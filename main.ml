@@ -39,7 +39,7 @@ let lookup env var =
   | None -> failwith "unbound variable"
   | Some v -> v
 
-let rec eval (env : Value.env) (exp : Exp.t) : Value.t Incr.t =
+(* let rec eval (env : Value.env) (exp : Exp.t) : Value.t Incr.t =
   Incr.bind exp ~f:(function
       | Exp.Variable x ->
          Incr.const (lookup env x)
@@ -95,11 +95,117 @@ let rec eval (env : Value.env) (exp : Exp.t) : Value.t Incr.t =
          | _ -> failwith "Not a closure"
          end
     )
+ *)
+module TaintValue = struct
+  type taint = Tainted | Untainted
+  type value =
+    | Const of int
+    | Closure of Symbol.t list * Exp.t * Symbol.t option * env
+  and t = value * taint
+  and env = t String.Map.t
+  let sexp_of_t = function
+    | (Const n, _) -> Sexp.Atom (string_of_int n)
+    | (Closure _, _) -> Sexp.Atom ("clo")
+  let const n = (Const n, Untainted)
+  let value v = (v, Untainted)
+  let join t1 t2 =
+    match t1 with
+    | Tainted -> Tainted
+    | Untainted -> t2
+end
+
+module Error = struct
+  type t =
+    | TaintError of TaintValue.value
+    | UnboundVariable of Symbol.t
+    | ApplicationError
+  let sexp_of_t = function
+    | TaintError _ -> Sexp.Atom "TaintError"
+    | UnboundVariable _ -> Sexp.Atom "UnboundVariable"
+    | ApplicationError -> Sexp.Atom "ApplicationError"
+end
 
 let show x =
   Incr.stabilize ();
-  print_s [%sexp (Incr.Observer.value_exn x : Value.t)]
+  print_s [%sexp (Incr.Observer.value_exn x : ((TaintValue.t, Error.t) Either.t))]
 
+
+let lookup_either (env : TaintValue.env) x : ((TaintValue.t, Error.t) Either.t) =
+  match Map.find env x with
+  | Some v -> Either.First v
+  | None -> Either.Second (Error.UnboundVariable x)
+
+let rec eval (env : TaintValue.env) (exp : Exp.t) : ((TaintValue.t, Error.t) Either.t) Incr.t =
+  Incr.bind exp ~f:(function
+      | Exp.Variable x ->
+         Incr.const (lookup_either env x)
+      | Exp.Const n -> Incr.const (Either.First (TaintValue.const n))
+      | Exp.BinOp (left, op, right) ->
+          let%map left = eval env left
+          and right = eval env right in
+          begin match (left, op, right) with
+          | (Either.First (TaintValue.Const x, t1), Exp.Plus,    Either.First (TaintValue.Const y, t2)) -> Either.First (TaintValue.Const (x + y), (TaintValue.join t1 t2))
+          | (Either.First (TaintValue.Const x, t1), Exp.Minus,   Either.First (TaintValue.Const y, t2)) -> Either.First (TaintValue.Const (x - y), (TaintValue.join t1 t2))
+          | (Either.First (TaintValue.Const x, t1), Exp.Times,   Either.First (TaintValue.Const y, t2)) -> Either.First (TaintValue.Const (x * y), (TaintValue.join t1 t2))
+          | (Either.First (TaintValue.Const x, t1), Exp.Divides, Either.First (TaintValue.Const y, t2)) -> Either.First (TaintValue.Const (x / y), (TaintValue.join t1 t2))
+          | (Either.First (TaintValue.Const x, t1), Exp.Equals,  Either.First (TaintValue.Const y, t2)) -> Either.First (TaintValue.Const (if x = y then 1 else 0), (TaintValue.join t1 t2))
+          | _ -> Either.Second Error.ApplicationError
+          end
+      | Exp.UnOp (op, arg) ->
+         let%map v = eval env arg in
+         begin match (op, v) with
+         | (Exp.UnaryMinus, Either.First (TaintValue.Const x, t)) -> Either.First (TaintValue.Const (- x), t)
+         | (Exp.UnaryMinus, _) -> Either.Second Error.ApplicationError
+         | (Exp.Source, Either.First (v, _)) -> Either.First (v, TaintValue.Tainted)
+         | (Exp.Source, err) -> err
+         | (Exp.Sink, Either.First (v, Tainted)) -> Either.Second (Error.TaintError v)
+         | (Exp.Sink, v) -> v
+         end
+      | Exp.Let (x, binding, body) ->
+         let%bind v = eval env binding in
+         begin match v with
+         | Either.First v -> eval (Map.update env x ~f:(function _ -> v)) body
+         | err -> Incr.const err
+         end
+      | Exp.LetRec (name, args, fbody, body) ->
+         let v = TaintValue.value (TaintValue.Closure (args, fbody, Some name, env)) in
+         eval (Map.update env name ~f:(function _ -> v)) body
+      | Exp.If (condition, consequence, alternative) ->
+         let%bind v = eval env condition in
+         begin match v with (* TODO: taint control flow *)
+         | Either.First (TaintValue.Const 0, _) -> (* false *) eval env alternative
+         | Either.First _ -> (* true *) eval env consequence
+         | err -> Incr.const err
+         end
+      | Exp.Lambda (args, body) ->
+         Incr.const (Either.First (TaintValue.value (TaintValue.Closure (args, body, None, env))))
+      | Exp.Call (f, args) ->
+         let%bind operator = eval env f
+         and operands = Incr.all (List.map ~f:(eval env) args) in
+         begin match operator with
+         | Either.First ((TaintValue.Closure (args, body, fname, env'), _) as opv) -> (* TODO: taint control flow *)
+            begin match (List.zip args operands) with
+            | Some argsops ->
+               let env'' = List.fold argsops ~init:(Either.First env') ~f:(fun accenv (name, v) ->
+                               match (accenv, v) with
+                               | (Either.First env, Either.First vv) -> Either.First (Map.update env name ~f:(function _ -> vv))
+                               | (Either.Second err, _) -> Either.Second err
+                               | (_, Either.Second err) -> Either.Second err) in
+               begin match (env'', fname) with
+               | (Either.First env'', None) -> eval env'' body (* not a recursive function *)
+               | (Either.First env'', Some f) -> eval (Map.update env'' f ~f:(function _ -> opv)) body (* recursive function, bind it *)
+               | (Either.Second err, _) -> Incr.const (Either.Second err)
+               end
+            | None -> failwith "invalid call, arity does not match"
+            end
+         | _ -> failwith "Not a closure"
+         end
+    )
+
+(* let show x =
+  Incr.stabilize ();
+  print_s [%sexp (Incr.Observer.value_exn x : Value.t)]
+ *)
 let exp e = Incr.Var.watch (Incr.Var.create e)
 
 (* let fact (n) = if (n == 0) then 1 else n * fact(n-1) *)

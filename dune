@@ -1,5 +1,18 @@
 (executable
   (name main)
+  (modules Main Incr_engine)
   (libraries core incremental incr_map)
-  (preprocess (pps ppx_jane)))
+  (preprocess (pps ppx_jane ppx_compare)))
+
+(executable
+  (name cps)
+  (modules Cps)
+  (libraries core incremental incr_map)
+  (preprocess (pps ppx_jane ppx_compare)))
+
+(executable
+  (name aam)
+  (modules Aam)
+  (libraries core incremental incr_map)
+  (preprocess (pps ppx_jane ppx_compare)))
 
