@@ -16,3 +16,8 @@
   (libraries core incremental incr_map)
   (preprocess (pps ppx_jane ppx_compare)))
 
+(executable
+  (name wasmtaint)
+  (modules Wasmtaint)
+  (libraries core incremental incr_map wasm)
+  (preprocess (pps ppx_jane ppx_compare)))

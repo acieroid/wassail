@@ -67,13 +67,13 @@ module ExpExamples = struct
      let f x = source 1 in
      let g x = sink x in
      let h a b = a (b 0) in
-     h f g
+     h g f
   *)
   let taint1 =
     (LetRec ("f", ["x"], UnOp (Source, Const 1),
              LetRec ("g", ["x"], UnOp (Sink, Variable "x"),
                      LetRec ("h", ["a"; "b"], Call (0, Variable "a", [Call (1, Variable "b", [Const 0])]),
-                            Call (2, Variable "h", [Variable "f"; Variable "g"])))))
+                            Call (2, Variable "h", [Variable "g"; Variable "f"])))))
 end
 
 module Addr = struct
@@ -390,7 +390,9 @@ module TaintAnalysis = struct
     let lookup_exn (env : t) (x : string) =
       match Map.find env x with
       | Some v -> v
-      | None -> failwith (Printf.sprintf "Unbound taint variable %s" x)
+      | None ->
+        Printf.printf "Unbound taint variable %s\n" x;
+        Untainted
     let empty : t = String.Map.empty
   end
 
@@ -453,21 +455,35 @@ module TaintAnalysis = struct
           let _ = eval env f in (* TODO: control taint *)
           begin match Int.Map.find !(deps.cfa) id with
             | Some callees ->
-              Component.Set.fold callees ~init:Taint.Untainted ~f:(fun acc callee ->
-                  Printf.printf "Calling %s\n" (Component.name callee);
-                  Taint.join acc
-                    (track_taint callee
-                       (List.fold (List.zip_exn (Component.args callee) args)
+              Printf.printf "Callees are: ";
+              Component.Set.iter callees ~f:(fun c -> Printf.printf "%s " (Component.name c));
+              Printf.printf "\n";
+              let res = Component.Set.fold callees ~init:Taint.Untainted ~f:(fun acc callee ->
+                  Printf.printf "Call of %s to %s\n" (Component.name comp) (Component.name callee);
+                  Printf.printf "foo ...\n";
+                  let foo = (List.fold (List.zip_exn (Component.args callee) args)
                           ~init:env
                           ~f:(fun env' (arg, e) ->
+                              Printf.printf "Argument %s exp is %s\n" arg (Sexp.to_string [%sexp (e : Exp.t)]);
                               Printf.printf "Argument %s is %s\n" arg (Sexp.to_string [%sexp (eval env e : Taint.t)]);
-                              Map.update env' arg ~f:(fun _ -> eval env e)))))
+                              Map.update env' arg ~f:(fun _ ->
+                                  print_s [%sexp (e : Exp.t)];
+                                  eval env e))) in
+                  Printf.printf "foo computed\n";
+                  let return = (track_taint callee foo) in
+                  Printf.printf "Call from %s to %s results in %s\n" (Component.name comp) (Component.name callee) (Sexp.to_string [%sexp (return : Taint.t)]);
+                  Taint.join acc return) in
+              Printf.printf "Calls done....";
+              res
             | None -> failwith "No call" (* no call, probably a mistake *)
           end
       in
       match Map.find !cache (comp, env) with
-      | Some res -> res (* result already computed, return it *)
+      | Some res ->
+        Printf.printf "[%s] Cached result: %s\n" (Component.name comp) (Sexp.to_string [%sexp (res : Taint.t)]);
+        res(* result already computed, return it *)
       | None ->
+        Printf.printf "[%s] No cached result, computing\n" (Component.name comp);
         (* First set it to untainted in case of recursion (TODO: make sure this is correct) *)
         cache := Map.update !cache (comp, env) ~f:(fun _ -> Taint.Untainted);
         (* Analyze this component *)
@@ -476,6 +492,25 @@ module TaintAnalysis = struct
         cache := Map.update !cache (comp, env) ~f:(fun _ -> taint);
         taint
     in
+    let rec track_taint_main (comp : Component.t) (env : TaintEnv.t) : unit =
+      Printf.printf "Tracking taint in component %s\n" (Component.name comp);
+      match track_taint comp env with
+      | Untainted ->
+        Printf.printf "Untainted, everything is fine in %s\n" (Component.name comp)
+      | Tainted ->
+        Printf.printf "Tainted, going to callers %s\n" (Component.name comp);
+        begin match Component.Map.find !(deps.calls) comp with
+          | Some callers -> Component.Set.iter callers ~f:(fun c ->
+              Printf.printf "%s calls %s\n" (Component.name c) (Component.name comp);
+              (* Note: we use an empty taint environment here, where everything
+                 is untainted. That should not be an issue because we are only
+                 interested in tracking taint coming from the result of the
+                 current component. Taint coming from somewhere else will be
+                 analyzed in another call to track_taint_main *)
+              track_taint_main c TaintEnv.empty)
+          | None -> ()
+        end in
+
     let components = Component.Map.keys !(deps.returns) in
     List.iter
       (List.filter components
@@ -489,9 +524,7 @@ module TaintAnalysis = struct
            ))
       ~f:(fun comp ->
           Printf.printf "Tracking taint in component %s\n" (Component.name comp);
-          let taint = track_taint comp TaintEnv.empty in
-          print_s [%sexp (taint : Taint.t)]
-        )
+          track_taint_main comp TaintEnv.empty)
   (* TODO: once we found a component whose result is tainted, we have to go to its caller components! *)
 end
 
