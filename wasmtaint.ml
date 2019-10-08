@@ -331,6 +331,7 @@ end
 module Frame = struct
   module T = struct
     type t =  {
+      arity: int;
       locals: Value.t list;
       (* TODO: module instance *)
     }
@@ -339,6 +340,8 @@ module Frame = struct
   include T
   let get_local (f : t) (l : Instr.var) : Value.t =
     List.nth_exn f.locals l
+  let set_local (f : t) (l : Instr.var) (v : Value.t) : t =
+    { f with locals = List.mapi f.locals ~f:(fun i x -> if i = l then v else x) }
 end
 
 module Activation = struct
@@ -390,34 +393,136 @@ end *)
 Store ; Frame ; Instructions -> Store'; Frame'; Instructions'
    where Instructions is isomorphic to the stack *)
 module FunctionAnalysis = struct
-  let analyze (_f: Ast.func)  =
-    let _eval (config : Configuration.t) : Configuration.Set.t =
-      match config.stack with
-      | [] -> Configuration.Set.empty
-      | head :: rest -> match head with
-        | Nop ->
-          (* Do nothing. nop -> epsilon *)
-          Configuration.Set.singleton config
-        | Drop ->
-          begin match rest with
-          | [] -> failwith "Empty stack on drop (should not happen)"
-          | _ :: rest -> Configuration.Set.singleton {config with stack = rest}
+  let eval_relop (r : Instr.relop) (v1 : Value.t) (v2 : Value.t) : Value.t =
+    match (r, v1, v2) with
+    | (I32LeS, Const n1, Const n2) -> Const (if n1 <= n2 then 1l else 0l)
+    | (I32LeS, _, _) -> Int
+  let eval_binop (b : Instr.binop) (v1 : Value.t) (v2 : Value.t) : Value.t =
+    match (b, v1, v2) with
+    | (I32Add, Const n1, Const n2) -> Const (Int32.(+) n1 n2)
+    | (I32Add, _, _) -> Int
+  (* Analyzes a block. Return the configuration at the exit of a block. This resulting configuration is the join of all reachable configurations. *)
+  type block_result =
+    | Configuration of Configuration.t
+    | Returned of Value.t list
+  let rec analyze_block (c : Configuration.t) : block_result =
+    failwith "TODO"
+
+  type step_result =
+    | Configurations of Configuration.Set.t
+    | Configuration of Configuration.t
+    | Finished of Configuration.t
+    | Returned of Value.t list
+          
+  (* Step a configuration by one instruction.
+     Only recursive for specific rewrite case (e.g. TeeLocal is expressed in terms of SetLocal *)
+  let rec step (config : Configuration.t) : step_result =
+      match config.astack with
+      | [] -> Finished config
+      | head :: astack' -> match (head, config.vstack) with
+        | Nop, _ ->
+          (* [spec] Do nothing *)
+          Configuration
+            { config with astack = astack' }
+        | Drop, _ :: vrest ->
+          (* [spec] Assert: due to validation, a value is on the top of the stack.
+             Pop the value val from the stack. *)
+          Configuration
+            { config with vstack = vrest; astack = astack' }
+        | GetLocal x, vstack ->
+          (* [spec] Let F be the current frame.
+             Assert: due to validation, F.locals[x] exists.
+             Let val be the value F.locals[x].
+             Push the value val to the stack. *)
+          let v = Frame.get_local config.frame x in
+          Configuration
+            { config with vstack = v :: vstack; astack = astack' }
+        | SetLocal x, v :: vstack ->
+          (* [spec] Let F be the current frame.
+             Assert: due to validation, F.locals[x] exists.
+             Assert: due to validation, a value is on the top of the stack.
+             Pop the value val from the stack.
+             Replace F.locals[x] with the value val. *)
+          let frame' = Frame.set_local config.frame x v in
+          Configuration
+            { config with vstack = vstack; astack = astack'; frame = frame' }
+        | TeeLocal x, v :: vstack ->
+          (* [spec] Assert: due to validation, a value is on the top of the stack.
+             Pop the value val from the stack.
+             Push the value val to the stack.
+             Push the value val to the stack.
+             Execute the instruction (local.set x). *)
+          step { config with vstack = v :: v :: vstack; astack = SetLocal x :: astack' }
+        | Block (_st, instrs), _ ->
+          (* [spec] Let n be the arity |t?| of the result type t?.
+             Let L be the label whose arity is n and whose continuation is the end of the block.
+             Enter the block instr∗ with label L. *)
+          (* We empty the administrative stack before analyzing the block, as we want the block to be analyzed up to its end *)
+          (* TODO: use st? *)
+          begin match analyze_block { config with astack = instrs } with
+          | Returned vs ->
+            (* If there was a return in the block, we propagate it with the same return values *)
+            Returned vs
+          | Configuration exit_conf ->
+            (* After analyzing the block, the astack should be empty *)
+            assert (exit_conf.astack = []);
+            (* And the vstack should have exactly the form of st *)
+            (* But we don't check that yet. *)
+            (* We restore the administrative stack after analyzing the block *)
+            Configuration { exit_conf with astack = astack' }
           end
-        | GetLocal v ->
-          let value = Frame.get_local config.frame v in
-          Configuration.Set.singleton
-            { config with stack = (Instr.Const value) :: rest }
-        | SetLocal v -> failwith "TODO"
-        | TeeLocal _ -> failwith "TODO"
-        | Block _ -> failwith "TODO now"
-        | Call _ -> failwith "TODO now"
-        | Return -> failwith "TODO now"
-        | Const _ -> failwith "TODO now"
-        | Compare _ -> failwith "TODO now"
-        | Binary _ -> failwith "TODO now"
-    in
-    ()
+        | Call x, vstack ->
+          (* [spec] Let F be the current frame.
+             Assert: due to validation, F.module.funcaddrs[x] exists.
+             Let a be the function address F.module.funcaddrs[x].
+             Invoke the function instance at address a. *)
+          let funcaddr = Frame.funcaddr config.frame x in
+          (* Invoke the function, get a list of return values *)
+          let (return_vs, in_arity) = invoke funcaddr vstack config.store in
+          Configuration { config with vstack = return_vs @ List.drop vstack in_arity }
+        | Return, vstack ->
+          (* [spec] Let F be the current frame.
+             Let n be the arity of F.
+             Assert: due to validation, there are at least n values on the top of the stack.
+             Pop the results valn from the stack.
+             Assert: due to validation, the stack contains at least one frame.
+             While the top of the stack is not a frame, do:
+             Pop the top element from the stack.
+             Assert: the top of the stack is the frame F.
+             Pop the frame from the stack.
+             Push valn to the stack.
+             Jump to the instruction after the original call that pushed the frame. *)
+          let n = config.frame.arity in
+          (* We keep the n top values of the stack *)
+          (* TODO: should the order of values be the same or reversed? *)
+          Returned (List.take vstack n)
+        | Const v, vstack ->
+          (* [spec] Push the value t.const c to the stack. *)
+          Configuration { config with vstack = v :: vstack; astack = astack' }
+        | Compare rel, v2 :: v1 :: vstack ->
+          (* [spec] Assert: due to validation, two values of value type t are on the top of the stack.
+             Pop the value t.const c2 from the stack.
+             Pop the value t.const c1 from the stack.
+             Let c be the result of computing relopt(c1,c2).
+             Push the value i32.const c to the stack. *)
+          let v = eval_relop rel v1 v2 in
+          Configuration
+            { config with vstack = v :: vstack; astack = astack' }
+        | Binary bin, v2 :: v1 :: vstack ->
+          (* [spec] Assert: due to validation, two values of value type t are on the top of the stack.
+             Pop the value t.const c2 from the stack.
+             Pop the value t.const c1 from the stack.
+             If binopt(c1,c2) is defined, then:
+               Let c be a possible result of computing binopt(c1,c2).
+               Push the value t.const c to the stack.
+             Else:
+               Trap. *)
+          let v = eval_binop bin v1 v2 in (* TODO: trap *)
+          Configuration
+            { config with vstack = v :: vstack; astack = astack' }
+        | _ -> failwith "invalid configuration"
 end
+
 let trace name = print_endline ("-- " ^ name)
 
 let error at category msg =
