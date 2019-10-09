@@ -12,6 +12,11 @@ module Value = struct
   include T
   include Comparator.Make(T)
 
+  let join (v1 : t) (v2 : t) : t =
+    match (v1, v2) with
+    | (Const n1, Const n2) when n1 = n2 -> Const n1
+    | (Const _, Const _) -> Int
+    | _ -> Int
   let is_zero (v : t) =
     match v with
     | Const 0l -> true
@@ -137,6 +142,9 @@ module Store = struct
   include T
   let get_funcinst (s : t) (a : Address.t) : funcinst =
     List.nth_exn s.funcs a
+  let join (s1 : t) (s2 : t) : t =
+    assert (s1.funcs = s2.funcs);
+    s1
 end
 
 module Frame = struct
@@ -155,6 +163,10 @@ module Frame = struct
     List.nth_exn f.locals l
   let set_local (f : t) (l : Instr.var) (v : Value.t) : t =
     { f with locals = List.mapi f.locals ~f:(fun i x -> if i = l then v else x) }
+  let join (f1 : t) (f2 : t) =
+    assert (f1.arity = f2.arity);
+    assert (f1.module_ = f2.module_);
+    { f1 with locals = List.map2_exn f1.locals f2.locals ~f:Value.join }
 end
 
 module Activation = struct
@@ -177,8 +189,43 @@ module Configuration = struct
   end
   include T
   module Set = Set.Make(T)
+  module Map = Map.Make(T)
+  let join (c1 : t) (c2 : t) =
+    (* We're not supposed to join configurations with non-empty administrative stacks *)
+    assert (c1.astack = [] && c2.astack = []);
+    { store = Store.join c1.store c2.store;
+      frame = Frame.join c1.frame c2.frame;
+      vstack = List.map2_exn c1.vstack c2.vstack ~f:Value.join;
+      astack = [] }
 end
 
+module Deps = struct
+  module T = struct
+    (* Most of the time, a block either reaches its final state or a return statement. Due to joining, a block analysis could reach both *)
+    type block_result = {
+      configuration: Configuration.t option;
+      returned: Configuration.t option;
+    }
+    [@@deriving sexp, compare]
+    type t = {
+      results: block_result Configuration.Map.t ref (* configuration -> configuration map *)
+    }
+    [@@deriving sexp, compare]
+  end
+  include T
+  include Comparator.Make(T)
+  let empty = {
+    results = ref Configuration.Map.empty;
+  }
+  let join_block_results (b1 : block_result) (b2: block_result) : block_result =
+    let join_conf_opt c1 c2 = match (c1, c2) with
+      | (Some c1, Some c2) -> Some (Configuration.join c1 c2)
+      | (Some c1, None) -> Some c1
+      | (None, Some c2) -> Some c2
+      | (None, None) -> None in
+    { configuration = join_conf_opt b1.configuration b2.configuration;
+      returned = join_conf_opt b1.returned b2.returned }
+end
 
 (* Structure of the execution:
 Store ; Frame ; Instructions -> Store'; Frame'; Instructions'
@@ -192,14 +239,46 @@ module FunctionAnalysis = struct
     match (b, v1, v2) with
     | (I32Add, Const n1, Const n2) -> Const (Int32.(+) n1 n2)
     | (I32Add, _, _) -> Int
-  (* Analyzes a block. Return the configuration at the exit of a block. This resulting configuration is the join of all reachable configurations. The block could also have "returned" if it reaches a "Return" instruction *)
-  type block_result =
-    | Configuration of Configuration.t
-    | Returned of Configuration.t
-  let rec analyze_block (_c : Configuration.t) : block_result =
-    failwith "TODO"
 
-  let invoke (funcaddr : Address.t) (vstack : Value.t list) (store : Store.t) : (Value.t list * int) =
+  type step_result =
+    | Configurations of Configuration.Set.t
+    | Configuration of Configuration.t
+    | Finished of Configuration.t
+    | Returned of Configuration.t
+  [@@deriving sexp, compare]
+
+  (* Analyzes a block. Return the configuration at the exit of a block. This resulting configuration is the join of all reachable configurations. The block could also have "returned" if it reaches a "Return" instruction *)
+  let rec analyze_block (conf : Configuration.t) (deps : Deps.t) : Deps.block_result =
+    match Configuration.Map.find !(deps.results) conf  with
+    | Some res ->
+      (* results already computed, return it *)
+      res
+    | None ->
+      (* compute result and cache it *)
+      let rec run_analysis (todo: Configuration.t list) (visited : Configuration.Set.t) (current: Deps.block_result) : Deps.block_result =
+        match todo with
+        | [] -> current
+        | c :: todo' ->
+          if not (Configuration.Set.mem visited c) then
+            let visited' = Configuration.Set.add visited c in
+            match step c deps with
+            | Configurations cs ->
+              run_analysis (Configuration.Set.fold cs ~init:todo' ~f:(fun acc c -> c :: acc)) visited' current
+            | Configuration c ->
+              run_analysis (c :: todo') visited' current
+            | Finished c ->
+              run_analysis todo' visited' (Deps.join_block_results current
+                                             { configuration = Some c;
+                                               returned = None })
+            | Returned c ->
+              run_analysis todo' visited' (Deps.join_block_results current
+                                             { configuration = None;
+                                               returned = Some c })
+          else
+            run_analysis todo' visited current
+      in
+      run_analysis [conf] (Configuration.Set.empty) { configuration = None; returned = None }
+  and invoke (funcaddr : Address.t) (vstack : Value.t list) (store : Store.t) (deps : Deps.t) : (Value.t list * int) =
     let f = Store.get_funcinst store funcaddr in
     let (in_arity, out_arity) = f.arity in
     let valn = List.take vstack in_arity in
@@ -216,21 +295,17 @@ module FunctionAnalysis = struct
         vstack = [] ;
         astack = f.code.body
       } in
-    let exit_conf = match analyze_block in_conf with
-      | Configuration c -> c
-      | Returned c -> c
-    in
+    let analysis_result = analyze_block in_conf deps in
+    let exit_conf = match (analysis_result.configuration, analysis_result.returned) with
+      | (Some c1, Some c2) -> Configuration.join c1 c2
+      | (Some c1, None) -> c1
+      | (None, Some c2) -> c2
+      | (None, None) -> failwith "no analysis result" in
     (List.take exit_conf.vstack out_arity, in_arity)
-
-  type step_result =
-    | Configurations of Configuration.Set.t
-    | Configuration of Configuration.t
-    | Finished of Configuration.t
-    | Returned of Configuration.t
 
   (* Step a configuration by one instruction.
      Only recursive for specific rewrite case (e.g. TeeLocal is expressed in terms of SetLocal *)
-  let rec step (config : Configuration.t) : step_result =
+  and step (config : Configuration.t) (deps : Deps.t) : step_result =
       match config.astack with
       | [] -> Finished config
       | head :: astack' -> match (head, config.vstack) with
@@ -266,24 +341,27 @@ module FunctionAnalysis = struct
              Push the value val to the stack.
              Push the value val to the stack.
              Execute the instruction (local.set x). *)
-          step { config with vstack = v :: v :: vstack; astack = SetLocal x :: astack' }
+          step { config with vstack = v :: v :: vstack; astack = SetLocal x :: astack' } deps
         | Block (_st, instrs), _ ->
           (* [spec] Let n be the arity |t?| of the result type t?.
              Let L be the label whose arity is n and whose continuation is the end of the block.
              Enter the block instr∗ with label L. *)
           (* We empty the administrative stack before analyzing the block, as we want the block to be analyzed up to its end *)
-          (* TODO: use st? *)
-          begin match analyze_block { config with astack = instrs } with
-          | Returned c ->
-            (* If there was a return in the block, we propagate it with the same return values *)
-            Returned c
-          | Configuration exit_conf ->
-            (* After analyzing the block, the astack should be empty *)
-            assert (exit_conf.astack = []);
-            (* And the vstack should have exactly the form of st *)
-            (* But we don't check that yet. *)
-            (* We restore the administrative stack after analyzing the block *)
-            Configuration { exit_conf with astack = astack' }
+          let analysis_result = analyze_block { config with astack = instrs } deps in
+          (* TODO: we should change the return value of this function (similar to block_result) *)
+          (* TODO: for now, we'll just assert that either you return, or you step *)
+          assert (analysis_result.configuration = None || analysis_result.returned = None);
+          begin match analysis_result.configuration with
+          | Some c ->
+                (* After analyzing the block, the astack should be empty *)
+                assert (c.astack = []);
+                (* And the vstack should have exactly the form of st *)
+                (* But we don't check that (yet, TODO). *)
+                (* We restore the administrative stack after analyzing the block *)
+                Configuration { c with astack = astack' }
+          | None -> match analysis_result.returned with
+            | Some c -> Returned c
+            | None -> failwith "no block result"
           end
         | Call x, vstack ->
           (* [spec] Let F be the current frame.
@@ -292,7 +370,7 @@ module FunctionAnalysis = struct
              Invoke the function instance at address a. *)
           let funcaddr = Frame.funcaddr config.frame x in
           (* Invoke the function, get a list of return values *)
-          let (return_vs, in_arity) = invoke funcaddr vstack config.store in
+          let (return_vs, in_arity) = invoke funcaddr vstack config.store deps in
           Configuration { config with vstack = return_vs @ List.drop vstack in_arity }
         | Return, _vstack ->
           (* [spec] Let F be the current frame.
@@ -306,7 +384,8 @@ module FunctionAnalysis = struct
              Pop the frame from the stack.
              Push valn to the stack.
              Jump to the instruction after the original call that pushed the frame. *)
-          Returned config
+          (* We just clear the administrative stack when returning *)
+          Returned { config with astack = [] }
         | Const v, vstack ->
           (* [spec] Push the value t.const c to the stack. *)
           Configuration { config with vstack = v :: vstack; astack = astack' }
