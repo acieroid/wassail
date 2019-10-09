@@ -1,25 +1,6 @@
 open Core
 open Wasm
 
-(* What we need for now:
-
-Analyzing foo:
-
-i32.const
-i32.add
-i32.le_s
-
-
-Rest:
-loop
-
-i32.sub
-i32.store
-i32.load
-i32.eqz
-i32.mul
-*)
-
 module Value = struct
   module T = struct
     type t =
@@ -31,24 +12,15 @@ module Value = struct
   include T
   include Comparator.Make(T)
 
-  (*
   let is_zero (v : t) =
     match v with
-    | Const 0 -> true
+    | Const 0l -> true
     | Const _ -> false
     | Int -> true
   let is_not_zero (v : t) =
     match v with
-    | Const 0 -> false
-    | _ -> true *)
-end
-
-module Store = struct
-  module T = struct
-    type t = unit (* TODO *)
-    [@@deriving sexp, compare]
-  end
-  include T
+    | Const 0l -> false
+    | _ -> true
 end
 
 module Address = struct
@@ -67,14 +39,14 @@ end
 
 module Instr = struct
   module T = struct
+    type value_type =
+      | I32Type
+    [@@deriving sexp, compare]
     type binop =
       | I32Add
     [@@deriving sexp, compare]
     type relop =
       | I32LeS
-    [@@deriving sexp, compare]
-    type value_type =
-      | I32Type
     [@@deriving sexp, compare]
     type stack_type = value_type list
     [@@deriving sexp, compare]
@@ -134,210 +106,51 @@ module Instr = struct
     | _ -> failwith "unsupported instruction"
 end
 
-
-(*
-    type t = Ast.instr
-    let sexp_of_pos (p : Source.pos) : Sexp.t =
-      Sexp.List [Sexp.Atom p.file; Sexp.Atom (string_of_int p.line); Sexp.Atom (string_of_int p.column)]
-    let pos_of_sexp (s : Sexp.t) : Source.pos =
-      match s with
-      | Sexp.List [Sexp.Atom file; Sexp.Atom line; Sexp.Atom column] ->
-        { file = file; line = int_of_string line; column = int_of_string column }
-      | _ -> failwith "invalid position"
-    let sexp_of_region (r : Source.region) : Sexp.t =
-      Sexp.List [sexp_of_pos r.left; sexp_of_pos r.right]
-    let region_of_sexp (s : Sexp.t) : Source.region =
-      match s with
-      | Sexp.List [left; right] ->
-        { left = pos_of_sexp left; right = pos_of_sexp right }
-      | _ -> failwith "invalid region"
-    let sexp_of_value_type (vt : Types.value_type) : Sexp.t =
-      Sexp.Atom (match vt with
-          | I32Type -> "i32"
-          | I64Type -> "i64"
-          | F32Type -> "f32"
-          | F64Type -> "f64")
-    let value_type_of_sexp (s : Sexp.t) : Types.value_type =
-      match s with
-      | Sexp.Atom "i32" -> I32Type
-      | Sexp.Atom "i64" -> I64Type
-      | Sexp.Atom "f32" -> I32Type
-      | Sexp.Atom "f64" -> F64Type
-      | _ -> failwith "invalid value type"
-    let sexp_of_stack_type (st : Types.stack_type) : Sexp.t =
-      Sexp.List (List.map st ~f:sexp_of_value_type)
-    let stack_type_of_sexp (s : Sexp.t) : Types.stack_type =
-      match s with
-      | Sexp.List l -> List.map l ~f:value_type_of_sexp
-      | _ -> failwith "invalid value type"
-    let sexp_of_var (v : Ast.var) : Sexp.t =
-      Sexp.List [Int32.sexp_of_t v.it; Sexp.Atom "@@"; sexp_of_region v.at]
-    let var_of_sexp (s : Sexp.t) : Ast.var =
-      match s with
-      | Sexp.List [v; Sexp.Atom "@@"; region] ->
-        { it = Int32.t_of_sexp v ; at = region_of_sexp region }
-      | _ -> failwith "invalid var"
-    let sexp_of_value (v : Values.value) : Sexp.t =
-      match v with
-        | I32 v -> Sexp.List [Sexp.Atom "i32"; Int32.sexp_of_t v]
-        | I64 v -> Sexp.List [Sexp.Atom "i64"; Int64.sexp_of_t v]
-        | F32 _ -> failwith "unsupported: floats"
-        | F64 _ -> failwith "unsupported: floats"
-    let value_of_sexp (s : Sexp.t) : Values.value =
-      match s with
-      | Sexp.List [Sexp.Atom "i32"; v] -> I32 (Int32.t_of_sexp v)
-      | Sexp.List [Sexp.Atom "i64"; v] -> I32 (Int32.t_of_sexp v)
-      | _ -> failwith "invalid or unsupported value"
-    let sexp_of_literal (lit : Ast.literal) : Sexp.t =
-      Sexp.List [sexp_of_value lit.it; Sexp.Atom "@@"; sexp_of_region lit.at]
-    let literal_of_sexp (s : Sexp.t) : Ast.literal =
-      match s with
-      | Sexp.List [lit; Sexp.Atom "@@"; region] ->
-        { it = value_of_sexp lit; at = region_of_sexp region }
-      | _ -> failwith "invalid literal"
-    let sexp_of_intbinop (b : Ast.IntOp.binop) : Sexp.t =
-      match b with
-      | Add -> Sexp.Atom "add"
-      | Sub -> Sexp.Atom "sub"
-      | Mul -> Sexp.Atom "mul"
-      | And -> Sexp.Atom "and"
-      | Or -> Sexp.Atom "or"
-      | Xor -> Sexp.Atom "xor"
-      | _ -> failwith "unsupported intbinop"
-    let intbinop_of_sexp (s : Sexp.t) : Ast.IntOp.binop =
-      match s with
-      | Sexp.Atom "add" -> Add
-      | Sexp.Atom "sub" -> Sub
-      | Sexp.Atom "mul" -> Mul
-      | Sexp.Atom "and" -> And
-      | Sexp.Atom "xor" -> Xor
-      | _ -> failwith "unsupported intbinop"
-    let sexp_of_intrelop (r : Ast.IntOp.relop) : Sexp.t =
-      match r with
-      | Eq -> Sexp.Atom "eq"
-      | Ne -> Sexp.Atom "ne"
-      | LtS -> Sexp.Atom "lt_s"
-      | LtU -> Sexp.Atom "lt_u"
-      | GtS -> Sexp.Atom "gt_s"
-      | GtU -> Sexp.Atom "gt_u"
-      | LeS -> Sexp.Atom "le_s"
-      | LeU -> Sexp.Atom "le_u"
-      | GeS -> Sexp.Atom "ge_s"
-      | GeU -> Sexp.Atom "ge_u"
-    let intrelop_of_sexp (s : Sexp.t) : Ast.IntOp.relop =
-      match s with
-      | Sexp.Atom "eq" -> Eq
-      | Sexp.Atom "ne" -> Ne
-      | Sexp.Atom "lt_s" -> LtS
-      | Sexp.Atom "lt_u" -> LtU
-      | Sexp.Atom "gt_s" -> GtS
-      | Sexp.Atom "gt_u" -> GtU
-      | Sexp.Atom "le_s" -> LeS
-      | Sexp.Atom "le_u" -> LeU
-      | Sexp.Atom "ge_s" -> GeS
-      | Sexp.Atom "ge_u" -> GeU
-      | _ -> failwith "invalid intrelop"
-    let sexp_of_valueop (o : ('a, 'a, 'b, 'b) Values.op)
-        (int : 'a -> Sexp.t) (float : 'b -> Sexp.t)
-      : Sexp.t =
-      match o with
-      | I32 op -> Sexp.List [Sexp.Atom "i32"; int op]
-      | I64 op -> Sexp.List [Sexp.Atom "i64"; int op]
-      | F32 op -> Sexp.List [Sexp.Atom "f32"; float op]
-      | F64 op -> Sexp.List [Sexp.Atom "f64"; float op]
-    let valueop_of_sexp (s : Sexp.t) (int : Sexp.t -> 'a) (float : Sexp.t -> 'b) : ('a, 'a, 'b, 'b) Values.op =
-      match s with
-      | Sexp.List [Sexp.Atom "i32"; op] -> I32 (int op)
-      | Sexp.List [Sexp.Atom "i64"; op] -> I64 (int op)
-      | Sexp.List [Sexp.Atom "f32"; op] -> F32 (float op)
-      | Sexp.List [Sexp.Atom "f64"; op] -> F64 (float op)
-      | _ -> failwith "invalid valueop"
-    let sexp_of_binop (b : Ast.binop) : Sexp.t = sexp_of_valueop b sexp_of_intbinop (fun _ -> failwith "unsupported: floats")
-    let binop_of_sexp (s : Sexp.t) : Ast.binop = valueop_of_sexp s intbinop_of_sexp (fun _ -> failwith "unsupported: floats")
-    let sexp_of_relop (r : Ast.relop) : Sexp.t = sexp_of_valueop r sexp_of_intrelop (fun _ -> failwith "unsupported: floats")
-    let relop_of_sexp (s : Sexp.t) : Ast.relop = valueop_of_sexp s intrelop_of_sexp (fun _ -> failwith "unspported: floats")
-    let rec sexp_of_t (i : t) : Sexp.t =
-      Sexp.List [(match i.it with
-          | Unreachable -> Sexp.Atom "unreachable"
-          | Nop -> Sexp.Atom "nop"
-          | Drop -> Sexp.Atom "drop"
-          | Select -> Sexp.Atom "select"
-          | Return -> Sexp.Atom "return"
-          | GrowMemory -> Sexp.Atom "growmemory"
-          | CurrentMemory -> Sexp.Atom "currentmemory"
-          | Block (st, instrs) ->
-            Sexp.List [Sexp.Atom "block";
-                       sexp_of_stack_type st;
-                       Sexp.List (List.map instrs ~f:sexp_of_t)]
-          | Loop (st, instrs) ->
-            Sexp.List [Sexp.Atom "loop";
-                       sexp_of_stack_type st;
-                       Sexp.List (List.map instrs ~f:sexp_of_t)]
-          | GetLocal var -> Sexp.List [Sexp.Atom "getlocal"; sexp_of_var var]
-          | SetLocal var -> Sexp.List [Sexp.Atom "setlocal"; sexp_of_var var]
-          | TeeLocal var -> Sexp.List [Sexp.Atom "setlocal"; sexp_of_var var]
-          | Br var -> Sexp.List [Sexp.Atom "br"; sexp_of_var var]
-          | BrIf var -> Sexp.List [Sexp.Atom "brif"; sexp_of_var var]
-          | Call var -> Sexp.List [Sexp.Atom "call"; sexp_of_var var]
-          | CallIndirect var -> Sexp.List [Sexp.Atom "callindirect"; sexp_of_var var]
-          | Const lit -> Sexp.List [Sexp.Atom "const"; sexp_of_literal lit]
-          | Binary bin -> Sexp.List [Sexp.Atom "binary"; sexp_of_binop bin]
-          | Compare rel -> Sexp.List [Sexp.Atom "compare"; sexp_of_relop rel]
-          | _ -> failwith "unsupported instr"
-        ); Sexp.Atom "@@"; sexp_of_region i.at]
-    let rec t_of_sexp (s: Sexp.t) : t =
-      match s with
-      | Sexp.List [e; Sexp.Atom "@@"; region] ->
-        {at = region_of_sexp region;
-         it = match e with
-           | Sexp.Atom "unreachable" -> Ast.Unreachable
-           | Sexp.Atom "drop" -> Ast.Drop
-           | Sexp.Atom "select" -> Ast.Select
-           | Sexp.Atom "return" -> Ast.Return
-           | Sexp.Atom "growmemory" -> Ast.GrowMemory
-           | Sexp.Atom "currentmemory" -> Ast.CurrentMemory
-           | Sexp.List [Sexp.Atom "block"; st; Sexp.List instrs] ->
-             Ast.Block (stack_type_of_sexp st, List.map instrs ~f:(t_of_sexp))
-           | Sexp.List [Sexp.Atom "loop"; st; Sexp.List instrs] ->
-             Ast.Loop (stack_type_of_sexp st, List.map instrs ~f:(t_of_sexp))
-           | Sexp.List [Sexp.Atom "getlocal"; v] -> Ast.GetLocal (var_of_sexp v)
-           | Sexp.List [Sexp.Atom "setlocal"; v] -> Ast.SetLocal (var_of_sexp v)
-           | Sexp.List [Sexp.Atom "teelocal"; v] -> Ast.SetLocal (var_of_sexp v)
-           | Sexp.List [Sexp.Atom "br"; v] -> Ast.Br (var_of_sexp v)
-           | Sexp.List [Sexp.Atom "brif"; v] -> Ast.BrIf (var_of_sexp v)
-           | Sexp.List [Sexp.Atom "call"; v] -> Ast.Call (var_of_sexp v)
-           | Sexp.List [Sexp.Atom "callindirect"; v] -> Ast.CallIndirect (var_of_sexp v)
-           | Sexp.List [Sexp.Atom "const"; lit] -> Ast.Const (literal_of_sexp lit)
-           | Sexp.List [Sexp.Atom "binary"; bin] -> Ast.Binary (binop_of_sexp bin)
-           | Sexp.List [Sexp.Atom "compare"; rel] -> Ast.Compare (relop_of_sexp rel)
-           | _ -> failwith "invalid sexp for instr"
-        }
-      | _ -> failwith "invadid sexpr for instr"
-    let compare (i1 : t) (i2 : t) : int =
-      match (i1.it, i2.it) with
-      | _ -> failwith "TODO"
-  end
-  include T
-end
-module Label = struct
+module Store = struct
   module T = struct
-    type t = int * Instr.t list
+    type func = {
+      typ : int; (* TODO: u32 *)
+      locals : Instr.value_type list;
+      body : Instr.t list;
+    }
     [@@deriving sexp, compare]
-  end
-  include T
-end
-*)
-
-module Frame = struct
-  module T = struct
-    type t =  {
-      arity: int;
-      locals: Value.t list;
-      (* TODO: module instance *)
+    type funcaddr = Address.t
+    [@@deriving sexp, compare]
+    type moduleinst = {
+      funcaddrs: funcaddr list;
+      (* TODO: other fields *)
+    }
+    [@@deriving sexp, compare]
+    type funcinst = {
+      arity : (int * int);
+      typ : (Instr.value_type list * Instr.value_type list);
+      module_: moduleinst;
+      code: func
+    }
+    [@@deriving sexp, compare]
+    type t = {
+      funcs : funcinst list;
+      (* TODO: other fields *)
     }
     [@@deriving sexp, compare]
   end
   include T
+  let get_funcinst (s : t) (a : Address.t) : funcinst =
+    List.nth_exn s.funcs a
+end
+
+module Frame = struct
+  module T = struct
+    type t = {
+      arity: int;
+      locals: Value.t list;
+      module_: Store.moduleinst;
+    }
+    [@@deriving sexp, compare]
+  end
+  include T
+  let funcaddr (f : t) (fn : Instr.var) : Address.t =
+    List.nth_exn f.module_.funcaddrs fn
   let get_local (f : t) (l : Instr.var) : Value.t =
     List.nth_exn f.locals l
   let set_local (f : t) (l : Instr.var) (v : Value.t) : t =
@@ -366,28 +179,6 @@ module Configuration = struct
   module Set = Set.Make(T)
 end
 
-(*
-module Stack = struct
-  module T = struct
-    type entry =
-      | Val of Value.t
-      | Lab of Label.t
-      | Act of Activation.t
-    [@@deriving sexp, compare]
-    type t = entry list (* TODO: represent using an array/vector/stack *)
-    [@@deriving sexp, compare]
-  end
-  include T
-  include Comparator.Make(T)
-  (* Pop a value from the stack, raise an exception if the stack is empty *)
-  let pop_exn (s : t) : (entry * t) =
-    match s with
-    | [] -> failwith "popping from empty stack"
-    | head :: tail -> (head, tail)
-  let push_val (s : t) (v : Value.t) : t =
-    v :: s
-  module Set = Set.Make(T)
-end *)
 
 (* Structure of the execution:
 Store ; Frame ; Instructions -> Store'; Frame'; Instructions'
@@ -401,19 +192,42 @@ module FunctionAnalysis = struct
     match (b, v1, v2) with
     | (I32Add, Const n1, Const n2) -> Const (Int32.(+) n1 n2)
     | (I32Add, _, _) -> Int
-  (* Analyzes a block. Return the configuration at the exit of a block. This resulting configuration is the join of all reachable configurations. *)
+  (* Analyzes a block. Return the configuration at the exit of a block. This resulting configuration is the join of all reachable configurations. The block could also have "returned" if it reaches a "Return" instruction *)
   type block_result =
     | Configuration of Configuration.t
-    | Returned of Value.t list
-  let rec analyze_block (c : Configuration.t) : block_result =
+    | Returned of Configuration.t
+  let rec analyze_block (_c : Configuration.t) : block_result =
     failwith "TODO"
+
+  let invoke (funcaddr : Address.t) (vstack : Value.t list) (store : Store.t) : (Value.t list * int) =
+    let f = Store.get_funcinst store funcaddr in
+    let (in_arity, out_arity) = f.arity in
+    let valn = List.take vstack in_arity in
+    let zeros = List.map f.code.locals ~f:(function I32Type -> Value.Const 0l) in
+    let frame = Frame.{
+      arity = in_arity + (List.length f.code.locals);
+      module_ = f.module_;
+      locals = valn @ zeros;
+    } in
+    (* let b = Block (snd f.typ) f.code.body in *)
+    let in_conf = Configuration.{
+        store ;
+        frame ;
+        vstack = [] ;
+        astack = f.code.body
+      } in
+    let exit_conf = match analyze_block in_conf with
+      | Configuration c -> c
+      | Returned c -> c
+    in
+    (List.take exit_conf.vstack out_arity, in_arity)
 
   type step_result =
     | Configurations of Configuration.Set.t
     | Configuration of Configuration.t
     | Finished of Configuration.t
-    | Returned of Value.t list
-          
+    | Returned of Configuration.t
+
   (* Step a configuration by one instruction.
      Only recursive for specific rewrite case (e.g. TeeLocal is expressed in terms of SetLocal *)
   let rec step (config : Configuration.t) : step_result =
@@ -460,9 +274,9 @@ module FunctionAnalysis = struct
           (* We empty the administrative stack before analyzing the block, as we want the block to be analyzed up to its end *)
           (* TODO: use st? *)
           begin match analyze_block { config with astack = instrs } with
-          | Returned vs ->
+          | Returned c ->
             (* If there was a return in the block, we propagate it with the same return values *)
-            Returned vs
+            Returned c
           | Configuration exit_conf ->
             (* After analyzing the block, the astack should be empty *)
             assert (exit_conf.astack = []);
@@ -480,7 +294,7 @@ module FunctionAnalysis = struct
           (* Invoke the function, get a list of return values *)
           let (return_vs, in_arity) = invoke funcaddr vstack config.store in
           Configuration { config with vstack = return_vs @ List.drop vstack in_arity }
-        | Return, vstack ->
+        | Return, _vstack ->
           (* [spec] Let F be the current frame.
              Let n be the arity of F.
              Assert: due to validation, there are at least n values on the top of the stack.
@@ -492,10 +306,7 @@ module FunctionAnalysis = struct
              Pop the frame from the stack.
              Push valn to the stack.
              Jump to the instruction after the original call that pushed the frame. *)
-          let n = config.frame.arity in
-          (* We keep the n top values of the stack *)
-          (* TODO: should the order of values be the same or reversed? *)
-          Returned (List.take vstack n)
+          Returned config
         | Const v, vstack ->
           (* [spec] Push the value t.const c to the stack. *)
           Configuration { config with vstack = v :: vstack; astack = astack' }
