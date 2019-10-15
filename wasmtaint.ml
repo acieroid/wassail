@@ -144,21 +144,21 @@ module Instr = struct
     | Ast.Br v -> Br (Var.of_wasm v)
     | Ast.Call v -> Call (Var.of_wasm v)
     | Ast.Return -> Return
-    (* | Unreachable -> 
-       | Select ->
-       | Loop (st, instrs) ->
-       | If (st, instr, instr') ->
-       | BrTable (vs, v) -> 
-       | CallIndirect v ->
-       | GetGlobal v ->
-       | SetGlobal v ->
-       | Load op ->
-       | Store op ->
-       | MemorySize ->
-       | MemoryGrow ->
-       | Test op -> 
-       | Convert op -> *)
-    | _ -> failwith "unsupported instruction" (* TODO: many other ops (see above) *)
+    | Ast.Unreachable -> failwith "unsupported instruction: unreachable"
+    | Ast.Select -> failwith "unsupported instruction: select"
+    | Ast.Loop (_st, _instrs) -> failwith "unsupported instruction: loop"
+    | Ast.If (_st, _instr, _instr') -> failwith "unsupported instruction: if"
+    | Ast.BrTable (_vs, _v) -> failwith "unsupported instruction: brtable"
+    | Ast.CallIndirect _v -> failwith "unsupported instruction: call indirect"
+    | Ast.GetGlobal _v -> failwith "unsupported instruction: get global"
+    | Ast.SetGlobal _v -> failwith "unsupported instruction: set global"
+    | Ast.Load _op -> failwith "unsupported instruction: load"
+    | Ast.Store _op -> failwith "unsupported instruction: store"
+    | Ast.CurrentMemory -> failwith "unsupported instruction: current memory"
+    | Ast.GrowMemory -> failwith "unsupported instruction: memory grow"
+    | Ast.Test _op -> failwith "unsupported instruction: test"
+    | Ast.Convert _op -> failwith "unsupported instruction: convert"
+    | Ast.Unary _op -> failwith "unsupported instruction: unary"
 end
 
 module Store = struct
