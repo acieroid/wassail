@@ -13,7 +13,6 @@ module Type = struct
     match vt with
     | Types.I32Type -> I32Type
     | _ -> failwith "unsupported type"
-
 end
 
 module Value = struct
@@ -33,9 +32,7 @@ module Value = struct
     | _ -> failwith "unsupported type"
 
   let to_string (v : t) : string =
-    match v with
-    | Const n -> Printf.sprintf "Const(%d)" (Int32.to_int_exn n)
-    | Int -> "Int"
+    Sexp.to_string [%sexp (v : t)]
 
   let join (v1 : t) (v2 : t) : t =
     match (v1, v2) with
@@ -76,11 +73,43 @@ module Var = struct
   let of_wasm (v : Ast.var) : t = Int32.to_int_exn v.it
 end
 
-module Instr = struct
+module Binop = struct
   module T = struct
-    type binop =
+    type t =
       | I32Add
     [@@deriving sexp, compare]
+  end
+  include T
+  let of_wasm (b : Ast.binop) : t =
+    match b with
+    | I32 Add -> I32Add
+    | _ -> failwith "unsupported type"
+
+  let eval (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
+    match (b, v1, v2) with
+    | (I32Add, Const n1, Const n2) -> Const (Int32.(+) n1 n2)
+    | (I32Add, _, _) -> Int
+end
+
+module Relop = struct
+  module T = struct
+    type t =
+      | I32LeS
+    [@@deriving sexp, compare]
+  end
+  include T
+  let of_wasm (r : Ast.relop) : t =
+    match r with
+    | I32 LeS -> I32LeS
+    | _ -> failwith "unsupported type"
+  let eval (r : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
+    match (r, v1, v2) with
+    | (I32LeS, Const n1, Const n2) -> Const (if n1 <= n2 then 1l else 0l)
+    | (I32LeS, _, _) -> Int
+end
+
+module Instr = struct
+  module T = struct
     type relop =
       | I32LeS
     [@@deriving sexp, compare]
@@ -91,8 +120,8 @@ module Instr = struct
       | Drop
       | Block of stack_type * t list
       | Const of Value.t
-      | Binary of binop
-      | Compare of relop
+      | Binary of Binop.t
+      | Compare of Relop.t
       | GetLocal of Var.t
       | SetLocal of Var.t
       | TeeLocal of Var.t
@@ -107,23 +136,16 @@ module Instr = struct
   let convert_stack_type (st : Types.stack_type) : stack_type =
     List.map st ~f:Type.of_wasm
 
-  let convert_binop (b : Ast.binop) : binop =
-    match b with
-    | I32 Add -> I32Add
-    | _ -> failwith "unsupported type"
-  let convert_relop (r : Ast.relop) : relop =
-    match r with
-    | I32 LeS -> I32LeS
-    | _ -> failwith "unsupported type"
   let rec of_wasm (i : Ast.instr) : t =
     match i.it with
     | Ast.Nop -> Nop
     | Ast.Drop -> Drop
     | Ast.Block (st, instrs) ->
+      (* TODO: we can probably safely ignore st *)
       Block (convert_stack_type st, List.map instrs ~f:of_wasm)
     | Ast.Const lit -> Const (Value.of_wasm lit.it)
-    | Ast.Binary bin -> Binary (convert_binop bin)
-    | Ast.Compare rel -> Compare (convert_relop rel)
+    | Ast.Binary bin -> Binary (Binop.of_wasm bin)
+    | Ast.Compare rel -> Compare (Relop.of_wasm rel)
     | Ast.GetLocal v -> GetLocal (Var.of_wasm v)
     | Ast.SetLocal v -> SetLocal (Var.of_wasm v)
     | Ast.TeeLocal v -> TeeLocal (Var.of_wasm v)
@@ -286,15 +308,6 @@ end
 Store ; Frame ; Instructions -> Store'; Frame'; Instructions'
    where Instructions is isomorphic to the stack *)
 module FunctionAnalysis = struct
-  let eval_relop (r : Instr.relop) (v1 : Value.t) (v2 : Value.t) : Value.t =
-    match (r, v1, v2) with
-    | (I32LeS, Const n1, Const n2) -> Const (if n1 <= n2 then 1l else 0l)
-    | (I32LeS, _, _) -> Int
-  let eval_binop (b : Instr.binop) (v1 : Value.t) (v2 : Value.t) : Value.t =
-    match (b, v1, v2) with
-    | (I32Add, Const n1, Const n2) -> Const (Int32.(+) n1 n2)
-    | (I32Add, _, _) -> Int
-
   type step_result =
     | Configurations of Configuration.Set.t
     | Configuration of Configuration.t
@@ -453,7 +466,7 @@ module FunctionAnalysis = struct
              Pop the value t.const c1 from the stack.
              Let c be the result of computing relopt(c1,c2).
              Push the value i32.const c to the stack. *)
-          let v = eval_relop rel v1 v2 in
+          let v = Relop.eval rel v1 v2 in
           Configuration
             { config with vstack = v :: vstack; astack = astack' }
         | Binary bin, v2 :: v1 :: vstack ->
@@ -465,7 +478,7 @@ module FunctionAnalysis = struct
                Push the value t.const c to the stack.
              Else:
                Trap. *)
-          let v = eval_binop bin v1 v2 in (* TODO: trap *)
+          let v = Binop.eval bin v1 v2 in (* TODO: trap *)
           Configuration
             { config with vstack = v :: vstack; astack = astack' }
         | _ -> failwith "invalid configuration"
