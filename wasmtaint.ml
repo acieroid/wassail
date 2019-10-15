@@ -110,15 +110,10 @@ end
 
 module Instr = struct
   module T = struct
-    type relop =
-      | I32LeS
-    [@@deriving sexp, compare]
-    type stack_type = Type.t list
-    [@@deriving sexp, compare]
     type t =
       | Nop
       | Drop
-      | Block of stack_type * t list
+      | Block of t list
       | Const of Value.t
       | Binary of Binop.t
       | Compare of Relop.t
@@ -133,16 +128,12 @@ module Instr = struct
   end
   include T
 
-  let convert_stack_type (st : Types.stack_type) : stack_type =
-    List.map st ~f:Type.of_wasm
-
   let rec of_wasm (i : Ast.instr) : t =
     match i.it with
     | Ast.Nop -> Nop
     | Ast.Drop -> Drop
-    | Ast.Block (st, instrs) ->
-      (* TODO: we can probably safely ignore st *)
-      Block (convert_stack_type st, List.map instrs ~f:of_wasm)
+    | Ast.Block (_st, instrs) ->
+      Block (List.map instrs ~f:of_wasm)
     | Ast.Const lit -> Const (Value.of_wasm lit.it)
     | Ast.Binary bin -> Binary (Binop.of_wasm bin)
     | Ast.Compare rel -> Compare (Relop.of_wasm rel)
@@ -413,7 +404,7 @@ module FunctionAnalysis = struct
              Push the value val to the stack.
              Execute the instruction (local.set x). *)
           step { config with vstack = v :: v :: vstack; astack = SetLocal x :: astack' } deps
-        | Block (_st, instrs), _ ->
+        | Block instrs, _ ->
           (* [spec] Let n be the arity |t?| of the result type t?.
              Let L be the label whose arity is n and whose continuation is the end of the block.
              Enter the block instr∗ with label L. *)
