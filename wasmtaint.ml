@@ -1,6 +1,21 @@
 open Core
 open Wasm
 
+module Type = struct
+  module T = struct
+    type t =
+      | I32Type (* TODO: other types *)
+    [@@deriving sexp, compare]
+  end
+  include T
+
+  let of_wasm (vt : Types.value_type) : t =
+    match vt with
+    | Types.I32Type -> I32Type
+    | _ -> failwith "unsupported type"
+
+end
+
 module Value = struct
   module T = struct
     type t =
@@ -11,6 +26,11 @@ module Value = struct
   end
   include T
   include Comparator.Make(T)
+
+  let of_wasm (v : Values.value) : t =
+    match v with
+    | I32 x -> Const x
+    | _ -> failwith "unsupported type"
 
   let to_string (v : t) : string =
     match v with
@@ -47,52 +67,46 @@ end
 (* TODO: export instances *)
 (* TODO: external values *)
 
+module Var = struct
+  module T = struct
+    type t = int
+    [@@deriving sexp, compare]
+  end
+  include T
+  let of_wasm (v : Ast.var) : t = Int32.to_int_exn v.it
+end
+
 module Instr = struct
   module T = struct
-    type value_type =
-      | I32Type
-    [@@deriving sexp, compare]
     type binop =
       | I32Add
     [@@deriving sexp, compare]
     type relop =
       | I32LeS
     [@@deriving sexp, compare]
-    type stack_type = value_type list
-    [@@deriving sexp, compare]
-    type var = int
-    [@@deriving sexp, compare]
-    type value = Value.t
+    type stack_type = Type.t list
     [@@deriving sexp, compare]
     type t =
       | Nop
       | Drop
       | Block of stack_type * t list
-      | Const of value
+      | Const of Value.t
       | Binary of binop
       | Compare of relop
-      | GetLocal of var
-      | SetLocal of var
-      | TeeLocal of var
-      | Call of var
-      | Br of var
-      | BrIf of var
+      | GetLocal of Var.t
+      | SetLocal of Var.t
+      | TeeLocal of Var.t
+      | Call of Var.t
+      | Br of Var.t
+      | BrIf of Var.t
       | Return
     [@@deriving sexp, compare]
   end
   include T
 
-  let convert_value_type (vt : Types.value_type) : value_type =
-    match vt with
-    | Types.I32Type -> I32Type
-    | _ -> failwith "unsupported type"
   let convert_stack_type (st : Types.stack_type) : stack_type =
-    List.map st ~f:convert_value_type
-  let convert_value (v : Values.value) : value =
-    match v with
-    | I32 x -> Value.Const x
-    | _ -> failwith "unsupported type"
-  let convert_var (v : Ast.var) : var = Int32.to_int_exn v.it
+    List.map st ~f:Type.of_wasm
+
   let convert_binop (b : Ast.binop) : binop =
     match b with
     | I32 Add -> I32Add
@@ -101,21 +115,21 @@ module Instr = struct
     match r with
     | I32 LeS -> I32LeS
     | _ -> failwith "unsupported type"
-  let rec of_wasm_instr (i : Ast.instr) : t =
+  let rec of_wasm (i : Ast.instr) : t =
     match i.it with
     | Ast.Nop -> Nop
     | Ast.Drop -> Drop
     | Ast.Block (st, instrs) ->
-      Block (convert_stack_type st, List.map instrs ~f:of_wasm_instr)
-    | Ast.Const lit -> Const (convert_value lit.it)
+      Block (convert_stack_type st, List.map instrs ~f:of_wasm)
+    | Ast.Const lit -> Const (Value.of_wasm lit.it)
     | Ast.Binary bin -> Binary (convert_binop bin)
     | Ast.Compare rel -> Compare (convert_relop rel)
-    | Ast.GetLocal v -> GetLocal (convert_var v)
-    | Ast.SetLocal v -> SetLocal (convert_var v)
-    | Ast.TeeLocal v -> TeeLocal (convert_var v)
-    | Ast.BrIf v -> BrIf (convert_var v)
-    | Ast.Br v -> Br (convert_var v)
-    | Ast.Call v -> Call (convert_var v)
+    | Ast.GetLocal v -> GetLocal (Var.of_wasm v)
+    | Ast.SetLocal v -> SetLocal (Var.of_wasm v)
+    | Ast.TeeLocal v -> TeeLocal (Var.of_wasm v)
+    | Ast.BrIf v -> BrIf (Var.of_wasm v)
+    | Ast.Br v -> Br (Var.of_wasm v)
+    | Ast.Call v -> Call (Var.of_wasm v)
     | Ast.Return -> Return
     (* | Unreachable -> 
        | Select ->
@@ -137,7 +151,7 @@ end
 module Store = struct
   module T = struct
     type func = {
-      locals : Instr.value_type list;
+      locals : Type.t list;
       body : Instr.t list;
     }
     [@@deriving sexp, compare]
@@ -150,7 +164,7 @@ module Store = struct
     [@@deriving sexp, compare]
     type funcinst = {
       arity : (int * int);
-      typ : (Instr.value_type list * Instr.value_type list);
+      typ : (Type.t list * Type.t list);
       module_: moduleinst;
       code: func
     }
@@ -169,15 +183,15 @@ module Store = struct
     s1
   let init (m : Ast.module_) : (t * Address.t list) =
     let mk_func (f : Ast.func) : func = {
-      body = List.map f.it.body ~f:Instr.of_wasm_instr;
-      locals = List.map f.it.locals ~f:Instr.convert_value_type;
+      body = List.map f.it.body ~f:Instr.of_wasm;
+      locals = List.map f.it.locals ~f:Type.of_wasm;
       }
     in
     let mk_funcinst (minst : moduleinst) (f : Ast.func) : funcinst =
       match Ast.func_type_for m f.it.ftype with
       | FuncType (input, output) -> {
           arity = (List.length input, List.length output);
-          typ = (List.map input ~f:Instr.convert_value_type, List.map output ~f:Instr.convert_value_type);
+          typ = (List.map input ~f:Type.of_wasm, List.map output ~f:Type.of_wasm);
           module_ = minst;
           code = mk_func f
         } in
@@ -195,11 +209,11 @@ module Frame = struct
     [@@deriving sexp, compare]
   end
   include T
-  let funcaddr (f : t) (fn : Instr.var) : Address.t =
+  let funcaddr (f : t) (fn : Var.t) : Address.t =
     List.nth_exn f.module_.funcaddrs fn
-  let get_local (f : t) (l : Instr.var) : Value.t =
+  let get_local (f : t) (l : Var.t) : Value.t =
     List.nth_exn f.locals l
-  let set_local (f : t) (l : Instr.var) (v : Value.t) : t =
+  let set_local (f : t) (l : Var.t) (v : Value.t) : t =
     { f with locals = List.mapi f.locals ~f:(fun i x -> if i = l then v else x) }
   let join (f1 : t) (f2 : t) =
     assert (f1.arity = f2.arity);
@@ -242,7 +256,7 @@ module Deps = struct
     (* Most of the time, a block either reaches its final state, a return statement, or a break. Due to joining, a block analysis could reach multiple of these *)
     type block_result = {
       configuration: Configuration.t option;
-      breaks: (int (* The block we break to *) * Configuration.t (* The configuration before the break *)) list; (* there could be different breaks reached *)
+      breaks: (Var.t (* The block we break to *) * Configuration.t (* The configuration before the break *)) list; (* there could be different breaks reached *)
       returned: Configuration.t option;
     }
     [@@deriving sexp, compare]
@@ -284,7 +298,7 @@ module FunctionAnalysis = struct
   type step_result =
     | Configurations of Configuration.Set.t
     | Configuration of Configuration.t
-    | Break of int * Configuration.t
+    | Break of Var.t * Configuration.t
     | Finished of Configuration.t
     | Returned of Configuration.t
   [@@deriving sexp, compare]
