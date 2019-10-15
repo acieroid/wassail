@@ -12,6 +12,11 @@ module Value = struct
   include T
   include Comparator.Make(T)
 
+  let to_string (v : t) : string =
+    match v with
+    | Const n -> Printf.sprintf "Const(%d)" (Int32.to_int_exn n)
+    | Int -> "Int"
+
   let join (v1 : t) (v2 : t) : t =
     match (v1, v2) with
     | (Const n1, Const n2) when n1 = n2 -> Const n1
@@ -70,6 +75,8 @@ module Instr = struct
       | SetLocal of var
       | TeeLocal of var
       | Call of var
+      | Br of var
+      | BrIf of var
       | Return
     [@@deriving sexp, compare]
   end
@@ -106,15 +113,30 @@ module Instr = struct
     | Ast.GetLocal v -> GetLocal (convert_var v)
     | Ast.SetLocal v -> SetLocal (convert_var v)
     | Ast.TeeLocal v -> TeeLocal (convert_var v)
+    | Ast.BrIf v -> BrIf (convert_var v)
+    | Ast.Br v -> Br (convert_var v)
     | Ast.Call v -> Call (convert_var v)
     | Ast.Return -> Return
-    | _ -> failwith "unsupported instruction"
+    (* | Unreachable -> 
+       | Select ->
+       | Loop (st, instrs) ->
+       | If (st, instr, instr') ->
+       | BrTable (vs, v) -> 
+       | CallIndirect v ->
+       | GetGlobal v ->
+       | SetGlobal v ->
+       | Load op ->
+       | Store op ->
+       | MemorySize ->
+       | MemoryGrow ->
+       | Test op -> 
+       | Convert op -> *)
+    | _ -> failwith "unsupported instruction" (* TODO: many other ops (see above) *)
 end
 
 module Store = struct
   module T = struct
     type func = {
-      typ : int; (* TODO: u32 *)
       locals : Instr.value_type list;
       body : Instr.t list;
     }
@@ -145,6 +167,22 @@ module Store = struct
   let join (s1 : t) (s2 : t) : t =
     assert (s1.funcs = s2.funcs);
     s1
+  let init (m : Ast.module_) : (t * Address.t list) =
+    let mk_func (f : Ast.func) : func = {
+      body = List.map f.it.body ~f:Instr.of_wasm_instr;
+      locals = List.map f.it.locals ~f:Instr.convert_value_type;
+      }
+    in
+    let mk_funcinst (minst : moduleinst) (f : Ast.func) : funcinst =
+      match Ast.func_type_for m f.it.ftype with
+      | FuncType (input, output) -> {
+          arity = (List.length input, List.length output);
+          typ = (List.map input ~f:Instr.convert_value_type, List.map output ~f:Instr.convert_value_type);
+          module_ = minst;
+          code = mk_func f
+        } in
+    let funcaddrs = List.mapi m.it.funcs ~f:(fun i _ -> i) in
+    ({ funcs = List.map m.it.funcs ~f:(mk_funcinst { funcaddrs = funcaddrs }) }, funcaddrs)
 end
 
 module Frame = struct
@@ -201,9 +239,10 @@ end
 
 module Deps = struct
   module T = struct
-    (* Most of the time, a block either reaches its final state or a return statement. Due to joining, a block analysis could reach both *)
+    (* Most of the time, a block either reaches its final state, a return statement, or a break. Due to joining, a block analysis could reach multiple of these *)
     type block_result = {
       configuration: Configuration.t option;
+      breaks: (int (* The block we break to *) * Configuration.t (* The configuration before the break *)) list; (* there could be different breaks reached *)
       returned: Configuration.t option;
     }
     [@@deriving sexp, compare]
@@ -224,7 +263,9 @@ module Deps = struct
       | (None, Some c2) -> Some c2
       | (None, None) -> None in
     { configuration = join_conf_opt b1.configuration b2.configuration;
-      returned = join_conf_opt b1.returned b2.returned }
+      returned = join_conf_opt b1.returned b2.returned;
+      breaks = b1.breaks @ b2.breaks (* TODO: use sets to avoid duplicates *)
+    }
 end
 
 (* Structure of the execution:
@@ -243,6 +284,7 @@ module FunctionAnalysis = struct
   type step_result =
     | Configurations of Configuration.Set.t
     | Configuration of Configuration.t
+    | Break of int * Configuration.t
     | Finished of Configuration.t
     | Returned of Configuration.t
   [@@deriving sexp, compare]
@@ -266,21 +308,22 @@ module FunctionAnalysis = struct
               run_analysis (Configuration.Set.fold cs ~init:todo' ~f:(fun acc c -> c :: acc)) visited' current
             | Configuration c ->
               run_analysis (c :: todo') visited' current
+            | Break (v, c) ->
+              run_analysis todo' visited' (Deps.join_block_results current
+                                             { configuration = None; returned = None; breaks = [(v, c)] })
             | Finished c ->
               run_analysis todo' visited' (Deps.join_block_results current
-                                             { configuration = Some c;
-                                               returned = None })
+                                             { configuration = Some c; returned = None; breaks = [] })
             | Returned c ->
               run_analysis todo' visited' (Deps.join_block_results current
-                                             { configuration = None;
-                                               returned = Some c })
+                                             { configuration = None; returned = Some c; breaks = [] })
           else
             run_analysis todo' visited current
       in
-      run_analysis [conf] (Configuration.Set.empty) { configuration = None; returned = None }
+      run_analysis [conf] (Configuration.Set.empty) { configuration = None; returned = None; breaks = [] }
   and invoke (funcaddr : Address.t) (vstack : Value.t list) (store : Store.t) (deps : Deps.t) : (Value.t list * int) =
     let f = Store.get_funcinst store funcaddr in
-    let (in_arity, out_arity) = f.arity in
+    let (in_arity, _) = f.arity in
     let valn = List.take vstack in_arity in
     let zeros = List.map f.code.locals ~f:(function I32Type -> Value.Const 0l) in
     let frame = Frame.{
@@ -301,7 +344,8 @@ module FunctionAnalysis = struct
       | (Some c1, None) -> c1
       | (None, Some c2) -> c2
       | (None, None) -> failwith "no analysis result" in
-    (List.take exit_conf.vstack out_arity, in_arity)
+    (* TODO: functions without result have an empty return stack *)
+    (List.take exit_conf.vstack in_arity, in_arity)
 
   (* Step a configuration by one instruction.
      Only recursive for specific rewrite case (e.g. TeeLocal is expressed in terms of SetLocal *)
@@ -370,8 +414,8 @@ module FunctionAnalysis = struct
              Invoke the function instance at address a. *)
           let funcaddr = Frame.funcaddr config.frame x in
           (* Invoke the function, get a list of return values *)
-          let (return_vs, in_arity) = invoke funcaddr vstack config.store deps in
-          Configuration { config with vstack = return_vs @ List.drop vstack in_arity }
+          let (return_vs, arity) = invoke funcaddr vstack config.store deps in
+          Configuration { config with vstack = return_vs @ List.drop vstack arity }
         | Return, _vstack ->
           (* [spec] Let F be the current frame.
              Let n be the arity of F.
@@ -411,6 +455,12 @@ module FunctionAnalysis = struct
           Configuration
             { config with vstack = v :: vstack; astack = astack' }
         | _ -> failwith "invalid configuration"
+
+  let analyze_function (funcaddr : Address.t) (store : Store.t) (deps : Deps.t) : (Value.t list * int) =
+    let f = Store.get_funcinst store funcaddr in
+    let (in_arity, _) = f.arity in
+    let vstack = List.init in_arity ~f:(fun _ -> Value.Int) in
+    invoke funcaddr vstack store deps
 end
 
 let trace name = print_endline ("-- " ^ name)
@@ -450,19 +500,20 @@ let parse_file name run =
 
 let () =
   let run (l : (Script.var option * Script.definition) list) =
-    Printf.printf "I got %d elements\n" (List.length l);
-    List.iter l ~f:(fun (var_opt, def) ->
-        begin match var_opt with
+    (* Printf.printf "I got %d elements\n" (List.length l); *)
+    List.iter l ~f:(fun (_var_opt, def) ->
+        (* begin match var_opt with
         | Some {it = x; at = at} -> Printf.printf "var: %s (at %s)\n" x (Source.string_of_region at)
         | None -> Printf.printf "no var\n"
-        end;
+           end; *)
         begin match def.it with
           | Script.Textual m ->
-            begin match m.it.start with
+            (* begin match m.it.start with
               | Some var -> Printf.printf "start: %s\n" (Int32.to_string var.it)
               | None -> Printf.printf "no start\n"
-            end;
-            List.iter m.it.exports ~f:(fun e ->
+               end; *)
+            (* List.iter m.it.tables ~f:(fun table -> table.it.ttype) *)
+            (* List.iter m.it.exports ~f:(fun e ->
                 Printf.printf "export: ";
                 List.iter e.it.name ~f:(fun x -> Printf.printf "%c" (Char.of_int_exn x));
                 Printf.printf "\n";
@@ -470,44 +521,57 @@ let () =
                 | FuncExport v -> Printf.printf "func %s\n" (Int32.to_string v.it)
                 | TableExport v -> Printf.printf "table %s\n" (Int32.to_string v.it)
                 | MemoryExport v -> Printf.printf "memory %s\n" (Int32.to_string v.it)
-                | GlobalExport v -> Printf.printf "global %s\n" (Int32.to_string v.it));
+                | GlobalExport v -> Printf.printf "global %s\n" (Int32.to_string v.it)); *)
             List.iter m.it.funcs ~f:(fun f ->
+                Printf.printf "FUNCTION\n-------------------";
                 Printf.printf "ftype: %s\n" (Int32.to_string f.it.ftype.it);
                 Printf.printf "locals:\n";
                 List.iter f.it.locals ~f:(fun t ->
                     Printf.printf "%s\n" (Types.string_of_value_type t));
                 Printf.printf "instrs:\n";
-                List.iter f.it.body ~f:(fun instr ->
-                    Printf.printf "%s\n"
+                let rec print_instr (instr : Ast.instr) =
                       (match instr.it with
-                       | Unreachable -> "unreachable"
-                       | Nop -> "nop"
-                       | Drop -> "drop"
-                       | Select -> "select"
-                       | Block _ -> "block"
-                       | Loop _ -> "loop"
-                       | If _ -> "if"
-                       | Br _ -> "br"
-                       | BrIf _ -> "brif"
-                       | BrTable _ -> "brtable"
-                       | Return -> "return"
-                       | Call var -> Printf.sprintf "call %s" (Int32.to_string var.it)
-                       | CallIndirect _ -> "callindirect"
-                       | GetLocal _ -> "localget"
-                       | SetLocal _ -> "localset"
-                       | TeeLocal _ -> "localtee"
-                       | GetGlobal _ -> "globalget"
-                       | SetGlobal _ -> "globalset"
-                       | Load _ -> "load"
-                       | Store _ -> "store"
-                       | CurrentMemory -> "memorysize"
-                       | GrowMemory -> "memorygrow"
-                       | Const _ -> "const"
-                       | Test _ -> "test"
-                       | Compare _ -> "compare"
-                       | Unary _ -> "unary"
-                       | Binary _ -> "binary"
-                       | Convert _ -> "convert")))
+                       | Unreachable -> Printf.printf "unreachable\n"
+                       | Nop -> Printf.printf "nop\n"
+                       | Drop -> Printf.printf "drop\n"
+                       | Select -> Printf.printf "select\n"
+                       | Block (_st, instrs) -> Printf.printf "--[block\n";
+                         List.iter instrs ~f:print_instr;
+                         Printf.printf "--]"
+                       | Loop (_st, instrs) -> Printf.printf "--[loop\n";
+                         List.iter instrs ~f:print_instr;
+                         Printf.printf "--]"
+                       | If _ -> Printf.printf "if\n"
+                       | Br _ -> Printf.printf "br\n"
+                       | BrIf _ -> Printf.printf "brif\n"
+                       | BrTable _ -> Printf.printf "brtable\n"
+                       | Return -> Printf.printf "return\n"
+                       | Call var -> Printf.printf "call %s\n" (Int32.to_string var.it)
+                       | CallIndirect _ -> Printf.printf "callindirect\n"
+                       | GetLocal _ -> Printf.printf "localget\n"
+                       | SetLocal _ -> Printf.printf "localset\n"
+                       | TeeLocal _ -> Printf.printf "localtee\n"
+                       | GetGlobal _ -> Printf.printf "globalget\n"
+                       | SetGlobal _ -> Printf.printf "globalset\n"
+                       | Load _ -> Printf.printf "load\n"
+                       | Store _ -> Printf.printf "store\n"
+                       | CurrentMemory -> Printf.printf "memorysize\n"
+                       | GrowMemory -> Printf.printf "memorygrow\n"
+                       | Const _ -> Printf.printf "const\n"
+                       | Test _ -> Printf.printf "test\n"
+                       | Compare _ -> Printf.printf "compare\n"
+                       | Unary _ -> Printf.printf "unary\n"
+                       | Binary _ -> Printf.printf "binary\n"
+                       | Convert _ -> Printf.printf "convert\n") in
+                List.iter f.it.body ~f:print_instr);
+            let (store, fs) = Store.init m in
+            let deps = Deps.empty in
+            List.iter fs ~f:(fun faddr ->
+                let (res, _arity) = FunctionAnalysis.analyze_function faddr store deps in
+                Printf.printf "result: ";
+                List.iter res ~f:(fun v -> Printf.printf "%s " (Value.to_string v));
+                Printf.printf "\n");
+            ()
           | Script.Encoded (x, y) -> Printf.printf "Encoded: %s\n------\n%s" x y
           | Script.Quoted (x, y) -> Printf.printf "Quoted: %s\n------\n%s" x y
         end
