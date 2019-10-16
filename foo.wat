@@ -1,9 +1,10 @@
 (module
-  (type $t0 (func))
-  (type $t1 (func (param i32) (result i32)))
+  (type $t0 (func (param i32) (result i32)))
+  (type $t1 (func))
   (type $t2 (func (result i32)))
-  (func $__wasm_call_ctors (type $t0))
-  (func $sink (type $t1) (param $p0 i32) (result i32)
+  (import "env" "sink" (func $sink (type $t0)))
+  (func $__wasm_call_ctors (type $t1))
+  (func $identity_noopt (export "identity_noopt") (type $t0) (param $p0 i32) (result i32)
     (local $l0 i32)
     get_global $g0
     i32.const 16
@@ -13,7 +14,9 @@
     i32.store offset=12
     get_local $l0
     i32.load offset=12)
-  (func $foo (export "foo") (type $t1) (param $p0 i32) (result i32)
+  (func $identity (export "identity") (type $t0) (param $p0 i32) (result i32)
+    get_local $p0)
+  (func $foo (export "foo") (type $t0) (param $p0 i32) (result i32)
     block $B0
       get_local $p0
       i32.const 0
@@ -26,7 +29,7 @@
     end
     get_local $p0
     call $sink)
-  (func $fact (export "fact") (type $t1) (param $p0 i32) (result i32)
+  (func $fact (export "fact") (type $t0) (param $p0 i32) (result i32)
     (local $l0 i32) (local $l1 i32)
     block $B0
       get_local $p0
