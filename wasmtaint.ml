@@ -12,7 +12,9 @@ module Type = struct
   let of_wasm (vt : Types.value_type) : t =
     match vt with
     | Types.I32Type -> I32Type
-    | _ -> failwith "unsupported type"
+    | Types.I64Type -> failwith "unsupported type: I64Type"
+    | Types.F32Type -> failwith "unsupported type: F32Type"
+    | Types.F64Type -> failwith "unsupported type: F64Type"
 end
 
 module Value = struct
@@ -29,7 +31,9 @@ module Value = struct
   let of_wasm (v : Values.value) : t =
     match v with
     | I32 x -> Const x
-    | _ -> failwith "unsupported type"
+    | I64 _ -> failwith "unsupported type: I64"
+    | F32 _ -> failwith "unsupported type: F32"
+    | F64 _ -> failwith "unsupported type: F64"
 
   let to_string (v : t) : string =
     Sexp.to_string [%sexp (v : t)]
@@ -77,18 +81,27 @@ module Binop = struct
   module T = struct
     type t =
       | I32Add
+      | I32Sub
+      | I32Mul
     [@@deriving sexp, compare]
   end
   include T
   let of_wasm (b : Ast.binop) : t =
     match b with
     | I32 Add -> I32Add
+    | I32 Sub -> I32Sub
+    | I32 Mul -> I32Mul
+    | I32 _ -> failwith "unsupported operation"
     | _ -> failwith "unsupported type"
 
   let eval (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
     match (b, v1, v2) with
     | (I32Add, Const n1, Const n2) -> Const (Int32.(+) n1 n2)
     | (I32Add, _, _) -> Int
+    | (I32Sub, Const n1, Const n2) -> Const (Int32.(-) n1 n2)
+    | (I32Sub, _, _) -> Int
+    | (I32Mul, Const n1, Const n2) -> Const (Int32.( * ) n1 n2)
+    | (I32Mul, _, _) -> Int
 end
 
 module Relop = struct
@@ -108,18 +121,40 @@ module Relop = struct
     | (I32LeS, _, _) -> Int
 end
 
+module Testop = struct
+  module T = struct
+    type t =
+      | I32Eqz
+    [@@deriving sexp, compare]
+  end
+  include T
+  let of_wasm (t : Ast.testop) : t =
+    match t with
+    | I32 Eqz -> I32Eqz
+    | _ -> failwith "unsupported type"
+  let eval (t : t) (v1 : Value.t) : Value.t =
+    match (t, v1) with
+    | (I32Eqz, Const 0l) -> Const 1l
+    | (I32Eqz, Const _) -> Const 0l
+    | (I32Eqz, Int) -> Value.join (Const 0l) (Const 1l)
+end
+
 module Instr = struct
   module T = struct
     type t =
       | Nop
       | Drop
       | Block of t list
+      | Loop of t list
       | Const of Value.t
       | Binary of Binop.t
       | Compare of Relop.t
+      | Test of Testop.t
       | GetLocal of Var.t
       | SetLocal of Var.t
       | TeeLocal of Var.t
+      | GetGlobal of Var.t
+      | SetGlobal of Var.t
       | Call of Var.t
       | Br of Var.t
       | BrIf of Var.t
@@ -146,17 +181,17 @@ module Instr = struct
     | Ast.Return -> Return
     | Ast.Unreachable -> failwith "unsupported instruction: unreachable"
     | Ast.Select -> failwith "unsupported instruction: select"
-    | Ast.Loop (_st, _instrs) -> failwith "unsupported instruction: loop"
+    | Ast.Loop (_st, instrs) -> Loop (List.map instrs ~f:of_wasm)
     | Ast.If (_st, _instr, _instr') -> failwith "unsupported instruction: if"
     | Ast.BrTable (_vs, _v) -> failwith "unsupported instruction: brtable"
     | Ast.CallIndirect _v -> failwith "unsupported instruction: call indirect"
-    | Ast.GetGlobal _v -> failwith "unsupported instruction: get global"
-    | Ast.SetGlobal _v -> failwith "unsupported instruction: set global"
+    | Ast.GetGlobal v -> GetGlobal (Var.of_wasm v)
+    | Ast.SetGlobal v -> SetGlobal (Var.of_wasm v)
     | Ast.Load _op -> failwith "unsupported instruction: load"
     | Ast.Store _op -> failwith "unsupported instruction: store"
     | Ast.CurrentMemory -> failwith "unsupported instruction: current memory"
     | Ast.GrowMemory -> failwith "unsupported instruction: memory grow"
-    | Ast.Test _op -> failwith "unsupported instruction: test"
+    | Ast.Test op -> Test (Testop.of_wasm op)
     | Ast.Convert _op -> failwith "unsupported instruction: convert"
     | Ast.Unary _op -> failwith "unsupported instruction: unary"
 end
@@ -196,9 +231,13 @@ module Store = struct
   include T
   let get_funcinst (s : t) (a : Address.t) : funcinst =
     List.nth_exn s.funcs a
+  let get_global (s : t) (a : Address.t) : globalinst =
+    List.nth_exn s.globals a
   let join (s1 : t) (s2 : t) : t =
     assert (s1.funcs = s2.funcs);
-    s1
+    { s1 with
+      globals = List.map2_exn s1.globals s2.globals ~f:(fun g1 g2 -> assert (g1.mut = g2.mut); { value = Value.join g1.value g2.value; mut = g1.mut })
+    }
   let init (m : Ast.module_) : (t * Address.t list) =
     let mk_func (f : Ast.func) : func = {
       body = List.map f.it.body ~f:Instr.of_wasm;
@@ -251,6 +290,8 @@ module Frame = struct
     List.nth_exn f.locals l
   let set_local (f : t) (l : Var.t) (v : Value.t) : t =
     { f with locals = List.mapi f.locals ~f:(fun i x -> if i = l then v else x) }
+  let get_global_addr (f : t) (g : Var.t) : Address.t =
+    List.nth_exn f.module_.globaladdrs g
   let join (f1 : t) (f2 : t) =
     assert (f1.arity = f2.arity);
     assert (f1.module_ = f2.module_);
@@ -268,6 +309,7 @@ end
 module Configuration = struct
   module T = struct
     type t = {
+      (* TODO: we probably don't want the frame and the store as part of the config, or only as a reference *)
       store : Store.t;
       frame : Frame.t;
       vstack : Value.t list;
@@ -325,7 +367,7 @@ module FunctionAnalysis = struct
   type step_result =
     | Configurations of Configuration.Set.t
     | Configuration of Configuration.t
-    | Break of Var.t * Configuration.t
+    | Break of int * Configuration.t
     | Finished of Configuration.t
     | Returned of Configuration.t
   [@@deriving sexp, compare]
@@ -403,6 +445,8 @@ module FunctionAnalysis = struct
              Pop the value val from the stack. *)
           Configuration
             { config with vstack = vrest; astack = astack' }
+        | Drop, _ ->
+          failwith "Invalid value stack for drop"
         | GetLocal x, vstack ->
           (* [spec] Let F be the current frame.
              Assert: due to validation, F.locals[x] exists.
@@ -420,6 +464,7 @@ module FunctionAnalysis = struct
           let frame' = Frame.set_local config.frame x v in
           Configuration
             { config with vstack = vstack; astack = astack'; frame = frame' }
+        | SetLocal _, _ -> failwith "Invalid value stack for setlocal"
         | TeeLocal x, v :: vstack ->
           (* [spec] Assert: due to validation, a value is on the top of the stack.
              Pop the value val from the stack.
@@ -427,6 +472,8 @@ module FunctionAnalysis = struct
              Push the value val to the stack.
              Execute the instruction (local.set x). *)
           step { config with vstack = v :: v :: vstack; astack = SetLocal x :: astack' } deps
+        | TeeLocal _, _ ->
+          failwith "Invalid value stack for teelocal"
         | Block instrs, _ ->
           (* [spec] Let n be the arity |t?| of the result type t?.
              Let L be the label whose arity is n and whose continuation is the end of the block.
@@ -446,8 +493,11 @@ module FunctionAnalysis = struct
                 Configuration { c with astack = astack' }
           | None -> match analysis_result.returned with
             | Some c -> Returned c
-            | None -> failwith "no block result"
+            | None -> failwith "no block result" (* TODO: break *)
           end
+        | Loop instrs, _ ->
+          let _analysis_result = analyze_block { config with astack = instrs @ [Loop instrs] } deps in
+          failwith "TODO: same as block"
         | Call x, vstack ->
           (* [spec] Let F be the current frame.
              Assert: due to validation, F.module.funcaddrs[x] exists.
@@ -483,6 +533,7 @@ module FunctionAnalysis = struct
           let v = Relop.eval rel v1 v2 in
           Configuration
             { config with vstack = v :: vstack; astack = astack' }
+        | Compare _, _ -> failwith "Invalid value stack for compare"
         | Binary bin, v2 :: v1 :: vstack ->
           (* [spec] Assert: due to validation, two values of value type t are on the top of the stack.
              Pop the value t.const c2 from the stack.
@@ -495,7 +546,54 @@ module FunctionAnalysis = struct
           let v = Binop.eval bin v1 v2 in (* TODO: trap *)
           Configuration
             { config with vstack = v :: vstack; astack = astack' }
-        | _ -> failwith "invalid configuration"
+        | Binary _, _ -> failwith "Invalid value stack for binary"
+        | Test test, v :: vstack ->
+          (* [spec] Assert: due to validation, a value of value type t is on the top of the stack.
+             Pop the value t.const c1 from the stack.
+             Let c be the result of computing testopt(c1).
+             Push the value i32.const c to the stack. *)
+          let v' = Testop.eval test v in
+          Configuration
+            { config with vstack = v' :: vstack; astack = astack' }
+        | GetGlobal v, vstack ->
+          (* [spec] Let F be the current frame.
+             Assert: due to validation, F.module.globaladdrs[x] exists.
+             Let a be the global address F.module.globaladdrs[x].
+             Assert: due to validation, S.globals[a] exists.
+             Let glob be the global instance S.globals[a].
+             Let val be the value glob.value.
+             Push the value val to the stack. *)
+          let addr = Frame.get_global_addr config.frame v in
+          let g = Store.get_global config.store addr in
+          Configuration
+            { config with vstack = g.value :: vstack; astack = astack' }
+        | SetGlobal _, _ -> failwith "TODO: get global"
+        | Test _, _ -> failwith "Invalid value stack for test"
+        | Br n, _ ->
+          (* [spec] Assert: due to validation, the stack contains at least l+1 labels.
+             Let L be the l-th label appearing on the stack, starting from the top and counting from zero.
+             Let n be the arity of L.
+             Assert: due to validation, there are at least n values on the top of the stack.
+             Pop the values valn from the stack.
+             Repeat l+1 times:
+             While the top of the stack is a value, do:
+             Pop the value from the stack.
+             Assert: due to validation, the top of the stack now is a label.
+             Pop the label from the stack.
+             Push the values valn to the stack.
+             Jump to the continuation of L. *)
+          (* We encode this as just returning Break with the value on n. This
+             will be propagated back until n is 0 *)
+          Break (n, { config with astack = astack' })
+        | BrIf _n, _v :: _vstack ->
+          (* [spec] Assert: due to validation, a value of value type i32 is on the top of the stack.
+             Pop the value i32.const c from the stack.
+             If c is non-zero, then:
+               Execute the instruction (br l).
+             Else:
+               Do nothing. *)
+          failwith "TODO: br_if" (* can both break and continue *)
+        | BrIf _, _ -> failwith "Invalid value stack for br_if"
 
   let analyze_function (funcaddr : Address.t) (store : Store.t) (deps : Deps.t) : (Value.t list * int) =
     let f = Store.get_funcinst store funcaddr in
@@ -583,8 +681,8 @@ let () =
                          List.iter instrs ~f:print_instr;
                          Printf.printf "--]"
                        | If _ -> Printf.printf "if\n"
-                       | Br _ -> Printf.printf "br\n"
-                       | BrIf _ -> Printf.printf "brif\n"
+                       | Br v -> Printf.printf "br %s\n" (Int32.to_string v.it)
+                       | BrIf v -> Printf.printf "brif %s\n" (Int32.to_string v.it)
                        | BrTable _ -> Printf.printf "brtable\n"
                        | Return -> Printf.printf "return\n"
                        | Call var -> Printf.printf "call %s\n" (Int32.to_string var.it)
