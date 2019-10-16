@@ -375,8 +375,9 @@ module FunctionAnalysis = struct
   type step_result =
     | Configurations of Configuration.Set.t
     | Configuration of Configuration.t
-    | Break of int * Configuration.t
-    | BreakCond of (((* the break *) int * Configuration.t) * (* the next state *) Configuration.t)
+    | Break of (int * Configuration.t) list
+    | BreakCond of ((* the breaks *)(int * Configuration.t) list * (* the next state *) Configuration.t)
+    | BreakReturn of ((int * Configuration.t) list * Configuration.t)
     | Finished of Configuration.t
     | Returned of Configuration.t
   [@@deriving sexp, compare]
@@ -400,12 +401,15 @@ module FunctionAnalysis = struct
               run_analysis (Configuration.Set.fold cs ~init:todo' ~f:(fun acc c -> c :: acc)) visited' current
             | Configuration c ->
               run_analysis (c :: todo') visited' current
-            | Break (v, c) ->
+            | Break bs ->
               run_analysis todo' visited' (Deps.join_block_results current
-                                             { configuration = None; returned = None; breaks = [(v, c)] })
-            | BreakCond ((v, c1), c2) ->
+                                             { configuration = None; returned = None; breaks = bs })
+            | BreakCond (bs, c2) ->
               run_analysis (c2 :: todo) visited' (Deps.join_block_results current
-                                                    { configuration = None; returned = None; breaks = [(v, c1)] })
+                                                    { configuration = None; returned = None; breaks = bs })
+            | BreakReturn (bs, c) ->
+              run_analysis todo' visited' (Deps.join_block_results current
+                                             { configuration = None; returned = Some c; breaks = bs })
             | Finished c ->
               run_analysis todo' visited' (Deps.join_block_results current
                                              { configuration = Some c; returned = None; breaks = [] })
@@ -492,24 +496,45 @@ module FunctionAnalysis = struct
              Enter the block instr∗ with label L. *)
           (* We empty the administrative stack before analyzing the block, as we want the block to be analyzed up to its end *)
           let analysis_result = analyze_block { config with astack = instrs } deps in
-          (* TODO: we should change the return value of this function (similar to block_result) *)
-          (* TODO: for now, we'll just assert that either you return, or you step *)
-          assert (analysis_result.configuration = None || analysis_result.returned = None);
-          begin match analysis_result.configuration with
-          | Some c ->
-                (* After analyzing the block, the astack should be empty *)
-                assert (c.astack = []);
-                (* And the vstack should have exactly the form of st *)
-                (* But we don't check that (yet, TODO). *)
-                (* We restore the administrative stack after analyzing the block *)
-                Configuration { c with astack = astack' }
-          | None -> match analysis_result.returned with
-            | Some c -> Returned c
-            | None -> failwith "no block result" (* TODO: break *)
+          begin match analysis_result with
+            | { Deps.configuration = Some c; breaks = []; returned = None } -> (* Only normal result *)
+              (* After analyzing the block, the astack should be empty *)
+              assert (c.astack = []);
+              (* And the vstack should have exactly the form of st *)
+              (* But we don't check that (yet, TODO). *)
+              (* We restore the administrative stack after analyzing the block *)
+              Configuration { c with astack = astack' }
+            | { Deps.configuration = None; breaks = []; returned = Some c } -> (* Only return *)
+              Returned c
+            | { Deps.configuration = None; breaks = bs; returned = None } -> (* Only breaks *)
+              Break bs
+            | { Deps.configuration = Some c; breaks = bs; returned = None } -> (* break and normal result *)
+              assert (c.astack = []);
+              BreakCond (bs, { c with astack = astack' })
+            | { Deps.configuration = None; breaks = bs; returned = Some c } ->
+              BreakReturn (bs, c)
+            | _ -> failwith "Invalid analysis result for block"
           end
         | Loop instrs, _ ->
-          let _analysis_result = analyze_block { config with astack = instrs @ [Loop instrs] } deps in
-          failwith "TODO: same as block"
+          let analysis_result = analyze_block { config with astack = instrs @ [Loop instrs] } deps in
+          (* TODO: this is duplicated from Block above *)
+          begin match analysis_result with
+            | { Deps.configuration = Some c; breaks = []; returned = None } -> (* Only normal result *)
+              (* After analyzing the block, the astack should be empty *)
+              assert (c.astack = []);
+              (* And the vstack should have exactly the form of st *)
+              (* But we don't check that (yet, TODO). *)
+              (* We restore the administrative stack after analyzing the block *)
+              Configuration { c with astack = astack' }
+            | { Deps.configuration = None; breaks = []; returned = Some c } -> (* Only return *)
+              Returned c
+            | { Deps.configuration = None; breaks = bs; returned = None } -> (* Only breaks *)
+              Break bs
+            | { Deps.configuration = Some c; breaks = bs; returned = None } -> (* break and normal result *)
+              assert (c.astack = []);
+              BreakCond (bs, { c with astack = astack' })
+            | _ -> failwith "Invalid analysis result for loop"
+          end
         | Call x, vstack ->
           (* [spec] Let F be the current frame.
              Assert: due to validation, F.module.funcaddrs[x] exists.
@@ -596,7 +621,7 @@ module FunctionAnalysis = struct
              Jump to the continuation of L. *)
           (* We encode this as just returning Break with the value on n. This
              will be propagated back until n is 0 *)
-          Break (n, { config with astack = astack' })
+          Break [(n, { config with astack = astack' })]
         | BrIf n, v :: vstack ->
           (* [spec] Assert: due to validation, a value of value type i32 is on the top of the stack.
              Pop the value i32.const c from the stack.
@@ -608,9 +633,9 @@ module FunctionAnalysis = struct
           if Value.is_definitely_zero v then
             Configuration config'
           else if Value.is_definitely_not_zero v then
-            Break (n, config')
+            Break [(n, config')]
           else
-            BreakCond ((n, config'), config')
+            BreakCond ([(n, config')], config')
         | BrIf _, _ -> failwith "Invalid value stack for br_if"
 
   let analyze_function (funcaddr : Address.t) (store : Store.t) (deps : Deps.t) : (Value.t list * int) =
