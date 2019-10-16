@@ -48,10 +48,18 @@ module Value = struct
     | Const 0l -> true
     | Const _ -> false
     | Int -> true
+  let is_definitely_zero (v : t) =
+    match v with
+    | Const 0l -> true
+    | _ -> false
   let is_not_zero (v : t) =
     match v with
     | Const 0l -> false
     | _ -> true
+  let is_definitely_not_zero (v : t) =
+    match v with
+    | Const n -> n <> 0l
+    | _ -> false
 end
 
 module Address = struct
@@ -368,6 +376,7 @@ module FunctionAnalysis = struct
     | Configurations of Configuration.Set.t
     | Configuration of Configuration.t
     | Break of int * Configuration.t
+    | BreakCond of (((* the break *) int * Configuration.t) * (* the next state *) Configuration.t)
     | Finished of Configuration.t
     | Returned of Configuration.t
   [@@deriving sexp, compare]
@@ -394,6 +403,9 @@ module FunctionAnalysis = struct
             | Break (v, c) ->
               run_analysis todo' visited' (Deps.join_block_results current
                                              { configuration = None; returned = None; breaks = [(v, c)] })
+            | BreakCond ((v, c1), c2) ->
+              run_analysis (c2 :: todo) visited' (Deps.join_block_results current
+                                                    { configuration = None; returned = None; breaks = [(v, c1)] })
             | Finished c ->
               run_analysis todo' visited' (Deps.join_block_results current
                                              { configuration = Some c; returned = None; breaks = [] })
@@ -585,14 +597,20 @@ module FunctionAnalysis = struct
           (* We encode this as just returning Break with the value on n. This
              will be propagated back until n is 0 *)
           Break (n, { config with astack = astack' })
-        | BrIf _n, _v :: _vstack ->
+        | BrIf n, v :: vstack ->
           (* [spec] Assert: due to validation, a value of value type i32 is on the top of the stack.
              Pop the value i32.const c from the stack.
              If c is non-zero, then:
                Execute the instruction (br l).
              Else:
                Do nothing. *)
-          failwith "TODO: br_if" (* can both break and continue *)
+          let config' = { config with vstack = vstack; astack = astack' } in
+          if Value.is_definitely_zero v then
+            Configuration config'
+          else if Value.is_definitely_not_zero v then
+            Break (n, config')
+          else
+            BreakCond ((n, config'), config')
         | BrIf _, _ -> failwith "Invalid value stack for br_if"
 
   let analyze_function (funcaddr : Address.t) (store : Store.t) (deps : Deps.t) : (Value.t list * int) =
