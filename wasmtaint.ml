@@ -168,10 +168,9 @@ module Store = struct
       body : Instr.t list;
     }
     [@@deriving sexp, compare]
-    type funcaddr = Address.t
-    [@@deriving sexp, compare]
     type moduleinst = {
-      funcaddrs: funcaddr list;
+      funcaddrs: Address.t list;
+      globaladdrs: Address.t list;
       (* TODO: other fields *)
     }
     [@@deriving sexp, compare]
@@ -179,11 +178,17 @@ module Store = struct
       arity : (int * int);
       typ : (Type.t list * Type.t list);
       module_: moduleinst;
-      code: func
+      code: func;
+    }
+    [@@deriving sexp, compare]
+    type globalinst = {
+      value : Value.t;
+      mut : bool;
     }
     [@@deriving sexp, compare]
     type t = {
       funcs : funcinst list;
+      globals : globalinst list;
       (* TODO: other fields *)
     }
     [@@deriving sexp, compare]
@@ -208,8 +213,26 @@ module Store = struct
           module_ = minst;
           code = mk_func f
         } in
+    let mk_globalinst (g : Ast.global) : globalinst =
+      { value = Value.of_wasm (match g.it.value.it with
+            | [] -> failwith "Undefined global"
+            | [v] -> begin match v.it with
+                | Ast.Const l -> l.it
+                | _ -> failwith "Unsupported non-const global instaciation"
+              end
+            | _ -> failwith "Unsupported global instanciation with multiple instructions");
+        mut = match g.it.gtype with
+          | Types.GlobalType (_, Types.Immutable) -> false
+          | Types.GlobalType (_, Types.Mutable) -> true
+      }
+    in
     let funcaddrs = List.mapi m.it.funcs ~f:(fun i _ -> i) in
-    ({ funcs = List.map m.it.funcs ~f:(mk_funcinst { funcaddrs = funcaddrs }) }, funcaddrs)
+    let globaladdrs = List.mapi m.it.globals ~f:(fun i _ -> i) in
+    let minst = { funcaddrs; globaladdrs } in
+    ({
+      funcs = List.map m.it.funcs ~f:(mk_funcinst minst);
+      globals = List.map m.it.globals ~f:mk_globalinst;
+    }, funcaddrs)
 end
 
 module Frame = struct
