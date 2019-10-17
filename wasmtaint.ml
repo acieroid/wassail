@@ -4,7 +4,7 @@ open Wasm
 module Type = struct
   module T = struct
     type t =
-      | I32Type (* TODO: other types *)
+      | I32Type (* XXX: other types *)
     [@@deriving sexp, compare]
   end
   include T
@@ -22,7 +22,7 @@ module Value = struct
     type t =
       | Const of int32
       | Int
-      (* TODO: values are actually i32/i64/f32/f64 *)
+      (* XXX: values are actually i32/i64/f32/f64 *)
     [@@deriving sexp, compare]
   end
   include T
@@ -64,17 +64,11 @@ end
 
 module Address = struct
   module T = struct
-    type t = int (* TODO: abstract it, but how? *)
+    type t = int (* XXX: abstract it, but how? Also, depend on which address (function address are fine with int) *)
     [@@deriving sexp, compare]
   end
   include T
 end
-
-(* TODO: table instances *)
-(* TODO: memory instances *)
-(* TODO: global instances *)
-(* TODO: export instances *)
-(* TODO: external values *)
 
 module Var = struct
   module T = struct
@@ -170,6 +164,8 @@ module Instr = struct
     [@@deriving sexp, compare]
   end
   include T
+  let to_string (i : t) : string =
+    Sexp.to_string [%sexp (i : t)]
 
   let rec of_wasm (i : Ast.instr) : t =
     match i.it with
@@ -214,7 +210,7 @@ module Store = struct
     type moduleinst = {
       funcaddrs: Address.t list;
       globaladdrs: Address.t list;
-      (* TODO: other fields *)
+      (* XXX: other fields *)
     }
     [@@deriving sexp, compare]
     type funcinst = {
@@ -232,7 +228,7 @@ module Store = struct
     type t = {
       funcs : funcinst list;
       globals : globalinst list;
-      (* TODO: other fields *)
+      (* XXX: other fields *)
     }
     [@@deriving sexp, compare]
   end
@@ -317,7 +313,7 @@ end
 module Configuration = struct
   module T = struct
     type t = {
-      (* TODO: we probably don't want the frame and the store as part of the config, or only as a reference *)
+      (* XXX: we probably don't want the frame and the store as part of the config, or only as a reference *)
       store : Store.t;
       frame : Frame.t;
       vstack : Value.t list;
@@ -326,15 +322,35 @@ module Configuration = struct
     [@@deriving sexp, compare]
   end
   include T
+  let to_string (c : t) : string =
+    Printf.sprintf "Config{\n\tvals: [%s]\n\tinstr: [%s]\n\tlocals: [%s]\n}" (String.concat ~sep:", " (List.map c.vstack ~f:Value.to_string)) (String.concat ~sep:", " (List.map c.astack ~f:Instr.to_string)) (String.concat ~sep:", " (List.map c.frame.locals ~f:Value.to_string))
   module Set = Set.Make(T)
   module Map = Map.Make(T)
-  let join (c1 : t) (c2 : t) =
+  let join (c1 : t) (c2 : t) : t =
     (* We're not supposed to join configurations with non-empty administrative stacks *)
-    assert (c1.astack = [] && c2.astack = []);
+    (* assert (c1.astack = [] && c2.astack = []); *)
     { store = Store.join c1.store c2.store;
       frame = Frame.join c1.frame c2.frame;
       vstack = List.map2_exn c1.vstack c2.vstack ~f:Value.join;
       astack = [] }
+  let join_opt (c1 : t option) (c2 : t option) : t option =
+    match (c1, c2) with
+    | None, None -> None
+    | Some c1, None -> Some c1
+    | None, Some c2 -> Some c2
+    | Some c1, Some c2 -> Some (join c1 c2)
+end
+
+module Break = struct
+  module T = struct
+    type t = int * Configuration.t
+    [@@deriving sexp, compare]
+  end
+  include T
+  include Comparator.Make(T)
+  module Set = Set.Make(T)
+  let to_string (b : t) : string =
+    Printf.sprintf "(%d, %s)" (fst b) (Configuration.to_string (snd b))
 end
 
 module Deps = struct
@@ -342,7 +358,7 @@ module Deps = struct
     (* Most of the time, a block either reaches its final state, a return statement, or a break. Due to joining, a block analysis could reach multiple of these *)
     type block_result = {
       configuration: Configuration.t option;
-      breaks: (Var.t (* The block we break to *) * Configuration.t (* The configuration before the break *)) list; (* there could be different breaks reached *)
+      breaks: Break.Set.t;
       returned: Configuration.t option;
     }
     [@@deriving sexp, compare]
@@ -353,7 +369,9 @@ module Deps = struct
   end
   include T
   include Comparator.Make(T)
-  let empty = {
+  let no_result : block_result =
+    { configuration = None; breaks = Break.Set.empty; returned = None }
+  let empty : t = {
     results = ref Configuration.Map.empty;
   }
   let join_block_results (b1 : block_result) (b2: block_result) : block_result =
@@ -364,62 +382,74 @@ module Deps = struct
       | (None, None) -> None in
     { configuration = join_conf_opt b1.configuration b2.configuration;
       returned = join_conf_opt b1.returned b2.returned;
-      breaks = b1.breaks @ b2.breaks (* TODO: use sets to avoid duplicates *)
+      breaks = Break.Set.union b1.breaks b2.breaks
     }
+  let block_result_to_string (b : block_result) : string =
+    Printf.sprintf "configuration %s, returned: %s, breaks: [%s]"
+      (match b.configuration with
+       | Some c -> Configuration.to_string c
+       | None -> "none")
+      (match b.returned with
+       | Some c -> Configuration.to_string c
+       | None -> "none")
+      (String.concat ~sep:", " (List.map (Break.Set.elements b.breaks) ~f:Break.to_string))
 end
 
 (* Structure of the execution:
 Store ; Frame ; Instructions -> Store'; Frame'; Instructions'
    where Instructions is isomorphic to the stack *)
 module FunctionAnalysis = struct
-  type step_result =
-    | Configurations of Configuration.Set.t
-    | Configuration of Configuration.t
-    | Break of (int * Configuration.t) list
-    | BreakCond of ((* the breaks *)(int * Configuration.t) list * (* the next state *) Configuration.t)
-    | BreakReturn of ((int * Configuration.t) list * Configuration.t)
-    | Finished of Configuration.t
-    | Returned of Configuration.t
+  type step_result = {
+    configs: Configuration.Set.t;
+    breaks: Break.Set.t;
+    returned: Configuration.t option;
+    finished: Configuration.t option;
+  }
   [@@deriving sexp, compare]
+
+  let no_result : step_result = {
+    configs = Configuration.Set.empty;
+    breaks = Break.Set.empty;
+    returned = None;
+    finished = None;
+  }
+  let finished (c : Configuration.t) : step_result =
+    { no_result with finished = Some c }
+  let reached (c : Configuration.t) : step_result =
+    { no_result with configs = Configuration.Set.singleton c }
+  let returned (c : Configuration.t) : step_result =
+    { no_result with returned = Some c }
+  let break (b : Break.t) : step_result =
+    { no_result with breaks = Break.Set.singleton b }
+  let merge_results (r1 : step_result) (r2 : step_result) : step_result =
+    {
+      configs = Configuration.Set.union r1.configs r2.configs;
+      breaks = Break.Set.union r1.breaks r2.breaks;
+      returned = Configuration.join_opt r1.returned r2.returned;
+      finished = Configuration.join_opt r2.finished r2.finished;
+    }
 
   (* Analyzes a block. Return the configuration at the exit of a block. This resulting configuration is the join of all reachable configurations. The block could also have "returned" if it reaches a "Return" instruction *)
   let rec analyze_block (conf : Configuration.t) (deps : Deps.t) : Deps.block_result =
+    let rec run_analysis (todo: Configuration.t list) (current: Deps.block_result) : Deps.block_result =
+        match todo with
+        | [] -> current
+        | c :: todo' ->
+          let stepped = step c deps in
+          run_analysis (Configuration.Set.fold stepped.configs ~init:todo' ~f:(fun acc c -> c :: acc))
+            (Deps.join_block_results current
+               { configuration = stepped.finished; returned = stepped.returned; breaks = stepped.breaks })
+      in
     match Configuration.Map.find !(deps.results) conf  with
     | Some res ->
       (* results already computed, return it *)
       res
     | None ->
-      (* compute result and cache it *)
-      let rec run_analysis (todo: Configuration.t list) (visited : Configuration.Set.t) (current: Deps.block_result) : Deps.block_result =
-        match todo with
-        | [] -> current
-        | c :: todo' ->
-          if not (Configuration.Set.mem visited c) then
-            let visited' = Configuration.Set.add visited c in
-            match step c deps with
-            | Configurations cs ->
-              run_analysis (Configuration.Set.fold cs ~init:todo' ~f:(fun acc c -> c :: acc)) visited' current
-            | Configuration c ->
-              run_analysis (c :: todo') visited' current
-            | Break bs ->
-              run_analysis todo' visited' (Deps.join_block_results current
-                                             { configuration = None; returned = None; breaks = bs })
-            | BreakCond (bs, c2) ->
-              run_analysis (c2 :: todo) visited' (Deps.join_block_results current
-                                                    { configuration = None; returned = None; breaks = bs })
-            | BreakReturn (bs, c) ->
-              run_analysis todo' visited' (Deps.join_block_results current
-                                             { configuration = None; returned = Some c; breaks = bs })
-            | Finished c ->
-              run_analysis todo' visited' (Deps.join_block_results current
-                                             { configuration = Some c; returned = None; breaks = [] })
-            | Returned c ->
-              run_analysis todo' visited' (Deps.join_block_results current
-                                             { configuration = None; returned = Some c; breaks = [] })
-          else
-            run_analysis todo' visited current
-      in
-      run_analysis [conf] (Configuration.Set.empty) { configuration = None; returned = None; breaks = [] }
+      (* compute result and cache it. *)
+      deps.results := Configuration.Map.update !(deps.results) conf ~f:(fun _ -> Deps.no_result);
+      let r = run_analysis [conf] { configuration = None; returned = None; breaks = Break.Set.empty } in
+      deps.results := Configuration.Map.update !(deps.results) conf ~f:(fun _ -> r);
+      r
   and invoke (funcaddr : Address.t) (vstack : Value.t list) (store : Store.t) (deps : Deps.t) : (Value.t list * int) =
     let f = Store.get_funcinst store funcaddr in
     let (in_arity, _) = f.arity in
@@ -443,23 +473,40 @@ module FunctionAnalysis = struct
       | (Some c1, None) -> c1
       | (None, Some c2) -> c2
       | (None, None) -> failwith "no analysis result" in
-    (* TODO: functions without result have an empty return stack *)
     (List.take exit_conf.vstack in_arity, in_arity)
 
+  and enter_block (config : Configuration.t) (instrs : Instr.t list) (deps : Deps.t) : step_result =
+    let analysis_result = analyze_block { config with astack = instrs } deps in
+    (* Decrease the index of the breaks, those that would reach 0 become finished configurations *)
+    let (breaks, finished) = Break.Set.partition_tf analysis_result.breaks ~f:(fun (b, _) -> b = 1) in
+    let breaks' = Break.Set.map breaks ~f:(fun (b, c) -> (b-1, c)) in
+    let finished' = Break.Set.fold finished
+        ~init:analysis_result.configuration
+        ~f:(fun acc (_, c) ->
+            match acc with
+            | Some c' -> Some (Configuration.join c c')
+            | None -> Some c) in
+    { configs = begin match finished' with
+          | Some c -> Configuration.Set.singleton { c with astack = List.tl_exn config.astack }
+          | None -> Configuration.Set.empty (* next conf comes from successful exits of the analyzed block *)
+        end;
+      finished = None; (* there's no finished *)
+      returned = analysis_result.returned (* Returns are propagated *);
+      breaks = breaks' (* breaks are updated *)}
   (* Step a configuration by one instruction.
      Only recursive for specific rewrite case (e.g. TeeLocal is expressed in terms of SetLocal *)
   and step (config : Configuration.t) (deps : Deps.t) : step_result =
       match config.astack with
-      | [] -> Finished config
+      | [] -> finished config
       | head :: astack' -> match (head, config.vstack) with
         | Nop, _ ->
           (* [spec] Do nothing *)
-          Configuration
+          reached
             { config with astack = astack' }
         | Drop, _ :: vrest ->
           (* [spec] Assert: due to validation, a value is on the top of the stack.
              Pop the value val from the stack. *)
-          Configuration
+          reached
             { config with vstack = vrest; astack = astack' }
         | Drop, _ ->
           failwith "Invalid value stack for drop"
@@ -469,7 +516,7 @@ module FunctionAnalysis = struct
              Let val be the value F.locals[x].
              Push the value val to the stack. *)
           let v = Frame.get_local config.frame x in
-          Configuration
+          reached
             { config with vstack = v :: vstack; astack = astack' }
         | SetLocal x, v :: vstack ->
           (* [spec] Let F be the current frame.
@@ -478,7 +525,7 @@ module FunctionAnalysis = struct
              Pop the value val from the stack.
              Replace F.locals[x] with the value val. *)
           let frame' = Frame.set_local config.frame x v in
-          Configuration
+          reached
             { config with vstack = vstack; astack = astack'; frame = frame' }
         | SetLocal _, _ -> failwith "Invalid value stack for setlocal"
         | TeeLocal x, v :: vstack ->
@@ -495,46 +542,9 @@ module FunctionAnalysis = struct
              Let L be the label whose arity is n and whose continuation is the end of the block.
              Enter the block instr∗ with label L. *)
           (* We empty the administrative stack before analyzing the block, as we want the block to be analyzed up to its end *)
-          let analysis_result = analyze_block { config with astack = instrs } deps in
-          begin match analysis_result with
-            | { Deps.configuration = Some c; breaks = []; returned = None } -> (* Only normal result *)
-              (* After analyzing the block, the astack should be empty *)
-              assert (c.astack = []);
-              (* And the vstack should have exactly the form of st *)
-              (* But we don't check that (yet, TODO). *)
-              (* We restore the administrative stack after analyzing the block *)
-              Configuration { c with astack = astack' }
-            | { Deps.configuration = None; breaks = []; returned = Some c } -> (* Only return *)
-              Returned c
-            | { Deps.configuration = None; breaks = bs; returned = None } -> (* Only breaks *)
-              Break bs
-            | { Deps.configuration = Some c; breaks = bs; returned = None } -> (* break and normal result *)
-              assert (c.astack = []);
-              BreakCond (bs, { c with astack = astack' })
-            | { Deps.configuration = None; breaks = bs; returned = Some c } ->
-              BreakReturn (bs, c)
-            | _ -> failwith "Invalid analysis result for block"
-          end
+          enter_block config instrs deps
         | Loop instrs, _ ->
-          let analysis_result = analyze_block { config with astack = instrs @ [Loop instrs] } deps in
-          (* TODO: this is duplicated from Block above *)
-          begin match analysis_result with
-            | { Deps.configuration = Some c; breaks = []; returned = None } -> (* Only normal result *)
-              (* After analyzing the block, the astack should be empty *)
-              assert (c.astack = []);
-              (* And the vstack should have exactly the form of st *)
-              (* But we don't check that (yet, TODO). *)
-              (* We restore the administrative stack after analyzing the block *)
-              Configuration { c with astack = astack' }
-            | { Deps.configuration = None; breaks = []; returned = Some c } -> (* Only return *)
-              Returned c
-            | { Deps.configuration = None; breaks = bs; returned = None } -> (* Only breaks *)
-              Break bs
-            | { Deps.configuration = Some c; breaks = bs; returned = None } -> (* break and normal result *)
-              assert (c.astack = []);
-              BreakCond (bs, { c with astack = astack' })
-            | _ -> failwith "Invalid analysis result for loop"
-          end
+          enter_block config (instrs @ [Loop instrs]) deps
         | Call x, vstack ->
           (* [spec] Let F be the current frame.
              Assert: due to validation, F.module.funcaddrs[x] exists.
@@ -543,7 +553,7 @@ module FunctionAnalysis = struct
           let funcaddr = Frame.funcaddr config.frame x in
           (* Invoke the function, get a list of return values *)
           let (return_vs, arity) = invoke funcaddr vstack config.store deps in
-          Configuration { config with vstack = return_vs @ List.drop vstack arity }
+          reached { config with vstack = return_vs @ List.drop vstack arity }
         | Return, _vstack ->
           (* [spec] Let F be the current frame.
              Let n be the arity of F.
@@ -557,10 +567,10 @@ module FunctionAnalysis = struct
              Push valn to the stack.
              Jump to the instruction after the original call that pushed the frame. *)
           (* We just clear the administrative stack when returning *)
-          Returned { config with astack = [] }
+          returned { config with astack = [] }
         | Const v, vstack ->
           (* [spec] Push the value t.const c to the stack. *)
-          Configuration { config with vstack = v :: vstack; astack = astack' }
+          reached { config with vstack = v :: vstack; astack = astack' }
         | Compare rel, v2 :: v1 :: vstack ->
           (* [spec] Assert: due to validation, two values of value type t are on the top of the stack.
              Pop the value t.const c2 from the stack.
@@ -568,7 +578,7 @@ module FunctionAnalysis = struct
              Let c be the result of computing relopt(c1,c2).
              Push the value i32.const c to the stack. *)
           let v = Relop.eval rel v1 v2 in
-          Configuration
+          reached
             { config with vstack = v :: vstack; astack = astack' }
         | Compare _, _ -> failwith "Invalid value stack for compare"
         | Binary bin, v2 :: v1 :: vstack ->
@@ -581,7 +591,7 @@ module FunctionAnalysis = struct
              Else:
                Trap. *)
           let v = Binop.eval bin v1 v2 in (* TODO: trap *)
-          Configuration
+          reached
             { config with vstack = v :: vstack; astack = astack' }
         | Binary _, _ -> failwith "Invalid value stack for binary"
         | Test test, v :: vstack ->
@@ -590,7 +600,7 @@ module FunctionAnalysis = struct
              Let c be the result of computing testopt(c1).
              Push the value i32.const c to the stack. *)
           let v' = Testop.eval test v in
-          Configuration
+          reached
             { config with vstack = v' :: vstack; astack = astack' }
         | GetGlobal v, vstack ->
           (* [spec] Let F be the current frame.
@@ -602,7 +612,7 @@ module FunctionAnalysis = struct
              Push the value val to the stack. *)
           let addr = Frame.get_global_addr config.frame v in
           let g = Store.get_global config.store addr in
-          Configuration
+          reached
             { config with vstack = g.value :: vstack; astack = astack' }
         | SetGlobal _, _ -> failwith "TODO: get global"
         | Test _, _ -> failwith "Invalid value stack for test"
@@ -621,7 +631,7 @@ module FunctionAnalysis = struct
              Jump to the continuation of L. *)
           (* We encode this as just returning Break with the value on n. This
              will be propagated back until n is 0 *)
-          Break [(n, { config with astack = astack' })]
+          break (n, { config with astack = astack' })
         | BrIf n, v :: vstack ->
           (* [spec] Assert: due to validation, a value of value type i32 is on the top of the stack.
              Pop the value i32.const c from the stack.
@@ -630,12 +640,9 @@ module FunctionAnalysis = struct
              Else:
                Do nothing. *)
           let config' = { config with vstack = vstack; astack = astack' } in
-          if Value.is_definitely_zero v then
-            Configuration config'
-          else if Value.is_definitely_not_zero v then
-            Break [(n, config')]
-          else
-            BreakCond ([(n, config')], config')
+          let r1 = if Value.is_zero v then reached config' else no_result in
+          let r2 = if Value.is_zero v then break (n, config') else no_result in
+          merge_results r1 r2
         | BrIf _, _ -> failwith "Invalid value stack for br_if"
 
   let analyze_function (funcaddr : Address.t) (store : Store.t) (deps : Deps.t) : (Value.t list * int) =
