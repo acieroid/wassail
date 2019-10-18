@@ -1,0 +1,12 @@
+Steps to compile:
+
+1. Get the right version of the wasm spec
+  git clone https://github.com/WebAssembly/spec
+  cd spec/
+  opam pin add wasm .
+
+2. Install dependencies for this project
+  opam install core incremental incr_map pps ppx_jane ppx_compare
+
+3. Compile and run (in this directory)
+  dune exec ./wasmtaint.exe
