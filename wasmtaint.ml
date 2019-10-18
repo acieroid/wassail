@@ -152,11 +152,11 @@ module Instr = struct
       | Binary of Binop.t
       | Compare of Relop.t
       | Test of Testop.t
-      | GetLocal of Var.t
-      | SetLocal of Var.t
-      | TeeLocal of Var.t
-      | GetGlobal of Var.t
-      | SetGlobal of Var.t
+      | LocalGet of Var.t
+      | LocalSet of Var.t
+      | LocalTee of Var.t
+      | GlobalGet of Var.t
+      | GlobalSet of Var.t
       | Call of Var.t
       | Br of Var.t
       | BrIf of Var.t
@@ -176,9 +176,9 @@ module Instr = struct
     | Ast.Const lit -> Const (Value.of_wasm lit.it)
     | Ast.Binary bin -> Binary (Binop.of_wasm bin)
     | Ast.Compare rel -> Compare (Relop.of_wasm rel)
-    | Ast.GetLocal v -> GetLocal (Var.of_wasm v)
-    | Ast.SetLocal v -> SetLocal (Var.of_wasm v)
-    | Ast.TeeLocal v -> TeeLocal (Var.of_wasm v)
+    | Ast.LocalGet v -> LocalGet (Var.of_wasm v)
+    | Ast.LocalSet v -> LocalSet (Var.of_wasm v)
+    | Ast.LocalTee v -> LocalTee (Var.of_wasm v)
     | Ast.BrIf v -> BrIf (Var.of_wasm v)
     | Ast.Br v -> Br (Var.of_wasm v)
     | Ast.Call v -> Call (Var.of_wasm v)
@@ -189,12 +189,12 @@ module Instr = struct
     | Ast.If (_st, _instr, _instr') -> failwith "unsupported instruction: if"
     | Ast.BrTable (_vs, _v) -> failwith "unsupported instruction: brtable"
     | Ast.CallIndirect _v -> failwith "unsupported instruction: call indirect"
-    | Ast.GetGlobal v -> GetGlobal (Var.of_wasm v)
-    | Ast.SetGlobal v -> SetGlobal (Var.of_wasm v)
+    | Ast.GlobalGet v -> GlobalGet (Var.of_wasm v)
+    | Ast.GlobalSet v -> GlobalSet (Var.of_wasm v)
     | Ast.Load _op -> failwith "unsupported instruction: load"
     | Ast.Store _op -> failwith "unsupported instruction: store"
-    | Ast.CurrentMemory -> failwith "unsupported instruction: current memory"
-    | Ast.GrowMemory -> failwith "unsupported instruction: memory grow"
+    | Ast.MemorySize -> failwith "unsupported instruction: current memory"
+    | Ast.MemoryGrow -> failwith "unsupported instruction: memory grow"
     | Ast.Test op -> Test (Testop.of_wasm op)
     | Ast.Convert _op -> failwith "unsupported instruction: convert"
     | Ast.Unary _op -> failwith "unsupported instruction: unary"
@@ -510,7 +510,7 @@ module FunctionAnalysis = struct
             { config with vstack = vrest; astack = astack' }
         | Drop, _ ->
           failwith "Invalid value stack for drop"
-        | GetLocal x, vstack ->
+        | LocalGet x, vstack ->
           (* [spec] Let F be the current frame.
              Assert: due to validation, F.locals[x] exists.
              Let val be the value F.locals[x].
@@ -518,7 +518,7 @@ module FunctionAnalysis = struct
           let v = Frame.get_local config.frame x in
           reached
             { config with vstack = v :: vstack; astack = astack' }
-        | SetLocal x, v :: vstack ->
+        | LocalSet x, v :: vstack ->
           (* [spec] Let F be the current frame.
              Assert: due to validation, F.locals[x] exists.
              Assert: due to validation, a value is on the top of the stack.
@@ -527,15 +527,15 @@ module FunctionAnalysis = struct
           let frame' = Frame.set_local config.frame x v in
           reached
             { config with vstack = vstack; astack = astack'; frame = frame' }
-        | SetLocal _, _ -> failwith "Invalid value stack for setlocal"
-        | TeeLocal x, v :: vstack ->
+        | LocalSet _, _ -> failwith "Invalid value stack for setlocal"
+        | LocalTee x, v :: vstack ->
           (* [spec] Assert: due to validation, a value is on the top of the stack.
              Pop the value val from the stack.
              Push the value val to the stack.
              Push the value val to the stack.
              Execute the instruction (local.set x). *)
-          step { config with vstack = v :: v :: vstack; astack = SetLocal x :: astack' } deps
-        | TeeLocal _, _ ->
+          step { config with vstack = v :: v :: vstack; astack = LocalSet x :: astack' } deps
+        | LocalTee _, _ ->
           failwith "Invalid value stack for teelocal"
         | Block instrs, _ ->
           (* [spec] Let n be the arity |t?| of the result type t?.
@@ -602,7 +602,7 @@ module FunctionAnalysis = struct
           let v' = Testop.eval test v in
           reached
             { config with vstack = v' :: vstack; astack = astack' }
-        | GetGlobal v, vstack ->
+        | GlobalGet v, vstack ->
           (* [spec] Let F be the current frame.
              Assert: due to validation, F.module.globaladdrs[x] exists.
              Let a be the global address F.module.globaladdrs[x].
@@ -614,7 +614,7 @@ module FunctionAnalysis = struct
           let g = Store.get_global config.store addr in
           reached
             { config with vstack = g.value :: vstack; astack = astack' }
-        | SetGlobal _, _ -> failwith "TODO: get global"
+        | GlobalSet _, _ -> failwith "TODO: get global"
         | Test _, _ -> failwith "Invalid value stack for test"
         | Br n, _ ->
           (* [spec] Assert: due to validation, the stack contains at least l+1 labels.
@@ -677,7 +677,7 @@ let input_from get_script run =
   | Encode.Code (at, msg) -> error at "encoding error" msg
 
 let parse_file name run =
-  let ic = In_channel.create "foo.wat" in
+  let ic = In_channel.create name in
   try
     let lexbuf = Lexing.from_channel ic in
     let success = input_from (fun _ ->
@@ -737,15 +737,15 @@ let () =
                        | Return -> Printf.printf "return\n"
                        | Call var -> Printf.printf "call %s\n" (Int32.to_string var.it)
                        | CallIndirect _ -> Printf.printf "callindirect\n"
-                       | GetLocal _ -> Printf.printf "localget\n"
-                       | SetLocal _ -> Printf.printf "localset\n"
-                       | TeeLocal _ -> Printf.printf "localtee\n"
-                       | GetGlobal _ -> Printf.printf "globalget\n"
-                       | SetGlobal _ -> Printf.printf "globalset\n"
+                       | LocalGet _ -> Printf.printf "localget\n"
+                       | LocalSet _ -> Printf.printf "localset\n"
+                       | LocalTee _ -> Printf.printf "localtee\n"
+                       | GlobalGet _ -> Printf.printf "globalget\n"
+                       | GlobalSet _ -> Printf.printf "globalset\n"
                        | Load _ -> Printf.printf "load\n"
                        | Store _ -> Printf.printf "store\n"
-                       | CurrentMemory -> Printf.printf "memorysize\n"
-                       | GrowMemory -> Printf.printf "memorygrow\n"
+                       | MemorySize -> Printf.printf "memorysize\n"
+                       | MemoryGrow -> Printf.printf "memorygrow\n"
                        | Const _ -> Printf.printf "const\n"
                        | Test _ -> Printf.printf "test\n"
                        | Compare _ -> Printf.printf "compare\n"
@@ -765,4 +765,4 @@ let () =
           | Script.Quoted (x, y) -> Printf.printf "Quoted: %s\n------\n%s" x y
         end
       ) in
-  Printf.printf "Success? %b" (parse_file "foo.wat" run)
+  Printf.printf "Success? %b" (parse_file "bar.wat" run)
