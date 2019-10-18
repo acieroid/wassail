@@ -45,9 +45,6 @@ B /home/quentin/.opam/4.07.1/lib/time_now
 B /home/quentin/.opam/4.07.1/lib/typerep
 B /home/quentin/.opam/4.07.1/lib/variantslib
 B /home/quentin/.opam/4.07.1/lib/wasm
-B _build/default/.aam.eobjs/byte
-B _build/default/.cps.eobjs/byte
-B _build/default/.main.eobjs/byte
 B _build/default/.wasmtaint.eobjs/byte
 S /home/quentin/.opam/4.07.1/lib/base
 S /home/quentin/.opam/4.07.1/lib/base/caml
@@ -96,5 +93,5 @@ S /home/quentin/.opam/4.07.1/lib/typerep
 S /home/quentin/.opam/4.07.1/lib/variantslib
 S /home/quentin/.opam/4.07.1/lib/wasm
 S .
-FLG -ppx '/home/quentin/p/inctaint/_build/default/.ppx/5b9f37d9530f4ee3b2e302345f91d91b/ppx.exe --as-ppx'
-FLG -w @1..3@5..28@30..39@43@46..47@49..57@61..62-40 -strict-sequence -strict-formats -short-paths -keep-locs -w @1..3@5..28@30..39@43@46..47@49..57@61..62-40 -strict-sequence -strict-formats -short-paths -keep-locs -w @1..3@5..28@30..39@43@46..47@49..57@61..62-40 -strict-sequence -strict-formats -short-paths -keep-locs -w @1..3@5..28@30..39@43@46..47@49..57@61..62-40 -strict-sequence -strict-formats -short-paths -keep-locs
+FLG -ppx '/home/quentin/p/wasmtaint/_build/default/.ppx/5b9f37d9530f4ee3b2e302345f91d91b/ppx.exe --as-ppx'
+FLG -w @1..3@5..28@30..39@43@46..47@49..57@61..62-40 -strict-sequence -strict-formats -short-paths -keep-locs

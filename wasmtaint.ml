@@ -1,6 +1,21 @@
 open Core
 open Wasm
 
+(* TODO: ([ ] = to start, [-] = started, [x] = finished)
+  - [ ] Support memory instructions (load, store)
+  - [ ] Display loaded program nicely
+  - [ ] Tests
+  - [ ] Use apron for abstraction of values
+  - [ ] Display results of the analysis
+
+For later:
+  - Track taint!
+
+For much later:
+  - other types (i64, f32, f64)
+  - other instructions
+*)
+
 (** These are types of values during the execution of wasm *)
 module Type = struct
   module T = struct
