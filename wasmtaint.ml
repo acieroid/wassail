@@ -1,10 +1,14 @@
 open Core
 open Wasm
 
+(** These are types of values during the execution of wasm *)
 module Type = struct
   module T = struct
     type t =
-      | I32Type (* XXX: other types *)
+      | I32Type
+      | I64Type
+      | F32Type
+      | F64Type
     [@@deriving sexp, compare]
   end
   include T
@@ -12,11 +16,12 @@ module Type = struct
   let of_wasm (vt : Types.value_type) : t =
     match vt with
     | Types.I32Type -> I32Type
-    | Types.I64Type -> failwith "unsupported type: I64Type"
-    | Types.F32Type -> failwith "unsupported type: F32Type"
-    | Types.F64Type -> failwith "unsupported type: F64Type"
+    | Types.I64Type -> I64Type
+    | Types.F32Type -> F32Type
+    | Types.F64Type -> F64Type
 end
 
+(** These are the values (and their abstractions) *)
 module Value = struct
   module T = struct
     type t =
@@ -38,30 +43,31 @@ module Value = struct
   let to_string (v : t) : string =
     Sexp.to_string [%sexp (v : t)]
 
+  (** Joins two values together *)
   let join (v1 : t) (v2 : t) : t =
     match (v1, v2) with
     | (Const n1, Const n2) when n1 = n2 -> Const n1
     | (Const _, Const _) -> Int
     | _ -> Int
+
   let is_zero (v : t) =
     match v with
     | Const 0l -> true
     | Const _ -> false
     | Int -> true
-  let is_definitely_zero (v : t) =
-    match v with
-    | Const 0l -> true
-    | _ -> false
   let is_not_zero (v : t) =
     match v with
     | Const 0l -> false
     | _ -> true
-  let is_definitely_not_zero (v : t) =
-    match v with
-    | Const n -> n <> 0l
-    | _ -> false
+
+  let zero (t : Type.t) : t =
+    match t with
+    | I32Type -> Const 0l
+    | _ -> failwith "unsupported type"
 end
 
+
+(** These are the addresses. This needs to be further improved *)
 module Address = struct
   module T = struct
     type t = int (* XXX: abstract it, but how? Also, depend on which address (function address are fine with int) *)
@@ -70,6 +76,7 @@ module Address = struct
   include T
 end
 
+(** A variable in wasm is just an index *)
 module Var = struct
   module T = struct
     type t = int
@@ -79,12 +86,14 @@ module Var = struct
   let of_wasm (v : Ast.var) : t = Int32.to_int_exn v.it
 end
 
+(** Binary operations *)
 module Binop = struct
   module T = struct
     type t =
       | I32Add
       | I32Sub
       | I32Mul
+      (* XXX: there are many other operations *)
     [@@deriving sexp, compare]
   end
   include T
@@ -96,6 +105,7 @@ module Binop = struct
     | I32 _ -> failwith "unsupported operation"
     | _ -> failwith "unsupported type"
 
+  (** Evaluates a binary operation on two values *)
   let eval (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
     match (b, v1, v2) with
     | (I32Add, Const n1, Const n2) -> Const (Int32.(+) n1 n2)
@@ -106,16 +116,18 @@ module Binop = struct
     | (I32Mul, _, _) -> Int
 end
 
+(** Relational operation *)
 module Relop = struct
   module T = struct
     type t =
-      | I32LeS
+      | I32LeS (* XXX: others *)
     [@@deriving sexp, compare]
   end
   include T
   let of_wasm (r : Ast.relop) : t =
     match r with
     | I32 LeS -> I32LeS
+    | I32 _ -> failwith "unsupported relational operation"
     | _ -> failwith "unsupported type"
   let eval (r : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
     match (r, v1, v2) with
@@ -123,6 +135,7 @@ module Relop = struct
     | (I32LeS, _, _) -> Int
 end
 
+(** Test operations *)
 module Testop = struct
   module T = struct
     type t =
@@ -141,6 +154,7 @@ module Testop = struct
     | (I32Eqz, Int) -> Value.join (Const 0l) (Const 1l)
 end
 
+(** Instructions *)
 module Instr = struct
   module T = struct
     type t =
@@ -454,7 +468,7 @@ module FunctionAnalysis = struct
     let f = Store.get_funcinst store funcaddr in
     let (in_arity, _) = f.arity in
     let valn = List.take vstack in_arity in
-    let zeros = List.map f.code.locals ~f:(function I32Type -> Value.Const 0l) in
+    let zeros = List.map f.code.locals ~f:Value.zero in
     let frame = Frame.{
       arity = in_arity + (List.length f.code.locals);
       module_ = f.module_;
@@ -765,4 +779,4 @@ let () =
           | Script.Quoted (x, y) -> Printf.printf "Quoted: %s\n------\n%s" x y
         end
       ) in
-  Printf.printf "Success? %b" (parse_file "bar.wat" run)
+  Printf.printf "Success? %b" (parse_file "examples/overflow/overflow.wat" run)
