@@ -249,81 +249,107 @@ module Instr = struct
     | Ast.Unary _op -> failwith "unsupported instruction: unary"
 end
 
-module Store = struct
+module Func = struct
   module T = struct
-    type func = {
+    type t = {
       locals : Type.t list;
       body : Instr.t list;
     }
     [@@deriving sexp, compare]
-    type moduleinst = {
+  end
+  include T
+  let of_wasm  (f : Ast.func) : t = {
+    body = List.map f.it.body ~f:Instr.of_wasm;
+    locals = List.map f.it.locals ~f:Type.of_wasm;
+  }
+end
+
+module ModuleInst = struct
+  module T = struct
+    type t = {
       funcaddrs: Address.t list;
       globaladdrs: Address.t list;
       (* XXX: other fields *)
     }
     [@@deriving sexp, compare]
-    type funcinst = {
-      arity : (int * int);
-      typ : (Type.t list * Type.t list);
-      module_: moduleinst;
-      code: func;
-    }
-    [@@deriving sexp, compare]
-    type globalinst = {
+  end
+  include T
+end
+
+module GlobalInst = struct
+  module T = struct
+    type t = {
       value : Value.t;
       mut : bool;
     }
     [@@deriving sexp, compare]
+  end
+  include T
+
+  let of_wasm (g : Ast.global) : t =
+    { value = Value.of_wasm (match g.it.value.it with
+          | [] -> failwith "Undefined global"
+          | [v] -> begin match v.it with
+              | Ast.Const l -> l.it
+              | _ -> failwith "Unsupported non-const global instaciation"
+            end
+          | _ -> failwith "Unsupported global instanciation with multiple instructions");
+      mut = match g.it.gtype with
+        | Types.GlobalType (_, Types.Immutable) -> false
+        | Types.GlobalType (_, Types.Mutable) -> true
+    }
+  let join (g1 : t) (g2 : t) : t =
+    assert (g1.mut = g2.mut);
+    { value = Value.join g1.value g2.value; mut = g1.mut }
+end
+
+module FuncInst = struct
+  module T = struct
     type t = {
-      funcs : funcinst list;
-      globals : globalinst list;
+      arity : (int * int);
+      typ : (Type.t list * Type.t list);
+      module_: ModuleInst.t;
+      code: Func.t;
+    }
+    [@@deriving sexp, compare]
+  end
+  include T
+  let of_wasm (m : Ast.module_) (minst : ModuleInst.t) (f : Ast.func) : t =
+    match Ast.func_type_for m f.it.ftype with
+    | FuncType (input, output) -> {
+        arity = (List.length input, List.length output);
+        typ = (List.map input ~f:Type.of_wasm, List.map output ~f:Type.of_wasm);
+        module_ = minst;
+        code = Func.of_wasm f
+      }
+end
+
+module Store = struct
+  module T = struct
+    type t = {
+      funcs : FuncInst.t list;
+      globals : GlobalInst.t list;
       (* XXX: other fields *)
     }
     [@@deriving sexp, compare]
   end
   include T
-  let get_funcinst (s : t) (a : Address.t) : funcinst =
+  let get_funcinst (s : t) (a : Address.t) : FuncInst.t =
     List.nth_exn s.funcs a
-  let get_global (s : t) (a : Address.t) : globalinst =
+  let get_global (s : t) (a : Address.t) : GlobalInst.t =
     List.nth_exn s.globals a
   let join (s1 : t) (s2 : t) : t =
     assert (s1.funcs = s2.funcs);
     { s1 with
-      globals = List.map2_exn s1.globals s2.globals ~f:(fun g1 g2 -> assert (g1.mut = g2.mut); { value = Value.join g1.value g2.value; mut = g1.mut })
+      globals = List.map2_exn s1.globals s2.globals ~f:GlobalInst.join
     }
   let init (m : Ast.module_) : (t * Address.t list) =
-    let mk_func (f : Ast.func) : func = {
-      body = List.map f.it.body ~f:Instr.of_wasm;
-      locals = List.map f.it.locals ~f:Type.of_wasm;
-      }
-    in
-    let mk_funcinst (minst : moduleinst) (f : Ast.func) : funcinst =
-      match Ast.func_type_for m f.it.ftype with
-      | FuncType (input, output) -> {
-          arity = (List.length input, List.length output);
-          typ = (List.map input ~f:Type.of_wasm, List.map output ~f:Type.of_wasm);
-          module_ = minst;
-          code = mk_func f
-        } in
-    let mk_globalinst (g : Ast.global) : globalinst =
-      { value = Value.of_wasm (match g.it.value.it with
-            | [] -> failwith "Undefined global"
-            | [v] -> begin match v.it with
-                | Ast.Const l -> l.it
-                | _ -> failwith "Unsupported non-const global instaciation"
-              end
-            | _ -> failwith "Unsupported global instanciation with multiple instructions");
-        mut = match g.it.gtype with
-          | Types.GlobalType (_, Types.Immutable) -> false
-          | Types.GlobalType (_, Types.Mutable) -> true
-      }
-    in
     let funcaddrs = List.mapi m.it.funcs ~f:(fun i _ -> i) in
     let globaladdrs = List.mapi m.it.globals ~f:(fun i _ -> i) in
-    let minst = { funcaddrs; globaladdrs } in
+    let minst = ModuleInst.{ funcaddrs; globaladdrs } in
     ({
-      funcs = List.map m.it.funcs ~f:(mk_funcinst minst);
-      globals = List.map m.it.globals ~f:mk_globalinst;
+      funcs = List.map m.it.funcs ~f:(FuncInst.of_wasm m minst);
+      globals = List.map m.it.globals ~f:GlobalInst.of_wasm;
     }, funcaddrs)
 end
 
@@ -332,7 +358,7 @@ module Frame = struct
     type t = {
       arity: int;
       locals: Value.t list;
-      module_: Store.moduleinst;
+      module_: ModuleInst.t;
     }
     [@@deriving sexp, compare]
   end
@@ -738,70 +764,9 @@ let parse_file name run =
 
 let () =
   let run (l : (Script.var option * Script.definition) list) =
-    (* Printf.printf "I got %d elements\n" (List.length l); *)
     List.iter l ~f:(fun (_var_opt, def) ->
-        (* begin match var_opt with
-        | Some {it = x; at = at} -> Printf.printf "var: %s (at %s)\n" x (Source.string_of_region at)
-        | None -> Printf.printf "no var\n"
-           end; *)
-        begin match def.it with
+        match def.it with
           | Script.Textual m ->
-            (* begin match m.it.start with
-              | Some var -> Printf.printf "start: %s\n" (Int32.to_string var.it)
-              | None -> Printf.printf "no start\n"
-               end; *)
-            (* List.iter m.it.tables ~f:(fun table -> table.it.ttype) *)
-            (* List.iter m.it.exports ~f:(fun e ->
-                Printf.printf "export: ";
-                List.iter e.it.name ~f:(fun x -> Printf.printf "%c" (Char.of_int_exn x));
-                Printf.printf "\n";
-                match e.it.edesc.it with
-                | FuncExport v -> Printf.printf "func %s\n" (Int32.to_string v.it)
-                | TableExport v -> Printf.printf "table %s\n" (Int32.to_string v.it)
-                | MemoryExport v -> Printf.printf "memory %s\n" (Int32.to_string v.it)
-                | GlobalExport v -> Printf.printf "global %s\n" (Int32.to_string v.it)); *)
-            List.iter m.it.funcs ~f:(fun f ->
-                Printf.printf "FUNCTION\n-------------------";
-                Printf.printf "ftype: %s\n" (Int32.to_string f.it.ftype.it);
-                Printf.printf "locals:\n";
-                List.iter f.it.locals ~f:(fun t ->
-                    Printf.printf "%s\n" (Types.string_of_value_type t));
-                Printf.printf "instrs:\n";
-                let rec print_instr (instr : Ast.instr) =
-                      (match instr.it with
-                       | Unreachable -> Printf.printf "unreachable\n"
-                       | Nop -> Printf.printf "nop\n"
-                       | Drop -> Printf.printf "drop\n"
-                       | Select -> Printf.printf "select\n"
-                       | Block (_st, instrs) -> Printf.printf "--[block\n";
-                         List.iter instrs ~f:print_instr;
-                         Printf.printf "--]"
-                       | Loop (_st, instrs) -> Printf.printf "--[loop\n";
-                         List.iter instrs ~f:print_instr;
-                         Printf.printf "--]"
-                       | If _ -> Printf.printf "if\n"
-                       | Br v -> Printf.printf "br %s\n" (Int32.to_string v.it)
-                       | BrIf v -> Printf.printf "brif %s\n" (Int32.to_string v.it)
-                       | BrTable _ -> Printf.printf "brtable\n"
-                       | Return -> Printf.printf "return\n"
-                       | Call var -> Printf.printf "call %s\n" (Int32.to_string var.it)
-                       | CallIndirect _ -> Printf.printf "callindirect\n"
-                       | LocalGet _ -> Printf.printf "localget\n"
-                       | LocalSet _ -> Printf.printf "localset\n"
-                       | LocalTee _ -> Printf.printf "localtee\n"
-                       | GlobalGet _ -> Printf.printf "globalget\n"
-                       | GlobalSet _ -> Printf.printf "globalset\n"
-                       | Load _ -> Printf.printf "load\n"
-                       | Store _ -> Printf.printf "store\n"
-                       | MemorySize -> Printf.printf "memorysize\n"
-                       | MemoryGrow -> Printf.printf "memorygrow\n"
-                       | Const _ -> Printf.printf "const\n"
-                       | Test _ -> Printf.printf "test\n"
-                       | Compare _ -> Printf.printf "compare\n"
-                       | Unary _ -> Printf.printf "unary\n"
-                       | Binary _ -> Printf.printf "binary\n"
-                       | Convert _ -> Printf.printf "convert\n") in
-                List.iter f.it.body ~f:print_instr);
             let (store, fs) = Store.init m in
             let deps = Deps.empty in
             List.iter fs ~f:(fun faddr ->
@@ -810,8 +775,7 @@ let () =
                 List.iter res ~f:(fun v -> Printf.printf "%s " (Value.to_string v));
                 Printf.printf "\n");
             ()
-          | Script.Encoded (x, y) -> Printf.printf "Encoded: %s\n------\n%s" x y
-          | Script.Quoted (x, y) -> Printf.printf "Quoted: %s\n------\n%s" x y
-        end
+          | Script.Encoded _ -> failwith "unsupported"
+          | Script.Quoted _ -> failwith "unsupported"
       ) in
   Printf.printf "Success? %b" (parse_file "examples/overflow/overflow.wat" run)
