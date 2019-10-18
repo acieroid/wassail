@@ -34,6 +34,14 @@ module Type = struct
     | Types.I64Type -> I64Type
     | Types.F32Type -> F32Type
     | Types.F64Type -> F64Type
+  let to_string (t : t) : string =
+    match t with
+    | I32Type -> "i32"
+    | I64Type -> "i64"
+    | F32Type -> "f32"
+    | F64Type -> "f64"
+  let list_to_string (l : t list) : string =
+    String.concat ~sep:", " (List.map l ~f:to_string)
 end
 
 (** These are the values (and their abstractions) *)
@@ -56,7 +64,9 @@ module Value = struct
     | F64 _ -> failwith "unsupported type: F64"
 
   let to_string (v : t) : string =
-    Sexp.to_string [%sexp (v : t)]
+    match v with
+    | Const n -> Int32.to_string n
+    | Int -> "int"
 
   (** Joins two values together *)
   let join (v1 : t) (v2 : t) : t =
@@ -79,6 +89,9 @@ module Value = struct
     match t with
     | I32Type -> Const 0l
     | _ -> failwith "unsupported type"
+
+  let list_to_string (l : t list) : string =
+    String.concat ~sep:", " (List.map l ~f:to_string)
 end
 
 
@@ -120,6 +133,12 @@ module Binop = struct
     | I32 _ -> failwith "unsupported operation"
     | _ -> failwith "unsupported type"
 
+  let to_string (b : t) : string =
+    match b with
+    | I32Add -> "i32.add"
+    | I32Sub -> "i32.sub"
+    | I32Mul -> "i32.sub"
+
   (** Evaluates a binary operation on two values *)
   let eval (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
     match (b, v1, v2) with
@@ -154,6 +173,14 @@ module Relop = struct
     | I32 GeS -> I32GeS
     | I32 _ -> failwith "unsupported relational operation"
     | _ -> failwith "unsupported type"
+  let to_string (r : t) : string =
+    match r with
+    | I32Eq -> "i32.eq"
+    | I32Ne -> "i32.ne"
+    | I32LtS -> "i32.lt_s"
+    | I32GtS -> "i32.gt_s"
+    | I32LeS -> "i32.le_s"
+    | I32GeS -> "i32.ge_s"
   let eval (r : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
     match (r, v1, v2) with
     | (I32Eq, Const n1, Const n2) -> Const (if n1 = n2 then 1l else 0l)
@@ -182,6 +209,9 @@ module Testop = struct
     match t with
     | I32 Eqz -> I32Eqz
     | _ -> failwith "unsupported type"
+  let to_string (t : t) : string =
+    match t with
+    | I32Eqz -> "i32.eqz"
   let eval (t : t) (v1 : Value.t) : Value.t =
     match (t, v1) with
     | (I32Eqz, Const 0l) -> Const 1l
@@ -210,11 +240,37 @@ module Instr = struct
       | Br of Var.t
       | BrIf of Var.t
       | Return
+      (* TODO *)
+      | Load
+      | Store
     [@@deriving sexp, compare]
   end
   include T
-  let to_string (i : t) : string =
-    Sexp.to_string [%sexp (i : t)]
+  let rec to_string ?indent:(i : int = 0) (instr : t) : string =
+    Printf.sprintf "%s%s" (String.make i ' ')
+      (match instr with
+       | Nop -> "nop"
+       | Drop -> "drop"
+       | Return -> "return"
+       | Block instrs -> Printf.sprintf "block\n%s" (list_to_string instrs ~indent:(i+2) ~sep:"\n")
+       | Loop instrs -> Printf.sprintf "loop\n%s" (list_to_string instrs ~indent:(i+2) ~sep:"\n")
+       | Const v -> Printf.sprintf "const %s" (Value.to_string v)
+       | Binary b -> Printf.sprintf "binary %s" (Binop.to_string b)
+       | Compare r -> Printf.sprintf "compare %s" (Relop.to_string r)
+       | Test t -> Printf.sprintf "test %s" (Testop.to_string t)
+       | LocalGet v -> Printf.sprintf "local.get %d" v
+       | LocalSet v -> Printf.sprintf "local.set %d" v
+       | LocalTee v -> Printf.sprintf "tee.local %d" v
+       | Br b -> Printf.sprintf "br %d" b
+       | BrIf b -> Printf.sprintf "brif %d" b
+       | GlobalGet v -> Printf.sprintf "global.get %d" v
+       | GlobalSet v -> Printf.sprintf "global.set %d" v
+       | Call v -> Printf.sprintf "call %d" v
+       | Load -> "load"
+       | Store -> "store"
+      )
+  and list_to_string ?indent:(i : int = 0) ?sep:(sep : string = ", ") (l : t list) : string =
+    String.concat ~sep:sep (List.map l ~f:(to_string ?indent:(Some i)))
 
   let rec of_wasm (i : Ast.instr) : t =
     match i.it with
@@ -240,8 +296,8 @@ module Instr = struct
     | Ast.CallIndirect _v -> failwith "unsupported instruction: call indirect"
     | Ast.GlobalGet v -> GlobalGet (Var.of_wasm v)
     | Ast.GlobalSet v -> GlobalSet (Var.of_wasm v)
-    | Ast.Load _op -> failwith "unsupported instruction: load"
-    | Ast.Store _op -> failwith "unsupported instruction: store"
+    | Ast.Load _op -> Load
+    | Ast.Store _op -> Store
     | Ast.MemorySize -> failwith "unsupported instruction: current memory"
     | Ast.MemoryGrow -> failwith "unsupported instruction: memory grow"
     | Ast.Test op -> Test (Testop.of_wasm op)
@@ -258,10 +314,12 @@ module Func = struct
     [@@deriving sexp, compare]
   end
   include T
-  let of_wasm  (f : Ast.func) : t = {
+  let of_wasm (f : Ast.func) : t = {
     body = List.map f.it.body ~f:Instr.of_wasm;
     locals = List.map f.it.locals ~f:Type.of_wasm;
   }
+  let to_string (f : t) : string =
+    Printf.sprintf "locals: %s\ncode:\n%s" (Type.list_to_string f.locals) (Instr.list_to_string f.body ~sep:"\n")
 end
 
 module ModuleInst = struct
@@ -306,6 +364,7 @@ end
 module FuncInst = struct
   module T = struct
     type t = {
+      name : string option;
       arity : (int * int);
       typ : (Type.t list * Type.t list);
       module_: ModuleInst.t;
@@ -314,14 +373,29 @@ module FuncInst = struct
     [@@deriving sexp, compare]
   end
   include T
-  let of_wasm (m : Ast.module_) (minst : ModuleInst.t) (f : Ast.func) : t =
+  let of_wasm (m : Ast.module_) (minst : ModuleInst.t) (index : int) (f : Ast.func) : t =
+    let name = (List.find_map m.it.exports ~f:(fun x ->
+             match x.it.edesc.it with
+             | FuncExport v when (Int32.to_int_exn v.it) = index -> Some (Ast.string_of_name x.it.name)
+             | _ -> None
+           ))
+    in
     match Ast.func_type_for m f.it.ftype with
     | FuncType (input, output) -> {
+        name = name;
         arity = (List.length input, List.length output);
         typ = (List.map input ~f:Type.of_wasm, List.map output ~f:Type.of_wasm);
         module_ = minst;
         code = Func.of_wasm f
       }
+  let to_string (f : t) : string =
+    Printf.sprintf "Function %s (%s -> %s):\nCode: %s"
+      (match f.name with
+       | Some n -> n
+       | None -> "<noname>")
+      (String.concat ~sep:", " (List.map (fst f.typ) ~f:Type.to_string))
+      (String.concat ~sep:", " (List.map (snd f.typ) ~f:Type.to_string))
+      (Func.to_string f.code)
 end
 
 module Store = struct
@@ -348,7 +422,7 @@ module Store = struct
     let globaladdrs = List.mapi m.it.globals ~f:(fun i _ -> i) in
     let minst = ModuleInst.{ funcaddrs; globaladdrs } in
     ({
-      funcs = List.map m.it.funcs ~f:(FuncInst.of_wasm m minst);
+      funcs = List.mapi m.it.funcs ~f:(FuncInst.of_wasm m minst);
       globals = List.map m.it.globals ~f:GlobalInst.of_wasm;
     }, funcaddrs)
 end
@@ -719,9 +793,11 @@ module FunctionAnalysis = struct
           let r2 = if Value.is_zero v then break (n, config') else no_result in
           merge_results r1 r2
         | BrIf _, _ -> failwith "Invalid value stack for br_if"
+        | _, _ -> failwith "Not implemented yet"
 
   let analyze_function (funcaddr : Address.t) (store : Store.t) (deps : Deps.t) : (Value.t list * int) =
     let f = Store.get_funcinst store funcaddr in
+    Printf.printf "Analyzing function:\n%s\n" (FuncInst.to_string f);
     let (in_arity, _) = f.arity in
     let vstack = List.init in_arity ~f:(fun _ -> Value.Int) in
     invoke funcaddr vstack store deps
