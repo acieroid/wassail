@@ -322,16 +322,46 @@ module Func = struct
     Printf.sprintf "locals: %s\ncode:\n%s" (Type.list_to_string f.locals) (Instr.list_to_string f.body ~sep:"\n")
 end
 
+module MemoryInst = struct
+  module T = struct
+    type t = {
+      data: char list; (* TODO: this should definitely be abstracted *)
+      max_size: int option;
+    }
+    [@@deriving sexp, compare]
+  end
+  include T
+  let page_size = 65536
+  let of_wasm (m : Ast.memory) : t =
+    match m.it.mtype with
+    | MemoryType t ->
+      Printf.printf "Allocating memory, size is %s * 65536\n" (Int32.to_string t.min);
+      {
+        data = List.init (page_size * (Int32.to_int_exn t.min)) ~f:(fun _ -> Char.of_int_exn 0);
+        max_size = Option.map t.max ~f:Int32.to_int_exn
+      }
+end
+
 module ModuleInst = struct
   module T = struct
     type t = {
       funcaddrs: Address.t list;
       globaladdrs: Address.t list;
-      (* XXX: other fields *)
+      memaddrs: Address.t list;
+      (* Other fields are not represented because we don't need them. These are:
+        - types: function types (this has already been validated so we can ignore it)
+        - tableddrs: we don't support tables (yet)
+        - exports: we don't take exports into account (yet) *)
     }
     [@@deriving sexp, compare]
   end
   include T
+
+  let init (m : Ast.module_) : t =
+    let funcaddrs = List.mapi m.it.funcs ~f:(fun i _ -> i) in
+    let globaladdrs = List.mapi m.it.globals ~f:(fun i _ -> i) in
+    let memaddrs = List.mapi m.it.memories ~f:(fun i _ -> i) in
+    { funcaddrs; globaladdrs; memaddrs }
 end
 
 module GlobalInst = struct
@@ -403,6 +433,7 @@ module Store = struct
     type t = {
       funcs : FuncInst.t list;
       globals : GlobalInst.t list;
+      mems : MemoryInst.t list;
       (* XXX: other fields *)
     }
     [@@deriving sexp, compare]
@@ -417,14 +448,13 @@ module Store = struct
     { s1 with
       globals = List.map2_exn s1.globals s2.globals ~f:GlobalInst.join
     }
-  let init (m : Ast.module_) : (t * Address.t list) =
-    let funcaddrs = List.mapi m.it.funcs ~f:(fun i _ -> i) in
-    let globaladdrs = List.mapi m.it.globals ~f:(fun i _ -> i) in
-    let minst = ModuleInst.{ funcaddrs; globaladdrs } in
+  let init (m : Ast.module_) : t =
+    let minst = ModuleInst.init m in
     ({
       funcs = List.mapi m.it.funcs ~f:(FuncInst.of_wasm m minst);
       globals = List.map m.it.globals ~f:GlobalInst.of_wasm;
-    }, funcaddrs)
+      mems = List.map m.it.memories ~f:MemoryInst.of_wasm;
+    })
 end
 
 module Frame = struct
@@ -842,16 +872,16 @@ let () =
   let run (l : (Script.var option * Script.definition) list) =
     List.iter l ~f:(fun (_var_opt, def) ->
         match def.it with
-          | Script.Textual m ->
-            let (store, fs) = Store.init m in
-            let deps = Deps.empty in
-            List.iter fs ~f:(fun faddr ->
-                let (res, _arity) = FunctionAnalysis.analyze_function faddr store deps in
-                Printf.printf "result: ";
-                List.iter res ~f:(fun v -> Printf.printf "%s " (Value.to_string v));
-                Printf.printf "\n");
-            ()
-          | Script.Encoded _ -> failwith "unsupported"
-          | Script.Quoted _ -> failwith "unsupported"
+        | Script.Textual m ->
+          let store = Store.init m in
+          let deps = Deps.empty in
+          List.iteri store.funcs ~f:(fun faddr _ ->
+              let (res, _arity) = FunctionAnalysis.analyze_function faddr store deps in
+              Printf.printf "result: ";
+              List.iter res ~f:(fun v -> Printf.printf "%s " (Value.to_string v));
+              Printf.printf "\n");
+          ()
+        | Script.Encoded _ -> failwith "unsupported"
+        | Script.Quoted _ -> failwith "unsupported"
       ) in
   Printf.printf "Success? %b" (parse_file "examples/overflow/overflow.wat" run)
