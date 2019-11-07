@@ -90,6 +90,11 @@ module Value = struct
     | I32Type -> Const 0l
     | _ -> failwith "unsupported type"
 
+  let top (t : Type.t) : t =
+    match t with
+    | I32Type -> Const 0l
+    | _ -> failwith "unsupported type"
+
   let list_to_string (l : t list) : string =
     String.concat ~sep:", " (List.map l ~f:to_string)
 end
@@ -219,6 +224,61 @@ module Testop = struct
     | (I32Eqz, Int) -> Value.join (Const 0l) (Const 1l)
 end
 
+(** Description of memory operations (load and store) *)
+module Memoryop = struct
+  module T = struct
+    type extension = SX | ZX
+    [@@deriving sexp, compare]
+    type pack_size = Pack8 | Pack16 | Pack32
+    [@@deriving sexp, compare]
+    type t = {
+      typ: Type.t;
+      align: int;
+      offset: int;
+      (* The extension part is only use for load operation and should be ignored for store operations *)
+      sz: (pack_size * extension) option;
+    }
+    [@@deriving sexp, compare]
+  end
+  include T
+  let to_string (op : t) : string =
+    Printf.sprintf "align=%d, offset=%d, sz=%s"
+      op.align op.offset
+      (match op.sz with
+       | Some (pack, ext) ->
+         Printf.sprintf "%s,%s"
+           (match pack with
+            | Pack8 -> "8"
+            | Pack16 -> "16"
+            | Pack32 -> "32")
+           (match ext with
+            | SX -> "sx"
+            | ZX -> "zx")
+       | None -> "none")
+  let of_wasm_load (op : Ast.loadop) : t = {
+    typ = Type.of_wasm op.ty;
+    align = op.align;
+    offset = Int32.to_int_exn op.offset;
+    sz = Option.map op.sz ~f:(fun (pack, ext) ->
+            (match pack with
+            | Memory.Pack8 -> Pack8
+            | Memory.Pack16 -> Pack16
+            | Memory.Pack32 -> Pack32),
+            match ext with
+            | Memory.SX -> SX
+            | Memory.ZX -> ZX);
+  }
+  let of_wasm_store (op : Ast.storeop) : t = {
+    typ = Type.of_wasm op.ty;
+    align = op.align;
+    offset = Int32.to_int_exn op.offset;
+    sz = Option.map op.sz ~f:(function
+            | Memory.Pack8 -> (Pack8, SX)
+            | Memory.Pack16 -> (Pack16, SX)
+            | Memory.Pack32 -> (Pack32, SX));
+  }
+end
+
 (** Instructions *)
 module Instr = struct
   module T = struct
@@ -240,9 +300,8 @@ module Instr = struct
       | Br of Var.t
       | BrIf of Var.t
       | Return
-      (* TODO *)
-      | Load
-      | Store
+      | Load of Memoryop.t
+      | Store of Memoryop.t
     [@@deriving sexp, compare]
   end
   include T
@@ -266,8 +325,8 @@ module Instr = struct
        | GlobalGet v -> Printf.sprintf "global.get %d" v
        | GlobalSet v -> Printf.sprintf "global.set %d" v
        | Call v -> Printf.sprintf "call %d" v
-       | Load -> "load"
-       | Store -> "store"
+       | Load op -> Printf.sprintf "load %s" (Memoryop.to_string op)
+       | Store op -> Printf.sprintf "store %s" (Memoryop.to_string op)
       )
   and list_to_string ?indent:(i : int = 0) ?sep:(sep : string = ", ") (l : t list) : string =
     String.concat ~sep:sep (List.map l ~f:(to_string ?indent:(Some i)))
@@ -296,8 +355,8 @@ module Instr = struct
     | Ast.CallIndirect _v -> failwith "unsupported instruction: call indirect"
     | Ast.GlobalGet v -> GlobalGet (Var.of_wasm v)
     | Ast.GlobalSet v -> GlobalSet (Var.of_wasm v)
-    | Ast.Load _op -> Load
-    | Ast.Store _op -> Store
+    | Ast.Load op -> Load (Memoryop.of_wasm_load op)
+    | Ast.Store op -> Store (Memoryop.of_wasm_store op)
     | Ast.MemorySize -> failwith "unsupported instruction: current memory"
     | Ast.MemoryGrow -> failwith "unsupported instruction: memory grow"
     | Ast.Test op -> Test (Testop.of_wasm op)
@@ -322,10 +381,24 @@ module Func = struct
     Printf.sprintf "locals: %s\ncode:\n%s" (Type.list_to_string f.locals) (Instr.list_to_string f.body ~sep:"\n")
 end
 
+module ByteAbstr = struct
+  module T = struct
+    type t =
+      | Const of char
+      | Byte
+    [@@deriving sexp, compare]
+  end
+  include T
+  let zero = Const (Char.of_int_exn 0)
+  let join (b1 : t) (b2 : t) : t =
+    match (b1, b2) with
+    | Const x, Const y when x = y -> Const x
+    | _, _ -> Byte
+end
 module MemoryInst = struct
   module T = struct
     type t = {
-      data: char list; (* TODO: this should definitely be abstracted *)
+      data: ByteAbstr.t; (* Abstraction: everything merged into the same value *)
       max_size: int option;
     }
     [@@deriving sexp, compare]
@@ -335,9 +408,8 @@ module MemoryInst = struct
   let of_wasm (m : Ast.memory) : t =
     match m.it.mtype with
     | MemoryType t ->
-      Printf.printf "Allocating memory, size is %s * 65536\n" (Int32.to_string t.min);
       {
-        data = List.init (page_size * (Int32.to_int_exn t.min)) ~f:(fun _ -> Char.of_int_exn 0);
+        data = ByteAbstr.zero;
         max_size = Option.map t.max ~f:Int32.to_int_exn
       }
 end
@@ -443,6 +515,8 @@ module Store = struct
     List.nth_exn s.funcs a
   let get_global (s : t) (a : Address.t) : GlobalInst.t =
     List.nth_exn s.globals a
+  let get_meminst (s : t) (a : Address.t) : MemoryInst.t =
+    List.nth_exn s.mems a
   let join (s1 : t) (s2 : t) : t =
     assert (s1.funcs = s2.funcs);
     { s1 with
@@ -475,6 +549,8 @@ module Frame = struct
     { f with locals = List.mapi f.locals ~f:(fun i x -> if i = l then v else x) }
   let get_global_addr (f : t) (g : Var.t) : Address.t =
     List.nth_exn f.module_.globaladdrs g
+  let get_memory_addr (f : t) (n : int) : Address.t =
+    List.nth_exn f.module_.memaddrs n
   let join (f1 : t) (f2 : t) =
     assert (f1.arity = f2.arity);
     assert (f1.module_ = f2.module_);
@@ -823,6 +899,12 @@ module FunctionAnalysis = struct
           let r2 = if Value.is_zero v then break (n, config') else no_result in
           merge_results r1 r2
         | BrIf _, _ -> failwith "Invalid value stack for br_if"
+        | Load op, _v :: vstack ->
+          (* This is a pretty dumb memory abstraction: we just return the top value when loading something from the linea memory *)
+          let c = Value.top op.typ in (* value of the correct type *)
+          reached { config with astack = astack'; vstack = c :: vstack }
+        | Store _op, _v :: _i :: vstack ->
+          reached { config with astack = astack'; vstack = vstack }
         | _, _ -> failwith "Not implemented yet"
 
   let analyze_function (funcaddr : Address.t) (store : Store.t) (deps : Deps.t) : (Value.t list * int) =
