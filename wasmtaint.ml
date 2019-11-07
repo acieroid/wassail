@@ -515,6 +515,9 @@ module Store = struct
     List.nth_exn s.funcs a
   let get_global (s : t) (a : Address.t) : GlobalInst.t =
     List.nth_exn s.globals a
+  let set_global (s : t) (a : Address.t) (v : Value.t) : t =
+    { s with globals = List.mapi s.globals ~f:(fun i g ->
+          if i = a then { g with value = v } else g) }
   let get_meminst (s : t) (a : Address.t) : MemoryInst.t =
     List.nth_exn s.mems a
   let join (s1 : t) (s2 : t) : t =
@@ -857,7 +860,7 @@ module FunctionAnalysis = struct
           let v' = Testop.eval test v in
           reached
             { config with vstack = v' :: vstack; astack = astack' }
-        | GlobalGet v, vstack ->
+        | GlobalGet global, vstack ->
           (* [spec] Let F be the current frame.
              Assert: due to validation, F.module.globaladdrs[x] exists.
              Let a be the global address F.module.globaladdrs[x].
@@ -865,11 +868,21 @@ module FunctionAnalysis = struct
              Let glob be the global instance S.globals[a].
              Let val be the value glob.value.
              Push the value val to the stack. *)
-          let addr = Frame.get_global_addr config.frame v in
+          let addr = Frame.get_global_addr config.frame global in
           let g = Store.get_global config.store addr in
           reached
             { config with vstack = g.value :: vstack; astack = astack' }
-        | GlobalSet _, _ -> failwith "TODO: get global"
+        | GlobalSet global, v :: vstack ->
+          (* [spec] Let F be the current frame.
+             Assert: due to validation, F.module.globaladdrs[x] exists.
+             Let a be the global address F.module.globaladdrs[x].
+             Assert: due to validation, S.globals[a] exists.
+             Let glob be the global instance S.globals[a].
+             Assert: due to validation, a value is on the top of the stack.
+             Pop the value val from the stack.
+             Replace glob.value with the value val. *)
+          let addr = Frame.get_global_addr config.frame global in
+          reached { config with vstack = vstack; astack = astack'; store = Store.set_global config.store addr v }
         | Test _, _ -> failwith "Invalid value stack for test"
         | Br n, _ ->
           (* [spec] Assert: due to validation, the stack contains at least l+1 labels.
