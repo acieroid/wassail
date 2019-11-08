@@ -582,19 +582,29 @@ end
 
 module CFGBuilder(Data: CFGData) = struct
   module BasicBlock = struct
+    type block_sort = Loop | Block | Entry | Exit | AfterCall | Normal
     type t = {
       idx: int;
+      sort: block_sort;
       instrs: Instr.t list;
       data: Data.t list;
     }
     let to_string (b : t) : string = Printf.sprintf "block %d" b.idx
     let to_dot (b : t) : string =
-      Printf.sprintf "block%d [shape=record, label=\"{Block %d:\\l\\l%s}\"];"
+      Printf.sprintf "block%d [shape=record, label=\"{Block %d (%s):\\l\\l%s\\l}\"];"
         b.idx b.idx
-        (String.concat ~sep:"\n"
+        (match b.sort with
+         | Entry -> "entry"
+         | Exit -> "exit"
+         | Loop -> "loop"
+         | Block -> "block"
+         | AfterCall -> "after_call"
+         | Normal -> "normal"
+        )
+        (String.concat ~sep:"\\l"
            (List.map2_exn b.instrs b.data
               ~f:(fun instr data ->
-                  Printf.sprintf "%s -- %s" (Instr.to_string instr ~sep:"\\l") (Data.to_string data))))
+                  Printf.sprintf "%s %s" (Instr.to_string instr ~sep:"\\l") (Data.to_string data))))
 
     (* An instruction is a leader if it should be the first instruction in a basic block *)
     let is_leader (i : Instr.t) : bool = match i with
@@ -630,68 +640,47 @@ module CFGBuilder(Data: CFGData) = struct
 
   let build (faddr : Address.t) (store : Store.t) : CFG.t =
     let funcinst = Store.get_funcinst store faddr in
-    let mk_block (idx : int) (reverse_instrs : Instr.t list) : BasicBlock.t =
+    let mk_block (idx : int) (sort: BasicBlock.block_sort) (reverse_instrs : Instr.t list) : BasicBlock.t =
       let instrs = List.rev reverse_instrs in
-      BasicBlock.{ idx = idx; instrs = instrs; data = List.map instrs ~f:(fun _ -> Data.init) } in
+      BasicBlock.{ idx = idx; instrs = instrs; sort = sort; data = List.map instrs ~f:(fun _ -> Data.init) } in
     (* helper takes a list of instructions and processes it entirely. It returns:
        1. The list of blocks constructed
        2. The index of the blocks that have to be connected to the "exit" block
        3. The next available block index *)
-    let rec helper (idx : int) (current_block : Instr.t list) (remaining: Instr.t list) : (int list * BasicBlock.t list * int) =
+    (* TODO: edges *)
+    let rec helper (idx : int) (sort : BasicBlock.block_sort) (current_block : Instr.t list) (remaining: Instr.t list) (blocks : BasicBlock.t list) (to_exit : int list) : (int list * BasicBlock.t list * int) =
       match remaining with
       | [] ->
         if current_block <> [] then
           (* End of the instructions, construct the current block and link it to the end block *)
-          (idx, mk_block idx current_block, idx + 1)
-          let block = mk_block idx current_block in
-          { cfg with basic_blocks = List.rev (mk_block exit_id [] :: block :: cfg.basic_blocks);
-                     edges = List.map (idx :: to_exit) ~f:(fun from -> (from, exit_id)) @ cfg.edges;
-                     exit_block = exit_id }
+          (idx :: to_exit, mk_block idx sort current_block :: blocks, idx + 1)
         else
-          (* similar, but no need for an extra empty block *)
-          let exit_id = idx in
-          { cfg with basic_blocks = List.rev (mk_block exit_id [] :: cfg.basic_blocks) ;
-                     edges = List.map to_exit ~f:(fun from -> (from, exit_id)) @ cfg.edges;
-                     exit_block = exit_id }
+          (* TODO: check if idx-1 shouldn't be connected to exit *)
+          (to_exit, blocks, idx)
       | Block instrs :: rest ->
-        (* We got a new block *)
-        let block = mk_block idx current_block in
-        let cfg' = { cfg with basic_blocks = block :: cfg.basic_blocks ;
-                              (* link from previous block to this one, except if we're block 0 (meaning we're the entry block) *)
-                              edges = if idx > 0 then (idx - 1, idx) :: cfg.edges else cfg.edges ;
-                   } in
-        helper (idx + 1) [head] rest to_exit cfg'
+        let to_exit', blocks', idx' = helper (idx+1) BasicBlock.Block [] instrs (mk_block idx sort current_block :: blocks) to_exit in
+        helper idx' BasicBlock.Normal [] rest blocks' to_exit'
+      | Loop instrs :: rest ->
+        let to_exit', blocks', idx' = helper (idx+1) BasicBlock.Loop [] instrs (mk_block idx sort current_block :: blocks) to_exit in
+        helper idx' BasicBlock.Normal [] rest blocks' to_exit'
       | ((BrIf _level) as instr) :: rest ->
-        let block = mk_block idx (instr :: current_block) in
-        (* TODO: we probably want to reserve the breaks after having constructed the rest. This can be done by a linear traversal of the graph *)
-        let idx_target = failwith "TODO" (* CFG.find_enclosing_block_idx cfg idx level*)  in
-        helper (idx + 1) [] rest to_exit
-          { cfg with basic_blocks = block :: cfg.basic_blocks ;
-                     edges = (idx, idx_target) :: cfg.edges }
+        helper (idx+1) BasicBlock.Normal [] rest (mk_block idx sort (instr :: current_block) :: blocks) to_exit
       | (Br _level) as instr :: rest ->
-        (* This is a copy paste from BrIf... *)
-        let block = mk_block idx (instr :: current_block) in
-        let idx_target = failwith "TODO" (* CFG.find_enclosing_block_idx cfg idx level *) in
-        helper (idx + 1) [] rest to_exit
-          { cfg with basic_blocks = block :: cfg.basic_blocks ;
-                     edges = (idx, idx_target) :: cfg.edges }
+        helper (idx+1) BasicBlock.Normal [] rest (mk_block idx sort (instr :: current_block) :: blocks) to_exit
       | Call _f as instr :: rest ->
-        (* A call to another function. There's no intraprodecural edge in this case *)
-        let block = mk_block idx (instr :: current_block) in
-        helper (idx + 1) [] rest to_exit
-          { cfg with basic_blocks = block :: cfg.basic_blocks }
+        helper (idx+1) BasicBlock.AfterCall [] rest (mk_block idx sort (instr :: current_block) :: blocks) to_exit
       | Return :: rest ->
         assert (rest = []); (* should always be the case, but not said so in the spec? *)
-        (* A return stops the block and connects it to the exit block *)
-        let block = mk_block idx current_block in
-        let exit_id = idx + 1 in
-        { cfg with basic_blocks = List.rev (mk_block exit_id [] :: block :: cfg.basic_blocks) ;
-                   edges = List.map (idx :: to_exit) ~f:(fun from -> (from, exit_id)) @ cfg.edges;
-                   exit_block = exit_id }
+        (idx :: to_exit, mk_block idx sort current_block :: blocks, idx + 1)
       | head :: rest ->
-        helper idx (head :: current_block) rest to_exit cfg
+        helper idx sort (head :: current_block) rest blocks to_exit
     in
-    helper 1 [] funcinst.code.body [] CFG.{ idx = faddr; basic_blocks = []; edges = []; entry_block = 0; exit_block = 0 }
+    let (to_exit, blocks, exit_id) = helper 0 BasicBlock.Entry [] funcinst.code.body [] [] in
+    let exit_block = mk_block exit_id BasicBlock.Exit [] in
+    CFG.{ idx = faddr; basic_blocks = List.rev (exit_block :: blocks);
+          edges = List.map to_exit ~f:(fun from -> (from, exit_id)) ;
+          entry_block = 0 ;
+          exit_block = exit_id }
 end
 
 
