@@ -4,7 +4,6 @@ open Wasm
 (* TODO: ([ ] = to start, [-] = started, [x] = finished)
   - [x] Support memory instructions (load, store)
   - [x] Display loaded program nicely
-  - [ ] Infinite loop due to CP lattice that doesn't join correctly when updating locals
   - [ ] Tests
   - [ ] Use apron for abstraction of values
   - [ ] Display results of the analysis
@@ -306,14 +305,14 @@ module Instr = struct
     [@@deriving sexp, compare]
   end
   include T
-  let rec to_string ?indent:(i : int = 0) (instr : t) : string =
+  let rec to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : t) : string =
     Printf.sprintf "%s%s" (String.make i ' ')
       (match instr with
        | Nop -> "nop"
        | Drop -> "drop"
        | Return -> "return"
-       | Block instrs -> Printf.sprintf "block\n%s" (list_to_string instrs ~indent:(i+2) ~sep:"\n")
-       | Loop instrs -> Printf.sprintf "loop\n%s" (list_to_string instrs ~indent:(i+2) ~sep:"\n")
+       | Block instrs -> Printf.sprintf "block%s%s" sep (list_to_string instrs ~indent:(i+2) ~sep:sep)
+       | Loop instrs -> Printf.sprintf "loop%s%s" sep (list_to_string instrs ~indent:(i+2) ~sep:sep)
        | Const v -> Printf.sprintf "const %s" (Value.to_string v)
        | Binary b -> Printf.sprintf "binary %s" (Binop.to_string b)
        | Compare r -> Printf.sprintf "compare %s" (Relop.to_string r)
@@ -330,7 +329,7 @@ module Instr = struct
        | Store op -> Printf.sprintf "store %s" (Memoryop.to_string op)
       )
   and list_to_string ?indent:(i : int = 0) ?sep:(sep : string = ", ") (l : t list) : string =
-    String.concat ~sep:sep (List.map l ~f:(to_string ?indent:(Some i)))
+    String.concat ~sep:sep (List.map l ~f:(to_string ?sep:(Some sep) ?indent:(Some i)))
 
   let rec of_wasm (i : Ast.instr) : t =
     match i.it with
@@ -569,6 +568,134 @@ module Activation = struct
   include T
 end
 
+module type CFGData = sig
+  type t
+  val to_string : t -> string
+  val init : t
+end
+
+module CFGNoData : CFGData = struct
+  type t = unit
+  let to_string () = ""
+  let init = ()
+end
+
+module CFGBuilder(Data: CFGData) = struct
+  module BasicBlock = struct
+    type t = {
+      idx: int;
+      instrs: Instr.t list;
+      data: Data.t list;
+    }
+    let to_string (b : t) : string = Printf.sprintf "block %d" b.idx
+    let to_dot (b : t) : string =
+      Printf.sprintf "block%d [shape=record, label=\"{Block %d:\\l\\l%s}\"];"
+        b.idx b.idx
+        (String.concat ~sep:"\n"
+           (List.map2_exn b.instrs b.data
+              ~f:(fun instr data ->
+                  Printf.sprintf "%s -- %s" (Instr.to_string instr ~sep:"\\l") (Data.to_string data))))
+
+    (* An instruction is a leader if it should be the first instruction in a basic block *)
+    let is_leader (i : Instr.t) : bool = match i with
+      | Block _
+      | Loop _ -> true
+      | _ -> false
+  end
+
+  module CFG = struct
+    type t = {
+      idx: int;
+      basic_blocks: BasicBlock.t list;
+      edges: (int * int) list;
+      entry_block: int;
+      exit_block: int;
+    }
+    let to_string (cfg : t) : string = Printf.sprintf "CFG of function %d" cfg.idx
+    let to_dot (cfg : t) : string =
+      Printf.sprintf "digraph \"CFG of function %d\" {\n%s\n%s}\n"
+        cfg.idx
+        (String.concat ~sep:"\n" (List.map cfg.basic_blocks ~f:BasicBlock.to_dot))
+        (String.concat ~sep:"\n" (List.map cfg.edges ~f:(fun (left, right) -> Printf.sprintf "block%d -> block%d;\n" left right)))
+
+(*    let find_enclosing_block_idx (cfg : t) (current : int) (level : int) =
+      if level = 0 then
+        (* We break from this block, so we have to go to the successor of the parent block (or the end if none) *)
+        parent
+        failwith "TODO"
+      else
+        (* Go to the parent block and decrease the level by one *)
+        failwith "TODO" *)
+  end
+
+  let build (faddr : Address.t) (store : Store.t) : CFG.t =
+    let funcinst = Store.get_funcinst store faddr in
+    let mk_block (idx : int) (reverse_instrs : Instr.t list) : BasicBlock.t =
+      let instrs = List.rev reverse_instrs in
+      BasicBlock.{ idx = idx; instrs = instrs; data = List.map instrs ~f:(fun _ -> Data.init) } in
+    (* helper takes a list of instructions and processes it entirely. It returns:
+       1. The list of blocks constructed
+       2. The index of the blocks that have to be connected to the "exit" block
+       3. The next available block index *)
+    let rec helper (idx : int) (current_block : Instr.t list) (remaining: Instr.t list) : (int list * BasicBlock.t list * int) =
+      match remaining with
+      | [] ->
+        if current_block <> [] then
+          (* End of the instructions, construct the current block and link it to the end block *)
+          (idx, mk_block idx current_block, idx + 1)
+          let block = mk_block idx current_block in
+          { cfg with basic_blocks = List.rev (mk_block exit_id [] :: block :: cfg.basic_blocks);
+                     edges = List.map (idx :: to_exit) ~f:(fun from -> (from, exit_id)) @ cfg.edges;
+                     exit_block = exit_id }
+        else
+          (* similar, but no need for an extra empty block *)
+          let exit_id = idx in
+          { cfg with basic_blocks = List.rev (mk_block exit_id [] :: cfg.basic_blocks) ;
+                     edges = List.map to_exit ~f:(fun from -> (from, exit_id)) @ cfg.edges;
+                     exit_block = exit_id }
+      | Block instrs :: rest ->
+        (* We got a new block *)
+        let block = mk_block idx current_block in
+        let cfg' = { cfg with basic_blocks = block :: cfg.basic_blocks ;
+                              (* link from previous block to this one, except if we're block 0 (meaning we're the entry block) *)
+                              edges = if idx > 0 then (idx - 1, idx) :: cfg.edges else cfg.edges ;
+                   } in
+        helper (idx + 1) [head] rest to_exit cfg'
+      | ((BrIf _level) as instr) :: rest ->
+        let block = mk_block idx (instr :: current_block) in
+        (* TODO: we probably want to reserve the breaks after having constructed the rest. This can be done by a linear traversal of the graph *)
+        let idx_target = failwith "TODO" (* CFG.find_enclosing_block_idx cfg idx level*)  in
+        helper (idx + 1) [] rest to_exit
+          { cfg with basic_blocks = block :: cfg.basic_blocks ;
+                     edges = (idx, idx_target) :: cfg.edges }
+      | (Br _level) as instr :: rest ->
+        (* This is a copy paste from BrIf... *)
+        let block = mk_block idx (instr :: current_block) in
+        let idx_target = failwith "TODO" (* CFG.find_enclosing_block_idx cfg idx level *) in
+        helper (idx + 1) [] rest to_exit
+          { cfg with basic_blocks = block :: cfg.basic_blocks ;
+                     edges = (idx, idx_target) :: cfg.edges }
+      | Call _f as instr :: rest ->
+        (* A call to another function. There's no intraprodecural edge in this case *)
+        let block = mk_block idx (instr :: current_block) in
+        helper (idx + 1) [] rest to_exit
+          { cfg with basic_blocks = block :: cfg.basic_blocks }
+      | Return :: rest ->
+        assert (rest = []); (* should always be the case, but not said so in the spec? *)
+        (* A return stops the block and connects it to the exit block *)
+        let block = mk_block idx current_block in
+        let exit_id = idx + 1 in
+        { cfg with basic_blocks = List.rev (mk_block exit_id [] :: block :: cfg.basic_blocks) ;
+                   edges = List.map (idx :: to_exit) ~f:(fun from -> (from, exit_id)) @ cfg.edges;
+                   exit_block = exit_id }
+      | head :: rest ->
+        helper idx (head :: current_block) rest to_exit cfg
+    in
+    helper 1 [] funcinst.code.body [] CFG.{ idx = faddr; basic_blocks = []; edges = []; entry_block = 0; exit_block = 0 }
+end
+
+
+(** From here-on, this is MODF-style analysis *)
 module Configuration = struct
   module T = struct
     type t = {
@@ -978,7 +1105,7 @@ let parse_file name run =
     success
   with exn -> In_channel.close ic; raise exn
 
-let () =
+let run_modf () =
   let run (l : (Script.var option * Script.definition) list) =
     List.iter l ~f:(fun (_var_opt, def) ->
         match def.it with
@@ -995,3 +1122,22 @@ let () =
         | Script.Quoted _ -> failwith "unsupported"
       ) in
   Printf.printf "Success? %b" (parse_file "examples/overflow/overflow.wat" run)
+
+
+module CFGBuilderNoData = CFGBuilder(CFGNoData)
+let run_cfg () =
+  let run (l : (Script.var option * Script.definition) list) =
+    List.iter l ~f:(fun (_var_opt, def) ->
+        match def.it with
+        | Script.Textual m ->
+          let store = Store.init m in
+          List.iteri store.funcs ~f:(fun faddr _ ->
+              Printf.printf "CFG for function %d\n" faddr;
+              let cfg = CFGBuilderNoData.build faddr store in
+              Printf.printf "---------------\n%s\n---------------\n" (CFGBuilderNoData.CFG.to_dot cfg))
+        | Script.Encoded _ -> failwith "unsupported"
+        | Script.Quoted _ -> failwith "unsupported"
+      ) in
+  Printf.printf "Success? %b" (parse_file "examples/overflow/overflow.wat" run)
+
+let () = run_cfg ()
