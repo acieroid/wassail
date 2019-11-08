@@ -2,8 +2,9 @@ open Core
 open Wasm
 
 (* TODO: ([ ] = to start, [-] = started, [x] = finished)
-  - [ ] Support memory instructions (load, store)
-  - [ ] Display loaded program nicely
+  - [x] Support memory instructions (load, store)
+  - [x] Display loaded program nicely
+  - [ ] Infinite loop due to CP lattice that doesn't join correctly when updating locals
   - [ ] Tests
   - [ ] Use apron for abstraction of values
   - [ ] Display results of the analysis
@@ -517,7 +518,7 @@ module Store = struct
     List.nth_exn s.globals a
   let set_global (s : t) (a : Address.t) (v : Value.t) : t =
     { s with globals = List.mapi s.globals ~f:(fun i g ->
-          if i = a then { g with value = v } else g) }
+          if i = a then { g with value = Value.join g.value v } else g) }
   let get_meminst (s : t) (a : Address.t) : MemoryInst.t =
     List.nth_exn s.mems a
   let join (s1 : t) (s2 : t) : t =
@@ -549,7 +550,7 @@ module Frame = struct
   let get_local (f : t) (l : Var.t) : Value.t =
     List.nth_exn f.locals l
   let set_local (f : t) (l : Var.t) (v : Value.t) : t =
-    { f with locals = List.mapi f.locals ~f:(fun i x -> if i = l then v else x) }
+    { f with locals = List.mapi f.locals ~f:(fun i x -> if i = l then Value.join x v else x) }
   let get_global_addr (f : t) (g : Var.t) : Address.t =
     List.nth_exn f.module_.globaladdrs g
   let get_memory_addr (f : t) (n : int) : Address.t =
@@ -689,10 +690,12 @@ module FunctionAnalysis = struct
 
   (* Analyzes a block. Return the configuration at the exit of a block. This resulting configuration is the join of all reachable configurations. The block could also have "returned" if it reaches a "Return" instruction *)
   let rec analyze_block (conf : Configuration.t) (deps : Deps.t) : Deps.block_result =
+    Printf.printf "analyze_block %s\n" (Configuration.to_string conf);
     let rec run_analysis (todo: Configuration.t list) (current: Deps.block_result) : Deps.block_result =
         match todo with
         | [] -> current
         | c :: todo' ->
+          Printf.printf "step conf %s from block %s\n" (Configuration.to_string c) (Configuration.to_string conf);
           let stepped = step c deps in
           run_analysis (Configuration.Set.fold stepped.configs ~init:todo' ~f:(fun acc c -> c :: acc))
             (Deps.join_block_results current
@@ -701,18 +704,22 @@ module FunctionAnalysis = struct
     match Configuration.Map.find !(deps.results) conf  with
     | Some res ->
       (* results already computed, return it *)
+      Printf.printf "result was cached: %s\n" (Deps.block_result_to_string res);
       res
     | None ->
       (* compute result and cache it. *)
       deps.results := Configuration.Map.update !(deps.results) conf ~f:(fun _ -> Deps.no_result);
       let r = run_analysis [conf] { configuration = None; returned = None; breaks = Break.Set.empty } in
       deps.results := Configuration.Map.update !(deps.results) conf ~f:(fun _ -> r);
+      Printf.printf "result is: %s\n" (Deps.block_result_to_string r);
       r
   and invoke (funcaddr : Address.t) (vstack : Value.t list) (store : Store.t) (deps : Deps.t) : (Value.t list * int) =
     let f = Store.get_funcinst store funcaddr in
-    let (in_arity, _) = f.arity in
+    let (in_arity, out_arity) = f.arity in
+    assert (List.length vstack >= in_arity);
     let valn = List.take vstack in_arity in
     let zeros = List.map f.code.locals ~f:Value.zero in
+    Printf.printf "fun %d there are (%d,%d) params and %d locals\n" funcaddr in_arity out_arity (List.length f.code.locals);
     let frame = Frame.{
       arity = in_arity + (List.length f.code.locals);
       module_ = f.module_;
@@ -725,6 +732,7 @@ module FunctionAnalysis = struct
         vstack = [] ;
         astack = f.code.body
       } in
+    Printf.printf "calling function, analyzing block\n";
     let analysis_result = analyze_block in_conf deps in
     let exit_conf = match (analysis_result.configuration, analysis_result.returned) with
       | (Some c1, Some c2) -> Configuration.join c1 c2
@@ -734,6 +742,7 @@ module FunctionAnalysis = struct
     (List.take exit_conf.vstack in_arity, in_arity)
 
   and enter_block (config : Configuration.t) (instrs : Instr.t list) (deps : Deps.t) : step_result =
+    Printf.printf "entering block %s\n" (Configuration.to_string config);
     let analysis_result = analyze_block { config with astack = instrs } deps in
     (* Decrease the index of the breaks, those that would reach 0 become finished configurations *)
     let (breaks, finished) = Break.Set.partition_tf analysis_result.breaks ~f:(fun (b, _) -> b = 1) in
@@ -756,7 +765,9 @@ module FunctionAnalysis = struct
   and step (config : Configuration.t) (deps : Deps.t) : step_result =
       match config.astack with
       | [] -> finished config
-      | head :: astack' -> match (head, config.vstack) with
+      | head :: astack' ->
+        Printf.printf "head is %s\n, vstack is %s\n" (Instr.to_string head) (String.concat ~sep:"," (List.map ~f:Value.to_string config.vstack));
+        match (head, config.vstack) with
         | Nop, _ ->
           (* [spec] Do nothing *)
           reached
@@ -800,8 +811,10 @@ module FunctionAnalysis = struct
              Let L be the label whose arity is n and whose continuation is the end of the block.
              Enter the block instr∗ with label L. *)
           (* We empty the administrative stack before analyzing the block, as we want the block to be analyzed up to its end *)
+          Printf.printf "block\n";
           enter_block config instrs deps
         | Loop instrs, _ ->
+          Printf.printf "loop\n";
           enter_block config (instrs @ [Loop instrs]) deps
         | Call x, vstack ->
           (* [spec] Let F be the current frame.
@@ -809,6 +822,7 @@ module FunctionAnalysis = struct
              Let a be the function address F.module.funcaddrs[x].
              Invoke the function instance at address a. *)
           let funcaddr = Frame.funcaddr config.frame x in
+          Printf.printf "call function %d with vstack: %s\n" funcaddr (String.concat ~sep:","  (List.map vstack ~f:Value.to_string));
           (* Invoke the function, get a list of return values *)
           let (return_vs, arity) = invoke funcaddr vstack config.store deps in
           reached { config with vstack = return_vs @ List.drop vstack arity }
@@ -907,6 +921,7 @@ module FunctionAnalysis = struct
                Execute the instruction (br l).
              Else:
                Do nothing. *)
+          Printf.printf "Breaking, vstack is %s\n" (String.concat ~sep:"," (List.map ~f:Value.to_string vstack));
           let config' = { config with vstack = vstack; astack = astack' } in
           let r1 = if Value.is_zero v then reached config' else no_result in
           let r2 = if Value.is_zero v then break (n, config') else no_result in
