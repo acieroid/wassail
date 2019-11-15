@@ -591,8 +591,14 @@ module CFGBuilder(Data: CFGData) = struct
     }
     let to_string (b : t) : string = Printf.sprintf "block %d" b.idx
     let to_dot (b : t) : string =
-      Printf.sprintf "block%d [shape=record, label=\"{Block %d (%s):\\l\\l%s\\l}\"];"
-        b.idx b.idx
+      Printf.sprintf "block%d [shape=%s, label=\"{Block %d (%s):\\l\\l%s\\l}\"];"
+        b.idx
+        (match b.sort with
+         | BlockEntry | BlockExit | LoopEntry | LoopExit -> "ellipse"
+         | Function -> "star"
+         | Normal -> "record"
+         | Return -> "point")
+        b.idx
         (match b.sort with
          | BlockEntry -> "block_entry"
          | BlockExit -> "block_exit"
@@ -634,21 +640,13 @@ module CFGBuilder(Data: CFGData) = struct
       BasicBlock.{ idx = new_idx (); instrs = instrs; sort = BasicBlock.Normal; data = List.map instrs ~f:(fun _ -> Data.init) } in
     let mk_funblock () : BasicBlock.t =
       BasicBlock.{ idx = new_idx () ; instrs = []; sort = Function; data = [] } in
-    let mk_block_entry (b : Instr.t) : BasicBlock.t =
+    let mk_block_entry (is_loop : bool) : BasicBlock.t =
       BasicBlock.{ idx = new_idx () ; instrs = [];
-                   sort = begin match b with
-                     | Loop _ -> LoopEntry
-                     | Block _ -> BlockEntry
-                     | _ -> failwith "Invalid block"
-                   end;
+                   sort = if is_loop then LoopEntry else BlockEntry;
                    data = [] } in
-    let mk_block_exit (b : Instr.t) : BasicBlock.t =
+    let mk_block_exit (is_loop : bool) : BasicBlock.t =
       BasicBlock.{ idx = new_idx () ; instrs = [];
-                   sort = begin match b with
-                     | Loop _ -> LoopExit
-                     | Block _ -> BlockExit
-                     | _ -> failwith "Invalid block"
-                   end;
+                   sort = if is_loop then LoopExit else BlockExit;
                    data = [] } in
     let mk_block_return () : BasicBlock.t =
       BasicBlock.{ idx = new_idx () ; instrs = []; sort = Return; data = [] } in
@@ -705,11 +703,14 @@ module CFGBuilder(Data: CFGData) = struct
       | ((Loop instrs') as b) :: rest ->
         (* Create a new block with all instructions collected, without the last one *)
         let block = mk_block instrs in
-        let block_entry = mk_block_entry b in
+        let is_loop = match b with
+          | Loop _ -> true
+          | _ -> false in
+        let block_entry = mk_block_entry is_loop in
         (* Recurse inside the block *)
         let (blocks, edges, breaks, returns, entry', exit') = helper [] instrs' in
         (* Create a node for the exit of the block *)
-        let block_exit = mk_block_exit b in
+        let block_exit = mk_block_exit is_loop in
         (* Recurse after the block *)
         let (blocks', edges', breaks', returns', entry'', exit'') = helper [] rest in
         (* Compute the new break levels:
@@ -717,9 +718,14 @@ module CFGBuilder(Data: CFGData) = struct
            All other breaks see their level decreased by one *)
         let new_breaks = List.map (List.filter (breaks @ breaks') ~f:(fun (_, level) -> level > 0)) ~f:(fun (idx, level) -> (idx, level -1)) in
         let break_edges = List.map (List.filter (breaks @ breaks') ~f:(fun (_, level) -> level = 0)) ~f:(fun (idx, _) -> (idx, block_exit.idx)) in
-        (* TODO: edges for loop are different, there's a looping edge and no connection from the last block to the loop exit (except if br_if, but that's handled by it *)
+        (* Compute the new edges. This is different between a loop and a block, for the exit of the inside of the block *)
+        let new_edges = if is_loop then
+            [(block.idx, block_entry.idx); (block_entry.idx, entry'); (exit', block_entry.idx); (block_exit.idx, entry'')]
+          else
+            [(block.idx, block_entry.idx); (block_entry.idx, entry'); (exit', block_exit.idx); (block_exit.idx, entry'')]
+        in
         (block :: block_entry :: block_exit :: (blocks @ blocks') (* add all blocks *),
-         (block.idx, block_entry.idx) :: (block_entry.idx, entry') :: (exit', block_exit.idx) :: (block_exit.idx, entry'') :: (break_edges @ edges @ edges') (* add edges *),
+         new_edges @ break_edges @ edges @ edges' (* add edges *),
          new_breaks (* filtered breaks *),
          returns @ returns' (* returns are propagated as is *),
          block.idx, exit'')
@@ -735,12 +741,27 @@ module CFGBuilder(Data: CFGData) = struct
         helper (i :: instrs) rest
     in
     let (blocks, edges, breaks, returns, entry_idx, exit_idx) = helper [] funcinst.code.body in
-    assert (breaks = []); (* there shouldn't be any breaks outside the function *)
     let return_block = mk_block_return () in
-    CFG.{ idx = faddr; basic_blocks = blocks;
-          edges = List.map returns ~f:(fun from -> (from, return_block.idx)) @ edges;
+    let blocks' = return_block :: blocks in
+    let edges' = (exit_idx, return_block.idx) :: List.map returns ~f:(fun from -> (from, return_block.idx)) @ edges in
+    assert (breaks = []); (* there shouldn't be any breaks outside the function *)
+    (* We now filter empty normal blocks *)
+    let (actual_blocks, filtered_blocks) = List.partition_tf blocks' ~f:(fun block -> match (block.sort, block.instrs) with
+        | Normal, [] -> false
+        | _ -> true) in
+    let filtered_blocks_idx = List.map filtered_blocks ~f:(fun b -> b.idx) in
+    (* And we have to redirect the edges: if there is an edge to a removed block, we make it point to its successors *)
+    let actual_edges = List.fold_left filtered_blocks_idx ~init:edges' ~f:(fun edges idx ->
+        (* idx is removed, so we find all edges pointing to idx (and we keep track of the other ones, as only these should be kept) *)
+        let (pointing_to, edges') = List.partition_tf edges ~f:(fun (_, dst) -> dst = idx) in
+        (* and we find all edges pointing from idx (again, keeping track of the other ones) *)
+        let (pointing_from, edges'') = List.partition_tf edges' ~f:(fun (src, _) -> src = idx) in
+        (* now we connect everything from both sets *)
+        List.concat (List.map pointing_to ~f:(fun (src, _) -> List.map pointing_from ~f:(fun (_, dst) -> (src, dst)))) @ edges'') in
+    CFG.{ idx = faddr; basic_blocks = actual_blocks;
+          edges = actual_edges;
           entry_block = entry_idx;
-          exit_block = exit_idx }
+          exit_block = return_block.idx }
 end
 
 
