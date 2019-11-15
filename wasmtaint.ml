@@ -582,7 +582,7 @@ end
 
 module CFGBuilder(Data: CFGData) = struct
   module BasicBlock = struct
-    type block_sort = Loop | Block | Entry | Exit | AfterCall | Normal
+    type block_sort = BlockEntry | BlockExit | LoopEntry | LoopExit | Normal | Function | Return
     type t = {
       idx: int;
       sort: block_sort;
@@ -594,23 +594,18 @@ module CFGBuilder(Data: CFGData) = struct
       Printf.sprintf "block%d [shape=record, label=\"{Block %d (%s):\\l\\l%s\\l}\"];"
         b.idx b.idx
         (match b.sort with
-         | Entry -> "entry"
-         | Exit -> "exit"
-         | Loop -> "loop"
-         | Block -> "block"
-         | AfterCall -> "after_call"
+         | BlockEntry -> "block_entry"
+         | BlockExit -> "block_exit"
+         | LoopEntry -> "loop_entry"
+         | LoopExit -> "loop_exit"
          | Normal -> "normal"
+         | Function -> "function"
+         | Return -> "return"
         )
         (String.concat ~sep:"\\l"
            (List.map2_exn b.instrs b.data
               ~f:(fun instr data ->
                   Printf.sprintf "%s %s" (Instr.to_string instr ~sep:"\\l") (Data.to_string data))))
-
-    (* An instruction is a leader if it should be the first instruction in a basic block *)
-    let is_leader (i : Instr.t) : bool = match i with
-      | Block _
-      | Loop _ -> true
-      | _ -> false
   end
 
   module CFG = struct
@@ -628,59 +623,191 @@ module CFGBuilder(Data: CFGData) = struct
         (String.concat ~sep:"\n" (List.map cfg.basic_blocks ~f:BasicBlock.to_dot))
         (String.concat ~sep:"\n" (List.map cfg.edges ~f:(fun (left, right) -> Printf.sprintf "block%d -> block%d;\n" left right)))
 
-(*    let find_enclosing_block_idx (cfg : t) (current : int) (level : int) =
-      if level = 0 then
-        (* We break from this block, so we have to go to the successor of the parent block (or the end if none) *)
-        parent
-        failwith "TODO"
-      else
-        (* Go to the parent block and decrease the level by one *)
-        failwith "TODO" *)
   end
 
   let build (faddr : Address.t) (store : Store.t) : CFG.t =
     let funcinst = Store.get_funcinst store faddr in
+    let cur_idx : int ref = ref 0 in
+    let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
+    let mk_block (reverse_instrs : Instr.t list) : BasicBlock.t =
+      let instrs = List.rev reverse_instrs in
+      BasicBlock.{ idx = new_idx (); instrs = instrs; sort = BasicBlock.Normal; data = List.map instrs ~f:(fun _ -> Data.init) } in
+    let mk_funblock () : BasicBlock.t =
+      BasicBlock.{ idx = new_idx () ; instrs = []; sort = Function; data = [] } in
+    let mk_block_entry (b : Instr.t) : BasicBlock.t =
+      BasicBlock.{ idx = new_idx () ; instrs = [];
+                   sort = begin match b with
+                     | Loop _ -> LoopEntry
+                     | Block _ -> BlockEntry
+                     | _ -> failwith "Invalid block"
+                   end;
+                   data = [] } in
+    let mk_block_exit (b : Instr.t) : BasicBlock.t =
+      BasicBlock.{ idx = new_idx () ; instrs = [];
+                   sort = begin match b with
+                     | Loop _ -> LoopExit
+                     | Block _ -> BlockExit
+                     | _ -> failwith "Invalid block"
+                   end;
+                   data = [] } in
+    let mk_block_return () : BasicBlock.t =
+      BasicBlock.{ idx = new_idx () ; instrs = []; sort = Return; data = [] } in
+    let rec helper (instrs : Instr.t list) (remaining : Instr.t list) : (
+      (* The blocks created *)
+      BasicBlock.t list *
+      (* The edges within the blocks created *)
+      (int * int) list *
+      (* The break points as (block_idx, break_level *)
+      (int * int) list *
+      (* The blocks that have to be connected to the return *)
+      int list *
+      (* The entry and exit of the created blocks *)
+      int * int) =
+      match remaining with
+      | [] ->
+        (* If there's no instruction anymore, build the block and connect it to exit_id *)
+        let block = mk_block instrs in
+        ([block] (* only this block *), [] (* no edge *),
+         [] (* no break point *), [] (* not connected to return *),
+         block.idx, block.idx)
+      | BrIf level :: rest ->
+        (* This is a break up to level `level` *)
+        (* First, construct the current block *)
+        let block = mk_block (BrIf level :: instrs) in
+        (* Then, construct the rest of the CFG *)
+        let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
+        (block :: blocks (* add the current block *),
+         (block.idx, entry') :: edges (* add an edge between this block and the rest *),
+         (block.idx, level) :: breaks (* add a break *),
+         returns (* no return *),
+         block.idx, exit')
+      | Br level :: rest ->
+        (* Similar to break, but because it is inconditional, there is no edge from this block to the next. In practice, rest should always be empty here *)
+        assert (rest = []);
+        let block = mk_block (Br level :: instrs) in
+        let (blocks, edges, breaks, returns, _entry', exit') = helper [] rest in
+        (block :: blocks (* add the current block *),
+         edges (* no edge *),
+         (block.idx, level) :: breaks (* add the break *),
+         returns (* no return *),
+         block.idx, exit')
+      | Call f :: rest ->
+        (* Also similar to br, but connects the edges differently *)
+        let block = mk_block (Call f :: instrs) in
+        let fblock = mk_funblock () in
+        let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
+        (block :: fblock :: blocks (* add the current block and the function block *),
+         (block.idx, fblock.idx) :: (fblock.idx, entry') :: edges (* connect current block to function block, and function block to the rest *),
+         breaks (* no break *),
+         returns (* no return *),
+         block.idx, exit')
+      | ((Block instrs') as b) :: rest
+      | ((Loop instrs') as b) :: rest ->
+        (* Create a new block with all instructions collected, without the last one *)
+        let block = mk_block instrs in
+        let block_entry = mk_block_entry b in
+        (* Recurse inside the block *)
+        let (blocks, edges, breaks, returns, entry', exit') = helper [] instrs' in
+        (* Create a node for the exit of the block *)
+        let block_exit = mk_block_exit b in
+        (* Recurse after the block *)
+        let (blocks', edges', breaks', returns', entry'', exit'') = helper [] rest in
+        (* Compute the new break levels:
+           All breaks with level 0 break the current block
+           All other breaks see their level decreased by one *)
+        let new_breaks = List.map (List.filter (breaks @ breaks') ~f:(fun (_, level) -> level > 0)) ~f:(fun (idx, level) -> (idx, level -1)) in
+        let break_edges = List.map (List.filter (breaks @ breaks') ~f:(fun (_, level) -> level = 0)) ~f:(fun (idx, _) -> (idx, block_exit.idx)) in
+        (* TODO: edges for loop are different, there's a looping edge and no connection from the last block to the loop exit (except if br_if, but that's handled by it *)
+        (block :: block_entry :: block_exit :: (blocks @ blocks') (* add all blocks *),
+         (block.idx, block_entry.idx) :: (block_entry.idx, entry') :: (exit', block_exit.idx) :: (block_exit.idx, entry'') :: (break_edges @ edges @ edges') (* add edges *),
+         new_breaks (* filtered breaks *),
+         returns @ returns' (* returns are propagated as is *),
+         block.idx, exit'')
+      | Return :: rest ->
+        (* Return block. The rest of the instructions does not matter (it should be empty) *)
+        assert (rest = []);
+        (* We create a new block with all instructions collected, and return it *)
+        let block = mk_block instrs in
+        (* It is not connected to anything, but is marked as to be connected to a return block *)
+        ([block], [], [], [block.idx], block.idx, block.idx)
+      | i :: rest ->
+        (* Instruction i is part of the block, but not the end of it so we continue *)
+        helper (i :: instrs) rest
+    in
+    let (blocks, edges, breaks, returns, entry_idx, exit_idx) = helper [] funcinst.code.body in
+    assert (breaks = []); (* there shouldn't be any breaks outside the function *)
+    let return_block = mk_block_return () in
+    CFG.{ idx = faddr; basic_blocks = blocks;
+          edges = List.map returns ~f:(fun from -> (from, return_block.idx)) @ edges;
+          entry_block = entry_idx;
+          exit_block = exit_idx }
+
+  (*
+  let build (faddr : Address.t) (store : Store.t) : CFG.t =
+    let funcinst = Store.get_funcinst store faddr in
+    (* let predecessors_idx (edges : (int * int) list) (block_idx : int) : int list =
+      let edges = List.filter edges ~f:(fun (_, b) -> b = block_idx) in
+      List.map edges ~f:(fun (a, _) -> a) in
+    let get_block (blocks : BasicBlock.t list) (block_idx : int) : BasicBlock.t =
+      List.find_exn blocks ~f:(fun b -> b.idx = block_idx) in
+     let rec find_nth_enclosing_block (blocks : BasicBlock.t list) (edges : (int * int) list) (block_idx : int) (level : int) : int list =
+      let block = get_block blocks block_idx in
+      if level = 0 && BasicBlock.is_block block then
+        (* This is the current block *)
+        [block_idx]
+      else
+        (* Go to predecessor *)
+        let level' = if BasicBlock.is_block block then level - 1 else level in
+        List.concat_map (predecessors_idx edges block_idx) ~f:(fun pred_idx ->
+            find_nth_enclosing_block blocks edges pred_idx level') in
+    let successors_idx (edges : (int * int) list) (block_idx : int) : int list =
+      let edges = List.filter edges ~f:(fun (a, _) -> a = block_idx) in
+       List.map edges ~f:(fun (_, b) -> b) in *)
     let mk_block (idx : int) (sort: BasicBlock.block_sort) (reverse_instrs : Instr.t list) : BasicBlock.t =
       let instrs = List.rev reverse_instrs in
       BasicBlock.{ idx = idx; instrs = instrs; sort = sort; data = List.map instrs ~f:(fun _ -> Data.init) } in
     (* helper takes a list of instructions and processes it entirely. It returns:
        1. The list of blocks constructed
        2. The index of the blocks that have to be connected to the "exit" block
-       3. The next available block index *)
+       3. The next available block index
+       4. The edges *)
     (* TODO: edges *)
-    let rec helper (idx : int) (sort : BasicBlock.block_sort) (current_block : Instr.t list) (remaining: Instr.t list) (blocks : BasicBlock.t list) (to_exit : int list) : (int list * BasicBlock.t list * int) =
+    let rec helper (idx : int) (sort : BasicBlock.block_sort) (current_block : Instr.t list) (remaining: Instr.t list) (blocks : BasicBlock.t list) (to_exit : int list) (edges : (int * int) list): (int list * BasicBlock.t list * int * (int * int) list) =
       match remaining with
       | [] ->
         if current_block <> [] then
           (* End of the instructions, construct the current block and link it to the end block *)
-          (idx :: to_exit, mk_block idx sort current_block :: blocks, idx + 1)
+          (idx :: to_exit, mk_block idx sort current_block :: blocks, idx + 1, edges)
         else
           (* TODO: check if idx-1 shouldn't be connected to exit *)
-          (to_exit, blocks, idx)
+          (* The current block is empty, just ignore it then *)
+          (to_exit, blocks, idx, edges)
       | Block instrs :: rest ->
-        let to_exit', blocks', idx' = helper (idx+1) BasicBlock.Block [] instrs (mk_block idx sort current_block :: blocks) to_exit in
-        helper idx' BasicBlock.Normal [] rest blocks' to_exit'
+        let to_exit', blocks', idx', edges' = helper (idx+1) BasicBlock.Block [] instrs (mk_block idx sort current_block :: blocks) to_exit edges in
+        (* Link the current block with the first block of instrs *)
+        helper idx' BasicBlock.Normal [] rest blocks' to_exit' ((idx, idx+1) :: edges')
       | Loop instrs :: rest ->
-        let to_exit', blocks', idx' = helper (idx+1) BasicBlock.Loop [] instrs (mk_block idx sort current_block :: blocks) to_exit in
-        helper idx' BasicBlock.Normal [] rest blocks' to_exit'
+        let to_exit', blocks', idx', edges = helper (idx+1) BasicBlock.Loop [] instrs (mk_block idx sort current_block :: blocks) to_exit edges in
+        helper idx' BasicBlock.Normal [] rest blocks' to_exit' ((idx, idx+1) :: edges)
       | ((BrIf _level) as instr) :: rest ->
-        helper (idx+1) BasicBlock.Normal [] rest (mk_block idx sort (instr :: current_block) :: blocks) to_exit
+        helper (idx+1) BasicBlock.Normal [] rest (mk_block idx sort (instr :: current_block) :: blocks) to_exit edges
+        (* TODO: Link block idx to where it breaks *)
       | (Br _level) as instr :: rest ->
-        helper (idx+1) BasicBlock.Normal [] rest (mk_block idx sort (instr :: current_block) :: blocks) to_exit
+        helper (idx+1) BasicBlock.Normal [] rest (mk_block idx sort (instr :: current_block) :: blocks) to_exit edges
       | Call _f as instr :: rest ->
-        helper (idx+1) BasicBlock.AfterCall [] rest (mk_block idx sort (instr :: current_block) :: blocks) to_exit
+        helper (idx+1) BasicBlock.AfterCall [] rest (mk_block idx sort (instr :: current_block) :: blocks) to_exit edges
       | Return :: rest ->
         assert (rest = []); (* should always be the case, but not said so in the spec? *)
-        (idx :: to_exit, mk_block idx sort current_block :: blocks, idx + 1)
+        (idx :: to_exit, mk_block idx sort current_block :: blocks, idx + 1, edges)
       | head :: rest ->
-        helper idx sort (head :: current_block) rest blocks to_exit
+        helper idx sort (head :: current_block) rest blocks to_exit edges
     in
-    let (to_exit, blocks, exit_id) = helper 0 BasicBlock.Entry [] funcinst.code.body [] [] in
+    let (to_exit, blocks, exit_id, edges) = helper 0 BasicBlock.Entry [] funcinst.code.body [] [] [] in
     let exit_block = mk_block exit_id BasicBlock.Exit [] in
     CFG.{ idx = faddr; basic_blocks = List.rev (exit_block :: blocks);
-          edges = List.map to_exit ~f:(fun from -> (from, exit_id)) ;
+          edges = List.map to_exit ~f:(fun from -> (from, exit_id)) @ edges;
           entry_block = 0 ;
-          exit_block = exit_id }
+          exit_block = exit_id } *)
 end
 
 
