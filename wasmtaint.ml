@@ -762,6 +762,385 @@ module CFGBuilder(Data: CFGData) = struct
           edges = actual_edges;
           entry_block = entry_idx;
           exit_block = return_block.idx }
+<<<<<<< HEAD
+=======
+end
+
+
+(** From here-on, this is MODF-style analysis *)
+module Configuration = struct
+  module T = struct
+    type t = {
+      (* XXX: we probably don't want the frame and the store as part of the config, or only as a reference *)
+      store : Store.t;
+      frame : Frame.t;
+      vstack : Value.t list;
+      astack : Instr.t list;
+    }
+    [@@deriving sexp, compare]
+  end
+  include T
+  let to_string (c : t) : string =
+    Printf.sprintf "Config{\n\tvals: [%s]\n\tinstr: [%s]\n\tlocals: [%s]\n}" (String.concat ~sep:", " (List.map c.vstack ~f:Value.to_string)) (String.concat ~sep:", " (List.map c.astack ~f:Instr.to_string)) (String.concat ~sep:", " (List.map c.frame.locals ~f:Value.to_string))
+  module Set = Set.Make(T)
+  module Map = Map.Make(T)
+  let join (c1 : t) (c2 : t) : t =
+    (* We're not supposed to join configurations with non-empty administrative stacks *)
+    (* assert (c1.astack = [] && c2.astack = []); *)
+    { store = Store.join c1.store c2.store;
+      frame = Frame.join c1.frame c2.frame;
+      vstack = List.map2_exn c1.vstack c2.vstack ~f:Value.join;
+      astack = [] }
+  let join_opt (c1 : t option) (c2 : t option) : t option =
+    match (c1, c2) with
+    | None, None -> None
+    | Some c1, None -> Some c1
+    | None, Some c2 -> Some c2
+    | Some c1, Some c2 -> Some (join c1 c2)
+end
+
+module Break = struct
+  module T = struct
+    type t = int * Configuration.t
+    [@@deriving sexp, compare]
+  end
+  include T
+  include Comparator.Make(T)
+  module Set = Set.Make(T)
+  let to_string (b : t) : string =
+    Printf.sprintf "(%d, %s)" (fst b) (Configuration.to_string (snd b))
+end
+
+module Deps = struct
+  module T = struct
+    (* Most of the time, a block either reaches its final state, a return statement, or a break. Due to joining, a block analysis could reach multiple of these *)
+    type block_result = {
+      configuration: Configuration.t option;
+      breaks: Break.Set.t;
+      returned: Configuration.t option;
+    }
+    [@@deriving sexp, compare]
+    type t = {
+      results: block_result Configuration.Map.t ref (* configuration -> configuration map *)
+    }
+    [@@deriving sexp, compare]
+  end
+  include T
+  include Comparator.Make(T)
+  let no_result : block_result =
+    { configuration = None; breaks = Break.Set.empty; returned = None }
+  let empty : t = {
+    results = ref Configuration.Map.empty;
+  }
+  let join_block_results (b1 : block_result) (b2: block_result) : block_result =
+    let join_conf_opt c1 c2 = match (c1, c2) with
+      | (Some c1, Some c2) -> Some (Configuration.join c1 c2)
+      | (Some c1, None) -> Some c1
+      | (None, Some c2) -> Some c2
+      | (None, None) -> None in
+    { configuration = join_conf_opt b1.configuration b2.configuration;
+      returned = join_conf_opt b1.returned b2.returned;
+      breaks = Break.Set.union b1.breaks b2.breaks
+    }
+  let block_result_to_string (b : block_result) : string =
+    Printf.sprintf "configuration %s, returned: %s, breaks: [%s]"
+      (match b.configuration with
+       | Some c -> Configuration.to_string c
+       | None -> "none")
+      (match b.returned with
+       | Some c -> Configuration.to_string c
+       | None -> "none")
+      (String.concat ~sep:", " (List.map (Break.Set.elements b.breaks) ~f:Break.to_string))
+end
+
+(* Structure of the execution:
+Store ; Frame ; Instructions -> Store'; Frame'; Instructions'
+   where Instructions is isomorphic to the stack *)
+module FunctionAnalysis = struct
+  type step_result = {
+    configs: Configuration.Set.t;
+    breaks: Break.Set.t;
+    returned: Configuration.t option;
+    finished: Configuration.t option;
+  }
+  [@@deriving sexp, compare]
+
+  let no_result : step_result = {
+    configs = Configuration.Set.empty;
+    breaks = Break.Set.empty;
+    returned = None;
+    finished = None;
+  }
+  let finished (c : Configuration.t) : step_result =
+    { no_result with finished = Some c }
+  let reached (c : Configuration.t) : step_result =
+    { no_result with configs = Configuration.Set.singleton c }
+  let returned (c : Configuration.t) : step_result =
+    { no_result with returned = Some c }
+  let break (b : Break.t) : step_result =
+    { no_result with breaks = Break.Set.singleton b }
+  let merge_results (r1 : step_result) (r2 : step_result) : step_result =
+    {
+      configs = Configuration.Set.union r1.configs r2.configs;
+      breaks = Break.Set.union r1.breaks r2.breaks;
+      returned = Configuration.join_opt r1.returned r2.returned;
+      finished = Configuration.join_opt r2.finished r2.finished;
+    }
+
+  (* Analyzes a block. Return the configuration at the exit of a block. This resulting configuration is the join of all reachable configurations. The block could also have "returned" if it reaches a "Return" instruction *)
+  let rec analyze_block (conf : Configuration.t) (deps : Deps.t) : Deps.block_result =
+    Printf.printf "analyze_block %s\n" (Configuration.to_string conf);
+    let rec run_analysis (todo: Configuration.t list) (current: Deps.block_result) : Deps.block_result =
+        match todo with
+        | [] -> current
+        | c :: todo' ->
+          Printf.printf "step conf %s from block %s\n" (Configuration.to_string c) (Configuration.to_string conf);
+          let stepped = step c deps in
+          run_analysis (Configuration.Set.fold stepped.configs ~init:todo' ~f:(fun acc c -> c :: acc))
+            (Deps.join_block_results current
+               { configuration = stepped.finished; returned = stepped.returned; breaks = stepped.breaks })
+      in
+    match Configuration.Map.find !(deps.results) conf  with
+    | Some res ->
+      (* results already computed, return it *)
+      Printf.printf "result was cached: %s\n" (Deps.block_result_to_string res);
+      res
+    | None ->
+      (* compute result and cache it. *)
+      deps.results := Configuration.Map.update !(deps.results) conf ~f:(fun _ -> Deps.no_result);
+      let r = run_analysis [conf] { configuration = None; returned = None; breaks = Break.Set.empty } in
+      deps.results := Configuration.Map.update !(deps.results) conf ~f:(fun _ -> r);
+      Printf.printf "result is: %s\n" (Deps.block_result_to_string r);
+      r
+  and invoke (funcaddr : Address.t) (vstack : Value.t list) (store : Store.t) (deps : Deps.t) : (Value.t list * int) =
+    let f = Store.get_funcinst store funcaddr in
+    let (in_arity, out_arity) = f.arity in
+    assert (List.length vstack >= in_arity);
+    let valn = List.take vstack in_arity in
+    let zeros = List.map f.code.locals ~f:Value.zero in
+    Printf.printf "fun %d there are (%d,%d) params and %d locals\n" funcaddr in_arity out_arity (List.length f.code.locals);
+    let frame = Frame.{
+      arity = in_arity + (List.length f.code.locals);
+      module_ = f.module_;
+      locals = valn @ zeros;
+    } in
+    (* let b = Block (snd f.typ) f.code.body in *)
+    let in_conf = Configuration.{
+        store ;
+        frame ;
+        vstack = [] ;
+        astack = f.code.body
+      } in
+    Printf.printf "calling function, analyzing block\n";
+    let analysis_result = analyze_block in_conf deps in
+    let exit_conf = match (analysis_result.configuration, analysis_result.returned) with
+      | (Some c1, Some c2) -> Configuration.join c1 c2
+      | (Some c1, None) -> c1
+      | (None, Some c2) -> c2
+      | (None, None) -> failwith "no analysis result" in
+    (List.take exit_conf.vstack in_arity, in_arity)
+
+  and enter_block (config : Configuration.t) (instrs : Instr.t list) (deps : Deps.t) : step_result =
+    Printf.printf "entering block %s\n" (Configuration.to_string config);
+    let analysis_result = analyze_block { config with astack = instrs } deps in
+    (* Decrease the index of the breaks, those that would reach 0 become finished configurations *)
+    let (breaks, finished) = Break.Set.partition_tf analysis_result.breaks ~f:(fun (b, _) -> b = 1) in
+    let breaks' = Break.Set.map breaks ~f:(fun (b, c) -> (b-1, c)) in
+    let finished' = Break.Set.fold finished
+        ~init:analysis_result.configuration
+        ~f:(fun acc (_, c) ->
+            match acc with
+            | Some c' -> Some (Configuration.join c c')
+            | None -> Some c) in
+    { configs = begin match finished' with
+          | Some c -> Configuration.Set.singleton { c with astack = List.tl_exn config.astack }
+          | None -> Configuration.Set.empty (* next conf comes from successful exits of the analyzed block *)
+        end;
+      finished = None; (* there's no finished *)
+      returned = analysis_result.returned (* Returns are propagated *);
+      breaks = breaks' (* breaks are updated *)}
+  (* Step a configuration by one instruction.
+     Only recursive for specific rewrite case (e.g. TeeLocal is expressed in terms of SetLocal *)
+  and step (config : Configuration.t) (deps : Deps.t) : step_result =
+      match config.astack with
+      | [] -> finished config
+      | head :: astack' ->
+        Printf.printf "head is %s\n, vstack is %s\n" (Instr.to_string head) (String.concat ~sep:"," (List.map ~f:Value.to_string config.vstack));
+        match (head, config.vstack) with
+        | Nop, _ ->
+          (* [spec] Do nothing *)
+          reached
+            { config with astack = astack' }
+        | Drop, _ :: vrest ->
+          (* [spec] Assert: due to validation, a value is on the top of the stack.
+             Pop the value val from the stack. *)
+          reached
+            { config with vstack = vrest; astack = astack' }
+        | Drop, _ ->
+          failwith "Invalid value stack for drop"
+        | LocalGet x, vstack ->
+          (* [spec] Let F be the current frame.
+             Assert: due to validation, F.locals[x] exists.
+             Let val be the value F.locals[x].
+             Push the value val to the stack. *)
+          let v = Frame.get_local config.frame x in
+          reached
+            { config with vstack = v :: vstack; astack = astack' }
+        | LocalSet x, v :: vstack ->
+          (* [spec] Let F be the current frame.
+             Assert: due to validation, F.locals[x] exists.
+             Assert: due to validation, a value is on the top of the stack.
+             Pop the value val from the stack.
+             Replace F.locals[x] with the value val. *)
+          let frame' = Frame.set_local config.frame x v in
+          reached
+            { config with vstack = vstack; astack = astack'; frame = frame' }
+        | LocalSet _, _ -> failwith "Invalid value stack for setlocal"
+        | LocalTee x, v :: vstack ->
+          (* [spec] Assert: due to validation, a value is on the top of the stack.
+             Pop the value val from the stack.
+             Push the value val to the stack.
+             Push the value val to the stack.
+             Execute the instruction (local.set x). *)
+          step { config with vstack = v :: v :: vstack; astack = LocalSet x :: astack' } deps
+        | LocalTee _, _ ->
+          failwith "Invalid value stack for teelocal"
+        | Block instrs, _ ->
+          (* [spec] Let n be the arity |t?| of the result type t?.
+             Let L be the label whose arity is n and whose continuation is the end of the block.
+             Enter the block instr∗ with label L. *)
+          (* We empty the administrative stack before analyzing the block, as we want the block to be analyzed up to its end *)
+          Printf.printf "block\n";
+          enter_block config instrs deps
+        | Loop instrs, _ ->
+          Printf.printf "loop\n";
+          enter_block config (instrs @ [Loop instrs]) deps
+        | Call x, vstack ->
+          (* [spec] Let F be the current frame.
+             Assert: due to validation, F.module.funcaddrs[x] exists.
+             Let a be the function address F.module.funcaddrs[x].
+             Invoke the function instance at address a. *)
+          let funcaddr = Frame.funcaddr config.frame x in
+          Printf.printf "call function %d with vstack: %s\n" funcaddr (String.concat ~sep:","  (List.map vstack ~f:Value.to_string));
+          (* Invoke the function, get a list of return values *)
+          let (return_vs, arity) = invoke funcaddr vstack config.store deps in
+          reached { config with vstack = return_vs @ List.drop vstack arity }
+        | Return, _vstack ->
+          (* [spec] Let F be the current frame.
+             Let n be the arity of F.
+             Assert: due to validation, there are at least n values on the top of the stack.
+             Pop the results valn from the stack.
+             Assert: due to validation, the stack contains at least one frame.
+             While the top of the stack is not a frame, do:
+             Pop the top element from the stack.
+             Assert: the top of the stack is the frame F.
+             Pop the frame from the stack.
+             Push valn to the stack.
+             Jump to the instruction after the original call that pushed the frame. *)
+          (* We just clear the administrative stack when returning *)
+          returned { config with astack = [] }
+        | Const v, vstack ->
+          (* [spec] Push the value t.const c to the stack. *)
+          reached { config with vstack = v :: vstack; astack = astack' }
+        | Compare rel, v2 :: v1 :: vstack ->
+          (* [spec] Assert: due to validation, two values of value type t are on the top of the stack.
+             Pop the value t.const c2 from the stack.
+             Pop the value t.const c1 from the stack.
+             Let c be the result of computing relopt(c1,c2).
+             Push the value i32.const c to the stack. *)
+          let v = Relop.eval rel v1 v2 in
+          reached
+            { config with vstack = v :: vstack; astack = astack' }
+        | Compare _, _ -> failwith "Invalid value stack for compare"
+        | Binary bin, v2 :: v1 :: vstack ->
+          (* [spec] Assert: due to validation, two values of value type t are on the top of the stack.
+             Pop the value t.const c2 from the stack.
+             Pop the value t.const c1 from the stack.
+             If binopt(c1,c2) is defined, then:
+               Let c be a possible result of computing binopt(c1,c2).
+               Push the value t.const c to the stack.
+             Else:
+               Trap. *)
+          let v = Binop.eval bin v1 v2 in (* TODO: trap *)
+          reached
+            { config with vstack = v :: vstack; astack = astack' }
+        | Binary _, _ -> failwith "Invalid value stack for binary"
+        | Test test, v :: vstack ->
+          (* [spec] Assert: due to validation, a value of value type t is on the top of the stack.
+             Pop the value t.const c1 from the stack.
+             Let c be the result of computing testopt(c1).
+             Push the value i32.const c to the stack. *)
+          let v' = Testop.eval test v in
+          reached
+            { config with vstack = v' :: vstack; astack = astack' }
+        | GlobalGet global, vstack ->
+          (* [spec] Let F be the current frame.
+             Assert: due to validation, F.module.globaladdrs[x] exists.
+             Let a be the global address F.module.globaladdrs[x].
+             Assert: due to validation, S.globals[a] exists.
+             Let glob be the global instance S.globals[a].
+             Let val be the value glob.value.
+             Push the value val to the stack. *)
+          let addr = Frame.get_global_addr config.frame global in
+          let g = Store.get_global config.store addr in
+          reached
+            { config with vstack = g.value :: vstack; astack = astack' }
+        | GlobalSet global, v :: vstack ->
+          (* [spec] Let F be the current frame.
+             Assert: due to validation, F.module.globaladdrs[x] exists.
+             Let a be the global address F.module.globaladdrs[x].
+             Assert: due to validation, S.globals[a] exists.
+             Let glob be the global instance S.globals[a].
+             Assert: due to validation, a value is on the top of the stack.
+             Pop the value val from the stack.
+             Replace glob.value with the value val. *)
+          let addr = Frame.get_global_addr config.frame global in
+          reached { config with vstack = vstack; astack = astack'; store = Store.set_global config.store addr v }
+        | Test _, _ -> failwith "Invalid value stack for test"
+        | Br n, _ ->
+          (* [spec] Assert: due to validation, the stack contains at least l+1 labels.
+             Let L be the l-th label appearing on the stack, starting from the top and counting from zero.
+             Let n be the arity of L.
+             Assert: due to validation, there are at least n values on the top of the stack.
+             Pop the values valn from the stack.
+             Repeat l+1 times:
+             While the top of the stack is a value, do:
+             Pop the value from the stack.
+             Assert: due to validation, the top of the stack now is a label.
+             Pop the label from the stack.
+             Push the values valn to the stack.
+             Jump to the continuation of L. *)
+          (* We encode this as just returning Break with the value on n. This
+             will be propagated back until n is 0 *)
+          break (n, { config with astack = astack' })
+        | BrIf n, v :: vstack ->
+          (* [spec] Assert: due to validation, a value of value type i32 is on the top of the stack.
+             Pop the value i32.const c from the stack.
+             If c is non-zero, then:
+               Execute the instruction (br l).
+             Else:
+               Do nothing. *)
+          Printf.printf "Breaking, vstack is %s\n" (String.concat ~sep:"," (List.map ~f:Value.to_string vstack));
+          let config' = { config with vstack = vstack; astack = astack' } in
+          let r1 = if Value.is_zero v then reached config' else no_result in
+          let r2 = if Value.is_zero v then break (n, config') else no_result in
+          merge_results r1 r2
+        | BrIf _, _ -> failwith "Invalid value stack for br_if"
+        | Load op, _v :: vstack ->
+          (* This is a pretty dumb memory abstraction: we just return the top value when loading something from the linea memory *)
+          let c = Value.top op.typ in (* value of the correct type *)
+          reached { config with astack = astack'; vstack = c :: vstack }
+        | Store _op, _v :: _i :: vstack ->
+          reached { config with astack = astack'; vstack = vstack }
+        | _, _ -> failwith "Not implemented yet"
+
+  let analyze_function (funcaddr : Address.t) (store : Store.t) (deps : Deps.t) : (Value.t list * int) =
+    let f = Store.get_funcinst store funcaddr in
+    Printf.printf "Analyzing function:\n%s\n" (FuncInst.to_string f);
+    let (in_arity, _) = f.arity in
+    let vstack = List.init in_arity ~f:(fun _ -> Value.Int) in
+    invoke funcaddr vstack store deps
+>>>>>>> 5f8a5c8ffd9b104aa49c01484ff8f83022b2eee3
 end
 
 let trace name = print_endline ("-- " ^ name)
