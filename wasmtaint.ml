@@ -683,9 +683,6 @@ module Transfer = struct
     | BrIf _ ->
       let (_, vstack') = Domain.pop state.vstack in
       { state with vstack = vstack' }
-    | Block _ -> failwith "shouldn't happen"
-    | Loop _ -> failwith "shouldn't happen"
-    | Call _ -> failwith "TODO: shouldn't be part of the block"
     | Return -> state
     | Const v ->
       { state with vstack = v :: state.vstack }
@@ -703,10 +700,23 @@ module Transfer = struct
       let (v, vstack') = Domain.pop state.vstack in
       let v' = Testop.eval test v in
       { state with vstack = v' :: vstack' }
-    | Load _ -> failwith "TODO"
-    | Store _ -> failwith "TODO"
+    | Load op ->
+      (* TODO: for now, we just return the top value of the expected type *)
+      let c = Value.top op.typ in (* value of the correct type *)
+      { state with vstack = c :: state.vstack }
+    | Store _op ->
+      (* TODO: for now, we just ignore the store *)
+      let (_, vstack') = Domain.pop state.vstack in
+      { state with vstack = vstack' }
+    | Block _ -> failwith "shouldn't happen"
+    | Loop _ -> failwith "shouldn't happen"
+    | Call _ -> failwith "shouldn't happen"
+
   let transfer (b : BasicBlock.t) (state : Domain.state) : Domain.state =
-    List.fold_left b.instrs ~init:state ~f:(fun acc i -> instr_transfer i acc)
+    match b.sort with
+    | Normal ->
+      List.fold_left b.instrs ~init:state ~f:(fun acc i -> instr_transfer i acc)
+    | _ -> failwith "Shouldn't call transfer on a non-normal block"
 end
 
 
@@ -768,7 +778,7 @@ module CFGBuilder = struct
          returns (* no return *),
          block.idx, exit')
       | Call f :: rest ->
-        (* Also similar to br, but connects the edges differently *)
+        (* Also similar to br, but connects the edges differently. Moreover, we don't include the call in this block because it has to be treated differently. *)
         let block = mk_block (Call f :: instrs) in
         let fblock = mk_funblock () in
         let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
