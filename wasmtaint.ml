@@ -580,76 +580,154 @@ module CFGNoData : CFGData = struct
   let init = ()
 end
 
-module CFGBuilder(Data: CFGData) = struct
-  module BasicBlock = struct
-    type block_sort = BlockEntry | BlockExit | LoopEntry | LoopExit | Normal | Function | Return
-    type t = {
-      idx: int;
-      sort: block_sort;
-      instrs: Instr.t list;
-      data: Data.t list;
-    }
-    let to_string (b : t) : string = Printf.sprintf "block %d" b.idx
-    let to_dot (b : t) : string =
-      Printf.sprintf "block%d [shape=%s, label=\"{Block %d (%s):\\l\\l%s\\l}\"];"
-        b.idx
-        (match b.sort with
-         | BlockEntry | BlockExit | LoopEntry | LoopExit -> "ellipse"
-         | Function -> "star"
-         | Normal -> "record"
-         | Return -> "point")
-        b.idx
-        (match b.sort with
-         | BlockEntry -> "block_entry"
-         | BlockExit -> "block_exit"
-         | LoopEntry -> "loop_entry"
-         | LoopExit -> "loop_exit"
-         | Normal -> "normal"
-         | Function -> "function"
-         | Return -> "return"
-        )
+module BasicBlock = struct
+  type block_sort = BlockEntry | BlockExit | LoopEntry | LoopExit | Normal | Function | Return
+  type t = {
+    idx: int;
+    sort: block_sort;
+    instrs: Instr.t list;
+  }
+  let to_string (b : t) : string = Printf.sprintf "block %d" b.idx
+  let to_dot (b : t) : string =
+    match b.sort with
+    | Normal ->
+      Printf.sprintf "block%d [shape=record, label=\"{Block %d:\\l\\l%s\\l}\"];"
+        b.idx b.idx
         (String.concat ~sep:"\\l"
-           (List.map2_exn b.instrs b.data
-              ~f:(fun instr data ->
-                  Printf.sprintf "%s %s" (Instr.to_string instr ~sep:"\\l") (Data.to_string data))))
-  end
+           (List.map b.instrs
+              ~f:(fun instr ->
+                  Printf.sprintf "%s" (Instr.to_string instr ~sep:"\\l"))))
+    | BlockEntry ->
+      Printf.sprintf "block%d [shape=ellipse, label = \"Block entry\"];" b.idx
+    | BlockExit ->
+      Printf.sprintf "block%d [shape=ellipse, label = \"Block exit\"];" b.idx
+    | LoopEntry ->
+      Printf.sprintf "block%d [shape=ellipse, label = \"Loop entry\"];" b.idx
+    | LoopExit ->
+      Printf.sprintf "block%d [shape=ellipse, label = \"Loop exit\"];" b.idx
+    | Function ->
+      Printf.sprintf "block%d [shape=star, label=\"Function call\"];" b.idx
+    | Return ->
+      Printf.sprintf "block%d [shape=point]" b.idx
+end
 
-  module CFG = struct
-    type t = {
-      idx: int;
-      basic_blocks: BasicBlock.t list;
-      edges: (int * int) list;
-      entry_block: int;
-      exit_block: int;
-    }
-    let to_string (cfg : t) : string = Printf.sprintf "CFG of function %d" cfg.idx
-    let to_dot (cfg : t) : string =
-      Printf.sprintf "digraph \"CFG of function %d\" {\n%s\n%s}\n"
-        cfg.idx
-        (String.concat ~sep:"\n" (List.map cfg.basic_blocks ~f:BasicBlock.to_dot))
-        (String.concat ~sep:"\n" (List.map cfg.edges ~f:(fun (left, right) -> Printf.sprintf "block%d -> block%d;\n" left right)))
+module CFG = struct
+  type t = {
+    idx: int;
+    basic_blocks: BasicBlock.t list;
+    edges: (int * int) list;
+    entry_block: int;
+    exit_block: int;
+  }
+  let to_string (cfg : t) : string = Printf.sprintf "CFG of function %d" cfg.idx
+  let to_dot (cfg : t) : string =
+    Printf.sprintf "digraph \"CFG of function %d\" {\n%s\n%s}\n"
+      cfg.idx
+      (String.concat ~sep:"\n" (List.map cfg.basic_blocks ~f:BasicBlock.to_dot))
+      (String.concat ~sep:"\n" (List.map cfg.edges ~f:(fun (left, right) -> Printf.sprintf "block%d -> block%d;\n" left right)))
+end
 
-  end
+module Domain = struct
+  (* The value stack is abstracted as a stack of values. It cannot grow unbounded so that is safe *)
+  type vstack = Value.t list
+  let pop (vstack : vstack) : (Value.t * vstack) =
+    match vstack with
+    | hd :: tl -> (hd, tl)
+    | _ -> failwith "Invalid empty vstack"
+  (* Similarly, locals are finite for any function *)
+  type locals = Value.t list
+  let get_local (l : locals) (x : int) : Value.t = List.nth_exn l x
+  let set_local (l : locals) (x : int) (v' : Value.t) : locals = List.mapi l ~f:(fun i v -> if i = x then v' else v)
 
+  (* There are also a finite number of globals *)
+  type globals = Value.t list
+  let get_global (g : globals) (x : int) : Value.t = List.nth_exn g x
+  let set_global (g : globals) (x : int) (v' : Value.t) : globals = List.mapi g ~f:(fun i v -> if i = x then v' else v)
+
+  (* TODO *)
+  type memory = TODO
+
+  type state = {
+    vstack : vstack;
+    locals : locals;
+    globals : globals;
+    memory : memory
+  }
+end
+
+module Transfer = struct
+  let rec instr_transfer (i : Instr.t) (state : Domain.state) : Domain.state =
+    match i with
+    | Nop ->
+      state
+    | Drop ->
+      let (_, vstack') = Domain.pop state.vstack in
+      { state with vstack = vstack' }
+    | LocalGet x ->
+      { state with vstack = (Domain.get_local state.locals x) :: state.vstack }
+    | LocalSet x ->
+      let (v, vstack') = Domain.pop state.vstack in
+      { state with vstack = vstack';
+                   locals = Domain.set_local state.locals x v }
+    | LocalTee x ->
+      let (v, vstack') = Domain.pop state.vstack in
+      instr_transfer (LocalSet x) { state with vstack = v :: v :: vstack' }
+    | GlobalGet x ->
+      { state with vstack = (Domain.get_global state.globals x) :: state.vstack }
+    | GlobalSet x ->
+      let (v, vstack') = Domain.pop state.vstack in
+      { state with vstack = vstack';
+                   globals = Domain.set_global state.globals x v }
+    | Br _ ->
+      state
+    | BrIf _ ->
+      let (_, vstack') = Domain.pop state.vstack in
+      { state with vstack = vstack' }
+    | Block _ -> failwith "shouldn't happen"
+    | Loop _ -> failwith "shouldn't happen"
+    | Call _ -> failwith "TODO: shouldn't be part of the block"
+    | Return -> state
+    | Const v ->
+      { state with vstack = v :: state.vstack }
+    | Compare rel ->
+      let (v1, vstack') = Domain.pop state.vstack in
+      let (v2, vstack'') = Domain.pop vstack' in
+      let v = Relop.eval rel v1 v2 in
+      { state with vstack = v :: vstack'' }
+    | Binary bin ->
+      let (v1, vstack') = Domain.pop state.vstack in
+      let (v2, vstack'') = Domain.pop vstack' in
+      let v = Binop.eval bin v1 v2 in
+      { state with vstack = v :: vstack'' }
+    | Test test ->
+      let (v, vstack') = Domain.pop state.vstack in
+      let v' = Testop.eval test v in
+      { state with vstack = v' :: vstack' }
+    | Load _ -> failwith "TODO"
+    | Store _ -> failwith "TODO"
+  let transfer (b : BasicBlock.t) (state : Domain.state) : Domain.state =
+    List.fold_left b.instrs ~init:state ~f:(fun acc i -> instr_transfer i acc)
+end
+
+
+module CFGBuilder = struct
   let build (faddr : Address.t) (store : Store.t) : CFG.t =
     let funcinst = Store.get_funcinst store faddr in
     let cur_idx : int ref = ref 0 in
     let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
     let mk_block (reverse_instrs : Instr.t list) : BasicBlock.t =
       let instrs = List.rev reverse_instrs in
-      BasicBlock.{ idx = new_idx (); instrs = instrs; sort = BasicBlock.Normal; data = List.map instrs ~f:(fun _ -> Data.init) } in
+      BasicBlock.{ idx = new_idx (); instrs = instrs; sort = BasicBlock.Normal; } in
     let mk_funblock () : BasicBlock.t =
-      BasicBlock.{ idx = new_idx () ; instrs = []; sort = Function; data = [] } in
+      BasicBlock.{ idx = new_idx () ; instrs = []; sort = Function } in
     let mk_block_entry (is_loop : bool) : BasicBlock.t =
       BasicBlock.{ idx = new_idx () ; instrs = [];
-                   sort = if is_loop then LoopEntry else BlockEntry;
-                   data = [] } in
+                   sort = if is_loop then LoopEntry else BlockEntry } in
     let mk_block_exit (is_loop : bool) : BasicBlock.t =
       BasicBlock.{ idx = new_idx () ; instrs = [];
-                   sort = if is_loop then LoopExit else BlockExit;
-                   data = [] } in
+                   sort = if is_loop then LoopExit else BlockExit } in
     let mk_block_return () : BasicBlock.t =
-      BasicBlock.{ idx = new_idx () ; instrs = []; sort = Return; data = [] } in
+      BasicBlock.{ idx = new_idx () ; instrs = []; sort = Return } in
     let rec helper (instrs : Instr.t list) (remaining : Instr.t list) : (
       (* The blocks created *)
       BasicBlock.t list *
@@ -799,7 +877,6 @@ let parse_file name run =
     success
   with exn -> In_channel.close ic; raise exn
 
-module CFGBuilderNoData = CFGBuilder(CFGNoData)
 let run_cfg () =
   let run (l : (Script.var option * Script.definition) list) =
     List.iter l ~f:(fun (_var_opt, def) ->
@@ -808,8 +885,8 @@ let run_cfg () =
           let store = Store.init m in
           List.iteri store.funcs ~f:(fun faddr _ ->
               Printf.printf "CFG for function %d\n" faddr;
-              let cfg = CFGBuilderNoData.build faddr store in
-              Printf.printf "---------------\n%s\n---------------\n" (CFGBuilderNoData.CFG.to_dot cfg))
+              let cfg = CFGBuilder.build faddr store in
+              Printf.printf "---------------\n%s\n---------------\n" (CFG.to_dot cfg))
         | Script.Encoded _ -> failwith "unsupported"
         | Script.Quoted _ -> failwith "unsupported"
       ) in
