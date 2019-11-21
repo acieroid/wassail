@@ -621,18 +621,37 @@ module IntSet = Set.Make(I)
 
 module CFG = struct
   type t = {
+    (* The index of this CFG *)
     idx: int;
-    basic_blocks: BasicBlock.t list;
-    edges: int IntMap.t;
+    (* The number of locals in that CFG *)
+    nlocals: int;
+    (* All basic blocks contained in this CFG, indexed in a map by their index *)
+    basic_blocks: BasicBlock.t IntMap.t;
+    (* The edges between basic blocks (forward direction) *)
+    edges: (int list) IntMap.t;
+    (* The edges between basic blocks (backward direction) *)
+    back_edges: (int list) IntMap.t;
+    (* The entry block *)
     entry_block: int;
+    (* The exit block *)
     exit_block: int;
   }
   let to_string (cfg : t) : string = Printf.sprintf "CFG of function %d" cfg.idx
   let to_dot (cfg : t) : string =
     Printf.sprintf "digraph \"CFG of function %d\" {\n%s\n%s}\n"
       cfg.idx
-      (String.concat ~sep:"\n" (List.map cfg.basic_blocks ~f:BasicBlock.to_dot))
-      (String.concat ~sep:"\n" (List.map (IntMap.to_alist cfg.edges) ~f:(fun (left, right) -> Printf.sprintf "block%d -> block%d;\n" left right)))
+      (String.concat ~sep:"\n" (List.map (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, b) -> BasicBlock.to_dot b)))
+      (String.concat ~sep:"\n" (List.concat_map (IntMap.to_alist cfg.edges) ~f:(fun (left, right) ->
+           List.map right ~f:(Printf.sprintf "block%d -> block%d;\n" left))))
+
+  let find_block_exn (cfg : t) (idx : int) : BasicBlock.t =
+    IntMap.find_exn cfg.basic_blocks idx
+
+  let successors (cfg : t) (idx : int) : int list =
+    IntMap.find_multi cfg.edges idx
+
+  let predecessors (cfg : t) (idx : int) : int list =
+    IntMap.find_multi cfg.back_edges idx
 end
 
 module Domain = struct
@@ -662,6 +681,12 @@ module Domain = struct
     memory : memory
   }
 
+  let to_string (s : state) : string =
+    Printf.sprintf "{vstack: [%s], locals: [%s], globals: [%s]}"
+      (String.concat ~sep:", " (List.map s.vstack ~f:Value.to_string))
+      (String.concat ~sep:", " (List.mapi s.locals ~f:(fun i v -> Printf.sprintf "%d: %s" i (Value.to_string v))))
+      (String.concat ~sep:", " (List.mapi s.locals ~f:(fun i v -> Printf.sprintf "%d: %s" i (Value.to_string v))))
+
   let bottom (nlocals : int) (globals : globals) (memory : memory) = {
     vstack = [];
     locals = List.init nlocals ~f:(fun _ -> Value.zero I32Type); (* TODO: should actually be bottom *)
@@ -669,7 +694,12 @@ module Domain = struct
     memory = memory
   }
 
-  let join (s1 : state) (s2 : state) : state = failwith "TODO: domain join"
+  let join (s1 : state) (s2 : state) : state = {
+    vstack = List.map2_exn s1.vstack s2.vstack ~f:Value.join;
+    locals = List.map2_exn s1.locals s2.locals ~f:Value.join;
+    globals = List.map2_exn s1.globals s2.globals ~f:Value.join;
+    memory = TODO
+  }
 end
 
 module Transfer = struct
@@ -738,23 +768,24 @@ end
 
 module Fixpoint = struct
   (* Analyzes a CFG. Returns a map where each basic blocks is mappped to its input state and output state *)
-  let analyze (cfg : CFG.t) (nlocals : int) (globals : Domain.globals) (memory : Domain.memory) : (Domain.state * Domain.state) IntMap.t =
-    let data = ref (IntMap.of_alist_exn (List.map cfg.basic_blocks
-                                           ~f:(fun b ->
-                                               let v = Domain.bottom nlocals globals memory in
-                                               (b.idx, (v, v))))) in
+  let analyze (cfg : CFG.t) (globals : Domain.globals) (memory : Domain.memory) : (Domain.state * Domain.state) IntMap.t =
+    let bottom = Domain.bottom cfg.nlocals globals memory in
+    let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
+                                           ~f:(fun idx -> (idx, (bottom, bottom))))) in
     let rec fixpoint (worklist : IntSet.t) : unit =
       if IntSet.is_empty worklist then
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = IntSet.min_elt_exn worklist in
-        let in_state = failwith "TODO: Join all preds" in
-        if failwith "in_state has not changed" then
+        let predecessors = CFG.predecessors cfg block_idx in
+        (* in_state is the join of all the the out_state of the predecessors *)
+        let in_state = List.fold_left (List.map predecessors ~f:(fun idx -> snd (IntMap.find_exn !data idx))) ~init:bottom ~f:Domain.join in
+        if failwith "TODO: in state comparison in_state has not changed" then
           (* In state has not changed since last analysis, so we can ignore this block *)
           fixpoint (IntSet.remove worklist block_idx)
         else
           (* In state has changed *)
-          let block = CFG.find_block block_idx in
+          let block = CFG.find_block_exn cfg block_idx in
           let out_state = Transfer.transfer block in_state in
           (* Out state most probably has changed so we don't even check for that and assume it has *)
           (* Update the out state in the analysis results *)
@@ -763,6 +794,7 @@ module Fixpoint = struct
           let successors = CFG.successors cfg block_idx in
           fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors))
     in
+    fixpoint (IntSet.singleton cfg.entry_block);
     !data
 end
 
@@ -892,10 +924,21 @@ module CFGBuilder = struct
         let (pointing_from, edges'') = List.partition_tf edges' ~f:(fun (src, _) -> src = idx) in
         (* now we connect everything from both sets *)
         List.concat (List.map pointing_to ~f:(fun (src, _) -> List.map pointing_from ~f:(fun (_, dst) -> (src, dst)))) @ edges'') in
-    CFG.{ idx = faddr; basic_blocks = actual_blocks;
-          edges = IntMap.of_alist_exn actual_edges;
-          entry_block = entry_idx;
-          exit_block = return_block.idx }
+    CFG.{
+      (* The index of this block is the integer that represent the address of this function *)
+      idx = faddr;
+      (* There are a+b locals, where a is the number of parameters of the function, and b is the number of local variables *)
+      nlocals = fst funcinst.arity + List.length funcinst.code.locals;
+      (*The basic blocks *)
+      basic_blocks = IntMap.of_alist_exn (List.map actual_blocks ~f:(fun b -> (b.idx, b)));
+      (* The forward edges *)
+      edges = IntMap.of_alist_multi actual_edges;
+      (* The backward edges *)
+      back_edges = IntMap.of_alist_multi (List.rev actual_edges);
+      (* The entry block *)
+      entry_block = entry_idx;
+      (* The exit block is the return block *)
+      exit_block = return_block.idx }
 end
 
 let trace name = print_endline ("-- " ^ name)
@@ -939,10 +982,17 @@ let run_cfg () =
         match def.it with
         | Script.Textual m ->
           let store = Store.init m in
+          let globals = ref (List.map store.globals ~f:(fun _ -> Value.zero Type.I32Type)) in
           List.iteri store.funcs ~f:(fun faddr _ ->
               Printf.printf "CFG for function %d\n" faddr;
               let cfg = CFGBuilder.build faddr store in
-              Printf.printf "---------------\n%s\n---------------\n" (CFG.to_dot cfg))
+              Printf.printf "---------------\n%s\n---------------\n" (CFG.to_dot cfg);
+              let results = Fixpoint.analyze cfg !globals TODO in
+              Printf.printf "-------\nResults\n------\n";
+              Map.iteri results ~f:(fun ~key:idx ~data:res ->
+                  Printf.printf "block %d: %s -> %s" idx (Domain.to_string (fst res)) (Domain.to_string (snd res)));
+              ()
+            )
         | Script.Encoded _ -> failwith "unsupported"
         | Script.Quoted _ -> failwith "unsupported"
       ) in
