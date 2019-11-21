@@ -611,11 +611,19 @@ module BasicBlock = struct
       Printf.sprintf "block%d [shape=point]" b.idx
 end
 
+module I = struct
+  type t = int
+  [@@deriving sexp, compare]
+end
+
+module IntMap = Map.Make(I)
+module IntSet = Set.Make(I)
+
 module CFG = struct
   type t = {
     idx: int;
     basic_blocks: BasicBlock.t list;
-    edges: (int * int) list;
+    edges: int IntMap.t;
     entry_block: int;
     exit_block: int;
   }
@@ -624,7 +632,7 @@ module CFG = struct
     Printf.sprintf "digraph \"CFG of function %d\" {\n%s\n%s}\n"
       cfg.idx
       (String.concat ~sep:"\n" (List.map cfg.basic_blocks ~f:BasicBlock.to_dot))
-      (String.concat ~sep:"\n" (List.map cfg.edges ~f:(fun (left, right) -> Printf.sprintf "block%d -> block%d;\n" left right)))
+      (String.concat ~sep:"\n" (List.map (IntMap.to_alist cfg.edges) ~f:(fun (left, right) -> Printf.sprintf "block%d -> block%d;\n" left right)))
 end
 
 module Domain = struct
@@ -653,6 +661,15 @@ module Domain = struct
     globals : globals;
     memory : memory
   }
+
+  let bottom (nlocals : int) (globals : globals) (memory : memory) = {
+    vstack = [];
+    locals = List.init nlocals ~f:(fun _ -> Value.zero I32Type); (* TODO: should actually be bottom *)
+    globals = globals;
+    memory = memory
+  }
+
+  let join (s1 : state) (s2 : state) : state = failwith "TODO: domain join"
 end
 
 module Transfer = struct
@@ -719,6 +736,35 @@ module Transfer = struct
     | _ -> failwith "Shouldn't call transfer on a non-normal block"
 end
 
+module Fixpoint = struct
+  (* Analyzes a CFG. Returns a map where each basic blocks is mappped to its input state and output state *)
+  let analyze (cfg : CFG.t) (nlocals : int) (globals : Domain.globals) (memory : Domain.memory) : (Domain.state * Domain.state) IntMap.t =
+    let data = ref (IntMap.of_alist_exn (List.map cfg.basic_blocks
+                                           ~f:(fun b ->
+                                               let v = Domain.bottom nlocals globals memory in
+                                               (b.idx, (v, v))))) in
+    let rec fixpoint (worklist : IntSet.t) : unit =
+      if IntSet.is_empty worklist then
+        () (* No more elements to consider. We can stop here *)
+      else
+        let block_idx = IntSet.min_elt_exn worklist in
+        let in_state = failwith "TODO: Join all preds" in
+        if failwith "in_state has not changed" then
+          (* In state has not changed since last analysis, so we can ignore this block *)
+          fixpoint (IntSet.remove worklist block_idx)
+        else
+          (* In state has changed *)
+          let block = CFG.find_block block_idx in
+          let out_state = Transfer.transfer block in_state in
+          (* Out state most probably has changed so we don't even check for that and assume it has *)
+          (* Update the out state in the analysis results *)
+          data := IntMap.set !data ~key:block_idx ~data:(in_state, out_state);
+          (* And recurse by adding all successors *)
+          let successors = CFG.successors cfg block_idx in
+          fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors))
+    in
+    !data
+end
 
 module CFGBuilder = struct
   let build (faddr : Address.t) (store : Store.t) : CFG.t =
@@ -847,7 +893,7 @@ module CFGBuilder = struct
         (* now we connect everything from both sets *)
         List.concat (List.map pointing_to ~f:(fun (src, _) -> List.map pointing_from ~f:(fun (_, dst) -> (src, dst)))) @ edges'') in
     CFG.{ idx = faddr; basic_blocks = actual_blocks;
-          edges = actual_edges;
+          edges = IntMap.of_alist_exn actual_edges;
           entry_block = entry_idx;
           exit_block = return_block.idx }
 end
