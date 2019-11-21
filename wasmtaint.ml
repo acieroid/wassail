@@ -700,7 +700,18 @@ module Domain = struct
   }
 
   let join (s1 : state) (s2 : state) : state = {
-    vstack = List.map2_exn s1.vstack s2.vstack ~f:Value.join;
+    vstack =
+      if List.length s1.vstack <> List.length s2.vstack then
+        (* Different length, probably one has not been analyzed yet. Just take the maximal one *)
+        if List.length s1.vstack > List.length s2.vstack then begin
+          assert (s2.vstack = []);
+          s1.vstack
+        end else begin
+          assert (s1.vstack = []);
+          s2.vstack
+        end
+      else
+        List.map2_exn s1.vstack s2.vstack ~f:Value.join;
     locals = List.map2_exn s1.locals s2.locals ~f:Value.join;
     globals = List.map2_exn s1.globals s2.globals ~f:Value.join;
     memory = TODO
@@ -767,19 +778,25 @@ module Transfer = struct
   let transfer (b : BasicBlock.t) (state : Domain.state) : Domain.state =
     match b.sort with
     | Normal ->
-      List.fold_left b.instrs ~init:state ~f:(fun acc i -> instr_transfer i acc)
-    | _ -> failwith "Shouldn't call transfer on a non-normal block"
+      Printf.printf "Block %d, instructions: %s\n" b.idx (String.concat ~sep:"," (List.map b.instrs ~f:Instr.to_string));
+      List.fold_left b.instrs ~init:state ~f:(fun acc i ->
+          let res = instr_transfer i acc in
+          Printf.printf "%s -> %s -> %s\n" (Domain.to_string acc) (Instr.to_string i) (Domain.to_string res);
+          res
+        )
+    | _ -> state
 end
 
 module Fixpoint = struct
   (* Analyzes a CFG. Returns a map where each basic blocks is mappped to its input state and output state *)
   let analyze (cfg : CFG.t) (globals : Domain.globals) (memory : Domain.memory) : (Domain.state * Domain.state) IntMap.t =
     let bottom = Domain.bottom cfg.nlocals globals memory in
+    (* TODO: how to distinguish initial data from bottom? *)
     let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
                                            ~f:(fun idx ->
                                                Printf.printf "creating data for block %d\n" idx;
                                                (idx, (bottom, bottom))))) in
-    let rec fixpoint (worklist : IntSet.t) : unit =
+    let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =
       if IntSet.is_empty worklist then
         () (* No more elements to consider. We can stop here *)
       else
@@ -788,21 +805,23 @@ module Fixpoint = struct
         let predecessors = CFG.predecessors cfg block_idx in
         (* in_state is the join of all the the out_state of the predecessors *)
         let in_state = List.fold_left (List.map predecessors ~f:(fun idx -> snd (IntMap.find_exn !data idx))) ~init:bottom ~f:Domain.join in
-        if in_state = fst (IntMap.find_exn !data block_idx) then
-          (* In state has not changed since last analysis, so we can ignore this block *)
-          fixpoint (IntSet.remove worklist block_idx)
+        (* The block to analyze *)
+        let block = CFG.find_block_exn cfg block_idx in
+        (* We analyze it *)
+        let out_state = Transfer.transfer block in_state in
+        (* Has out state changed? *)
+        if out_state = snd (IntMap.find_exn !data block_idx) then
+          (* Didn't change, we can safely ignore the successors *)
+          (* TODO: make sure that this is true. If not, maybe we just have to put all blocks on the worklist for the first iteration(s) *)
+          fixpoint (IntSet.remove worklist block_idx) (iteration+1)
         else
-          (* In state has changed *)
-          let block = CFG.find_block_exn cfg block_idx in
-          let out_state = Transfer.transfer block in_state in
-          (* Out state most probably has changed so we don't even check for that and assume it has *)
           (* Update the out state in the analysis results *)
           data := IntMap.set !data ~key:block_idx ~data:(in_state, out_state);
           (* And recurse by adding all successors *)
           let successors = CFG.successors cfg block_idx in
-          fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors))
+          fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors)) (iteration+1)
     in
-    fixpoint (IntSet.singleton cfg.entry_block);
+    fixpoint (IntSet.singleton cfg.entry_block) 1;
     !data
 end
 
@@ -1008,3 +1027,5 @@ let run_cfg () =
   Printf.printf "Success? %b" (parse_file "examples/overflow/overflow.wat" run)
 
 let () = run_cfg ()
+
+
