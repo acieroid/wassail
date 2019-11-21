@@ -657,22 +657,26 @@ end
 module Domain = struct
   (* The value stack is abstracted as a stack of values. It cannot grow unbounded so that is safe *)
   type vstack = Value.t list
+  [@@deriving sexp, compare]
   let pop (vstack : vstack) : (Value.t * vstack) =
     match vstack with
     | hd :: tl -> (hd, tl)
     | _ -> failwith "Invalid empty vstack"
   (* Similarly, locals are finite for any function *)
   type locals = Value.t list
+  [@@deriving sexp, compare]
   let get_local (l : locals) (x : int) : Value.t = List.nth_exn l x
   let set_local (l : locals) (x : int) (v' : Value.t) : locals = List.mapi l ~f:(fun i v -> if i = x then v' else v)
 
   (* There are also a finite number of globals *)
   type globals = Value.t list
+  [@@deriving sexp, compare]
   let get_global (g : globals) (x : int) : Value.t = List.nth_exn g x
   let set_global (g : globals) (x : int) (v' : Value.t) : globals = List.mapi g ~f:(fun i v -> if i = x then v' else v)
 
   (* TODO *)
   type memory = TODO
+  [@@deriving sexp, compare]
 
   type state = {
     vstack : vstack;
@@ -680,6 +684,7 @@ module Domain = struct
     globals : globals;
     memory : memory
   }
+  [@@deriving sexp, compare]
 
   let to_string (s : state) : string =
     Printf.sprintf "{vstack: [%s], locals: [%s], globals: [%s]}"
@@ -771,16 +776,19 @@ module Fixpoint = struct
   let analyze (cfg : CFG.t) (globals : Domain.globals) (memory : Domain.memory) : (Domain.state * Domain.state) IntMap.t =
     let bottom = Domain.bottom cfg.nlocals globals memory in
     let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
-                                           ~f:(fun idx -> (idx, (bottom, bottom))))) in
+                                           ~f:(fun idx ->
+                                               Printf.printf "creating data for block %d\n" idx;
+                                               (idx, (bottom, bottom))))) in
     let rec fixpoint (worklist : IntSet.t) : unit =
       if IntSet.is_empty worklist then
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = IntSet.min_elt_exn worklist in
+        Printf.printf "Analyzing block %d\n" block_idx;
         let predecessors = CFG.predecessors cfg block_idx in
         (* in_state is the join of all the the out_state of the predecessors *)
         let in_state = List.fold_left (List.map predecessors ~f:(fun idx -> snd (IntMap.find_exn !data idx))) ~init:bottom ~f:Domain.join in
-        if failwith "TODO: in state comparison in_state has not changed" then
+        if in_state = fst (IntMap.find_exn !data block_idx) then
           (* In state has not changed since last analysis, so we can ignore this block *)
           fixpoint (IntSet.remove worklist block_idx)
         else
@@ -906,7 +914,7 @@ module CFGBuilder = struct
         (* Instruction i is part of the block, but not the end of it so we continue *)
         helper (i :: instrs) rest
     in
-    let (blocks, edges, breaks, returns, entry_idx, exit_idx) = helper [] funcinst.code.body in
+    let (blocks, edges, breaks, returns, _entry_idx, exit_idx) = helper [] funcinst.code.body in
     let return_block = mk_block_return () in
     let blocks' = return_block :: blocks in
     let edges' = (exit_idx, return_block.idx) :: List.map returns ~f:(fun from -> (from, return_block.idx)) @ edges in
@@ -936,7 +944,8 @@ module CFGBuilder = struct
       (* The backward edges *)
       back_edges = IntMap.of_alist_multi (List.rev actual_edges);
       (* The entry block *)
-      entry_block = entry_idx;
+      (* TODO: probably not fully correct so we have to pay close attention to that: there should be a single entry block *)
+      entry_block = Option.value_exn (List.min_elt (List.map actual_blocks ~f:(fun b -> b.idx)) ~compare:compare);
       (* The exit block is the return block *)
       exit_block = return_block.idx }
 end
@@ -990,7 +999,7 @@ let run_cfg () =
               let results = Fixpoint.analyze cfg !globals TODO in
               Printf.printf "-------\nResults\n------\n";
               Map.iteri results ~f:(fun ~key:idx ~data:res ->
-                  Printf.printf "block %d: %s -> %s" idx (Domain.to_string (fst res)) (Domain.to_string (snd res)));
+                  Printf.printf "block %d: %s -> %s\n" idx (Domain.to_string (fst res)) (Domain.to_string (snd res)));
               ()
             )
         | Script.Encoded _ -> failwith "unsupported"
