@@ -693,9 +693,9 @@ module Domain = struct
       (String.concat ~sep:", " (List.mapi s.locals ~f:(fun i v -> Printf.sprintf "%d: %s" i (Value.to_string v))))
       (String.concat ~sep:", " (List.mapi s.locals ~f:(fun i v -> Printf.sprintf "%d: %s" i (Value.to_string v))))
 
-  let bottom (nlocals : int) (globals : globals) (memory : memory) = {
+  let init (nlocals : int) (globals : globals) (memory : memory) = {
     vstack = [];
-    locals = List.init nlocals ~f:(fun _ -> Value.zero I32Type); (* TODO: should actually be bottom *)
+    locals = List.init nlocals ~f:(fun _ -> Value.zero I32Type);
     globals = globals;
     memory = memory
   }
@@ -717,6 +717,12 @@ module Domain = struct
     globals = List.map2_exn s1.globals s2.globals ~f:Value.join;
     memory = TODO
   }
+  let join_opt (s1 : state option) (s2 : state option) : state option =
+    match (s1, s2) with
+    | Some s1, Some s2 -> Some (join s1 s2)
+    | Some s1, None -> Some s1
+    | None, Some s2 -> Some s2
+    | None, None -> None
 end
 
 module Transfer = struct
@@ -814,7 +820,8 @@ end
 module Fixpoint = struct
   (* Analyzes a CFG. Returns a map where each basic blocks is mappped to its input state and output state *)
   let analyze (cfg : CFG.t) (globals : Domain.globals) (memory : Domain.memory) : (Domain.state * Domain.state) IntMap.t =
-    let bottom = Domain.bottom cfg.nlocals globals memory in
+    let bottom = None in
+    let init = Domain.init cfg.nlocals globals memory in
     (* TODO: how to distinguish initial data from bottom? *)
     let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
                                            ~f:(fun idx ->
@@ -828,27 +835,28 @@ module Fixpoint = struct
         Printf.printf "Analyzing block %d\n" block_idx;
         let predecessors = CFG.predecessors cfg block_idx in
         (* in_state is the join of all the the out_state of the predecessors *)
-        let in_state = List.fold_left (List.map predecessors ~f:(fun idx -> snd (IntMap.find_exn !data idx))) ~init:bottom ~f:Domain.join in
+        let in_state = Option.value (List.fold_left (List.map predecessors ~f:(fun idx -> snd (IntMap.find_exn !data idx))) ~init:bottom ~f:Domain.join_opt) ~default:init in
         (* The block to analyze *)
         let block = CFG.find_block_exn cfg block_idx in
         (* We analyze it *)
         let out_state = Transfer.transfer block in_state in
         (* Has out state changed? *)
         Printf.printf "in state: %s\nout state: %s\n" (Domain.to_string in_state) (Domain.to_string out_state);
-        if out_state = snd (IntMap.find_exn !data block_idx) then begin
+        let previous_out_state = snd (IntMap.find_exn !data block_idx) in
+        if previous_out_state = Some(out_state) then begin
           (* Didn't change, we can safely ignore the successors *)
           (* TODO: make sure that this is true. If not, maybe we just have to put all blocks on the worklist for the first iteration(s) *)
           fixpoint (IntSet.remove worklist block_idx) (iteration+1)
         end else begin
-          (* Update the out state in the analysis results *)
-          data := IntMap.set !data ~key:block_idx ~data:(in_state, out_state);
+          (* Update the out state in the analysis results, joining it with the previous one *)
+          data := IntMap.set !data ~key:block_idx ~data:(Some in_state, Domain.join_opt (Some out_state) previous_out_state);
           (* And recurse by adding all successors *)
           let successors = CFG.successors cfg block_idx in
           fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors)) (iteration+1)
         end
     in
     fixpoint (IntSet.singleton cfg.entry_block) 1;
-    !data
+    IntMap.map !data ~f:(fun (in_state, out_state) -> (Option.value_exn in_state, Option.value_exn out_state))
 end
 
 module CFGBuilder = struct
