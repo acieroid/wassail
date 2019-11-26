@@ -4,6 +4,7 @@ open Wasm
 (* TODO: ([ ] = to start, [-] = started, [x] = finished)
   - [x] Support memory instructions (load, store)
   - [x] Display loaded program nicely
+  - [x] Bug: it is now analyzing block [4, 7, 9, 10, 11, 9, 10, 11, 5, 7, 9, 10, 11, 9, 10, 11]*
   - [ ] Tests
   - [ ] Use apron for abstraction of values
   - [ ] Display results of the analysis
@@ -801,10 +802,10 @@ module Transfer = struct
   let transfer (b : BasicBlock.t) (state : Domain.state) : Domain.state =
     match b.sort with
     | Normal ->
-      Printf.printf "Block %d, instructions: %s\n" b.idx (String.concat ~sep:"," (List.map b.instrs ~f:Instr.to_string));
+      (* Printf.printf "Block %d, instructions: %s\n" b.idx (String.concat ~sep:"," (List.map b.instrs ~f:Instr.to_string)); *)
       List.fold_left b.instrs ~init:state ~f:(fun acc i ->
           let res = instr_transfer i acc in
-          Printf.printf "%s -> %s -> %s\n" (Domain.to_string acc) (Instr.to_string i) (Domain.to_string res);
+          (* Printf.printf "%s -> %s -> %s\n" (Domain.to_string acc) (Instr.to_string i) (Domain.to_string res); *)
           res
         )
     | _ -> state
@@ -833,16 +834,18 @@ module Fixpoint = struct
         (* We analyze it *)
         let out_state = Transfer.transfer block in_state in
         (* Has out state changed? *)
-        if out_state = snd (IntMap.find_exn !data block_idx) then
+        Printf.printf "in state: %s\nout state: %s\n" (Domain.to_string in_state) (Domain.to_string out_state);
+        if out_state = snd (IntMap.find_exn !data block_idx) then begin
           (* Didn't change, we can safely ignore the successors *)
           (* TODO: make sure that this is true. If not, maybe we just have to put all blocks on the worklist for the first iteration(s) *)
           fixpoint (IntSet.remove worklist block_idx) (iteration+1)
-        else
+        end else begin
           (* Update the out state in the analysis results *)
           data := IntMap.set !data ~key:block_idx ~data:(in_state, out_state);
           (* And recurse by adding all successors *)
           let successors = CFG.successors cfg block_idx in
           fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors)) (iteration+1)
+        end
     in
     fixpoint (IntSet.singleton cfg.entry_block) 1;
     !data
@@ -1038,6 +1041,9 @@ let run_cfg () =
               Printf.printf "CFG for function %d\n" faddr;
               let cfg = CFGBuilder.build faddr store in
               Printf.printf "---------------\n%s\n---------------\n" (CFG.to_dot cfg);
+              Printf.printf "Press enter to analyze it...\n";
+              Out_channel.flush Out_channel.stdout;
+              let _ = In_channel.input_char In_channel.stdin in
               let results = Fixpoint.analyze cfg !globals TODO in
               Printf.printf "-------\nResults\n------\n";
               Map.iteri results ~f:(fun ~key:idx ~data:res ->
