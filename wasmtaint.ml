@@ -599,17 +599,17 @@ module BasicBlock = struct
               ~f:(fun instr ->
                   Printf.sprintf "%s" (Instr.to_string instr ~sep:"\\l"))))
     | BlockEntry ->
-      Printf.sprintf "block%d [shape=ellipse, label = \"Block entry\"];" b.idx
+      Printf.sprintf "block%d [shape=ellipse, label = \"Block entry (%d)\"];" b.idx b.idx
     | BlockExit ->
-      Printf.sprintf "block%d [shape=ellipse, label = \"Block exit\"];" b.idx
+      Printf.sprintf "block%d [shape=ellipse, label = \"Block exit (%d)\"];" b.idx b.idx
     | LoopEntry ->
-      Printf.sprintf "block%d [shape=ellipse, label = \"Loop entry\"];" b.idx
+      Printf.sprintf "block%d [shape=ellipse, label = \"Loop entry (%d)\"];" b.idx b.idx
     | LoopExit ->
-      Printf.sprintf "block%d [shape=ellipse, label = \"Loop exit\"];" b.idx
+      Printf.sprintf "block%d [shape=ellipse, label = \"Loop exit (%d)\"];" b.idx b.idx
     | Function ->
-      Printf.sprintf "block%d [shape=star, label=\"Function call\"];" b.idx
+      Printf.sprintf "block%d [shape=star, label=\"Function call (%d)\"];" b.idx b.idx
     | Return ->
-      Printf.sprintf "block%d [shape=point]" b.idx
+      Printf.sprintf "block%d [shape=point, label=\"%d\"]" b.idx b.idx
 end
 
 module I = struct
@@ -835,7 +835,9 @@ module Fixpoint = struct
         Printf.printf "Analyzing block %d\n" block_idx;
         let predecessors = CFG.predecessors cfg block_idx in
         (* in_state is the join of all the the out_state of the predecessors *)
-        let in_state = Option.value (List.fold_left (List.map predecessors ~f:(fun idx -> snd (IntMap.find_exn !data idx))) ~init:bottom ~f:Domain.join_opt) ~default:init in
+        let in_state = Option.value (List.fold_left (List.map predecessors ~f:(fun idx ->
+            Printf.printf "predecessor: %d\n" idx;
+            snd (IntMap.find_exn !data idx))) ~init:bottom ~f:Domain.join_opt) ~default:init in
         (* The block to analyze *)
         let block = CFG.find_block_exn cfg block_idx in
         (* We analyze it *)
@@ -843,13 +845,15 @@ module Fixpoint = struct
         (* Has out state changed? *)
         Printf.printf "in state: %s\nout state: %s\n" (Domain.to_string in_state) (Domain.to_string out_state);
         let previous_out_state = snd (IntMap.find_exn !data block_idx) in
-        if previous_out_state = Some(out_state) then begin
+        if Some(out_state) = previous_out_state then begin
           (* Didn't change, we can safely ignore the successors *)
           (* TODO: make sure that this is true. If not, maybe we just have to put all blocks on the worklist for the first iteration(s) *)
           fixpoint (IntSet.remove worklist block_idx) (iteration+1)
         end else begin
           (* Update the out state in the analysis results, joining it with the previous one *)
-          data := IntMap.set !data ~key:block_idx ~data:(Some in_state, Domain.join_opt (Some out_state) previous_out_state);
+          let new_out_state = Domain.join_opt (Some out_state) previous_out_state in
+          Printf.printf "new out state is: %s\n" (Domain.to_string (Option.value_exn new_out_state));
+          data := IntMap.set !data ~key:block_idx ~data:(Some in_state, new_out_state);
           (* And recurse by adding all successors *)
           let successors = CFG.successors cfg block_idx in
           fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors)) (iteration+1)
@@ -995,7 +999,7 @@ module CFGBuilder = struct
       (* The forward edges *)
       edges = IntMap.of_alist_multi actual_edges;
       (* The backward edges *)
-      back_edges = IntMap.of_alist_multi (List.rev actual_edges);
+      back_edges = IntMap.of_alist_multi (List.map actual_edges ~f:(fun (left, right) -> (right, left)));
       (* The entry block *)
       (* TODO: probably not fully correct so we have to pay close attention to that: there should be a single entry block *)
       entry_block = Option.value_exn (List.min_elt (List.map actual_blocks ~f:(fun b -> b.idx)) ~compare:compare);
