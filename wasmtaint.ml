@@ -5,14 +5,14 @@ open Wasm
   - [x] Support memory instructions (load, store)
   - [x] Display loaded program nicely
   - [x] Bug: it is now analyzing block [4, 7, 9, 10, 11, 9, 10, 11, 5, 7, 9, 10, 11, 9, 10, 11]*
+  - [x] Fixpoint computation
+  - [ ] Support function calls
   - [ ] Tests
   - [ ] Use apron for abstraction of values
-  - [ ] Display results of the analysis
+  - [ ] Display results of the analysis nicely (how?)
+  - [ ] Track taint
 
 For later:
-  - Track taint!
-
-For much later:
   - other types (i64, f32, f64)
   - other instructions
 *)
