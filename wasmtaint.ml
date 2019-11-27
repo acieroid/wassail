@@ -7,6 +7,9 @@ open Wasm
   - [x] Bug: it is now analyzing block [4, 7, 9, 10, 11, 9, 10, 11, 5, 7, 9, 10, 11, 9, 10, 11]*
   - [x] Fixpoint computation
   - [ ] Function parameters: for now they default to 0, but really they shouldn't. They should be top for functions that are exported. The other functions don't have to be analyzed if not called.
+ - [ ] Have a summary of each function? Summary on the vstack is easy, but what about the globals/heap? It depends on the input (params, globals, heap).
+     If the heap and globals are somehow timestamped, it can be efficient, but how to represent the summary? One per call/parameters?
+     For now, the simplest thing to do is simply to return bottom. But then we need a notion of bottom value.
   - [ ] Support (static) function calls
    - Two solutions (related to Cousot's modular paper)
      a) treat function calls as returning bottom
@@ -15,6 +18,12 @@ open Wasm
      b) treat function calls as returning the top value of their type
         -> worst-case separate analysis
         -> should be much faster (and less precise), but let's ignore it for now
+
+  - [ ] Track taint
+  - [ ] Tests
+  - [ ] Use apron for abstraction of values
+
+For later:
   - [ ] Improving analysis with a dependency graph
    What about having a graph of function dependencies.
    Exported functions are entry points.
@@ -32,9 +41,6 @@ open Wasm
      e.g., (overflow) Stratum 1: {1}, Stratum 2: {0}
    4. Finally, we can run the analysis on each stratum. Exported functions are analyzed with inputs set to Top. Other functions are called at some point and knowledge about their input has been refined in the previous stratum.
    5. We still need to fixpoint the entire analysis of the previous step in case the heap or global variables have been modified.
-  - [ ] Track taint
-  - [ ] Tests
-  - [ ] Use apron for abstraction of values
   - [ ] Improve abstraction of the memory
   - [ ] Support for indirect function calls
   - [ ] Display results of the analysis nicely (how?)
@@ -77,6 +83,7 @@ end
 module Value = struct
   module T = struct
     type t =
+      | Bottom
       | Const of int32
       | Int
       (* XXX: values are actually i32/i64/f32/f64 *)
@@ -94,6 +101,7 @@ module Value = struct
 
   let to_string (v : t) : string =
     match v with
+    | Bottom -> "bottom"
     | Const n -> Int32.to_string n
     | Int -> "int"
 
@@ -106,11 +114,13 @@ module Value = struct
 
   let is_zero (v : t) =
     match v with
+    | Bottom -> false
     | Const 0l -> true
     | Const _ -> false
     | Int -> true
   let is_not_zero (v : t) =
     match v with
+    | Bottom -> false
     | Const 0l -> false
     | _ -> true
 
@@ -248,6 +258,7 @@ module Testop = struct
     | I32Eqz -> "i32.eqz"
   let eval (t : t) (v1 : Value.t) : Value.t =
     match (t, v1) with
+    | (_, Bottom) -> Bottom
     | (I32Eqz, Const 0l) -> Const 1l
     | (I32Eqz, Const _) -> Const 0l
     | (I32Eqz, Int) -> Value.join (Const 0l) (Const 1l)
