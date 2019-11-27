@@ -6,6 +6,7 @@ open Wasm
   - [x] Display loaded program nicely
   - [x] Bug: it is now analyzing block [4, 7, 9, 10, 11, 9, 10, 11, 5, 7, 9, 10, 11, 9, 10, 11]*
   - [x] Fixpoint computation
+  - [ ] Function parameters: for now they default to 0, but really they shouldn't. They should be top for functions that are exported. The other functions don't have to be analyzed if not called.
   - [ ] Support function calls
    - Two solutions (related to Cousot's modular paper)
      a) treat function calls as returning bottom
