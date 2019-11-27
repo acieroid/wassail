@@ -7,17 +7,25 @@ open Wasm
   - [x] Bug: it is now analyzing block [4, 7, 9, 10, 11, 9, 10, 11, 5, 7, 9, 10, 11, 9, 10, 11]*
   - [x] Fixpoint computation
   - [ ] Function parameters: for now they default to 0, but really they shouldn't. They should be top for functions that are exported. The other functions don't have to be analyzed if not called.
-  - [ ] Support function calls
+   What about having a graph of function dependencies.
+   Exported functions are entry points.
+   Direct calls are edges in that graph.
+   Indirect calls will be dealth with later (if needed)
+   Then we should go for solution a) below.
+  - [ ] Support (static) function calls
    - Two solutions (related to Cousot's modular paper)
      a) treat function calls as returning bottom
         -> Separate modular static program analysis
         -> can be improved through a dependence graph (first analyze called functions)
      b) treat function calls as returning the top value of their type
         -> worst-case separate analysis
+  - [ ] Track taint
   - [ ] Tests
   - [ ] Use apron for abstraction of values
+  - [ ] Improve abstraction of the memory
+  - [ ] Support for indirect function calls
   - [ ] Display results of the analysis nicely (how?)
-  - [ ] Track taint
+  - [ ] Find benchmarks
 
 For later:
   - other types (i64, f32, f64)

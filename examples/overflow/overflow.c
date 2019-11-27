@@ -1,6 +1,4 @@
 // Compile this program into a .wasm/.wat with make (see Makefile)
-
-
 #define WASM_EXPORT __attribute__((visibility("default")))
 
 typedef struct Foo {
