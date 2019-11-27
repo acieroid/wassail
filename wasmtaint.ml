@@ -7,6 +7,12 @@ open Wasm
   - [x] Bug: it is now analyzing block [4, 7, 9, 10, 11, 9, 10, 11, 5, 7, 9, 10, 11, 9, 10, 11]*
   - [x] Fixpoint computation
   - [ ] Support function calls
+   - Two solutions (related to Cousot's modular paper)
+     a) treat function calls as returning bottom
+        -> Separate modular static program analysis
+        -> can be improved through a dependence graph (first analyze called functions)
+     b) treat function calls as returning the top value of their type
+        -> worst-case separate analysis
   - [ ] Tests
   - [ ] Use apron for abstraction of values
   - [ ] Display results of the analysis nicely (how?)
@@ -607,7 +613,12 @@ module BasicBlock = struct
     | LoopExit ->
       Printf.sprintf "block%d [shape=ellipse, label = \"Loop exit (%d)\"];" b.idx b.idx
     | Function ->
-      Printf.sprintf "block%d [shape=star, label=\"Function call (%d)\"];" b.idx b.idx
+      Printf.sprintf "block%d [shape=star, label=\"Direct call(%d):\\n%s\"];"
+        b.idx b.idx
+        (String.concat ~sep:"\\l"
+           (List.map b.instrs
+              ~f:(fun instr ->
+                  Printf.sprintf "%s" (Instr.to_string instr ~sep:"\\l"))))
     | Return ->
       Printf.sprintf "block%d [shape=point, label=\"%d\"]" b.idx b.idx
 end
@@ -871,8 +882,8 @@ module CFGBuilder = struct
     let mk_block (reverse_instrs : Instr.t list) : BasicBlock.t =
       let instrs = List.rev reverse_instrs in
       BasicBlock.{ idx = new_idx (); instrs = instrs; sort = BasicBlock.Normal; } in
-    let mk_funblock () : BasicBlock.t =
-      BasicBlock.{ idx = new_idx () ; instrs = []; sort = Function } in
+    let mk_funblock (f : Address.t) : BasicBlock.t =
+      BasicBlock.{ idx = new_idx () ; instrs = [Call f]; sort = Function } in
     let mk_block_entry (is_loop : bool) : BasicBlock.t =
       BasicBlock.{ idx = new_idx () ; instrs = [];
                    sort = if is_loop then LoopEntry else BlockEntry } in
@@ -922,8 +933,8 @@ module CFGBuilder = struct
          block.idx, exit')
       | Call f :: rest ->
         (* Also similar to br, but connects the edges differently. Moreover, we don't include the call in this block because it has to be treated differently. *)
-        let block = mk_block (Call f :: instrs) in
-        let fblock = mk_funblock () in
+        let block = mk_block (instrs) in
+        let fblock = mk_funblock f in
         let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
         (block :: fblock :: blocks (* add the current block and the function block *),
          (block.idx, fblock.idx) :: (fblock.idx, entry') :: edges (* connect current block to function block, and function block to the rest *),
