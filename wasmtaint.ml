@@ -600,26 +600,6 @@ module Frame = struct
     { f1 with locals = List.map2_exn f1.locals f2.locals ~f:Value.join }
 end
 
-module Activation = struct
-  module T = struct
-    type t = int * Frame.t
-    [@@deriving sexp, compare]
-  end
-  include T
-end
-
-module type CFGData = sig
-  type t
-  val to_string : t -> string
-  val init : t
-end
-
-module CFGNoData : CFGData = struct
-  type t = unit
-  let to_string () = ""
-  let init = ()
-end
-
 module BasicBlock = struct
   type block_sort = BlockEntry | BlockExit | LoopEntry | LoopExit | Normal | Function | Return
   type t = {
@@ -697,6 +677,23 @@ module CFG = struct
 
   let predecessors (cfg : t) (idx : int) : int list =
     IntMap.find_multi cfg.back_edges idx
+
+  let callees (cfg : t) : IntSet.t =
+    (* Loop through all the blocks of the cfg, collecting the targets of call instructions *)
+    IntMap.fold cfg.basic_blocks ~init:IntSet.empty ~f:(fun ~key:_ ~data:block callees -> match block.sort with
+        | Function -> begin match block.instrs with
+            | Call n :: [] -> IntSet.union (IntSet.singleton n) callees
+            | _ -> callees
+          end
+        | _ -> callees)
+
+  let callers (cfgs : t IntMap.t) (cfg : t) : IntSet.t =
+    IntMap.fold cfgs ~init:IntSet.empty ~f:(fun ~key:caller ~data:cfg' callers ->
+        if IntSet.mem (callees cfg') cfg.idx then
+          (* cfg' calls into cfg *)
+          IntSet.union (IntSet.singleton caller) callers
+        else
+          callers)
 end
 
 module Domain = struct
@@ -743,6 +740,10 @@ module Domain = struct
     globals = globals;
     memory = memory
   }
+  let join_globals (g1 : globals) (g2 : globals) : globals =
+    List.map2_exn g1 g2 ~f:Value.join
+  let join_memory (_m1 : memory) (_m2 : memory) : memory =
+    TODO
 
   let join (s1 : state) (s2 : state) : state = {
     vstack =
@@ -758,8 +759,8 @@ module Domain = struct
       else
         List.map2_exn s1.vstack s2.vstack ~f:Value.join;
     locals = List.map2_exn s1.locals s2.locals ~f:Value.join;
-    globals = List.map2_exn s1.globals s2.globals ~f:Value.join;
-    memory = TODO
+    globals = join_globals s1.globals s2.globals;
+    memory = join_memory s1.memory s2.memory;
   }
   let join_opt (s1 : state option) (s2 : state option) : state option =
     match (s1, s2) with
@@ -858,15 +859,15 @@ module Transfer = struct
           (* Printf.printf "%s -> %s -> %s\n" (Domain.to_string acc) (Instr.to_string i) (Domain.to_string res); *)
           res
         )
+    | Function -> failwith "TODO" (* TODO: model function calls correctly *)
     | _ -> state
 end
 
-module Fixpoint = struct
+module IntraFixpoint = struct
   (* Analyzes a CFG. Returns a map where each basic blocks is mappped to its input state and output state *)
   let analyze (cfg : CFG.t) (globals : Domain.globals) (memory : Domain.memory) : (Domain.state * Domain.state) IntMap.t =
     let bottom = None in
     let init = Domain.init cfg.nlocals globals memory in
-    (* TODO: how to distinguish initial data from bottom? *)
     let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
                                            ~f:(fun idx ->
                                                Printf.printf "creating data for block %d\n" idx;
@@ -905,6 +906,58 @@ module Fixpoint = struct
     in
     fixpoint (IntSet.singleton cfg.entry_block) 1;
     IntMap.map !data ~f:(fun (in_state, out_state) -> (Option.value_exn in_state, Option.value_exn out_state))
+
+  (* Similar to analyze, but only return the out state for a CFG *)
+  let analyze_coarse (cfg : CFG.t) (globals : Domain.globals) (memory : Domain.memory) : Domain.state =
+    let results = analyze cfg globals memory in
+    snd (IntMap.find_exn results cfg.exit_block)
+end
+
+module InterFixpoint = struct
+  (* Analyze multiple CFGS, returns a map from CFG id to out_state for each CFG *)
+  let analyze (cfgs : CFG.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
+    (* To analyze a set of CFG, we just fixpoint until no new change to the domains are detected.
+       globals = [0...]; memory = TODO; results = for all cfg, cfg.idx -> (in, out)
+       while the worklist is not empty:
+         cfg = pop the first element from the worklist
+         results (map of block idx -> domain) = IntraFixpoint.analyze cfg globals memory
+         if data(cfg) != results, then:
+           add callees(cfg) to worklist
+           recurse, extracting globals/memory from out state
+         else
+           recurse, extracting globals/memory from out state
+    *)
+    let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfgs)
+                                           ~f:(fun idx ->
+                                               Printf.printf "creating data for cfg %d\n" idx;
+                                               (idx, None)))) in
+    let rec fixpoint (worklist : IntSet.t) (globals : Domain.globals) (memory : Domain.memory) =
+      if IntSet.is_empty worklist then
+        () (* empty worklist, analysis finished *)
+      else
+        let cfg_idx = IntSet.min_elt_exn worklist in
+        let cfg = IntMap.find_exn cfgs cfg_idx in
+        let out_state = IntraFixpoint.analyze_coarse cfg globals memory in
+        let previous_out_state = IntMap.find_exn !data cfg_idx in
+        if Some(out_state) = previous_out_state then
+          (* Same results as before, we can just recurse without having to recompute globals nor memory*)
+          fixpoint (IntSet.remove worklist cfg_idx) globals memory
+        else begin
+          (* Result differed, we have to add all callees and callers to the worklist.
+             Callers because the analyzed function could have modified globals/memory that will be read by the caller.
+             Callees for the same reason. *)
+          let callees = CFG.callees cfg in
+          let callers = CFG.callers cfgs cfg in
+          let new_globals = Domain.join_globals globals out_state.globals in
+          let new_memory = Domain.join_memory memory out_state.memory in
+          data := IntMap.set !data ~key:cfg_idx ~data:(Some out_state);
+          fixpoint (IntSet.union (IntSet.remove worklist cfg_idx) (IntSet.union callees callers)) new_globals new_memory
+        end
+    in
+    fixpoint (IntSet.of_list (IntMap.keys cfgs)) (List.init nglobals ~f:(fun _ -> Value.zero Type.I32Type)) TODO;
+    IntMap.map !data ~f:(fun v -> match v with
+        | Some result -> result
+        | None -> failwith "...")
 end
 
 module CFGBuilder = struct
@@ -1092,20 +1145,15 @@ let run_cfg () =
         match def.it with
         | Script.Textual m ->
           let store = Store.init m in
-          let globals = ref (List.map store.globals ~f:(fun _ -> Value.zero Type.I32Type)) in
-          List.iteri store.funcs ~f:(fun faddr _ ->
-              Printf.printf "CFG for function %d\n" faddr;
-              let cfg = CFGBuilder.build faddr store in
-              Printf.printf "---------------\n%s\n---------------\n" (CFG.to_dot cfg);
-              Printf.printf "Press enter to analyze it...\n";
-              Out_channel.flush Out_channel.stdout;
-              let _ = In_channel.input_char In_channel.stdin in
-              let results = Fixpoint.analyze cfg !globals TODO in
-              Printf.printf "-------\nResults\n------\n";
-              Map.iteri results ~f:(fun ~key:idx ~data:res ->
-                  Printf.printf "block %d: %s -> %s\n" idx (Domain.to_string (fst res)) (Domain.to_string (snd res)));
-              ()
-            )
+          let nglobals = List.length store.globals in
+          let cfgs = IntMap.of_alist_exn (List.mapi store.funcs ~f:(fun faddr _ -> (faddr, CFGBuilder.build faddr store))) in
+          IntMap.iter cfgs ~f:(fun cfg ->
+              Printf.printf "CFG for function %d\n" cfg.idx;
+              Printf.printf "---------------\n%s\n---------------\n" (CFG.to_dot cfg)
+            );
+          let results = InterFixpoint.analyze cfgs nglobals in
+          IntMap.iteri results ~f:(fun ~key:cfg_idx ~data:res ->
+              Printf.printf "Results for function %d: %s\n" cfg_idx (Domain.to_string res))
         | Script.Encoded _ -> failwith "unsupported"
         | Script.Quoted _ -> failwith "unsupported"
       ) in
