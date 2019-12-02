@@ -728,11 +728,18 @@ module Domain = struct
   }
   [@@deriving sexp, compare]
 
+  let vstack_to_string (vstack : vstack) : string =
+    String.concat ~sep:", " (List.map vstack ~f:Value.to_string)
+  let locals_to_string (locals : locals) : string =
+    String.concat ~sep:", " (List.mapi locals ~f:(fun i v -> Printf.sprintf "%d: %s" i (Value.to_string v)))
+  let globals_to_string (globals : globals) : string =
+    String.concat ~sep:", " (List.mapi globals ~f:(fun i v -> Printf.sprintf "%d: %s" i (Value.to_string v)))
+
   let to_string (s : state) : string =
     Printf.sprintf "{vstack: [%s], locals: [%s], globals: [%s]}"
-      (String.concat ~sep:", " (List.map s.vstack ~f:Value.to_string))
-      (String.concat ~sep:", " (List.mapi s.locals ~f:(fun i v -> Printf.sprintf "%d: %s" i (Value.to_string v))))
-      (String.concat ~sep:", " (List.mapi s.locals ~f:(fun i v -> Printf.sprintf "%d: %s" i (Value.to_string v))))
+      (vstack_to_string s.vstack)
+      (locals_to_string s.locals)
+      (globals_to_string s.globals)
 
   let init (nlocals : int) (globals : globals) (memory : memory) = {
     vstack = [];
@@ -916,17 +923,6 @@ end
 module InterFixpoint = struct
   (* Analyze multiple CFGS, returns a map from CFG id to out_state for each CFG *)
   let analyze (cfgs : CFG.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
-    (* To analyze a set of CFG, we just fixpoint until no new change to the domains are detected.
-       globals = [0...]; memory = TODO; results = for all cfg, cfg.idx -> (in, out)
-       while the worklist is not empty:
-         cfg = pop the first element from the worklist
-         results (map of block idx -> domain) = IntraFixpoint.analyze cfg globals memory
-         if data(cfg) != results, then:
-           add callees(cfg) to worklist
-           recurse, extracting globals/memory from out state
-         else
-           recurse, extracting globals/memory from out state
-    *)
     let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfgs)
                                            ~f:(fun idx ->
                                                Printf.printf "creating data for cfg %d\n" idx;
@@ -937,6 +933,7 @@ module InterFixpoint = struct
       else
         let cfg_idx = IntSet.min_elt_exn worklist in
         let cfg = IntMap.find_exn cfgs cfg_idx in
+        Printf.printf "Analyzing cfg %d with globals: %s\n" (cfg_idx) (Domain.globals_to_string globals);
         let out_state = IntraFixpoint.analyze_coarse cfg globals memory in
         let previous_out_state = IntMap.find_exn !data cfg_idx in
         if Some(out_state) = previous_out_state then
