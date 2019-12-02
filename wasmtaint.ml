@@ -2,26 +2,11 @@ open Core
 open Wasm
 
 (* TODO: ([ ] = to start, [-] = started, [x] = finished)
-  - [x] Support memory instructions (load, store)
-  - [x] Display loaded program nicely
-  - [x] Bug: it is now analyzing block [4, 7, 9, 10, 11, 9, 10, 11, 5, 7, 9, 10, 11, 9, 10, 11]*
-  - [x] Fixpoint computation
-  - [X] Function parameters: for now they default to 0, but really they shouldn't. They should be top for functions that are exported. The other functions don't have to be analyzed if not called.
- - [ ] Have a summary of each function? Summary on the vstack is easy, but what about the globals/heap? It depends on the input (params, globals, heap).
-     If the heap and globals are somehow timestamped, it can be efficient, but how to represent the summary? One per call/parameters?
-     For now, the simplest thing to do is simply to return bottom. But then we need a notion of bottom value.
-  - [ ] Support (static) function calls
-   - Two solutions (related to Cousot's modular paper)
-     a) treat function calls as returning bottom
-        -> Separate modular static program analysis
-        -> can be improved through a dependence graph (first analyze called functions)
-     b) treat function calls as returning the top value of their type
-        -> worst-case separate analysis
-        -> should be much faster (and less precise), but let's ignore it for now
+  - [ ] Correctly pass function parameters (now they're always bottom...)
 
   - [ ] Track taint
   - [ ] Tests
-  - [ ] Use apron for abstraction of values
+  - [ ] Use apron for abstraction of values?
 
 For later:
   - [ ] Improving analysis with a dependency graph
