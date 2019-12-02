@@ -6,7 +6,7 @@ open Wasm
   - [x] Display loaded program nicely
   - [x] Bug: it is now analyzing block [4, 7, 9, 10, 11, 9, 10, 11, 5, 7, 9, 10, 11, 9, 10, 11]*
   - [x] Fixpoint computation
-  - [ ] Function parameters: for now they default to 0, but really they shouldn't. They should be top for functions that are exported. The other functions don't have to be analyzed if not called.
+  - [X] Function parameters: for now they default to 0, but really they shouldn't. They should be top for functions that are exported. The other functions don't have to be analyzed if not called.
  - [ ] Have a summary of each function? Summary on the vstack is easy, but what about the globals/heap? It depends on the input (params, globals, heap).
      If the heap and globals are somehow timestamped, it can be efficient, but how to represent the summary? One per call/parameters?
      For now, the simplest thing to do is simply to return bottom. But then we need a notion of bottom value.
@@ -108,6 +108,8 @@ module Value = struct
   (** Joins two values together *)
   let join (v1 : t) (v2 : t) : t =
     match (v1, v2) with
+    | (Bottom, x) -> x
+    | (x, Bottom) -> x
     | (Const n1, Const n2) when n1 = n2 -> Const n1
     | (Const _, Const _) -> Int
     | _ -> Int
@@ -123,6 +125,8 @@ module Value = struct
     | Bottom -> false
     | Const 0l -> false
     | _ -> true
+
+  let bottom : t = Bottom
 
   let zero (t : Type.t) : t =
     match t with
@@ -574,32 +578,6 @@ module Store = struct
     })
 end
 
-module Frame = struct
-  module T = struct
-    type t = {
-      arity: int;
-      locals: Value.t list;
-      module_: ModuleInst.t;
-    }
-    [@@deriving sexp, compare]
-  end
-  include T
-  let funcaddr (f : t) (fn : Var.t) : Address.t =
-    List.nth_exn f.module_.funcaddrs fn
-  let get_local (f : t) (l : Var.t) : Value.t =
-    List.nth_exn f.locals l
-  let set_local (f : t) (l : Var.t) (v : Value.t) : t =
-    { f with locals = List.mapi f.locals ~f:(fun i x -> if i = l then Value.join x v else x) }
-  let get_global_addr (f : t) (g : Var.t) : Address.t =
-    List.nth_exn f.module_.globaladdrs g
-  let get_memory_addr (f : t) (n : int) : Address.t =
-    List.nth_exn f.module_.memaddrs n
-  let join (f1 : t) (f2 : t) =
-    assert (f1.arity = f2.arity);
-    assert (f1.module_ = f2.module_);
-    { f1 with locals = List.map2_exn f1.locals f2.locals ~f:Value.join }
-end
-
 module BasicBlock = struct
   type block_sort = BlockEntry | BlockExit | LoopEntry | LoopExit | Normal | Function | Return
   type t = {
@@ -648,6 +626,8 @@ module CFG = struct
   type t = {
     (* The index of this CFG *)
     idx: int;
+    (* The number of parameters of that CFG *)
+    arity: int;
     (* The number of locals in that CFG *)
     nlocals: int;
     (* All basic blocks contained in this CFG, indexed in a map by their index *)
@@ -741,9 +721,9 @@ module Domain = struct
       (locals_to_string s.locals)
       (globals_to_string s.globals)
 
-  let init (nlocals : int) (globals : globals) (memory : memory) = {
+  let init (nargs : int) (nlocals : int) (globals : globals) (memory : memory) = {
     vstack = [];
-    locals = List.init nlocals ~f:(fun _ -> Value.zero I32Type);
+    locals = (List.init nargs ~f:(fun _ -> Value.bottom)) @ (List.init nlocals ~f:(fun _ -> Value.zero I32Type));
     globals = globals;
     memory = memory
   }
@@ -874,7 +854,7 @@ module IntraFixpoint = struct
   (* Analyzes a CFG. Returns a map where each basic blocks is mappped to its input state and output state *)
   let analyze (cfg : CFG.t) (globals : Domain.globals) (memory : Domain.memory) : (Domain.state * Domain.state) IntMap.t =
     let bottom = None in
-    let init = Domain.init cfg.nlocals globals memory in
+    let init = Domain.init cfg.arity cfg.nlocals globals memory in
     let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
                                            ~f:(fun idx ->
                                                Printf.printf "creating data for block %d\n" idx;
@@ -1086,8 +1066,10 @@ module CFGBuilder = struct
     CFG.{
       (* The index of this block is the integer that represent the address of this function *)
       idx = faddr;
-      (* There are a+b locals, where a is the number of parameters of the function, and b is the number of local variables *)
-      nlocals = fst funcinst.arity + List.length funcinst.code.locals;
+      (* Input arity of the function (output arity is assumed to be 1) *)
+      arity = fst funcinst.arity;
+      (* Number of locals in the function *)
+      nlocals = List.length funcinst.code.locals;
       (*The basic blocks *)
       basic_blocks = IntMap.of_alist_exn (List.map actual_blocks ~f:(fun b -> (b.idx, b)));
       (* The forward edges *)
