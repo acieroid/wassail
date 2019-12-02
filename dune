@@ -1,5 +1,5 @@
 (executable
   (name wasmtaint)
-  (modules Wasmtaint)
+  (modules Wasmtaint Type Address Binop Func Memoryop Testop Relop Value Var Instr)
   (libraries core incremental incr_map wasm)
   (preprocess (pps ppx_jane ppx_compare)))
