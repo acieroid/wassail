@@ -2,9 +2,10 @@ open Core
 open Wasm
 
 (* TODO: ([ ] = to start, [-] = started, [x] = finished)
-  - [ ] Correctly pass function parameters (now they're always bottom...)
-
   - [ ] Track taint
+   - Tag values with their provenance (e.g., nth argument of function f)
+   - Propagate taint values for data taint
+   - Propagate taint values for control taint
   - [ ] Tests
   - [ ] Use apron for abstraction of values?
 
@@ -253,6 +254,8 @@ module IntSet = Set.Make(I)
 
 module CFG = struct
   type t = {
+    (* Is this function exported or not? *)
+    exported: bool;
     (* The index of this CFG *)
     idx: int;
     (* The number of parameters and return values of that CFG *)
@@ -333,7 +336,8 @@ module Domain = struct
     vstack : vstack;
     locals : locals;
     globals : globals;
-    memory : memory
+    memory : memory;
+    calls : (Value.t list) IntMap.t; (* A map of function called, from function index to parameters given *)
   }
   [@@deriving sexp, compare]
 
@@ -350,14 +354,16 @@ module Domain = struct
       (locals_to_string s.locals)
       (globals_to_string s.globals)
 
-  let init (nargs : int) (nlocals : int) (globals : globals) (memory : memory) = {
+  let init (args : Value.t list) (nlocals : int) (globals : globals) (memory : memory) = {
     vstack = [];
-    locals = (List.init nargs ~f:(fun _ -> Value.bottom)) @ (List.init nlocals ~f:(fun _ -> Value.zero I32Type));
+    locals = args @ (List.init nlocals ~f:(fun _ -> Value.zero I32Type));
     globals = globals;
-    memory = memory
+    memory = memory;
+    (* The list of calls is initially empty *)
+    calls = IntMap.empty;
   }
   let join_globals (g1 : globals) (g2 : globals) : globals =
-    List.map2_exn g1 g2 ~f:Value.join
+    Value.join_vlist_exn g1 g2
   let join_memory (_m1 : memory) (_m2 : memory) : memory =
     TODO
 
@@ -377,6 +383,10 @@ module Domain = struct
     locals = List.map2_exn s1.locals s2.locals ~f:Value.join;
     globals = join_globals s1.globals s2.globals;
     memory = join_memory s1.memory s2.memory;
+    calls = IntMap.merge s1.calls s2.calls ~f:(fun ~key:_ data -> match data with
+        | `Both (a, b) -> Some (Value.join_vlist_exn a b)
+        | `Left a -> Some a
+        | `Right b -> Some b)
   }
   let join_opt (s1 : state option) (s2 : state option) : state option =
     match (s1, s2) with
@@ -409,9 +419,15 @@ module Summary = struct
     result = List.init (snd cfg.arity) ~f:(fun _ -> Value.bottom);
   }
 
-  (* Apply the summary to a state *)
-  let apply (sum : t) (st : Domain.state) : Domain.state =
-    { st with vstack = sum.result @ (List.drop st.vstack sum.nargs ) }
+  (* Apply the summary to a state, updating the vstack as if the function was
+     called, AND updating the set of called functions *)
+  let apply (sum : t) (fidx : Var.t) (st : Domain.state) : Domain.state =
+    { st with
+      vstack = sum.result @ (List.drop st.vstack sum.nargs );
+      calls = IntMap.update st.calls fidx ~f:(function
+          | None -> List.take st.vstack sum.nargs
+          | Some vs -> Value.join_vlist_exn vs (List.take st.vstack sum.nargs))
+    }
 end
 
 module Transfer = struct
@@ -507,8 +523,9 @@ module Transfer = struct
         | Call f :: [] ->
           (* We encounter a function call, retrieve its summary and apply it *)
           (* We assume all summaries are defined *)
+          Printf.printf "Call to function: %d\n" f;
           let summary = IntMap.find_exn summaries f in
-          Summary.apply summary state
+          Summary.apply summary f state
         | _ -> failwith "Invalid function block"
       end
     | _ -> state
@@ -516,9 +533,10 @@ end
 
 module IntraFixpoint = struct
   (* Analyzes a CFG. Returns a map where each basic blocks is mappped to its input state and output state *)
-  let analyze (cfg : CFG.t) (globals : Domain.globals) (memory : Domain.memory) (summaries : Summary.t IntMap.t) : (Domain.state * Domain.state) IntMap.t =
+  let analyze (cfg : CFG.t) (args : Value.t list) (globals : Domain.globals) (memory : Domain.memory) (summaries : Summary.t IntMap.t) : (Domain.state * Domain.state) IntMap.t =
     let bottom = None in
-    let init = Domain.init (fst cfg.arity) cfg.nlocals globals memory in
+    assert (List.length args = (fst cfg.arity)); (* Given number of arguments should match the in arity of the function *)
+    let init = Domain.init args cfg.nlocals globals memory in
     let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
                                            ~f:(fun idx ->
                                                Printf.printf "creating data for block %d\n" idx;
@@ -541,11 +559,12 @@ module IntraFixpoint = struct
         (* Has out state changed? *)
         Printf.printf "in state: %s\nout state: %s\n" (Domain.to_string in_state) (Domain.to_string out_state);
         let previous_out_state = snd (IntMap.find_exn !data block_idx) in
-        if Some(out_state) = previous_out_state then begin
+        match previous_out_state with
+        | Some st when Domain.compare_state out_state st = 0 ->
           (* Didn't change, we can safely ignore the successors *)
           (* TODO: make sure that this is true. If not, maybe we just have to put all blocks on the worklist for the first iteration(s) *)
           fixpoint (IntSet.remove worklist block_idx) (iteration+1)
-        end else begin
+        | _ ->
           (* Update the out state in the analysis results, joining it with the previous one *)
           let new_out_state = Domain.join_opt (Some out_state) previous_out_state in
           Printf.printf "new out state is: %s\n" (Domain.to_string (Option.value_exn new_out_state));
@@ -553,14 +572,13 @@ module IntraFixpoint = struct
           (* And recurse by adding all successors *)
           let successors = CFG.successors cfg block_idx in
           fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors)) (iteration+1)
-        end
     in
     fixpoint (IntSet.singleton cfg.entry_block) 1;
     IntMap.map !data ~f:(fun (in_state, out_state) -> (Option.value_exn in_state, Option.value_exn out_state))
 
   (* Similar to analyze, but only return the out state for a CFG *)
-  let analyze_coarse (cfg : CFG.t) (globals : Domain.globals) (memory : Domain.memory) (summaries : Summary.t IntMap.t) : Domain.state =
-    let results = analyze cfg globals memory summaries in
+  let analyze_coarse (cfg : CFG.t) (args : Value.t list) (globals : Domain.globals) (memory : Domain.memory) (summaries : Summary.t IntMap.t) : Domain.state =
+    let results = analyze cfg args globals memory summaries in
     snd (IntMap.find_exn results cfg.exit_block)
 end
 
@@ -571,19 +589,39 @@ module InterFixpoint = struct
                                            ~f:(fun idx ->
                                                Printf.printf "creating data for cfg %d\n" idx;
                                                (idx, None)))) in
-    let rec fixpoint (worklist : IntSet.t) (globals : Domain.globals) (memory : Domain.memory) (summaries : Summary.t IntMap.t) =
+    let rec fixpoint (worklist : IntSet.t)
+        (globals : Domain.globals) (memory : Domain.memory)
+        (summaries : Summary.t IntMap.t) (calls : (Value.t list) IntMap.t) =
       if IntSet.is_empty worklist then
         () (* empty worklist, analysis finished *)
       else
         let cfg_idx = IntSet.min_elt_exn worklist in
         let cfg = IntMap.find_exn cfgs cfg_idx in
-        Printf.printf "Analyzing cfg %d with globals: %s\n" (cfg_idx) (Domain.globals_to_string globals);
-        let out_state = IntraFixpoint.analyze_coarse cfg globals memory summaries in
+        let args = match IntMap.find calls cfg_idx with
+          | Some _ when cfg.exported ->
+            Printf.printf "It is exported\n";
+            (* We have stored specific arguments, but this function is exported so it can be called with any argument *)
+            List.init (fst cfg.arity) ~f:(fun _ -> Value.top Type.I32Type)
+          | Some args ->
+            Printf.printf "It is not exported\n";
+            (* Function is not exported, so it can only be called with what we discovered *)
+            args
+          | None when cfg.exported ->
+            Printf.printf "It is exported\n";
+            (* No call has been analyzed yet, and this function is exported, so we start from top *)
+            List.init (fst cfg.arity) ~f:(fun _ -> Value.top Type.I32Type)
+          | None ->
+            Printf.printf "It is not exported\n";
+            (* No call analyzed, function is not called from anywhere, use bottom as arguments *)
+            List.init (fst cfg.arity) ~f:(fun _ -> Value.bottom) in
+        Printf.printf "Analyzing cfg %d with globals: [%s] and args: [%s]\n" cfg_idx (Domain.globals_to_string globals) (Value.list_to_string args);
+        let out_state = IntraFixpoint.analyze_coarse cfg args globals memory summaries in
         let previous_out_state = IntMap.find_exn !data cfg_idx in
-        if Some(out_state) = previous_out_state then
-          (* Same results as before, we can just recurse without having to recompute globals nor memory *)
-          fixpoint (IntSet.remove worklist cfg_idx) globals memory summaries
-        else begin
+        match previous_out_state with
+        | Some st when Domain.compare_state out_state st = 0 ->
+          (* Same results as before, we can just recurse without having to recompute globals nor memory nor calls *)
+          fixpoint (IntSet.remove worklist cfg_idx) globals memory summaries calls
+        | _ ->
           (* Result differed, we have to add all callees and callers to the worklist.
              Callers because the analyzed function could have modified globals/memory that will be read by the caller.
              Callees for the same reason. *)
@@ -593,12 +631,16 @@ module InterFixpoint = struct
           let new_memory = Domain.join_memory memory out_state.memory in
           let summary = Summary.make cfg out_state in
           let new_summaries = IntMap.set summaries ~key:cfg.idx ~data:summary in
+          let new_calls = IntMap.merge calls out_state.calls ~f:(fun ~key:_ data -> match data with
+              | `Both (a, b) -> Some (Value.join_vlist_exn a b)
+              | `Left a -> Some a
+              | `Right b -> Some b) in
           data := IntMap.set !data ~key:cfg_idx ~data:(Some out_state);
-          fixpoint (IntSet.union (IntSet.remove worklist cfg_idx) (IntSet.union callees callers)) new_globals new_memory new_summaries
-        end
+          fixpoint (IntSet.union (IntSet.remove worklist cfg_idx) (IntSet.union callees callers)) new_globals new_memory new_summaries new_calls
     in
     let summaries0 = IntMap.map cfgs ~f:(fun cfg -> Summary.bottom cfg) in
-    fixpoint (IntSet.of_list (IntMap.keys cfgs)) (List.init nglobals ~f:(fun _ -> Value.zero Type.I32Type)) TODO summaries0 ;
+    let calls0 = IntMap.empty in
+    fixpoint (IntSet.of_list (IntMap.keys cfgs)) (List.init nglobals ~f:(fun _ -> Value.zero Type.I32Type)) TODO summaries0 calls0 ;
     IntMap.map !data ~f:(fun v -> match v with
         | Some result -> result
         | None -> failwith "...")
@@ -731,6 +773,8 @@ module CFGBuilder = struct
         (* now we connect everything from both sets *)
         List.concat (List.map pointing_to ~f:(fun (src, _) -> List.map pointing_from ~f:(fun (_, dst) -> (src, dst)))) @ edges'') in
     CFG.{
+      (* Exported functions have names, non-exported don't *)
+      exported = Option.is_some funcinst.name;
       (* The index of this block is the integer that represent the address of this function *)
       idx = faddr;
       (* Arity of the function *)

@@ -35,6 +35,10 @@ let join (v1 : t) (v2 : t) : t =
   | (Const _, Const _) -> Int
   | _ -> Int
 
+(** Joins two value lists together, assuming they have the same length *)
+let join_vlist_exn (v1 : t list) (v2 : t list) : t list =
+  List.map2_exn v1 v2 ~f:join
+
 let is_zero (v : t) =
   match v with
   | Bottom -> false
@@ -57,7 +61,7 @@ let zero (t : Type.t) : t =
 
 let top (t : Type.t) : t =
   match t with
-  | I32Type -> Const 0l
+  | I32Type -> Int
   | _ -> failwith "unsupported type"
 
 let list_to_string (l : t list) : string =
