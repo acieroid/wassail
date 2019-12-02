@@ -1,5 +1,6 @@
 open Core
 open Wasm
+open Helpers
 
 (** Relational operation *)
 module T = struct
@@ -32,17 +33,19 @@ let to_string (r : t) : string =
   | I32LeS -> "i32.le_s"
   | I32GeS -> "i32.ge_s"
 let eval (r : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
-  match (r, v1, v2) with
-  | (I32Eq, Const n1, Const n2) -> Const (if n1 = n2 then 1l else 0l)
-  | (I32Eq, _, _) -> Int
-  | (I32Ne, Const n1, Const n2) -> Const (if n1 <> n2 then 1l else 0l)
-  | (I32Ne, _, _) -> Int
-  | (I32LtS, Const n1, Const n2) -> Const (if n1 < n2 then 1l else 0l)
-  | (I32LtS, _, _) -> Int
-  | (I32GtS, Const n1, Const n2) -> Const (if n1 > n2 then 1l else 0l)
-  | (I32GtS, _, _) -> Int
-  | (I32LeS, Const n1, Const n2) -> Const (if n1 <= n2 then 1l else 0l)
-  | (I32LeS, _, _) -> Int
-  | (I32GeS, Const n1, Const n2) -> Const (if n1 >= n2 then 1l else 0l)
-  | (I32GeS, _, _) -> Int
+  { value = begin match (r, v1.value, v2.value) with
+        | (I32Eq, Const n1, Const n2) -> Const (if n1 = n2 then 1l else 0l)
+        | (I32Eq, _, _) -> Int
+        | (I32Ne, Const n1, Const n2) -> Const (if n1 <> n2 then 1l else 0l)
+        | (I32Ne, _, _) -> Int
+        | (I32LtS, Const n1, Const n2) -> Const (if n1 < n2 then 1l else 0l)
+        | (I32LtS, _, _) -> Int
+        | (I32GtS, Const n1, Const n2) -> Const (if n1 > n2 then 1l else 0l)
+        | (I32GtS, _, _) -> Int
+        | (I32LeS, Const n1, Const n2) -> Const (if n1 <= n2 then 1l else 0l)
+        | (I32LeS, _, _) -> Int
+        | (I32GeS, Const n1, Const n2) -> Const (if n1 >= n2 then 1l else 0l)
+        | (I32GeS, _, _) -> Int
+      end;
+    sources = IntPairSet.union v1.sources v2.sources }
 

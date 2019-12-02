@@ -16,9 +16,9 @@ let to_string (t : t) : string =
   match t with
   | I32Eqz -> "i32.eqz"
 let eval (t : t) (v1 : Value.t) : Value.t =
-  match (t, v1) with
-  | (_, Bottom) -> Bottom
-  | (I32Eqz, Const 0l) -> Const 1l
-  | (I32Eqz, Const _) -> Const 0l
-  | (I32Eqz, Int) -> Value.join (Const 0l) (Const 1l)
+  match (t, v1.value) with
+  | (_, Bottom) -> v1
+  | (I32Eqz, Const 0l) -> { v1 with value = Const 1l }
+  | (I32Eqz, Const _) -> { v1 with value = Const 0l }
+  | (I32Eqz, Int) -> Value.join { v1 with value = Const 0l } { v1 with value = Const 1l }
 

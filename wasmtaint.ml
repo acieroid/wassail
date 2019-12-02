@@ -1,5 +1,6 @@
 open Core
 open Wasm
+open Helpers
 
 (* TODO: ([ ] = to start, [-] = started, [x] = finished)
   - [ ] Track taint
@@ -11,6 +12,8 @@ open Wasm
 
 For later:
   - [ ] Improving analysis with a dependency graph
+   -> This dependency graph can be dynamically discovered. Just start from exported functions, then analyze called functions.
+   (Old text:
    What about having a graph of function dependencies.
    Exported functions are entry points.
    Direct calls are edges in that graph.
@@ -26,7 +29,7 @@ For later:
      e.g., Stratum 1: {0}, Stratum 2: {1,2}
      e.g., (overflow) Stratum 1: {1}, Stratum 2: {0}
    4. Finally, we can run the analysis on each stratum. Exported functions are analyzed with inputs set to Top. Other functions are called at some point and knowledge about their input has been refined in the previous stratum.
-   5. We still need to fixpoint the entire analysis of the previous step in case the heap or global variables have been modified.
+   5. We still need to fixpoint the entire analysis of the previous step in case the heap or global variables have been modified.)
   - [ ] Improve abstraction of the memory
   - [ ] Support for indirect function calls
   - [ ] Display results of the analysis nicely (how?)
@@ -243,14 +246,6 @@ module BasicBlock = struct
     | Return ->
       Printf.sprintf "block%d [shape=point, label=\"%d\"]" b.idx b.idx
 end
-
-module I = struct
-  type t = int
-  [@@deriving sexp, compare]
-end
-
-module IntMap = Map.Make(I)
-module IntSet = Set.Make(I)
 
 module CFG = struct
   type t = {
@@ -496,7 +491,7 @@ module Transfer = struct
     | Load op ->
       (* TODO: for now, we just return the top value of the expected type *)
       let (_, vstack') = Domain.pop state.vstack in
-      let c = Value.top op.typ in (* value of the correct type *)
+      let c = Value.top_no_source op.typ in (* value of the correct type *)
       let vstack'' = c :: vstack' in
       assert (List.length vstack'' = List.length state.vstack);
       { state with vstack = vstack'' }
@@ -590,13 +585,13 @@ module InterFixpoint = struct
         let args = match IntMap.find calls cfg_idx with
           | Some _ when cfg.exported ->
             (* We have stored specific arguments, but this function is exported so it can be called with any argument *)
-            List.init (fst cfg.arity) ~f:(fun _ -> Value.top Type.I32Type)
+            List.init (fst cfg.arity) ~f:(fun i -> Value.top Type.I32Type (cfg.idx, i))
           | Some args ->
             (* Function is not exported, so it can only be called with what we discovered *)
             args
           | None when cfg.exported ->
             (* No call has been analyzed yet, and this function is exported, so we start from top *)
-            List.init (fst cfg.arity) ~f:(fun _ -> Value.top Type.I32Type)
+            List.init (fst cfg.arity) ~f:(fun i -> Value.top Type.I32Type (cfg.idx, i))
           | None ->
             (* No call analyzed, function is not called from anywhere, use bottom as arguments *)
             List.init (fst cfg.arity) ~f:(fun _ -> Value.bottom) in
