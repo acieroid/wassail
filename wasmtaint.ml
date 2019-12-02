@@ -513,17 +513,14 @@ module Transfer = struct
   let transfer (b : BasicBlock.t) (state : Domain.state) (summaries: Summary.t IntMap.t) : Domain.state =
     match b.sort with
     | Normal ->
-      (* Printf.printf "Block %d, instructions: %s\n" b.idx (String.concat ~sep:"," (List.map b.instrs ~f:Instr.to_string)); *)
       List.fold_left b.instrs ~init:state ~f:(fun acc i ->
           let res = instr_transfer i acc in
-          (* Printf.printf "%s -> %s -> %s\n" (Domain.to_string acc) (Instr.to_string i) (Domain.to_string res); *)
           res
         )
     | Function -> begin match b.instrs with
         | Call f :: [] ->
           (* We encounter a function call, retrieve its summary and apply it *)
           (* We assume all summaries are defined *)
-          Printf.printf "Call to function: %d\n" f;
           let summary = IntMap.find_exn summaries f in
           Summary.apply summary f state
         | _ -> failwith "Invalid function block"
@@ -539,25 +536,20 @@ module IntraFixpoint = struct
     let init = Domain.init args cfg.nlocals globals memory in
     let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
                                            ~f:(fun idx ->
-                                               Printf.printf "creating data for block %d\n" idx;
                                                (idx, (bottom, bottom))))) in
     let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =
       if IntSet.is_empty worklist then
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = IntSet.min_elt_exn worklist in
-        Printf.printf "Analyzing block %d\n" block_idx;
         let predecessors = CFG.predecessors cfg block_idx in
         (* in_state is the join of all the the out_state of the predecessors *)
-        let in_state = Option.value (List.fold_left (List.map predecessors ~f:(fun idx ->
-            Printf.printf "predecessor: %d\n" idx;
-            snd (IntMap.find_exn !data idx))) ~init:bottom ~f:Domain.join_opt) ~default:init in
+        let in_state = Option.value (List.fold_left (List.map predecessors ~f:(fun idx -> snd (IntMap.find_exn !data idx))) ~init:bottom ~f:Domain.join_opt) ~default:init in
         (* The block to analyze *)
         let block = CFG.find_block_exn cfg block_idx in
         (* We analyze it *)
         let out_state = Transfer.transfer block in_state summaries in
         (* Has out state changed? *)
-        Printf.printf "in state: %s\nout state: %s\n" (Domain.to_string in_state) (Domain.to_string out_state);
         let previous_out_state = snd (IntMap.find_exn !data block_idx) in
         match previous_out_state with
         | Some st when Domain.compare_state out_state st = 0 ->
@@ -567,7 +559,6 @@ module IntraFixpoint = struct
         | _ ->
           (* Update the out state in the analysis results, joining it with the previous one *)
           let new_out_state = Domain.join_opt (Some out_state) previous_out_state in
-          Printf.printf "new out state is: %s\n" (Domain.to_string (Option.value_exn new_out_state));
           data := IntMap.set !data ~key:block_idx ~data:(Some in_state, new_out_state);
           (* And recurse by adding all successors *)
           let successors = CFG.successors cfg block_idx in
@@ -587,7 +578,6 @@ module InterFixpoint = struct
   let analyze (cfgs : CFG.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
     let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfgs)
                                            ~f:(fun idx ->
-                                               Printf.printf "creating data for cfg %d\n" idx;
                                                (idx, None)))) in
     let rec fixpoint (worklist : IntSet.t)
         (globals : Domain.globals) (memory : Domain.memory)
@@ -599,19 +589,15 @@ module InterFixpoint = struct
         let cfg = IntMap.find_exn cfgs cfg_idx in
         let args = match IntMap.find calls cfg_idx with
           | Some _ when cfg.exported ->
-            Printf.printf "It is exported\n";
             (* We have stored specific arguments, but this function is exported so it can be called with any argument *)
             List.init (fst cfg.arity) ~f:(fun _ -> Value.top Type.I32Type)
           | Some args ->
-            Printf.printf "It is not exported\n";
             (* Function is not exported, so it can only be called with what we discovered *)
             args
           | None when cfg.exported ->
-            Printf.printf "It is exported\n";
             (* No call has been analyzed yet, and this function is exported, so we start from top *)
             List.init (fst cfg.arity) ~f:(fun _ -> Value.top Type.I32Type)
           | None ->
-            Printf.printf "It is not exported\n";
             (* No call analyzed, function is not called from anywhere, use bottom as arguments *)
             List.init (fst cfg.arity) ~f:(fun _ -> Value.bottom) in
         Printf.printf "Analyzing cfg %d with globals: [%s] and args: [%s]\n" cfg_idx (Domain.globals_to_string globals) (Value.list_to_string args);
@@ -842,6 +828,7 @@ let run_cfg () =
               Printf.printf "---------------\n%s\n---------------\n" (CFG.to_dot cfg)
             );
           let results = InterFixpoint.analyze cfgs nglobals in
+          Printf.printf "--------- Results ---------\n";
           IntMap.iteri results ~f:(fun ~key:cfg_idx ~data:res ->
               Printf.printf "Results for function %d: %s\n" cfg_idx (Domain.to_string res))
         | Script.Encoded _ -> failwith "unsupported"
