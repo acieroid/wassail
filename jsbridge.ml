@@ -7,9 +7,12 @@ let js_hello = Js.Unsafe.obj [| ("some_number", Js.Unsafe.inject 42);
                                 ("some_string", Js.Unsafe.inject (Js.string "hello")); |]
 
 let array_of_intmap (map : 'a IntMap.t) (f : 'a -> 'b) : (string * Js.Unsafe.any) array =
-  Array.init (IntMap.length map) (fun i -> (string_of_int i, match IntMap.find map i with
+  match IntMap.max_elt map with
+  | Some (n, _) ->
+    Array.init (n+1) (fun i -> (string_of_int i, match IntMap.find map i with
     | Some x -> f x
     | None -> Js.Unsafe.inject Js.undefined))
+  | None -> [| |]
 
 let array_of_intlist (l : int list) : (string * Js.Unsafe.any) array =
   Array.init (List.length l) (fun i -> (string_of_int i, Js.Unsafe.inject (List.nth l i)))

@@ -7,25 +7,6 @@ g.setGraph({});
 // Default to assigning a new object as a label for each new edge.
 g.setDefaultEdgeLabel(function() { return {}; });
 
-// Add nodes to the graph. The first argument is the node id. The second is
-// metadata about the node. In this case we're going to add labels to each of
-// our nodes.
-// g.setNode("kspacey",    { label: "Kevin Spacey",  });
-// g.setNode("swilliams",  { label: "Saul Williams", });
-// g.setNode("bpitt",      { label: "Brad Pitt",     });
-// g.setNode("hford",      { label: "Harrison Ford", });
-// g.setNode("lwilson",    { label: "Luke Wilson",   });
-// g.setNode("kbacon",     { label: "Kevin Bacon",   });
-// 
-// // Add edges to the graph.
-// g.setEdge("kspacey",   "swilliams");
-// g.setEdge("swilliams", "kbacon");
-// g.setEdge("bpitt",     "kbacon");
-// g.setEdge("hford",     "lwilson");
-// g.setEdge("lwilson",   "kbacon");
-// 
-// dagre.layout(g);
-
 var svg = d3.select("svg"),
     inner = svg.select("g");
 
@@ -41,8 +22,6 @@ var render = new dagreD3.render();
 
 function load() {
 console.log(jsbridge.init(document.getElementById("code").value));
-console.log("initialized");
-console.log("There are " + jsbridge.cfgs() + " CFGs");
 
 function label(cfgIdx, blockIdx, block) {
     switch (block.sort) {
@@ -50,7 +29,6 @@ function label(cfgIdx, blockIdx, block) {
         var str = "";
         Object.keys(block.instrs).forEach(function (instrIdx, _) {
             const instr = block.instrs[instrIdx];
-            console.log(instr);
             str += instr + "\n";
         })
         return { label : str };
@@ -80,6 +58,8 @@ Object.keys(cfgs).forEach(function (cfgIdx, _) {
             const nodeName = "block" + cfgIdx + "-" + blockIdx;
             g.setNode(nodeName, label(cfgIdx, blockIdx, block));
             g.setParent(nodeName, `CFG-${cfgIdx}`);
+        } else {
+            console.log(`block ${blockIdx} is undefined`);
         }
     });
     Object.keys(cfg.edges).forEach(function (from, _) {
