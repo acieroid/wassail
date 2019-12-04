@@ -1,5 +1,19 @@
+(library
+   (name wasmtaint)
+   (modules Wasmtaint Helpers Type Address Binop Memoryop Testop Relop Value Var Instr)
+   (libraries core_kernel wasm)
+   (preprocess (pps ppx_jane ppx_compare)))
+
+;; TODO: library wasmtaint, executable main
+
 (executable
-  (name wasmtaint)
-  (modules Wasmtaint Helpers Type Address Binop Func Memoryop Testop Relop Value Var Instr)
-  (libraries core incremental incr_map wasm)
+  (name main)
+  (modules Main)
+  (libraries wasmtaint core_kernel wasm)
   (preprocess (pps ppx_jane ppx_compare)))
+  
+(executable
+  (name jsbridge)
+  (modules Jsbridge)
+  (libraries wasmtaint js_of_ocaml js_of_ocaml-ppx)
+  (preprocess (pps ppx_jane ppx_compare js_of_ocaml-ppx)))

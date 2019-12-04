@@ -1,16 +1,16 @@
-open Core
+open Core_kernel
 open Wasm
-open Helpers
+
+module Instr = Instr
+include Helpers
 
 (* TODO: ([ ] = to start, [-] = started, [x] = finished)
-  - [ ] Track taint
-   - Tag values with their provenance (e.g., nth argument of function f)
-   - Propagate taint values for data taint
-   - Propagate taint values for control taint
+  - [ ] There seems to be edges to non-existing nodes! Check and fix that
   - [ ] Tests
   - [ ] Use apron for abstraction of values?
 
 For later:
+  - [ ] Control taint
   - [ ] Improving analysis with a dependency graph
    -> This dependency graph can be dynamically discovered. Just start from exported functions, then analyze called functions.
    (Old text:
@@ -810,27 +810,26 @@ let parse_file name run =
     success
   with exn -> In_channel.close ic; raise exn
 
-let run_cfg () =
+let parse_string str run =
+  let lexbuf = Lexing.from_string str in
+    let success = input_from (fun _ ->
+        let var_opt, def = Parse.parse "foo.wat" lexbuf Parse.Module in
+        [(var_opt, def)]) run in
+  success
+
+let cfgs : (CFG.t IntMap.t) ref = ref IntMap.empty
+let nglobals : int ref = ref (-1)
+let initialize (program : string) : unit =
   let run (l : (Script.var option * Script.definition) list) =
-    List.iter l ~f:(fun (_var_opt, def) ->
+    List.iter l ~f:(fun (_, def) ->
         match def.it with
         | Script.Textual m ->
           let store = Store.init m in
-          let nglobals = List.length store.globals in
-          let cfgs = IntMap.of_alist_exn (List.mapi store.funcs ~f:(fun faddr _ -> (faddr, CFGBuilder.build faddr store))) in
-          IntMap.iter cfgs ~f:(fun cfg ->
-              Printf.printf "CFG for function %d\n" cfg.idx;
-              Printf.printf "---------------\n%s\n---------------\n" (CFG.to_dot cfg)
-            );
-          let results = InterFixpoint.analyze cfgs nglobals in
-          Printf.printf "--------- Results ---------\n";
-          IntMap.iteri results ~f:(fun ~key:cfg_idx ~data:res ->
-              Printf.printf "Results for function %d: %s\n" cfg_idx (Domain.to_string res))
+          trace (Printf.sprintf "nglobals: %d\n" (List.length store.globals));
+          nglobals := List.length store.globals;
+          cfgs := IntMap.of_alist_exn (List.mapi store.funcs ~f:(fun faddr _ -> (faddr, CFGBuilder.build faddr store)))
         | Script.Encoded _ -> failwith "unsupported"
         | Script.Quoted _ -> failwith "unsupported"
       ) in
-  Printf.printf "Success? %b" (parse_file "examples/overflow/overflow.wat" run)
-
-let () = run_cfg ()
-
+  trace (Printf.sprintf "Success? %b" (parse_string program run))
 

@@ -1,4 +1,4 @@
-open Core
+open Core_kernel
 open Wasm
 
 (** A variable in wasm is just an index *)

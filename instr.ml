@@ -1,4 +1,4 @@
-open Core
+open Core_kernel
 open Wasm
 
 module T = struct
@@ -40,7 +40,7 @@ let rec to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : t) :
      | Test t -> Printf.sprintf "test %s" (Testop.to_string t)
      | LocalGet v -> Printf.sprintf "local.get %d" v
      | LocalSet v -> Printf.sprintf "local.set %d" v
-     | LocalTee v -> Printf.sprintf "tee.local %d" v
+     | LocalTee v -> Printf.sprintf "local.tee %d" v
      | Br b -> Printf.sprintf "br %d" b
      | BrIf b -> Printf.sprintf "brif %d" b
      | GlobalGet v -> Printf.sprintf "global.get %d" v

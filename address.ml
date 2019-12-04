@@ -1,4 +1,4 @@
-open Core
+open Core_kernel
 
 (** These are the addresses. This needs to be further improved *)
 module T = struct
