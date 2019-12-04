@@ -88,3 +88,10 @@ svg.call(zoom.transform, d3.zoomIdentity.translate((svg.attr("width") - g.graph(
 
 svg.attr('height', g.graph().height * initialScale + 40);
 }
+
+
+function foo() {
+    g.setNode("data", {label: "foo"});
+    g.setParent
+    g.setEdge("block1-1", data);
+}
