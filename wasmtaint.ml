@@ -344,7 +344,7 @@ module Domain = struct
     String.concat ~sep:", " (List.mapi globals ~f:(fun i v -> Printf.sprintf "%d: %s" i (Value.to_string v)))
 
   let to_string (s : state) : string =
-    Printf.sprintf "{vstack: [%s], locals: [%s], globals: [%s]}"
+    Printf.sprintf "{vstack: [%s],\n locals: [%s],\n globals: [%s]\n}"
       (vstack_to_string s.vstack)
       (locals_to_string s.locals)
       (globals_to_string s.globals)
@@ -569,11 +569,14 @@ module IntraFixpoint = struct
 end
 
 module InterFixpoint = struct
+  (* TODO: change to Domain.state IntMap.t, adapt find_exn to find in fixpoint *)
+  let data : ((Domain.state option) IntMap.t) ref = ref IntMap.empty
+
   (* Analyze multiple CFGS, returns a map from CFG id to out_state for each CFG *)
   let analyze (cfgs : CFG.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
-    let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfgs)
-                                           ~f:(fun idx ->
-                                               (idx, None)))) in
+    data := (IntMap.of_alist_exn (List.map (IntMap.keys cfgs)
+                                    ~f:(fun idx ->
+                                        (idx, None))));
     let rec fixpoint (worklist : IntSet.t)
         (globals : Domain.globals) (memory : Domain.memory)
         (summaries : Summary.t IntMap.t) (calls : (Value.t list) IntMap.t) =

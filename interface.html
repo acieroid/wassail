@@ -20,15 +20,30 @@
           fill: #333;
           stroke-width: 1.5px;
       }
+      .container{
+          display: flex;
+      }
+      .fixed{
+          width: 70%;
+      }
+      .flex-item{
+          flex-grow: 1;
+      }
     </style>
     <script src="https://d3js.org/d3.v5.min.js" charset="utf-8"></script>
     <script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.js"></script>
     <script src="./_build/default/jsbridge.bc.js"></script>
   </head>
   <body>
-    <svg width=960 height=600><g/></svg><br/>
-
-    <textarea id="code" rows="20" cols="80">
+    <div class="container">
+      <div class="fixed">
+        <svg width="800"><g/></svg>
+      </div>
+      <div class="flex-item">
+        <a href="#" onclick="load();">Load</a>
+        <a href="#" onclick="analyze();">Analyze</a>
+        <br/>
+        <textarea id="code" rows="100" cols="50">
 (module
   (type (;0;) (func (param i32 i32 i32) (result i32)))
   (type (;1;) (func (param i32) (result i32)))
@@ -130,9 +145,10 @@
   (export "foo" (func 1))
   (export "main" (func 3))
   (export "__original_main" (func 2)))
-    </textarea>
-    <a href="#" onclick="load();">Load</a>
+</textarea>
+      </div>
 
+    </div>
     <script src="viz.js"></script>
 
   </body>

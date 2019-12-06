@@ -20,6 +20,8 @@ svg.call(zoom);
 // Create the renderer
 var render = new dagreD3.render();
 
+var cfgs = undefined;
+var returnBlock = {};
 function load() {
 console.log(jsbridge.init(document.getElementById("code").value));
 
@@ -41,14 +43,15 @@ function label(cfgIdx, blockIdx, block) {
     case "loop_exit":
         return { label: `Loop exit`, shape: "diamond" };
     case "return":
-        return { label : `Return`, shape: "ellipse" };
+        returnBlock[cfgIdx] = "block" + cfgIdx + "-" + blockIdx;
+        return { label : `Return` };
     case "function":
         const instr = block.instrs[0];
         return { label : `${instr}`, shape: "circle" };
     default: return { label: block.sort };
     }
 }
-const cfgs = jsbridge.cfgs();
+cfgs = jsbridge.cfgs();
 Object.keys(cfgs).forEach(function (cfgIdx, _) {
     const cfg = cfgs[cfgIdx];
     g.setNode(`CFG-${cfgIdx}`, {label: `Function ${cfgIdx}`, style: "fill: #DDDDDD", clusterLabelPos: "top"});
@@ -90,8 +93,16 @@ svg.attr('height', g.graph().height * initialScale + 40);
 }
 
 
-function foo() {
-    g.setNode("data", {label: "foo"});
-    g.setParent
-    g.setEdge("block1-1", data);
+function analyze() {
+    jsbridge.analyze();
+    Object.keys(cfgs).forEach(function (cfgIdx, _) {
+        const result = jsbridge.result(cfgIdx);
+        if (result != undefined) {
+            g.setNode(returnBlock[cfgIdx], {label: `Return\nResult: ${result}`, style: "fill: #DDAAAA"});
+            // g.setNode(`CFG-${cfgIdx}`, {label: `Function ${cfgIdx}\nSummary: ${result}`, style: "fill: #DDDDDD", clusterLabelPos: "top"});
+        } else {
+            console.log("Undefined analysis result for cfg: " + cfgIdx);
+        }
+    })
+    render(inner, g);
 }

@@ -36,10 +36,17 @@ let js_of_cfg (cfg : CFG.t) = Js.Unsafe.obj [| ("blocks", Js.Unsafe.obj (array_o
 let get_cfgs () =
   Js.Unsafe.obj (array_of_intmap !(Wasmtaint.cfgs) js_of_cfg)
 
+let js_of_state (state : Domain.state) = Js.string (Domain.to_string state)
+
 let () =
     Js.export "jsbridge"
       (object%js
         method init program = Wasmtaint.initialize (Js.to_string program)
-        method nglobals = !(Wasmtaint.nglobals)
+        method analyze =
+          let _ = Wasmtaint.InterFixpoint.analyze !(Wasmtaint.cfgs) !(Wasmtaint.nglobals) in
+          ()
+        method result (cfgidx : int) = match IntMap.find_exn !(InterFixpoint.data) cfgidx with
+          | Some state -> Js.Unsafe.inject (js_of_state state)
+          | None -> Js.Unsafe.inject (Js.undefined)
         method cfgs = get_cfgs ()
       end)
