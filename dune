@@ -1,6 +1,6 @@
 (library
    (name wasmtaint)
-   (modules Wasmtaint Helpers Type Address Binop Memoryop Testop Relop Value Var Instr Basic_block Memory_inst Module_inst Global_inst Func Func_inst Store Cfg Cfg_builder Domain Summary Transfer)
+   (modules Wasmtaint Helpers Type Address Binop Memoryop Testop Relop Value Var Instr Basic_block Memory_inst Module_inst Global_inst Func Func_inst Store Cfg Cfg_builder Domain Summary Transfer Intra_fixpoint Inter_fixpoint Compositional)
    (libraries core_kernel wasm)
    (preprocess (pps ppx_jane ppx_compare)))
 

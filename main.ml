@@ -14,11 +14,11 @@ let () =
               Printf.printf "CFG for function %d\n" cfg.idx;
               Printf.printf "---------------\n%s\n---------------\n" (Cfg.to_dot cfg)
             );
-          let results = InterFixpoint.analyze cfgs nglobals in
+          let results = Inter_fixpoint.analyze cfgs nglobals in
           Printf.printf "--------- Results ---------\n";
           IntMap.iteri results ~f:(fun ~key:cfg_idx ~data:res ->
               Printf.printf "Results for function %d: %s\n" cfg_idx (Domain.to_string res))
         | Script.Encoded _ -> failwith "unsupported"
         | Script.Quoted _ -> failwith "unsupported"
       ) in
-  Printf.printf "Success? %b" (parse_file "examples/overflow/overflow.wat" run)
+  Printf.printf "Success? %b" (parse_file "foo.wat" run)
