@@ -4,42 +4,6 @@ open Wasm
 module Instr = Instr
 include Helpers
 
-(* TODO: ([ ] = to start, [-] = started, [x] = finished)
-  - [ ] There seems to be edges to non-existing nodes! Check and fix that
-  - [ ] Tests
-  - [ ] Use apron for abstraction of values?
-
-For later:
-  - [ ] Control taint
-  - [ ] Improving analysis with a dependency graph
-   -> This dependency graph can be dynamically discovered. Just start from exported functions, then analyze called functions.
-   (Old text:
-   What about having a graph of function dependencies.
-   Exported functions are entry points.
-   Direct calls are edges in that graph.
-   Indirect calls will be dealth with later (if needed)
-   Then we should go for solution a) below.
-   1. Build a function call graph linearly: navigate through functions, each call is remembered as an edge (caller_idx, callee_idx)
-     e.g., 0 calls 1, 1 calls 2, 2 calls 1, 3 calls 4.
-     e.g., (overflow), 1 calls 0
-   2. Filter functions that can't be reached from the exported functions.
-     e.g., if only 0 is exported, remove (3, 4)
-     e.g., (overflow) 1 is exported
-   3. Compute a stratification of that graph
-     e.g., Stratum 1: {0}, Stratum 2: {1,2}
-     e.g., (overflow) Stratum 1: {1}, Stratum 2: {0}
-   4. Finally, we can run the analysis on each stratum. Exported functions are analyzed with inputs set to Top. Other functions are called at some point and knowledge about their input has been refined in the previous stratum.
-   5. We still need to fixpoint the entire analysis of the previous step in case the heap or global variables have been modified.)
-  - [ ] Improve abstraction of the memory
-  - [ ] Support for indirect function calls
-  - [ ] Display results of the analysis nicely (how?)
-  - [ ] Find benchmarks
-
-For later:
-  - other types (i64, f32, f64)
-  - other instructions
-*)
-
 module ByteAbstr = struct
   module T = struct
     type t =
@@ -588,13 +552,13 @@ module InterFixpoint = struct
         let args = match IntMap.find calls cfg_idx with
           | Some _ when cfg.exported ->
             (* We have stored specific arguments, but this function is exported so it can be called with any argument *)
-            List.init (fst cfg.arity) ~f:(fun i -> Value.top Type.I32Type (cfg.idx, i))
+            List.init (fst cfg.arity) ~f:(fun i -> Value.top Type.I32Type (Parameter i))
           | Some args ->
             (* Function is not exported, so it can only be called with what we discovered *)
             args
           | None when cfg.exported ->
             (* No call has been analyzed yet, and this function is exported, so we start from top *)
-            List.init (fst cfg.arity) ~f:(fun i -> Value.top Type.I32Type (cfg.idx, i))
+            List.init (fst cfg.arity) ~f:(fun i -> Value.top Type.I32Type (Parameter i))
           | None ->
             (* No call analyzed, function is not called from anywhere, use bottom as arguments *)
             List.init (fst cfg.arity) ~f:(fun _ -> Value.bottom) in

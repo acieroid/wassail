@@ -1,6 +1,6 @@
 open Core_kernel
 open Wasm
-open Helpers
+open Value
 
 module T = struct
   (** Binary operations *)
@@ -51,7 +51,7 @@ let eval (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
         | (I32RemS, Const n1, Const n2) -> Const (Int32.rem n1 n2)
         | (I32RemS, _, _) -> Int
       end;
-    sources = IntPairSet.union v1.sources v2.sources
+    sources = SourceSet.union v1.sources v2.sources
   }
 
           

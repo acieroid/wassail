@@ -1,6 +1,18 @@
 open Core_kernel
 open Wasm
-open Helpers
+
+module Source = struct
+  module T = struct
+    type t =
+      | Parameter of int
+      | Global of int
+    [@@deriving sexp, compare]
+  end
+  include T
+  include Comparator.Make(T)
+end
+
+module SourceSet = Set.Make(Source)
 
 (** These are the values (and their abstractions) *)
 module T = struct
@@ -13,9 +25,8 @@ module T = struct
 
   type t = {
     value : value;
-    (* The possible sources of this value.
-       One source is a pair of function id, function argument number *)
-    sources : IntPairSet.t;
+    (* The possible sources of this value. It can be a parameter or a global. *)
+    sources : SourceSet.t;
   }
   [@@deriving sexp, compare]
 end
@@ -24,13 +35,15 @@ include Comparator.Make(T)
 
 let of_wasm (v : Values.value) : t =
   match v with
-  | I32 x -> { value = Const x ; sources = IntPairSet.empty }
+  | I32 x -> { value = Const x ; sources = SourceSet.empty }
   | I64 _ -> failwith "unsupported type: I64"
   | F32 _ -> failwith "unsupported type: F32"
   | F64 _ -> failwith "unsupported type: F64"
 
-let sources_to_string (sources : IntPairSet.t) : string =
-  String.concat ~sep:"," (List.map (IntPairSet.to_list sources) ~f:(fun (faddr,arg) -> Printf.sprintf "f%d.arg%d" faddr arg))
+let sources_to_string (sources : SourceSet.t) : string =
+  String.concat ~sep:"," (List.map (SourceSet.to_list sources) ~f:(function
+      | Parameter n -> Printf.sprintf "p%d" n
+      | Global n -> Printf.sprintf "g%d" n))
 
 let to_string (v : t) : string =
   match v.value with
@@ -45,11 +58,11 @@ let join (v1 : t) (v2 : t) : t =
   | (_, Bottom) -> v1
   | (Const n1, Const n2) when n1 = n2 -> {
       value = Const n1;
-      sources = IntPairSet.union v1.sources v2.sources
+      sources = SourceSet.union v1.sources v2.sources
     }
   | (_, _) -> {
       value = Int;
-      sources = IntPairSet.union v1.sources v2.sources
+      sources = SourceSet.union v1.sources v2.sources
     }
 
 (** Joins two value lists together, assuming they have the same length *)
@@ -71,22 +84,22 @@ let is_not_zero (v : t) =
 
 let bottom : t = {
   value = Bottom;
-  sources = IntPairSet.empty
+  sources = SourceSet.empty
 }
 
 let zero (t : Type.t) : t =
   match t with
   | I32Type -> {
       value = Const 0l;
-      sources = IntPairSet.empty
+      sources = SourceSet.empty
     }
   | _ -> failwith "unsupported type"
 
-let top (t : Type.t) (source : (int * int)) : t =
+let top (t : Type.t) (source : Source.t) : t =
   match t with
   | I32Type -> {
       value = Int;
-      sources = IntPairSet.singleton source
+      sources = SourceSet.singleton source
     }
   | _ -> failwith "unsupported type"
 
@@ -94,7 +107,7 @@ let top_no_source (t : Type.t) : t =
   match t with
   | I32Type -> {
       value = Int;
-      sources = IntPairSet.empty
+      sources = SourceSet.empty
     }
   | _ -> failwith "unsupported type"
 

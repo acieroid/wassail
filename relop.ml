@@ -1,6 +1,6 @@
 open Core_kernel
 open Wasm
-open Helpers
+open Value
 
 (** Relational operation *)
 module T = struct
@@ -47,5 +47,5 @@ let eval (r : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
         | (I32GeS, Const n1, Const n2) -> Const (if n1 >= n2 then 1l else 0l)
         | (I32GeS, _, _) -> Int
       end;
-    sources = IntPairSet.union v1.sources v2.sources }
+    sources = SourceSet.union v1.sources v2.sources }
 
