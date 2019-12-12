@@ -1,17 +1,15 @@
 (library
    (name wasmtaint)
-   (modules Wasmtaint Helpers Type Address Binop Memoryop Testop Relop Value Var Instr)
+   (modules Wasmtaint Helpers Type Address Binop Memoryop Testop Relop Value Var Instr Basic_block Memory_inst Module_inst Global_inst Func Func_inst Store Cfg Cfg_builder Domain Summary Transfer)
    (libraries core_kernel wasm)
    (preprocess (pps ppx_jane ppx_compare)))
-
-;; TODO: library wasmtaint, executable main
 
 (executable
   (name main)
   (modules Main)
   (libraries wasmtaint core_kernel wasm)
   (preprocess (pps ppx_jane ppx_compare)))
-  
+
 (executable
   (name jsbridge)
   (modules Jsbridge)

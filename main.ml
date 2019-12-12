@@ -9,10 +9,10 @@ let () =
         | Script.Textual m ->
           let store = Store.init m in
           let nglobals = List.length store.globals in
-          let cfgs = IntMap.of_alist_exn (List.mapi store.funcs ~f:(fun faddr _ -> (faddr, CFGBuilder.build faddr store))) in
+          let cfgs = IntMap.of_alist_exn (List.mapi store.funcs ~f:(fun faddr _ -> (faddr, Cfg_builder.build faddr store))) in
           IntMap.iter cfgs ~f:(fun cfg ->
               Printf.printf "CFG for function %d\n" cfg.idx;
-              Printf.printf "---------------\n%s\n---------------\n" (CFG.to_dot cfg)
+              Printf.printf "---------------\n%s\n---------------\n" (Cfg.to_dot cfg)
             );
           let results = InterFixpoint.analyze cfgs nglobals in
           Printf.printf "--------- Results ---------\n";
