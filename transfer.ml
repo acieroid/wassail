@@ -64,15 +64,27 @@ let rec instr_transfer (i : Instr.t) (state : Domain.state) : Domain.state =
     assert (List.length vstack'' = List.length state.vstack);
     { state with vstack = vstack'' }
   | Load op ->
-    (* If there is already a value in the heap formula, use it *)
-    (* TODO *)
-    (* Otherwise, expand the heap formula *)
-    (* TODO: for now, we just return the top value of the expected type *)
-    let (_, vstack') = Domain.pop state.vstack in
-    let c = Value.top_no_source op.typ in (* value of the correct type *)
-    let vstack'' = c :: vstack' in
-    assert (List.length vstack'' = List.length state.vstack);
-    { state with vstack = vstack'' }
+    assert (op.sz = None); (* We only support N = 32 for now *)
+    let (i, vstack') = Domain.pop state.vstack in
+    let state' = begin match Domain.formula_mapsto_4bytes state.memory i op.offset with
+      | Some c ->
+        (* If there is already a value in the heap formula, use it *)
+        let vstack'' = c :: vstack' in
+        { state with vstack = vstack'' }
+      | None ->
+        (* Otherwise, expand the heap formula *)
+        (* TODO: this expansion should be on the pre formula, not the post! *)
+        let c = Value.top op.typ (Value.Source.Heap i.value) in (* value of the correct type *)
+        let vstack'' = c :: vstack' in
+        let memory' = Domain.star state.memory
+            (Domain.star (MapsTo (ByteInValue (i, op.offset), ByteInValue (c, 0)))
+               (Domain.star (MapsTo (ByteInValue (i, op.offset + 1), ByteInValue (c, 1)))
+                  (Domain.star (MapsTo (ByteInValue (i, op.offset + 2), ByteInValue (c, 2)))
+                     (MapsTo (ByteInValue (i, op.offset + 3), ByteInValue (c, 3)))))) in
+        { state with vstack = vstack''; memory = memory' }
+    end in
+    assert (List.length state'.vstack = List.length state.vstack);
+    state'
   | Store op ->
     (* Pop the value t.const c from the stack *)
     let (c, vstack') = Domain.pop state.vstack in

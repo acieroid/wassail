@@ -31,23 +31,39 @@ let byte_to_string (b : byte) : string = match b with
     end
 
 type formula =
-  | Bottom (* TODO: do we need to distinguish bottom from emp? *)
   | Emp
   | MapsTo of byte * byte
   | Star of formula * formula
 [@@deriving sexp, compare]
 let rec formula_to_string (f : formula) : string = match f with
-  | Bottom -> "bot"
   | Emp -> "emp"
   | MapsTo (b1, b2) -> Printf.sprintf "%s -> %s" (byte_to_string b1) (byte_to_string b2)
   | Star (f1, f2) -> Printf.sprintf "%s * %s" (formula_to_string f1) (formula_to_string f2)
 
 let rec contains_maps_to (f : formula) (b1 : byte) (b2 : byte) = match f with
-  | Bottom | Emp -> false
+  | Emp -> false
   | MapsTo (b1', b2') -> compare_byte b1 b1' = 0 && compare_byte b2 b2' = 0
   | Star (f1, f2) -> contains_maps_to f1 b1 b2 || contains_maps_to f2 b1 b2
+
+let rec maps_to (f : formula) (b : byte) =
+  match f with
+  | Emp -> None
+  | MapsTo (b1, b2) -> if compare_byte b b1 = 0 then Some b2 else None
+  | Star (f1, f2) -> begin match maps_to f1 b with
+      | Some b2 -> Some b2
+      | None -> maps_to f2 b
+    end
+let formula_mapsto_4bytes (f : formula) (i : Value.t) (offset : int) : Value.t option =
+  match (maps_to f (ByteInValue (i, offset)),
+         maps_to f (ByteInValue (i, offset + 1)),
+         maps_to f (ByteInValue (i, offset + 2)),
+         maps_to f (ByteInValue (i, offset + 3))) with
+  | Some (ByteInValue (c0, _)), Some (ByteInValue (c1, _)), Some (ByteInValue (c2, _)), Some (ByteInValue (c3, _))
+    when Value.compare c0 c1 = 0 && Value.compare c1 c2 = 0 && Value.compare c2 c3 = 0 -> Some c0
+  | None, None, None, None -> None
+  | _ -> failwith "TODO: formula_mapsto_4bytes"
 let rec star (f1 : formula) (f2 : formula) = match f1 with
-  | Bottom | Emp -> f2
+  | Emp -> f2
   | MapsTo (b1, b2) ->
     if contains_maps_to f2 b1 b2 then
       f2
@@ -94,8 +110,8 @@ let init (args : Value.t list) (nlocals : int) (globals : globals) (memory : mem
 let join_globals (g1 : globals) (g2 : globals) : globals =
   Value.join_vlist_exn g1 g2
 let join_memory (m1 : memory) (m2 : memory) : memory = match (m1, m2) with
-  | Bottom, x -> x
-  | x, Bottom -> x
+  | Emp, x -> x
+  | x, Emp -> x
   | x, y -> if compare_formula x y = 0 then
       x
     else

@@ -1,18 +1,8 @@
 open Core_kernel
 open Wasm
 
-module Source = struct
-  module T = struct
-    type t =
-      | Parameter of int
-      | Global of int
-    [@@deriving sexp, compare]
-  end
-  include T
-  include Comparator.Make(T)
-end
 
-module SourceSet = Set.Make(Source)
+
 
 (** These are the values (and their abstractions) *)
 module T = struct
@@ -22,6 +12,21 @@ module T = struct
     | Int
     (* XXX: values are actually i32/i64/f32/f64 *)
   [@@deriving sexp, compare]
+
+  module Source = struct
+    module T = struct
+      type t =
+        | Heap of value (* XXX: Ideally, we want Heap of t *)
+        | Parameter of int
+        | Global of int
+      [@@deriving sexp, compare]
+    end
+    include T
+    include Comparator.Make(T)
+  end
+
+  module SourceSet = Set.Make(Source)
+
 
   type t = {
     value : value;
@@ -40,12 +45,15 @@ let of_wasm (v : Values.value) : t =
   | F32 _ -> failwith "unsupported type: F32"
   | F64 _ -> failwith "unsupported type: F64"
 
-let sources_to_string (sources : SourceSet.t) : string =
+let rec sources_to_string (sources : SourceSet.t) : string =
   String.concat ~sep:"," (List.map (SourceSet.to_list sources) ~f:(function
+      | Heap v -> Printf.sprintf "h%s" (match v with
+          | Bottom -> "bottom"
+          | Const n -> Printf.sprintf "%s" (Int32.to_string n)
+          | Int -> "int")
       | Parameter n -> Printf.sprintf "p%d" n
       | Global n -> Printf.sprintf "g%d" n))
-
-let to_string (v : t) : string =
+and to_string (v : t) : string =
   match v.value with
   | Bottom -> "bottom"
   | Const n -> Printf.sprintf "%s@%s" (Int32.to_string n) (sources_to_string v.sources)
@@ -113,4 +121,3 @@ let top_no_source (t : Type.t) : t =
 
 let list_to_string (l : t list) : string =
   String.concat ~sep:", " (List.map l ~f:to_string)
-

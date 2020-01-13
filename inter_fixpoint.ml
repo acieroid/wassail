@@ -36,10 +36,8 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
            Callees for the same reason. *)
         let callees = Cfg.callees cfg in
         let callers = Cfg.callers cfgs cfg in
-        let new_globals = globals
-        (* Globals don't change, we are compositional now *)
-          (* Domain.join_globals globals out_state.globals *) in
-        let new_memory = Domain.join_memory memory out_state.memory in
+(*        let new_globals = globals in         (* Globals don't change, we are compositional now *)
+          let new_memory = Domain.join_memory memory out_state.memory in *)
         let summary = Summary.make cfg out_state in
         let new_summaries = IntMap.set summaries ~key:cfg.idx ~data:summary in
         let new_calls = IntMap.merge calls out_state.calls ~f:(fun ~key:_ data -> match data with
@@ -48,7 +46,9 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
             | `Right b -> Some b) in
         (* Update data of the analysis and recurse *)
         data := IntMap.set !data ~key:cfg_idx ~data:(Some out_state);
-        fixpoint (IntSet.union (IntSet.remove worklist cfg_idx) (IntSet.union callees callers)) new_globals new_memory new_summaries new_calls
+        fixpoint (IntSet.union (IntSet.remove worklist cfg_idx) (IntSet.union callees callers))
+          (* These should always remain the same, and not be necessary anymore *)
+          globals memory new_summaries new_calls
   in
   (* Initial summaries are all empty *)
   let summaries0 = IntMap.map cfgs ~f:(fun cfg -> Summary.bottom cfg) in
@@ -56,7 +56,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
   let calls0 = IntMap.empty in
   (* Globals are symbolic variables, values are top *)
   let globals = (List.init nglobals ~f:(fun i -> Value.top Type.I32Type (Global i))) in
-  fixpoint (IntSet.of_list (IntMap.keys cfgs)) globals Domain.Bottom summaries0 calls0 ;
+  fixpoint (IntSet.of_list (IntMap.keys cfgs)) globals Domain.Emp summaries0 calls0 ;
   IntMap.map !data ~f:(fun v -> match v with
       | Some result -> result
       | None -> failwith "...")
