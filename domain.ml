@@ -19,9 +19,32 @@ type globals = Value.t list
 let get_global (g : globals) (x : int) : Value.t = List.nth_exn g x
 let set_global (g : globals) (x : int) (v' : Value.t) : globals = List.mapi g ~f:(fun i v -> if i = x then v' else v)
 
-(* TODO *)
-type memory = TODO
+(* Representation of the memory using separation logic *)
+type byte =
+  | ByteInValue of (Value.t * int) (* (val, byte_position) *)
 [@@deriving sexp, compare]
+let byte_to_string (b : byte) : string = match b with
+  | ByteInValue (v, b) -> begin match v.value with
+      | Value.Bottom -> "Bottom"
+      | Value.Const n -> Printf.sprintf "%d[%d]" (Option.value_exn (Int32.to_int n)) b
+      | Value.Int -> "Byte"
+    end
+
+type formula =
+  | Bottom
+  | Emp
+  | MapsTo of byte * byte
+  | Star of formula * formula
+[@@deriving sexp, compare]
+let rec formula_to_string (f : formula) : string = match f with
+  | Bottom -> "⊥"
+  | Emp -> "emp"
+  | MapsTo (b1, b2) -> Printf.sprintf "%s ↦ %s" (byte_to_string b1) (byte_to_string b2)
+  | Star (f1, f2) -> Printf.sprintf "%s ⋆ %s" (formula_to_string f1) (formula_to_string f2)
+
+type memory = formula
+[@@deriving sexp, compare]
+let memory_to_string (m : memory) : string = formula_to_string m
 
 type state = {
   vstack : vstack;
@@ -40,10 +63,11 @@ let globals_to_string (globals : globals) : string =
   String.concat ~sep:", " (List.mapi globals ~f:(fun i v -> Printf.sprintf "%d: %s" i (Value.to_string v)))
 
 let to_string (s : state) : string =
-  Printf.sprintf "{vstack: [%s],\n locals: [%s],\n globals: [%s]\n}"
+  Printf.sprintf "{vstack: [%s],\n locals: [%s],\n globals: [%s]\n, heap: %s\n}"
     (vstack_to_string s.vstack)
     (locals_to_string s.locals)
     (globals_to_string s.globals)
+    (memory_to_string s.memory)
 
 let init (args : Value.t list) (nlocals : int) (globals : globals) (memory : memory) = {
   vstack = [];
@@ -55,8 +79,10 @@ let init (args : Value.t list) (nlocals : int) (globals : globals) (memory : mem
 }
 let join_globals (g1 : globals) (g2 : globals) : globals =
   Value.join_vlist_exn g1 g2
-let join_memory (_m1 : memory) (_m2 : memory) : memory =
-  TODO
+let join_memory (m1 : memory) (m2 : memory) : memory = match (m1, m2) with
+  | Bottom, x -> x
+  | x, Bottom -> x
+  | x, y -> failwith (Printf.sprintf "failure to join memories %s and %s" (formula_to_string x) (formula_to_string y))
 
 let join (s1 : state) (s2 : state) : state = {
   vstack =

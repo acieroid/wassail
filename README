@@ -9,4 +9,8 @@ Steps to compile:
   opam install core incremental incr_map pps ppx_jane ppx_compare
 
 3. Compile and run (in this directory)
-  dune exec ./wasmtaint.exe
+  dune exec ./main.exe
+
+
+Or you can also compile to JavaScript:
+  dune build ./jsbridge.js
