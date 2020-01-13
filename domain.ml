@@ -27,20 +27,34 @@ let byte_to_string (b : byte) : string = match b with
   | ByteInValue (v, b) -> begin match v.value with
       | Value.Bottom -> "Bottom"
       | Value.Const n -> Printf.sprintf "%d[%d]" (Option.value_exn (Int32.to_int n)) b
-      | Value.Int -> "Byte"
+      | Value.Int -> Printf.sprintf "%s[%d]" (Value.sources_to_string v.sources) b
     end
 
 type formula =
-  | Bottom
+  | Bottom (* TODO: do we need to distinguish bottom from emp? *)
   | Emp
   | MapsTo of byte * byte
   | Star of formula * formula
 [@@deriving sexp, compare]
 let rec formula_to_string (f : formula) : string = match f with
-  | Bottom -> "⊥"
+  | Bottom -> "bot"
   | Emp -> "emp"
-  | MapsTo (b1, b2) -> Printf.sprintf "%s ↦ %s" (byte_to_string b1) (byte_to_string b2)
-  | Star (f1, f2) -> Printf.sprintf "%s ⋆ %s" (formula_to_string f1) (formula_to_string f2)
+  | MapsTo (b1, b2) -> Printf.sprintf "%s -> %s" (byte_to_string b1) (byte_to_string b2)
+  | Star (f1, f2) -> Printf.sprintf "%s * %s" (formula_to_string f1) (formula_to_string f2)
+
+let rec contains_maps_to (f : formula) (b1 : byte) (b2 : byte) = match f with
+  | Bottom | Emp -> false
+  | MapsTo (b1', b2') -> compare_byte b1 b1' = 0 && compare_byte b2 b2' = 0
+  | Star (f1, f2) -> contains_maps_to f1 b1 b2 || contains_maps_to f2 b1 b2
+let rec star (f1 : formula) (f2 : formula) = match f1 with
+  | Bottom | Emp -> f2
+  | MapsTo (b1, b2) ->
+    if contains_maps_to f2 b1 b2 then
+      f2
+    else
+      Star (MapsTo (b1, b2), f2)
+  | Star (f11, f12) ->
+    star f11 (star f12 f2)
 
 type memory = formula
 [@@deriving sexp, compare]
@@ -82,7 +96,11 @@ let join_globals (g1 : globals) (g2 : globals) : globals =
 let join_memory (m1 : memory) (m2 : memory) : memory = match (m1, m2) with
   | Bottom, x -> x
   | x, Bottom -> x
-  | x, y -> failwith (Printf.sprintf "failure to join memories %s and %s" (formula_to_string x) (formula_to_string y))
+  | x, y -> if compare_formula x y = 0 then
+      x
+    else
+      (* TODO: implement join fully *)
+      failwith (Printf.sprintf "failure to join memories %s and %s" (formula_to_string x) (formula_to_string y))
 
 let join (s1 : state) (s2 : state) : state = {
   vstack =

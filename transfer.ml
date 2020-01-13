@@ -64,18 +64,33 @@ let rec instr_transfer (i : Instr.t) (state : Domain.state) : Domain.state =
     assert (List.length vstack'' = List.length state.vstack);
     { state with vstack = vstack'' }
   | Load op ->
+    (* If there is already a value in the heap formula, use it *)
+    (* TODO *)
+    (* Otherwise, expand the heap formula *)
     (* TODO: for now, we just return the top value of the expected type *)
     let (_, vstack') = Domain.pop state.vstack in
     let c = Value.top_no_source op.typ in (* value of the correct type *)
     let vstack'' = c :: vstack' in
     assert (List.length vstack'' = List.length state.vstack);
     { state with vstack = vstack'' }
-  | Store _op ->
-    (* TODO: for now, we just ignore the store *)
-    let (_, vstack') = Domain.pop state.vstack in
-    let (_, vstack'') = Domain.pop vstack' in
+  | Store op ->
+    (* Pop the value t.const c from the stack *)
+    let (c, vstack') = Domain.pop state.vstack in
+    (* Pop the value i32.const i from the stack *)
+    let (i, vstack'') = Domain.pop vstack' in
+    (* let b be the byte sequence of c *)
+    assert (op.sz = None); (* We only support N = 32 for now *)
+    (* "Replace the bytes mem.data[ea:N/8] with b*" -> we remember that in the heap formula *)
+    (* The formula is:
+       heap * ea -> c0 * ea+1 -> c1 * ea+2 -> c2 * ea+3 -> c3
+       where c is formed of the bytes c0, c1, c2, c3 *)
+    let memory' = Domain.star state.memory
+        (Domain.star (MapsTo (ByteInValue (i, op.offset), ByteInValue (c, 0)))
+           (Domain.star (MapsTo (ByteInValue (i, op.offset + 1), ByteInValue (c, 1)))
+              (Domain.star (MapsTo (ByteInValue (i, op.offset + 2), ByteInValue (c, 2)))
+                 (MapsTo (ByteInValue (i, op.offset + 3), ByteInValue (c, 3)))))) in
     assert (List.length vstack'' = List.length state.vstack - 2);
-    { state with vstack = vstack'' }
+    { state with vstack = vstack''; memory = memory' }
   | Block _ -> failwith "shouldn't happen"
   | Loop _ -> failwith "shouldn't happen"
   | Call _ -> failwith "shouldn't happen"
