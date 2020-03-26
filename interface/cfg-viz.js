@@ -28,20 +28,20 @@ console.log(jsbridge.init(document.getElementById("code").value));
 function label(cfgIdx, blockIdx, block) {
     switch (block.sort) {
     case "normal":
-        var str = "";
+        var str = `(Block ${blockIdx})\n`
         Object.keys(block.instrs).forEach(function (instrIdx, _) {
             const instr = block.instrs[instrIdx];
             str += instr + "\n";
         })
         return { label : str };
     case "block_entry":
-        return { label: `Block entry`, shape: "diamond" };
+        return { label: `Block entry (${blockIdx})`, shape: "diamond" };
     case "block_exit":
-        return { label: `Block exit`, shape: "diamond" };
+        return { label: `Block exit (${blockIdx})`, shape: "diamond" };
     case "loop_entry":
-        return { label: `Loop entry`, shape: "diamond" };
+        return { label: `Loop entry (${blockIdx})`, shape: "diamond" };
     case "loop_exit":
-        return { label: `Loop exit`, shape: "diamond" };
+        return { label: `Loop exit (${blockIdx})`, shape: "diamond" };
     case "return":
         returnBlock[cfgIdx] = "block" + cfgIdx + "-" + blockIdx;
         return { label : `Return` };

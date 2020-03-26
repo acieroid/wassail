@@ -11,7 +11,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
                                       (idx, None))));
   (* The fixpoint loop, with a worklist, and the different domain values *)
   let rec fixpoint (worklist : IntSet.t)
-      (globals : Domain.globals) (memory : Domain.memory)
+      (globals : Globals.t) (memory : Domain.memory)
       (summaries : Summary.t IntMap.t) (calls : (Value.t list) IntMap.t) =
     if IntSet.is_empty worklist then
       () (* empty worklist, analysis finished *)
@@ -21,7 +21,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
       let cfg = IntMap.find_exn cfgs cfg_idx in
       (* The arguments to this CFG. They all map to top because we perform a compositional analysis *)
       let args = List.init (fst cfg.arity) ~f:(fun i -> Value.top Type.I32Type (Parameter i)) in
-      Printf.printf "Analyzing cfg %d with globals: [%s] and args: [%s]\n" cfg_idx (Domain.globals_to_string globals) (Value.list_to_string args);
+      Printf.printf "Analyzing cfg %d with globals: [%s] and args: [%s]\n" cfg_idx (Globals.to_string globals) (Value.list_to_string args);
       (* Perform intra-procedural analysis *)
       let out_state = Intra_fixpoint.analyze_coarse cfg args globals memory summaries in
       (* Check difference with previous state, if there was any *)

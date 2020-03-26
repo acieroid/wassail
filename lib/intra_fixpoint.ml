@@ -2,7 +2,7 @@ open Core_kernel
 open Helpers
 
 (* Analyzes a CFG. Returns a map where each basic blocks is mappped to its input state and output state *)
-let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Domain.globals) (memory : Domain.memory) (summaries : Summary.t IntMap.t) : (Domain.state * Domain.state) IntMap.t =
+let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : Domain.memory) (summaries : Summary.t IntMap.t) : (Domain.state * Domain.state) IntMap.t =
   let bottom = None in
   assert (List.length args = (fst cfg.arity)); (* Given number of arguments should match the in arity of the function *)
   let init = Domain.init args cfg.nlocals globals memory in
@@ -40,6 +40,6 @@ let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Domain.globals) (memo
   IntMap.map !data ~f:(fun (in_state, out_state) -> (Option.value_exn in_state, Option.value_exn out_state))
 
 (* Similar to analyze, but only return the out state for a CFG *)
-let analyze_coarse (cfg : Cfg.t) (args : Value.t list) (globals : Domain.globals) (memory : Domain.memory) (summaries : Summary.t IntMap.t) : Domain.state =
+let analyze_coarse (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : Domain.memory) (summaries : Summary.t IntMap.t) : Domain.state =
   let results = analyze cfg args globals memory summaries in
   snd (IntMap.find_exn results cfg.exit_block)

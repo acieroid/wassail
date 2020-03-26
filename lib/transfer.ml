@@ -9,36 +9,36 @@ let rec instr_transfer (i : Instr.t) (state : Domain.state) : (Domain.formula * 
   | Nop ->
     [], state
   | Drop ->
-    let (_, vstack') = Domain.pop state.vstack in
+    let (_, vstack') = Vstack.pop state.vstack in
     assert (List.length vstack' = List.length state.vstack - 1);
     [], { state with vstack = vstack' }
   | LocalGet x ->
-    let vstack' = (Domain.get_local state.locals x) :: state.vstack in
+    let vstack' = (Locals.get_local state.locals x) :: state.vstack in
     assert (List.length vstack' = 1 + List.length state.vstack);
     [], { state with vstack = vstack' }
   | LocalSet x ->
-    let (v, vstack') = Domain.pop state.vstack in
+    let (v, vstack') = Vstack.pop state.vstack in
     assert (List.length vstack' = List.length state.vstack - 1);
     [], { state with vstack = vstack';
-                 locals = Domain.set_local state.locals x v }
+                 locals = Locals.set_local state.locals x v }
   | LocalTee x ->
-    let (v, vstack') = Domain.pop state.vstack in
+    let (v, vstack') = Vstack.pop state.vstack in
     let (f, state') = instr_transfer (LocalSet x) { state with vstack = v :: v :: vstack' } in
     assert (List.length state'.vstack = List.length state.vstack);
     f, state'
   | GlobalGet x ->
-    let vstack' = (Domain.get_global state.globals x) :: state.vstack in
+    let vstack' = (Globals.get_global state.globals x) :: state.vstack in
     assert (List.length vstack' = List.length state.vstack + 1);
     [], { state with vstack = vstack' }
   | GlobalSet x ->
-    let (v, vstack') = Domain.pop state.vstack in
+    let (v, vstack') = Vstack.pop state.vstack in
     assert (List.length vstack' = List.length state.vstack - 1);
     [], { state with vstack = vstack';
-                     globals = Domain.set_global state.globals x v }
+                     globals = Globals.set_global state.globals x v }
   | Br _ ->
     [], state
   | BrIf _ ->
-    let (_, vstack') = Domain.pop state.vstack in
+    let (_, vstack') = Vstack.pop state.vstack in
     assert (List.length vstack' = List.length state.vstack - 1);
     [], { state with vstack = vstack' }
   | Return -> [], state
@@ -47,28 +47,28 @@ let rec instr_transfer (i : Instr.t) (state : Domain.state) : (Domain.formula * 
     assert (List.length vstack' = List.length state.vstack + 1);
     [], { state with vstack = vstack' }
   | Compare rel ->
-    let (v1, vstack') = Domain.pop state.vstack in
-    let (v2, vstack'') = Domain.pop vstack' in
+    let (v1, vstack') = Vstack.pop state.vstack in
+    let (v2, vstack'') = Vstack.pop vstack' in
     let v = Relop.eval rel v1 v2 in
     let vstack''' = v :: vstack'' in
     assert (List.length vstack''' = List.length state.vstack - 1);
     [], { state with vstack =  vstack''' }
   | Binary bin ->
-    let (v1, vstack') = Domain.pop state.vstack in
-    let (v2, vstack'') = Domain.pop vstack' in
+    let (v1, vstack') = Vstack.pop state.vstack in
+    let (v2, vstack'') = Vstack.pop vstack' in
     let v = Binop.eval bin v1 v2 in
     let vstack''' = v :: vstack'' in
     assert (List.length vstack''' = List.length state.vstack - 1);
     [], { state with vstack = vstack''' }
   | Test test ->
-    let (v, vstack') = Domain.pop state.vstack in
+    let (v, vstack') = Vstack.pop state.vstack in
     let v' = Testop.eval test v in
     let vstack'' = v' :: vstack' in
     assert (List.length vstack'' = List.length state.vstack);
     [], { state with vstack = vstack'' }
   | Load op ->
     assert (op.sz = None); (* We only support N = 32 for now *)
-    let (i, vstack') = Domain.pop state.vstack in
+    let (i, vstack') = Vstack.pop state.vstack in
     let (f, state') = begin match Domain.formula_mapsto_4bytes state.memory i op.offset with
       | Some c ->
         (* If there is already a value in the heap formula, use it *)
@@ -90,9 +90,9 @@ let rec instr_transfer (i : Instr.t) (state : Domain.state) : (Domain.formula * 
     f, state'
   | Store op ->
     (* Pop the value t.const c from the stack *)
-    let (c, vstack') = Domain.pop state.vstack in
+    let (c, vstack') = Vstack.pop state.vstack in
     (* Pop the value i32.const i from the stack *)
-    let (i, vstack'') = Domain.pop vstack' in
+    let (i, vstack'') = Vstack.pop vstack' in
     (* let b be the byte sequence of c *)
     assert (op.sz = None); (* We only support N = 32 for now *)
     (* "Replace the bytes mem.data[ea:N/8] with b*" -> we remember that in the heap formula *)

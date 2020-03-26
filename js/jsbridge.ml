@@ -47,6 +47,17 @@ let () =
         method analyze =
           let _ = Wasmtaint.Inter_fixpoint.analyze !(Wasmtaint.cfgs) !(Wasmtaint.nglobals) in
           ()
+
+(*        method initial_state (nargs : int) (nlocals : int) (nglobals : int) =
+          Domain.init
+            (* locals: [p0, p1, ...., 0, 0, 0] *)
+            (List.init nargs ~f:(fun i -> Value.symbolic (Printf.sprintf "p%d" i))
+               (List.init nlocals ~f:(fun _ -> Value.zero I32Type)))
+            (* globals: [g0, ...] *)
+            (List.init nglobals ~f:(fun i -> Value.symbolic (Printf.sprintf "g%d" i)))
+            (* memory: M *)
+            Memory.top
+*)
         method result (cfgidx : int) = match IntMap.find_exn !(Inter_fixpoint.data) cfgidx with
           | Some state -> Js.Unsafe.inject (js_of_state state)
           | None -> Js.Unsafe.inject (Js.undefined)
