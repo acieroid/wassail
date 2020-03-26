@@ -69,9 +69,8 @@ let rec instr_transfer (i : Instr.t) (state : Domain.state) : Domain.state =
     assert (List.length vstack'' = List.length state.vstack);
     { state with vstack = vstack'' }
   | Load op ->
-    assert (op.sz = None); (* We only support N = 32 for now. TODO: move assumption to memory.ml *)
     let (i, vstack') = Vstack.pop state.vstack in
-    let c = Memory.load state.memory i (* op  *) in
+    let c = Memory.load state.memory i op in
     let state' = { state with vstack = c :: vstack' } in
     assert (List.length state'.vstack = List.length state.vstack);
     state'
@@ -82,7 +81,7 @@ let rec instr_transfer (i : Instr.t) (state : Domain.state) : Domain.state =
     let (i, vstack'') = Vstack.pop vstack' in
     (* let b be the byte sequence of c *)
     assert (op.sz = None); (* We only support N = 32 for now *)
-    let memory' = Memory.store state.memory c i (* op *) in
+    let memory' = Memory.store state.memory c i op in
     assert (List.length vstack'' = List.length state.vstack - 2);
     { state with vstack = vstack''; memory = memory' }
   | Block _ -> failwith "shouldn't happen"
