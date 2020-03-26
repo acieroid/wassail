@@ -11,7 +11,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
                                       (idx, None))));
   (* The fixpoint loop, with a worklist, and the different domain values *)
   let rec fixpoint (worklist : IntSet.t)
-      (globals : Globals.t) (memory : Domain.memory)
+      (globals : Globals.t) (memory : Memory.t)
       (summaries : Summary.t IntMap.t) (calls : (Value.t list) IntMap.t) =
     if IntSet.is_empty worklist then
       () (* empty worklist, analysis finished *)
