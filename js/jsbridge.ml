@@ -20,7 +20,7 @@ let array_of_intlist (l : int list) : (string * Js.Unsafe.any) array =
 let array_of_list (l : 'a list) (f : 'a -> Js.Unsafe.any) : (string * Js.Unsafe.any) array =
   Array.init (List.length l) (fun i -> (string_of_int i, f (List.nth l i)))
 
-let js_of_block (block : BasicBlock.t) = Js.Unsafe.obj [| ("idx", Js.Unsafe.inject block.idx);
+let js_of_block (block : Basic_block.t) = Js.Unsafe.obj [| ("idx", Js.Unsafe.inject block.idx);
                                                           ("sort", Js.Unsafe.inject (Js.string (match block.sort with
                                                             | BlockEntry -> "block_entry"
                                                             | BlockExit -> "block_exit"
@@ -31,7 +31,7 @@ let js_of_block (block : BasicBlock.t) = Js.Unsafe.obj [| ("idx", Js.Unsafe.inje
                                                             | Return -> "return")));
                                                           ("instrs", Js.Unsafe.obj (array_of_list block.instrs (fun x -> Js.Unsafe.inject (Wasmtaint.Instr.to_string x)))) |]
 
-let js_of_cfg (cfg : CFG.t) = Js.Unsafe.obj [| ("blocks", Js.Unsafe.obj (array_of_intmap cfg.basic_blocks js_of_block));
+let js_of_cfg (cfg : Cfg.t) = Js.Unsafe.obj [| ("blocks", Js.Unsafe.obj (array_of_intmap cfg.basic_blocks js_of_block));
                                                ("edges", Js.Unsafe.inject (Js.Unsafe.obj (array_of_intmap cfg.edges (fun x -> Js.Unsafe.obj (array_of_intlist x))))) |]
 let get_cfgs () =
   Js.Unsafe.obj (array_of_intmap !(Wasmtaint.cfgs) js_of_cfg)
@@ -43,9 +43,9 @@ let () =
       (object%js
         method init program = Wasmtaint.initialize (Js.to_string program)
         method analyze =
-          let _ = Wasmtaint.InterFixpoint.analyze !(Wasmtaint.cfgs) !(Wasmtaint.nglobals) in
+          let _ = Wasmtaint.Inter_fixpoint.analyze !(Wasmtaint.cfgs) !(Wasmtaint.nglobals) in
           ()
-        method result (cfgidx : int) = match IntMap.find_exn !(InterFixpoint.data) cfgidx with
+        method result (cfgidx : int) = match IntMap.find_exn !(Inter_fixpoint.data) cfgidx with
           | Some state -> Js.Unsafe.inject (js_of_state state)
           | None -> Js.Unsafe.inject (Js.undefined)
         method cfgs = get_cfgs ()

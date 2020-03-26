@@ -3,3 +3,4 @@
 *.wasm
 *.o
 \#*\#
+.merlin
