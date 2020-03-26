@@ -56,7 +56,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
   let calls0 = IntMap.empty in
   (* Globals are symbolic variables, values are top *)
   let globals = (List.init nglobals ~f:(fun i -> Value.top Type.I32Type (Global i))) in
-  fixpoint (IntSet.of_list (IntMap.keys cfgs)) globals Domain.Emp summaries0 calls0 ;
+  fixpoint (IntSet.of_list (IntMap.keys cfgs)) globals [] summaries0 calls0 ;
   IntMap.map !data ~f:(fun v -> match v with
       | Some result -> result
       | None -> failwith "...")

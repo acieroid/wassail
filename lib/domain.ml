@@ -30,29 +30,14 @@ let byte_to_string (b : byte) : string = match b with
       | Value.Int -> Printf.sprintf "%s[%d]" (Value.sources_to_string v.sources) b
     end
 
-type formula =
-  | Emp
-  | MapsTo of byte * byte
-  | Star of formula * formula
+type formula = (byte * byte) list
 [@@deriving sexp, compare]
-let rec formula_to_string (f : formula) : string = match f with
-  | Emp -> "emp"
-  | MapsTo (b1, b2) -> Printf.sprintf "%s -> %s" (byte_to_string b1) (byte_to_string b2)
-  | Star (f1, f2) -> Printf.sprintf "%s * %s" (formula_to_string f1) (formula_to_string f2)
+let formula_to_string (f : formula) : string = match f with
+  | [] -> "emp"
+  | _ -> String.concat ~sep:" * " (List.map ~f:(fun (b1, b2) -> Printf.sprintf "%s -> %s" (byte_to_string b1) (byte_to_string b2)) f)
 
-let rec contains_maps_to (f : formula) (b1 : byte) (b2 : byte) = match f with
-  | Emp -> false
-  | MapsTo (b1', b2') -> compare_byte b1 b1' = 0 && compare_byte b2 b2' = 0
-  | Star (f1, f2) -> contains_maps_to f1 b1 b2 || contains_maps_to f2 b1 b2
+let maps_to (f : formula) (b : byte) = Option.map ~f:(fun (_, b2) -> b2) (List.find f ~f:(fun (b1, _) -> compare_byte b b1 = 0))
 
-let rec maps_to (f : formula) (b : byte) =
-  match f with
-  | Emp -> None
-  | MapsTo (b1, b2) -> if compare_byte b b1 = 0 then Some b2 else None
-  | Star (f1, f2) -> begin match maps_to f1 b with
-      | Some b2 -> Some b2
-      | None -> maps_to f2 b
-    end
 let formula_mapsto_4bytes (f : formula) (i : Value.t) (offset : int) : Value.t option =
   match (maps_to f (ByteInValue (i, offset)),
          maps_to f (ByteInValue (i, offset + 1)),
@@ -62,15 +47,8 @@ let formula_mapsto_4bytes (f : formula) (i : Value.t) (offset : int) : Value.t o
     when Value.compare c0 c1 = 0 && Value.compare c1 c2 = 0 && Value.compare c2 c3 = 0 -> Some c0
   | None, None, None, None -> None
   | _ -> failwith "TODO: formula_mapsto_4bytes"
-let rec star (f1 : formula) (f2 : formula) = match f1 with
-  | Emp -> f2
-  | MapsTo (b1, b2) ->
-    if contains_maps_to f2 b1 b2 then
-      f2
-    else
-      Star (MapsTo (b1, b2), f2)
-  | Star (f11, f12) ->
-    star f11 (star f12 f2)
+let add_mapsto (f : formula) (b1 : byte) (b2 : byte) = (b1, b2) :: (List.filter ~f:(fun (b1', _) -> compare_byte b1 b1' <> 0) f)
+
 
 type memory = formula
 [@@deriving sexp, compare]
@@ -109,14 +87,9 @@ let init (args : Value.t list) (nlocals : int) (globals : globals) (memory : mem
 }
 let join_globals (g1 : globals) (g2 : globals) : globals =
   Value.join_vlist_exn g1 g2
-let join_memory (m1 : memory) (m2 : memory) : memory = match (m1, m2) with
-  | Emp, x -> x
-  | x, Emp -> x
-  | x, y -> if compare_formula x y = 0 then
-      x
-    else
-      (* TODO: implement join fully *)
-      failwith (Printf.sprintf "failure to join memories %s and %s" (formula_to_string x) (formula_to_string y))
+let join_memory (m1 : memory) (m2 : memory) : memory =
+  (* TODO: if m2 redefines elements from m1, fail? or do what? *)
+  List.fold_left ~init:m1 ~f:(fun f (b1, b2) -> add_mapsto f b1 b2) m2
 
 let join (s1 : state) (s2 : state) : state = {
   vstack =

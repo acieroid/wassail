@@ -3,15 +3,3 @@
    (modules Wasmtaint Helpers Type Address Binop Memoryop Testop Relop Value Var Instr Basic_block Memory_inst Module_inst Global_inst Func Func_inst Store Cfg Cfg_builder Domain Summary Transfer Intra_fixpoint Inter_fixpoint Compositional)
    (libraries core_kernel wasm)
    (preprocess (pps ppx_jane ppx_compare)))
-
-(executable
-  (name main)
-  (modules Main)
-  (libraries wasmtaint core_kernel wasm)
-  (preprocess (pps ppx_jane ppx_compare)))
-
-(executable
-  (name jsbridge)
-  (modules Jsbridge)
-  (libraries wasmtaint js_of_ocaml js_of_ocaml-ppx)
-  (preprocess (pps ppx_jane ppx_compare js_of_ocaml-ppx)))

@@ -20,7 +20,7 @@ let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Domain.globals) (memo
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
       (* We analyze it *)
-      let out_state = Transfer.transfer block in_state summaries in
+      let (_formula, out_state) = Transfer.transfer block in_state summaries in (* TODO: use formula *)
       (* Has out state changed? *)
       let previous_out_state = snd (IntMap.find_exn !data block_idx) in
       match previous_out_state with

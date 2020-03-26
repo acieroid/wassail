@@ -1,0 +1,5 @@
+(executable
+  (name main)
+  (modules Main)
+  (libraries wasmtaint core_kernel wasm)
+  (preprocess (pps ppx_jane ppx_compare)))
