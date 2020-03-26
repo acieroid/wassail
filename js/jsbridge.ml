@@ -42,11 +42,12 @@ let () =
     Js.export "jsbridge"
       (object%js
         method init program = Wasmtaint.initialize (Js.to_string program)
+        method cfgs = get_cfgs ()
+
         method analyze =
           let _ = Wasmtaint.Inter_fixpoint.analyze !(Wasmtaint.cfgs) !(Wasmtaint.nglobals) in
           ()
         method result (cfgidx : int) = match IntMap.find_exn !(Inter_fixpoint.data) cfgidx with
           | Some state -> Js.Unsafe.inject (js_of_state state)
           | None -> Js.Unsafe.inject (Js.undefined)
-        method cfgs = get_cfgs ()
       end)

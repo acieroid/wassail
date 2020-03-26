@@ -12,4 +12,5 @@ Steps to compile:
   dune exec ./bin/main.exe
 
    Or you can also compile to JavaScript:
-  dune build ./js/jsbridge.js
+  dune build ./js/jsbridge.bc.js
+   Then you can open interface.html
