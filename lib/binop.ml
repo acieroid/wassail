@@ -12,7 +12,7 @@ module T = struct
     | I32Shl
     | I32And
     (* XXX: there are many other operations *)
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, yojson]
 end
 include T
 let of_wasm (b : Ast.binop) : t =

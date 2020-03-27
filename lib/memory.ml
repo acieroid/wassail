@@ -1,7 +1,7 @@
 open Core_kernel
 
 type t = (Value.t * Value.t) list
-[@@deriving sexp, compare]
+[@@deriving sexp, compare, yojson]
 
 let initial = []
 

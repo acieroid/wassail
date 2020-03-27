@@ -6,7 +6,7 @@ module T = struct
     value : Value.t;
     mut : bool;
   }
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, yojson]
 end
 include T
 

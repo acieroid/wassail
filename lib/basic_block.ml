@@ -1,11 +1,12 @@
 open Core_kernel
 
 type block_sort = BlockEntry | BlockExit | LoopEntry | LoopExit | Normal | Function | Return
+                  [@@deriving sexp, compare, yojson]
 type t = {
   idx: int;
   sort: block_sort;
   instrs: Instr.t list;
-}
+} [@@deriving sexp, compare, yojson]
 let to_string (b : t) : string = Printf.sprintf "block %d" b.idx
 let to_dot (b : t) : string =
   match b.sort with

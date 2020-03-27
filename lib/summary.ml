@@ -28,7 +28,7 @@ let bottom (cfg : Cfg.t) : t = {
 let apply (sum : t) (fidx : Var.t) (st : Domain.state) : Domain.state =
   { st with
     vstack = sum.result @ (List.drop st.vstack sum.nargs );
-    calls = IntMap.update st.calls fidx ~f:(function
+    calls = ValueListIntMap.IntMap.update st.calls fidx ~f:(function
         | None -> List.take st.vstack sum.nargs
         | Some vs -> Value.join_vlist_exn vs (List.take st.vstack sum.nargs))
   }

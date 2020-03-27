@@ -8,7 +8,7 @@ module T = struct
     | I64Type
     | F32Type
     | F64Type
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, yojson]
 end
 include T
 

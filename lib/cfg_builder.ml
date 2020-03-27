@@ -1,5 +1,6 @@
 open Core_kernel
 open Helpers
+
 let build (faddr : Address.t) (store : Store.t) : Cfg.t =
   let funcinst = Store.get_funcinst store faddr in
   let cur_idx : int ref = ref 0 in
@@ -135,13 +136,13 @@ let build (faddr : Address.t) (store : Store.t) : Cfg.t =
     (* Number of locals in the function *)
     nlocals = List.length funcinst.code.locals;
     (*The basic blocks *)
-    basic_blocks = IntMap.of_alist_exn (List.map actual_blocks ~f:(fun b -> (b.idx, b)));
+    basic_blocks = BasicBlockIntMap.IntMap.of_alist_exn (List.map actual_blocks ~f:(fun b -> (b.idx, b)));
     (* The forward edges *)
     edges = IntMap.of_alist_multi actual_edges;
     (* The backward edges *)
     back_edges = IntMap.of_alist_multi (List.map actual_edges ~f:(fun (left, right) -> (right, left)));
     (* The entry block *)
     (* TODO: probably not fully correct so we have to pay close attention to that: there should be a single entry block *)
-    entry_block = Option.value_exn (List.min_elt (List.map actual_blocks ~f:(fun b -> b.idx)) ~compare:compare);
+    entry_block = Option.value_exn (List.min_elt (List.map actual_blocks ~f:(fun b -> b.idx)) ~compare:Pervasives.compare);
     (* The exit block is the return block *)
     exit_block = return_block.idx }

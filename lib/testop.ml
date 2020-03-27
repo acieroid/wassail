@@ -6,7 +6,7 @@ open Value
 module T = struct
   type t =
     | I32Eqz
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, yojson]
 end
 include T
 let of_wasm (t : Ast.testop) : t =

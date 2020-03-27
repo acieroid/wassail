@@ -6,9 +6,9 @@ type state = {
   locals : Locals.t;
   globals : Globals.t;
   memory : Memory.t;
-  calls : (Value.t list) IntMap.t; (* A map of function called, from function index to parameters given *)
+  calls : ValueListIntMap.t; (* A map of function called, from function index to parameters given *)
 }
-[@@deriving sexp, compare]
+[@@deriving sexp, compare, yojson]
 
 let to_string (s : state) : string =
   Printf.sprintf "{vstack: [%s],\n locals: [%s],\n globals: [%s]\n, heap: %s\n}"
@@ -23,7 +23,7 @@ let init (args : Value.t list) (nlocals : int) (globals : Globals.t) (memory : M
   globals = globals;
   memory = memory;
   (* The list of calls is initially empty *)
-  calls = IntMap.empty;
+  calls = ValueListIntMap.IntMap.empty;
 }
 
 let join (s1 : state) (s2 : state) : state = {
@@ -42,7 +42,7 @@ let join (s1 : state) (s2 : state) : state = {
   locals = List.map2_exn s1.locals s2.locals ~f:Value.join;
   globals = Globals.join s1.globals s2.globals;
   memory = Memory.join s1.memory s2.memory;
-  calls = IntMap.merge s1.calls s2.calls ~f:(fun ~key:_ data -> match data with
+  calls = ValueListIntMap.IntMap.merge s1.calls s2.calls ~f:(fun ~key:_ data -> match data with
       | `Both (a, b) -> Some (Value.join_vlist_exn a b)
       | `Left a -> Some a
       | `Right b -> Some b)

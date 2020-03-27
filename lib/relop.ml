@@ -11,7 +11,7 @@ module T = struct
     | I32GtS
     | I32LeS
     | I32GeS (* XXX: others *)
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, yojson]
 end
 include T
 let of_wasm (r : Ast.relop) : t =

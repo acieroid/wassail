@@ -23,7 +23,7 @@ module T = struct
     | Return
     | Load of Memoryop.t
     | Store of Memoryop.t
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, yojson]
 end
 include T
 let rec to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : t) : string =

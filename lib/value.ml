@@ -5,7 +5,7 @@ open Wasm
 module T = struct
   type operator =
     | Plus | Minus | Times
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, yojson]
   type t =
     | Bottom
     | Const of int32
@@ -18,7 +18,7 @@ module T = struct
     | Op of operator * t * t (* g0-16 *)
     | Deref of t (* *g0 *)
     (* XXX: values are actually i32/i64/f32/f64, but we only support i32 *)
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, yojson]
 
 end
 include T
