@@ -73,10 +73,10 @@ let is_zero (v : t) =
   | LeftOpenInterval b -> b >= Int32.zero
   | RightOpenInterval a -> a <= Int32.zero
   | OpenInterval -> true
-  | Parameter _ -> true
-  | Global _ -> true
-  | Op _ -> failwith "TODO"
-  | Deref _ -> failwith "TODO"
+  | Parameter _ -> true (* TODO: could be more precise here *)
+  | Global _ -> true (* TODO: could be more precise here *)
+  | Op _ -> true (* TODO: could be more precise here *)
+  | Deref _ -> true (* TODO: could be more precise here *)
 
 let is_not_zero (v : t) =
   match v with
@@ -87,10 +87,27 @@ let is_not_zero (v : t) =
   | LeftOpenInterval _ -> true
   | RightOpenInterval _ -> true
   | OpenInterval -> true
-  | Parameter _ -> true
-  | Global _ -> true
-  | Op _ -> failwith "TODO"
-  | Deref _ -> failwith "TODO"
+  | Parameter _ -> true (* TODO: could be more precise here *)
+  | Global _ -> true (* TODO: could be more precise here *)
+  | Op _ -> true (* TODO: could be more precise here *)
+  | Deref _ -> true (* TODO: could be more precise here *)
+
+let rec add_offset (v : t) (offset : int) : t =
+  let off = Int32.of_int_exn offset in
+  match v with
+  | Bottom -> Bottom
+  | Const n -> Const (Int32.(+) n off)
+  | Interval (a, b) -> Interval ((Int32.(+) a off), (Int32.(+) b off))
+  | LeftOpenInterval b -> LeftOpenInterval (Int32.(+) b off)
+  | RightOpenInterval b -> LeftOpenInterval (Int32.(+) b off)
+  | OpenInterval -> OpenInterval
+  | Parameter i -> Op (Plus, Parameter i, Const off)
+  | Global i -> Op (Plus, Parameter i, Const off)
+  | Deref a -> Op (Plus, Deref a, Const off)
+  (* TODO: choose between adding it to a or b? e.g., g0-16+8 is better represented as g0-8 than g0+8-16. Maybe introduce a simplification phase*)
+  | Op (Plus, a, b) -> Op (Plus, a, add_offset b offset)
+  | Op (Minus, a, b) -> Op (Minus, a, add_offset b (- offset))
+  | Op (Times, a, b) -> Op (Plus, Op (Times, a, b), Const off)
 
 let bottom : t = Bottom
 

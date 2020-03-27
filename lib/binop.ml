@@ -45,6 +45,7 @@ let to_string (b : t) : string =
 
 let add (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1, v2) with
+  | (_, Const 0l) -> v1
   | (Const n1, Const n2) -> Const (Int32.(+) n1 n2)
   | _ -> top (Printf.sprintf "add %s %s" (Value.to_string v1) (Value.to_string v2))
 
