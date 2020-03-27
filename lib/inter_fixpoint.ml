@@ -20,7 +20,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
       let cfg_idx = IntSet.min_elt_exn worklist in
       let cfg = IntMap.find_exn cfgs cfg_idx in
       (* The arguments to this CFG. They all map to top because we perform a compositional analysis *)
-      let args = List.init (fst cfg.arity) ~f:(fun i -> Value.top Type.I32Type (Parameter i)) in
+      let args = List.init (fst cfg.arity) ~f:Value.parameter in
       Printf.printf "Analyzing cfg %d with globals: [%s] and args: [%s]\n" cfg_idx (Globals.to_string globals) (Value.list_to_string args);
       (* Perform intra-procedural analysis *)
       let out_state = Intra_fixpoint.analyze_coarse cfg args globals memory summaries in
@@ -55,7 +55,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
   (* There are no calls initially. TODO: is this not unnecessary for compositional? *)
   let calls0 = IntMap.empty in
   (* Globals are symbolic variables, values are top *)
-  let globals = (List.init nglobals ~f:(fun i -> Value.top Type.I32Type (Global i))) in
+  let globals = List.init nglobals ~f:Value.global in
   fixpoint (IntSet.of_list (IntMap.keys cfgs)) globals Memory.initial summaries0 calls0 ;
   IntMap.map !data ~f:(fun v -> match v with
       | Some result -> result

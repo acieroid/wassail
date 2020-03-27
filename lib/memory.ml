@@ -10,7 +10,7 @@ let load (m : t) (addr : Value.t) (op : Memoryop.t) : Value.t =
   let v = List.fold_left ~init:Value.bottom ~f:(fun v1 (_, v2) -> Value.join v1 v2)
       (List.filter m ~f:(fun (a, _) -> Value.compare a addr = 0 (* TODO: subsumes, not compare *))) in
   if v = Value.bottom then
-    Value.top I32Type (Value.Source.Heap Value.Bottom)
+    Value.deref addr
   else
     v
 
@@ -23,5 +23,3 @@ let to_string (m : t) : string =
       Printf.sprintf "[%s: %s]" (Value.to_string a) (Value.to_string v))))
 
 let join (m1 : t) (m2 : t) : t = m1 @ m2 (* TODO: what about overlapping values? *)
-                                 
-

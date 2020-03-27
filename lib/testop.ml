@@ -1,5 +1,6 @@
 open Core_kernel
 open Wasm
+open Value
 
 (** Test operations *)
 module T = struct
@@ -15,10 +16,15 @@ let of_wasm (t : Ast.testop) : t =
 let to_string (t : t) : string =
   match t with
   | I32Eqz -> "i32.eqz"
+
+let eqz (v : Value.t) : Value.t = match (is_zero v, is_not_zero v) with
+  | (true, false) -> const 1l
+  | (false, true) -> const 0l
+  | (false, false) -> bottom
+  | (true, true) -> bool
+
 let eval (t : t) (v1 : Value.t) : Value.t =
-  match (t, v1.value) with
-  | (_, Bottom) -> v1
-  | (I32Eqz, Const 0l) -> { v1 with value = Const 1l }
-  | (I32Eqz, Const _) -> { v1 with value = Const 0l }
-  | (I32Eqz, Int) -> Value.join { v1 with value = Const 0l } { v1 with value = Const 1l }
+  match (t, v1) with
+  | (_, Bottom) -> Bottom
+  | (I32Eqz, v) -> eqz v
 

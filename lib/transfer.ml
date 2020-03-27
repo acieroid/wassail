@@ -49,15 +49,15 @@ let rec instr_transfer (i : Instr.t) (state : Domain.state) : Domain.state =
     assert (List.length vstack' = List.length state.vstack + 1);
     { state with vstack = vstack' }
   | Compare rel ->
-    let (v1, vstack') = Vstack.pop state.vstack in
-    let (v2, vstack'') = Vstack.pop vstack' in
+    let (v2, vstack') = Vstack.pop state.vstack in
+    let (v1, vstack'') = Vstack.pop vstack' in
     let v = Relop.eval rel v1 v2 in
     let vstack''' = v :: vstack'' in
     assert (List.length vstack''' = List.length state.vstack - 1);
     { state with vstack =  vstack''' }
   | Binary bin ->
-    let (v1, vstack') = Vstack.pop state.vstack in
-    let (v2, vstack'') = Vstack.pop vstack' in
+    let (v2, vstack') = Vstack.pop state.vstack in
+    let (v1, vstack'') = Vstack.pop vstack' in
     let v = Binop.eval bin v1 v2 in
     let vstack''' = v :: vstack'' in
     assert (List.length vstack''' = List.length state.vstack - 1);
@@ -81,7 +81,7 @@ let rec instr_transfer (i : Instr.t) (state : Domain.state) : Domain.state =
     let (i, vstack'') = Vstack.pop vstack' in
     (* let b be the byte sequence of c *)
     assert (op.sz = None); (* We only support N = 32 for now *)
-    let memory' = Memory.store state.memory c i op in
+    let memory' = Memory.store state.memory i c op in
     assert (List.length vstack'' = List.length state.vstack - 2);
     { state with vstack = vstack''; memory = memory' }
   | Block _ -> failwith "shouldn't happen"

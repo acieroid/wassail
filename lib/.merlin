@@ -7,8 +7,10 @@ B /home/quentin/.opam/4.07.1/lib/base_bigstring
 B /home/quentin/.opam/4.07.1/lib/base_quickcheck
 B /home/quentin/.opam/4.07.1/lib/bin_prot
 B /home/quentin/.opam/4.07.1/lib/bin_prot/shape
+B /home/quentin/.opam/4.07.1/lib/biniou
 B /home/quentin/.opam/4.07.1/lib/core_kernel
 B /home/quentin/.opam/4.07.1/lib/core_kernel/base_for_tests
+B /home/quentin/.opam/4.07.1/lib/easy-format
 B /home/quentin/.opam/4.07.1/lib/fieldslib
 B /home/quentin/.opam/4.07.1/lib/jane-street-headers
 B /home/quentin/.opam/4.07.1/lib/ocaml
@@ -16,6 +18,8 @@ B /home/quentin/.opam/4.07.1/lib/parsexp
 B /home/quentin/.opam/4.07.1/lib/ppx_assert/runtime-lib
 B /home/quentin/.opam/4.07.1/lib/ppx_bench/runtime-lib
 B /home/quentin/.opam/4.07.1/lib/ppx_compare/runtime-lib
+B /home/quentin/.opam/4.07.1/lib/ppx_deriving/runtime
+B /home/quentin/.opam/4.07.1/lib/ppx_deriving_yojson/runtime
 B /home/quentin/.opam/4.07.1/lib/ppx_enumerate/runtime-lib
 B /home/quentin/.opam/4.07.1/lib/ppx_expect/collector
 B /home/quentin/.opam/4.07.1/lib/ppx_expect/common
@@ -25,6 +29,7 @@ B /home/quentin/.opam/4.07.1/lib/ppx_inline_test/config
 B /home/quentin/.opam/4.07.1/lib/ppx_inline_test/runtime-lib
 B /home/quentin/.opam/4.07.1/lib/ppx_module_timer/runtime
 B /home/quentin/.opam/4.07.1/lib/ppx_sexp_conv/runtime-lib
+B /home/quentin/.opam/4.07.1/lib/result
 B /home/quentin/.opam/4.07.1/lib/sexplib
 B /home/quentin/.opam/4.07.1/lib/sexplib0
 B /home/quentin/.opam/4.07.1/lib/splittable_random
@@ -33,6 +38,7 @@ B /home/quentin/.opam/4.07.1/lib/time_now
 B /home/quentin/.opam/4.07.1/lib/typerep
 B /home/quentin/.opam/4.07.1/lib/variantslib
 B /home/quentin/.opam/4.07.1/lib/wasm
+B /home/quentin/.opam/4.07.1/lib/yojson
 B ../_build/default/lib/.wasmtaint.objs/byte
 S /home/quentin/.opam/4.07.1/lib/base
 S /home/quentin/.opam/4.07.1/lib/base/caml
@@ -42,8 +48,10 @@ S /home/quentin/.opam/4.07.1/lib/base_bigstring
 S /home/quentin/.opam/4.07.1/lib/base_quickcheck
 S /home/quentin/.opam/4.07.1/lib/bin_prot
 S /home/quentin/.opam/4.07.1/lib/bin_prot/shape
+S /home/quentin/.opam/4.07.1/lib/biniou
 S /home/quentin/.opam/4.07.1/lib/core_kernel
 S /home/quentin/.opam/4.07.1/lib/core_kernel/base_for_tests
+S /home/quentin/.opam/4.07.1/lib/easy-format
 S /home/quentin/.opam/4.07.1/lib/fieldslib
 S /home/quentin/.opam/4.07.1/lib/jane-street-headers
 S /home/quentin/.opam/4.07.1/lib/ocaml
@@ -51,6 +59,8 @@ S /home/quentin/.opam/4.07.1/lib/parsexp
 S /home/quentin/.opam/4.07.1/lib/ppx_assert/runtime-lib
 S /home/quentin/.opam/4.07.1/lib/ppx_bench/runtime-lib
 S /home/quentin/.opam/4.07.1/lib/ppx_compare/runtime-lib
+S /home/quentin/.opam/4.07.1/lib/ppx_deriving/runtime
+S /home/quentin/.opam/4.07.1/lib/ppx_deriving_yojson/runtime
 S /home/quentin/.opam/4.07.1/lib/ppx_enumerate/runtime-lib
 S /home/quentin/.opam/4.07.1/lib/ppx_expect/collector
 S /home/quentin/.opam/4.07.1/lib/ppx_expect/common
@@ -60,6 +70,7 @@ S /home/quentin/.opam/4.07.1/lib/ppx_inline_test/config
 S /home/quentin/.opam/4.07.1/lib/ppx_inline_test/runtime-lib
 S /home/quentin/.opam/4.07.1/lib/ppx_module_timer/runtime
 S /home/quentin/.opam/4.07.1/lib/ppx_sexp_conv/runtime-lib
+S /home/quentin/.opam/4.07.1/lib/result
 S /home/quentin/.opam/4.07.1/lib/sexplib
 S /home/quentin/.opam/4.07.1/lib/sexplib0
 S /home/quentin/.opam/4.07.1/lib/splittable_random
@@ -68,6 +79,7 @@ S /home/quentin/.opam/4.07.1/lib/time_now
 S /home/quentin/.opam/4.07.1/lib/typerep
 S /home/quentin/.opam/4.07.1/lib/variantslib
 S /home/quentin/.opam/4.07.1/lib/wasm
+S /home/quentin/.opam/4.07.1/lib/yojson
 S .
-FLG -ppx '/home/quentin/p/wasmtaint/_build/default/.ppx/5b9f37d9530f4ee3b2e302345f91d91b/ppx.exe --as-ppx --cookie '\''library-name="wasmtaint"'\'''
+FLG -ppx '/home/quentin/p/wasmtaint/_build/default/.ppx/a47bcc7ee75423e8271544fe93e23e2f/ppx.exe --as-ppx --cookie '\''library-name="wasmtaint"'\'''
 FLG -open Wasmtaint__ -w @1..3@5..28@30..39@43@46..47@49..57@61..62-40 -strict-sequence -strict-formats -short-paths -keep-locs

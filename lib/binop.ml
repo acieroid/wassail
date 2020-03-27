@@ -43,23 +43,43 @@ let to_string (b : t) : string =
   | I32Shl -> "i32.shl"
   | I32And -> "i32.and"
 
+let add (v1 : Value.t) (v2 : Value.t) : Value.t =
+  match (v1, v2) with
+  | (Const n1, Const n2) -> Const (Int32.(+) n1 n2)
+  | _ -> top (Printf.sprintf "add %s %s" (Value.to_string v1) (Value.to_string v2))
+
+let sub (v1 : Value.t) (v2 : Value.t) : Value.t =
+  match (v1, v2) with
+  | (Const n1, Const n2) -> Const (Int32.(-) n1 n2)
+  | (Global _, Const _) -> Op (Minus, v1, v2)
+  | _ -> top (Printf.sprintf "sub %s %s" (Value.to_string v1) (Value.to_string v2))
+
+let mul (v1 : Value.t) (v2 : Value.t) : Value.t =
+  match (v1, v2) with
+  | (Const n1, Const n2) -> Const (Int32.( * ) n1 n2)
+  | _ -> top (Printf.sprintf "mul %s %s" (Value.to_string v1) (Value.to_string v2))
+
+let rem_s (v1 : Value.t) (v2 : Value.t) : Value.t =
+  match (v1, v2) with
+  | (Const n1, Const n2) -> Const (Int32.rem n1 n2)
+  | _ -> top (Printf.sprintf "rem_s %s %s" (Value.to_string v1) (Value.to_string v2))
+
+let shl (v1 : Value.t) (v2 : Value.t) : Value.t =
+  match (v1, v2) with
+  | (Const n1, Const n2) -> Const (Int32.shift_left n1 (Int32.to_int_exn n2))
+  | _ -> top (Printf.sprintf "shl %s %s" (Value.to_string v1) (Value.to_string v2))
+
+let (land) (v1 : Value.t) (v2 : Value.t) : Value.t =
+  match (v1, v2) with
+  | (Const n1, Const n2) -> Const (Int32.(land) n1 n2)
+  | _ -> top (Printf.sprintf "land %s %s" (Value.to_string v1) (Value.to_string v2))
+
 (** Evaluates a binary operation on two values *)
 let eval (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
-  { value = begin match (b, v1.value, v2.value) with
-        | (I32Add, Const n1, Const n2) -> Const (Int32.(+) n1 n2)
-        | (I32Add, _, _) -> Int
-        | (I32Sub, Const n1, Const n2) -> Const (Int32.(-) n1 n2)
-        | (I32Sub, _, _) -> Int
-        | (I32Mul, Const n1, Const n2) -> Const (Int32.( * ) n1 n2)
-        | (I32Mul, _, _) -> Int
-        | (I32RemS, Const n1, Const n2) -> Const (Int32.rem n1 n2)
-        | (I32RemS, _, _) -> Int
-        | (I32Shl, Const n1, Const n2) -> Const (Int32.shift_left n1 (Int32.to_int_exn n2))
-        | (I32Shl, _, _) -> Int
-        | (I32And, Const n1, Const n2) -> Const (Int32.(land) n1 n2)
-        | (I32And, _, _) -> Int
-      end;
-    sources = SourceSet.union v1.sources v2.sources
-  }
-
-          
+  match b with
+  | I32Add -> add v1 v2
+  | I32Sub -> sub v1 v2
+  | I32Mul -> mul v1 v2
+  | I32RemS -> rem_s v1 v2
+  | I32Shl -> shl v1 v2
+  | I32And -> (land) v1 v2

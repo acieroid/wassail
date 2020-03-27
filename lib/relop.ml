@@ -32,20 +32,36 @@ let to_string (r : t) : string =
   | I32GtS -> "i32.gt_s"
   | I32LeS -> "i32.le_s"
   | I32GeS -> "i32.ge_s"
-let eval (r : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
-  { value = begin match (r, v1.value, v2.value) with
-        | (I32Eq, Const n1, Const n2) -> Const (if n1 = n2 then 1l else 0l)
-        | (I32Eq, _, _) -> Int
-        | (I32Ne, Const n1, Const n2) -> Const (if n1 <> n2 then 1l else 0l)
-        | (I32Ne, _, _) -> Int
-        | (I32LtS, Const n1, Const n2) -> Const (if n1 < n2 then 1l else 0l)
-        | (I32LtS, _, _) -> Int
-        | (I32GtS, Const n1, Const n2) -> Const (if n1 > n2 then 1l else 0l)
-        | (I32GtS, _, _) -> Int
-        | (I32LeS, Const n1, Const n2) -> Const (if n1 <= n2 then 1l else 0l)
-        | (I32LeS, _, _) -> Int
-        | (I32GeS, Const n1, Const n2) -> Const (if n1 >= n2 then 1l else 0l)
-        | (I32GeS, _, _) -> Int
-      end;
-    sources = SourceSet.union v1.sources v2.sources }
 
+let eq (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
+  | (Const n1, Const n2) when n1 = n2 -> const 1l
+  | _ -> bool
+
+let ne (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
+  | (Const n1, Const n2) when n1 <> n2 -> const 1l
+  | _ -> bool (* TODO *)
+
+let lt_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
+  | (Const n1, Const n2) when n1 < n2 -> const 1l
+  | _ -> bool (* TODO *)
+
+let gt_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
+  | (Const n1, Const n2) when n1 > n2 -> const 1l
+  | _ -> bool (* TODO *)
+
+let le_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
+  | (Const n1, Const n2) when n1 <= n2 -> const 1l
+  | _ -> bool (* TODO *)
+
+let ge_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
+  | (Const n1, Const n2) when n1 >= n2 -> const 1l
+  | _ -> bool (* TODO *)
+
+let eval (r : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
+  match r with
+  | I32Eq -> eq v1 v2
+  | I32Ne -> ne v1 v2
+  | I32LtS -> lt_s v1 v2
+  | I32GtS -> gt_s v1 v2
+  | I32LeS -> le_s v1 v2
+  | I32GeS -> ge_s v1 v2
