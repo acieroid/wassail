@@ -37,7 +37,7 @@ let rec to_string (v : t) : string = match v with
   | Interval (a, b) -> Printf.sprintf "[%s,%s]" (Int32.to_string a) (Int32.to_string b)
   | LeftOpenInterval b -> Printf.sprintf "]-inf,%s]" (Int32.to_string b)
   | RightOpenInterval a -> Printf.sprintf "[%s,+inf[" (Int32.to_string a)
-  | OpenInterval -> "]-inf,+inf["
+  | OpenInterval -> "T"
   | Parameter i -> Printf.sprintf "p%d" i
   | Global i -> Printf.sprintf "g%d" i
   | Op (op, left, right) -> Printf.sprintf "%s%s%s" (to_string left) (begin match op with

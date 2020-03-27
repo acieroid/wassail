@@ -3,6 +3,8 @@ open Core_kernel
 open Helpers
 
 (* For now it just models the number of arguments taken by the function, and the result on the vstack (in practice, either 0 or 1 value) *)
+(* TODO: memory! *)
+(* TODO: add globals, although this may not be used *)
 type t = {
   nargs : int;
   result : Value.t list;
@@ -26,6 +28,7 @@ let bottom (cfg : Cfg.t) : t = {
 (* Apply the summary to a state, updating the vstack as if the function was
    called, AND updating the set of called functions *)
 let apply (sum : t) (fidx : Var.t) (st : Domain.state) : Domain.state =
+  Printf.printf "Applying summary %s to state %s!" (to_string sum) (Domain.to_string st);
   { st with
     vstack = sum.result @ (List.drop st.vstack sum.nargs );
     calls = ValueListIntMap.IntMap.update st.calls fidx ~f:(function
