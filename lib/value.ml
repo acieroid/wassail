@@ -50,14 +50,33 @@ let rec to_string (v : t) : string = match v with
 (* TODO: substitute param / globals upon calls *)
 
 
+let bottom : t = Bottom
+
+let zero (t : Type.t) : t =
+  match t with
+  | I32Type -> Const 0l
+  | _ -> failwith "unsupported type"
+
+let parameter (i : int) : t = Parameter i
+let global (i : int) : t = Global i
+let deref (addr : t) : t = Deref addr
+let const (n : int32) : t = Const n
+let bool : t = Interval (0l, 1l)
+let top (source : string) : t = Logging.warn_imprecise source; OpenInterval
+
+let list_to_string (l : t list) : string =
+  String.concat ~sep:", " (List.map l ~f:to_string)
+
 (** Joins two values together *)
 let join (v1 : t) (v2 : t) : t =
   match (v1, v2) with
   | (Bottom, _) -> v2
   | (_, Bottom) -> v1
+  | (_, _) when v1 = v2 -> v1
   | (Const n1, Const n2) when n1 = n2 -> Const n1
   | (Const n1, Const n2) -> Interval (min n1 n2, max n1 n2)
-  | _ -> failwith "TODO: more cases when joining abstract values"
+  | (Interval (a, b), Const n) -> Interval (min a n, max b n)
+  | _ -> top (Printf.sprintf "Value.join %s %s" (to_string v1) (to_string v2))
 
 (** Joins two value lists together, assuming they have the same length *)
 let join_vlist_exn (v1 : t list) (v2 : t list) : t list =
@@ -109,20 +128,8 @@ let rec add_offset (v : t) (offset : int) : t =
   | Op (Minus, a, b) -> Op (Minus, a, add_offset b (- offset))
   | Op (Times, a, b) -> Op (Plus, Op (Times, a, b), Const off)
 
-let bottom : t = Bottom
-
-let zero (t : Type.t) : t =
-  match t with
-  | I32Type -> Const 0l
-  | _ -> failwith "unsupported type"
-
-let parameter (i : int) : t = Parameter i
-let global (i : int) : t = Global i
-let deref (addr : t) : t = Deref addr
-let const (n : int32) : t = Const n
-let bool : t = Interval (0l, 1l)
-let top (source : string) : t = Logging.warn_imprecise source; OpenInterval
-
-let list_to_string (l : t list) : string =
-  String.concat ~sep:", " (List.map l ~f:to_string)
-
+let simplify (v : t) : t =
+  match v with
+  | Op (Plus, (Op (Minus, a, Const x)), Const y) when x = y -> a
+  (* TODO: many more cases *)
+  | _ -> v

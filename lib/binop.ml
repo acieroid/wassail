@@ -47,6 +47,7 @@ let add (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1, v2) with
   | (_, Const 0l) -> v1
   | (Const n1, Const n2) -> Const (Int32.(+) n1 n2)
+  | (Op _, _) -> simplify (Op (Plus, v1, v2))
   | _ -> top (Printf.sprintf "add %s %s" (Value.to_string v1) (Value.to_string v2))
 
 let sub (v1 : Value.t) (v2 : Value.t) : Value.t =
@@ -73,6 +74,7 @@ let shl (v1 : Value.t) (v2 : Value.t) : Value.t =
 let (land) (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1, v2) with
   | (Const n1, Const n2) -> Const (Int32.(land) n1 n2)
+  | (Interval (0l, 1l), Const 1l) -> v1
   | _ -> top (Printf.sprintf "land %s %s" (Value.to_string v1) (Value.to_string v2))
 
 (** Evaluates a binary operation on two values *)
