@@ -19,7 +19,7 @@ let to_string (s : state) : string =
 
 let init (args : Value.t list) (nlocals : int) (globals : Globals.t) (memory : Memory.t) = {
   vstack = [];
-  locals = args @ (List.init nlocals ~f:(fun _ -> Value.zero I32Type));
+  locals = args @ (List.init nlocals ~f:(fun _ -> Value.zero));
   globals = globals;
   memory = memory;
   (* The list of calls is initially empty *)

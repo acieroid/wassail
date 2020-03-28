@@ -49,20 +49,37 @@ let rec to_string (v : t) : string = match v with
 
 (* TODO: substitute param / globals upon calls *)
 
+(** Checks if v1 subsumes v2 (i.e., v1 contains v2) *)
+let subsumes (v1 : t) (v2 : t) : bool = match (v1, v2) with
+  | _, Bottom -> true
+  | Bottom, _ -> false
+  | Const n1, Const n2 -> n1 = n2
+  | Const n, Interval (a, b) -> a = b && a = n
+  | Interval (a, b), Interval (a', b') -> a <= a' && b >= b'
+  | Interval (a, b), Const n -> a <= n && b >= n
+  | LeftOpenInterval b, Const n -> b >= n
+  | LeftOpenInterval b, Interval (_, b') -> b >= b'
+  | LeftOpenInterval b, LeftOpenInterval b' -> b >= b'
+  | RightOpenInterval a, Const n -> a <= n
+  | RightOpenInterval a, Interval (a', _) -> a <= a'
+  | RightOpenInterval a, RightOpenInterval a' -> a <= a'
+  | OpenInterval, Const _ -> true
+  | OpenInterval, Interval _ -> true
+  | OpenInterval, LeftOpenInterval _ -> true
+  | OpenInterval, RightOpenInterval _ -> true
+  | OpenInterval, OpenInterval -> true
+  | _, _ ->
+    Logging.warn WarnSubsumesIncorrect (fun () -> Printf.sprintf "might be incorrect: Value.subsumes %s and %s" (to_string v1) (to_string v2));
+    false 
 
 let bottom : t = Bottom
-
-let zero (t : Type.t) : t =
-  match t with
-  | I32Type -> Const 0l
-  | _ -> failwith "unsupported type"
-
+let zero : t = Const 0l
 let parameter (i : int) : t = Parameter i
 let global (i : int) : t = Global i
 let deref (addr : t) : t = Deref addr
 let const (n : int32) : t = Const n
 let bool : t = Interval (0l, 1l)
-let top (source : string) : t = Logging.warn_imprecise source; OpenInterval
+let top (source : string) : t = Logging.warn WarnImpreciseOp (fun () -> source); OpenInterval
 
 let list_to_string (l : t list) : string =
   String.concat ~sep:", " (List.map l ~f:to_string)

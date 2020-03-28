@@ -1,4 +1,14 @@
 open Core_kernel
 
-let warn_imprecise (source : string) : unit =
-  Printf.printf "[WARNING] Imprecise operation: %s\n" source
+type option =
+  | WarnMemJoin
+  | WarnImpreciseOp
+  | WarnSubsumesIncorrect
+
+let enabled_options = ref [WarnMemJoin; WarnImpreciseOp; WarnSubsumesIncorrect]
+
+let warn (opt : option) (msg : unit -> string) : unit =
+  if List.mem !enabled_options opt ~equal:Pervasives.(=) then
+    Printf.printf "[WARNING] %s\n" (msg ())
+  else
+    ()

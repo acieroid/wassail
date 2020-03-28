@@ -51,7 +51,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
           globals memory new_summaries new_calls
   in
   (* Initial summaries are all empty *)
-  let summaries0 = IntMap.map cfgs ~f:(fun cfg -> Summary.bottom cfg) in
+  let summaries0 = IntMap.map cfgs ~f:(fun cfg -> Summary.bottom nglobals cfg) in
   (* There are no calls initially. TODO: is this not unnecessary for compositional? *)
   let calls0 = IntMap.empty in
   (* Globals are symbolic variables, values are top *)
