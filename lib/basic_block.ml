@@ -7,7 +7,14 @@ type t = {
   sort: block_sort;
   instrs: Instr.t list;
 } [@@deriving sexp, compare, yojson]
-let to_string (b : t) : string = Printf.sprintf "block %d" b.idx
+let to_string (b : t) : string = Printf.sprintf "block %d, %s" b.idx (match b.sort with
+    | Normal -> "normal"
+    | BlockEntry -> "entry"
+    | BlockExit -> "exit"
+    | LoopEntry -> "loop entry"
+    | LoopExit -> "loop exit"
+    | Function -> "function"
+    | Return -> "return")
 let to_dot (b : t) : string =
   match b.sort with
   | Normal ->

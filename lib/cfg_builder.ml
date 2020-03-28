@@ -88,7 +88,7 @@ let build (faddr : Address.t) (store : Store.t) : Cfg.t =
       let break_edges = List.map (List.filter (breaks @ breaks') ~f:(fun (_, level) -> level = 0)) ~f:(fun (idx, _) -> (idx, block_exit.idx)) in
       (* Compute the new edges. This is different between a loop and a block, for the exit of the inside of the block *)
       let new_edges = if is_loop then
-          [(block.idx, block_entry.idx); (block_entry.idx, entry'); (exit', block_entry.idx); (block_exit.idx, entry'')]
+          [(block.idx, block_entry.idx); (block_entry.idx, entry'); (exit', block_entry.idx); (block_exit.idx, block_entry.idx)]
         else
           [(block.idx, block_entry.idx); (block_entry.idx, entry'); (exit', block_exit.idx); (block_exit.idx, entry'')]
       in

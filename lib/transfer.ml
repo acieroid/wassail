@@ -102,6 +102,8 @@ let transfer (b : Basic_block.t) (state : Domain.state) (summaries: Summary.t In
         (* We assume all summaries are defined *)
         let summary = IntMap.find_exn summaries f in
         Summary.apply summary f state
-      | _ -> failwith "Invalid function block"
+      | _ -> failwith "Invalid function block" (* TODO: or rather unsupported? *)
     end
-  | _ -> state
+  | _ ->
+    Logging.warn WarnNotImplemented (fun () -> Printf.sprintf "unsupported basic block: %s" (Basic_block.to_string b));
+    state

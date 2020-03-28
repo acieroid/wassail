@@ -47,10 +47,24 @@ let rec to_string (v : t) : string = match v with
     end) (to_string right)
   | Deref v -> Printf.sprintf "*%s" (to_string v)
 
+
+let rec simplify (v : t) : t =
+  let res = match v with
+    | Op (Plus, (Op (Minus, a, Const x)), Const y) when x = y -> simplify a
+    | Op (Plus, (Op (Minus, a, Const x)), Const y) when x > y -> Op (Plus, simplify a, Const (Int32.(-) x y))
+    | Op (Plus, (Op (Minus, a, Const x)), Const y) when x < y -> Op (Minus, simplify a, Const (Int32.(-) y x))
+    | Op (Plus, a, (Const 0l)) -> simplify a
+    (* TODO: many more cases *)
+    | _ -> v
+  in
+  Logging.info (Printf.sprintf "Simplify %s into %s" (to_string v) (to_string res));
+  res
+
 (* TODO: substitute param / globals upon calls *)
 
 (** Checks if v1 subsumes v2 (i.e., v1 contains v2) *)
 let subsumes (v1 : t) (v2 : t) : bool = match (v1, v2) with
+  | _, _ when v1 = v2 -> true
   | _, Bottom -> true
   | Bottom, _ -> false
   | Const n1, Const n2 -> n1 = n2
@@ -69,8 +83,8 @@ let subsumes (v1 : t) (v2 : t) : bool = match (v1, v2) with
   | OpenInterval, RightOpenInterval _ -> true
   | OpenInterval, OpenInterval -> true
   | _, _ ->
-    Logging.warn WarnSubsumesIncorrect (fun () -> Printf.sprintf "might be incorrect: Value.subsumes %s and %s" (to_string v1) (to_string v2));
-    false 
+    Logging.warn WarnSubsumesIncorrect (fun () -> Printf.sprintf "might be incorrect: assuming %s does not subsume %s" (to_string v1) (to_string v2));
+    false
 
 let bottom : t = Bottom
 let zero : t = Const 0l
@@ -141,12 +155,6 @@ let rec add_offset (v : t) (offset : int) : t =
   | Global i -> Op (Plus, Parameter i, Const off)
   | Deref a -> Op (Plus, Deref a, Const off)
   (* TODO: choose between adding it to a or b? e.g., g0-16+8 is better represented as g0-8 than g0+8-16. Maybe introduce a simplification phase*)
-  | Op (Plus, a, b) -> Op (Plus, a, add_offset b offset)
-  | Op (Minus, a, b) -> Op (Minus, a, add_offset b (- offset))
+  | Op (Plus, a, b) -> simplify (Op (Plus, a, add_offset b offset))
+  | Op (Minus, a, b) -> simplify (Op (Minus, a, add_offset b (- offset)))
   | Op (Times, a, b) -> Op (Plus, Op (Times, a, b), Const off)
-
-let simplify (v : t) : t =
-  match v with
-  | Op (Plus, (Op (Minus, a, Const x)), Const y) when x = y -> a
-  (* TODO: many more cases *)
-  | _ -> v
