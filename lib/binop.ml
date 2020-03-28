@@ -48,6 +48,8 @@ let add (v1 : Value.t) (v2 : Value.t) : Value.t =
   | (_, Const 0l) -> v1
   | (Const n1, Const n2) -> Const (Int32.(+) n1 n2)
   | (Op _, _) -> simplify (Op (Plus, v1, v2))
+  | (Parameter i, _) -> simplify (Op (Plus, Parameter i, v2))
+  | (Global i, _) -> simplify (Op (Plus, Global i, v2))
   | _ -> top (Printf.sprintf "add %s %s" (Value.to_string v1) (Value.to_string v2))
 
 let sub (v1 : Value.t) (v2 : Value.t) : Value.t =

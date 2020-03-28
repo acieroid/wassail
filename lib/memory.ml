@@ -41,8 +41,8 @@ let find (m : t) (ea : Value.t) : Value.t =
   let m' = Map.filteri m ~f:(fun ~key:a ~data:_ -> Value.subsumes a ea || Value.subsumes ea a) in
   Logging.info (Printf.sprintf "Memory.find %s %s" (to_string m) (Value.to_string ea));
   let v = Map.fold ~init:Value.bottom ~f:(fun ~key:_ ~data:v acc -> Value.join acc v) m' in
-  if (Map.exists m' ~f:(fun a -> Value.subsumes ea a)) then
-    Value.join v (Value.top (Printf.sprintf "Memory.find %s %s" (to_string m) (Value.to_string ea)))
+  if (Map.existsi m' ~f:(fun ~key:a ~data:_ -> ea <> a && Value.subsumes ea a)) then
+    Value.join v (Value.top (Printf.sprintf "Top created at memory.find %s %s" (to_string m) (Value.to_string ea)))
   else
     v
 

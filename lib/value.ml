@@ -106,6 +106,7 @@ let join (v1 : t) (v2 : t) : t =
   | (_, _) when v1 = v2 -> v1
   | (Const n1, Const n2) when n1 = n2 -> Const n1
   | (Const n1, Const n2) -> Interval (min n1 n2, max n1 n2)
+  | (Const n, Interval (a, b)) -> Interval (min a n, max b n)
   | (Interval (a, b), Const n) -> Interval (min a n, max b n)
   | _ -> top (Printf.sprintf "Value.join %s %s" (to_string v1) (to_string v2))
 
@@ -143,18 +144,19 @@ let is_not_zero (v : t) =
   | Deref _ -> true (* TODO: could be more precise here *)
 
 let rec add_offset (v : t) (offset : int) : t =
-  let off = Int32.of_int_exn offset in
-  match v with
-  | Bottom -> Bottom
-  | Const n -> Const (Int32.(+) n off)
-  | Interval (a, b) -> Interval ((Int32.(+) a off), (Int32.(+) b off))
-  | LeftOpenInterval b -> LeftOpenInterval (Int32.(+) b off)
-  | RightOpenInterval b -> LeftOpenInterval (Int32.(+) b off)
-  | OpenInterval -> OpenInterval
-  | Parameter i -> Op (Plus, Parameter i, Const off)
-  | Global i -> Op (Plus, Parameter i, Const off)
-  | Deref a -> Op (Plus, Deref a, Const off)
-  (* TODO: choose between adding it to a or b? e.g., g0-16+8 is better represented as g0-8 than g0+8-16. Maybe introduce a simplification phase*)
-  | Op (Plus, a, b) -> simplify (Op (Plus, a, add_offset b offset))
-  | Op (Minus, a, b) -> simplify (Op (Minus, a, add_offset b (- offset)))
-  | Op (Times, a, b) -> Op (Plus, Op (Times, a, b), Const off)
+  if offset = 0 then v else
+    let off = Int32.of_int_exn offset in
+    match v with
+    | Bottom -> Bottom
+    | Const n -> Const (Int32.(+) n off)
+    | Interval (a, b) -> Interval ((Int32.(+) a off), (Int32.(+) b off))
+    | LeftOpenInterval b -> LeftOpenInterval (Int32.(+) b off)
+    | RightOpenInterval b -> LeftOpenInterval (Int32.(+) b off)
+    | OpenInterval -> OpenInterval
+    | Parameter i -> Op (Plus, Parameter i, Const off)
+    | Global i -> Op (Plus, Parameter i, Const off)
+    | Deref a -> Op (Plus, Deref a, Const off)
+    (* TODO: choose between adding it to a or b? e.g., g0-16+8 is better represented as g0-8 than g0+8-16. Maybe introduce a simplification phase*)
+    | Op (Plus, a, b) -> simplify (Op (Plus, a, add_offset b offset))
+    | Op (Minus, a, b) -> simplify (Op (Minus, a, add_offset b (- offset)))
+    | Op (Times, a, b) -> Op (Plus, Op (Times, a, b), Const off)
