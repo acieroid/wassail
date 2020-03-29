@@ -21,6 +21,7 @@ let of_yojson json = match [%of_yojson: (Value.t * Value.t) list] json with
 
 let initial = Map.empty
 
+(** Update an address in the memory, joining it with the previous value if there was already one stored at the same address *)
 let update (m : t) (ea : Value.t) (v : Value.t) : t =
   (* TODO: what about overlapping values? e.g., M[0: 0][[0,1]: 1].
      Possible solution: find the most general key, join the values
@@ -32,7 +33,7 @@ let update (m : t) (ea : Value.t) (v : Value.t) : t =
       | None -> v
       | Some v' -> Value.join v v')
 
-(** Look up a value in the store at effective address ea. Returns either the value (Some v), or None if the value is not directly found in the store (meaning it could be any value) *)
+(** Look up a value in the memory at effective address ea. Returns either the value (Some v), or None if the value is not directly found in the store (meaning it could be any value) *)
 let find (m : t) (ea : Value.t) : Value.t option =
   (* Step 1. Find all values that subsume ea, or are subsumed by ea
      Example: find M[[[0,5]: 3][[1,3]: 0] 4 returns M[[0,5]: 3]
@@ -71,3 +72,13 @@ let join (m1 : t) (m2 : t) : t =
   (* M[a: b] joined with M[c: d] should be just like doing M[a: b][c: d] *)
   Logging.warn WarnMemJoin (fun () -> Printf.sprintf "join %s with %s" (to_string m1) (to_string m2));
   Map.fold m2 ~init:m1 ~f:(fun ~key:addr ~data:value m -> update m addr value)
+
+(** Adapt (both in the addresses and in the values), using the map given as argument
+    1. globals, e.g., M[g0: a], with map: [g0: X] becomes M[X: a]
+    2. parameters are mapped, e.g., M[A: p0] with map: [p0: X] becomes M[A: X]
+    3. Is it enough or do we need anything else? (TODO)
+*)
+let adapt (m : t) (map : Value.ValueValueMap.t) : t =
+  Map.of_alist_exn (List.map (Map.to_alist m)
+                  ~f:(fun (a, v) -> (Value.adapt a map, Value.adapt v map)))
+  

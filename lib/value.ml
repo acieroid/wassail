@@ -160,3 +160,30 @@ let rec add_offset (v : t) (offset : int) : t =
     | Op (Plus, a, b) -> simplify (Op (Plus, a, add_offset b offset))
     | Op (Minus, a, b) -> simplify (Op (Minus, a, add_offset b (- offset)))
     | Op (Times, a, b) -> Op (Plus, Op (Times, a, b), Const off)
+
+module ValueValueMap = struct
+  module ValueMap = Map.Make(T)
+
+  type t = T.t ValueMap.t
+  [@@deriving sexp, compare]
+end
+
+let rec adapt (v : t) (map : ValueValueMap.t) : t =
+  match v with
+  | Bottom
+  | Const _
+  | Interval _
+  | LeftOpenInterval _
+  | RightOpenInterval _
+  | OpenInterval
+    -> v
+  | Parameter _
+  | Global _ ->
+    begin match ValueValueMap.ValueMap.find map v with
+    | Some v' -> Printf.printf "[ADAPT] %s into %s\n" (to_string v) (to_string v'); v'
+    | None -> failwith (Printf.sprintf "Cannot adapt value %ss" (to_string v))
+    end
+  | Op (op, v1, v2) ->
+    Op (op, adapt v1 map, adapt v2 map)
+  | Deref v ->
+    Deref (adapt v map)

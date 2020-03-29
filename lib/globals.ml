@@ -12,3 +12,5 @@ let to_string (globals : t) : string =
 let join (g1 : t) (g2 : t) : t =
   Value.join_vlist_exn g1 g2
 
+let adapt (g : t) (map : Value.ValueValueMap.t) : t =
+  List.map g ~f:(fun v -> Value.adapt v map)

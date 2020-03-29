@@ -35,12 +35,19 @@ let bottom (nglobals : int) (cfg : Cfg.t) : t = {
 (* Apply the summary to a state, updating the vstack as if the function was
    called, AND updating the set of called functions *)
 let apply (sum : t) (fidx : Var.t) (st : Domain.state) : Domain.state =
-  Printf.printf "Applying summary %s to state %s!" (to_string sum) (Domain.to_string st);
+  Printf.printf "[fidx: %d] Applying summary %s to state %s!" fidx (to_string sum) (Domain.to_string st);
+  let map = List.foldi st.globals ~init:(List.foldi (List.rev st.vstack) ~init:Value.ValueValueMap.ValueMap.empty
+                                           ~f:(fun i acc v -> Value.ValueValueMap.ValueMap.add_exn acc
+                                                  ~key:(Value.parameter i)
+                                                  ~data:v))
+      ~f:(fun i acc v -> Value.ValueValueMap.ValueMap.add_exn acc
+             ~key:(Value.global i)
+             ~data:v) in
   { st with
-    vstack = sum.result @ (List.drop st.vstack sum.nargs );
+    vstack = sum.result @ (List.map (List.drop st.vstack sum.nargs) ~f:(fun v -> Value.adapt v map));
     calls = ValueListIntMap.IntMap.update st.calls fidx ~f:(function
         | None -> List.take st.vstack sum.nargs
         | Some vs -> Value.join_vlist_exn vs (List.take st.vstack sum.nargs));
-    memory = Memory.join st.memory sum.memory; (* TODO: adapt sum.memory in two ways: replace e.g., g0 by the value of g0 from st.globals; similar for parameters: p0 is the argument to the function, so replace p0 by its value (taken from the stack); finally: what about dereferences? These changes have to be propagated inside Op as well *)
-    globals = sum.globals; (* TODO: similarly, adapt globals *)
+    memory = Memory.join st.memory (Memory.adapt sum.memory map);
+    globals = Globals.adapt sum.globals map; (* TODO: similarly, adapt globals *)
   }
