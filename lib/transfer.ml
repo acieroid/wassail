@@ -105,5 +105,5 @@ let transfer (b : Basic_block.t) (state : Domain.state) (summaries: Summary.t In
       | _ -> failwith "Invalid function block" (* TODO: or rather unsupported? *)
     end
   | _ ->
-    Logging.warn WarnNotImplemented (fun () -> Printf.sprintf "unsupported basic block: %s" (Basic_block.to_string b));
+    (* All blocks represent control flow and are handled by the fixpoint, there is no need to special case them here *)
     state

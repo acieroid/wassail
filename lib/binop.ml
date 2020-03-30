@@ -45,38 +45,38 @@ let to_string (b : t) : string =
 
 let add (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1, v2) with
-  | (_, Const 0l) -> v1
-  | (Const n1, Const n2) -> Const (Int32.(+) n1 n2)
-  | (Op _, _) -> simplify (Op (Plus, v1, v2))
-  | (Parameter i, _) -> simplify (Op (Plus, Parameter i, v2))
-  | (Global i, _) -> simplify (Op (Plus, Global i, v2))
+  | (_, Symbolic (Const 0l)) -> v1
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> const (Int32.(+) n1 n2)
+  | (Symbolic (Op _), _) -> simplify (Symbolic (Op (Plus, v1, v2)))
+  | (Symbolic (Parameter i), _) -> simplify (Symbolic (Op (Plus, Symbolic (Parameter i), v2)))
+  | (Symbolic (Global i), _) -> simplify (Symbolic (Op (Plus, Symbolic (Global i), v2)))
   | _ -> top (Printf.sprintf "add %s %s" (Value.to_string v1) (Value.to_string v2))
 
 let sub (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1, v2) with
-  | (Const n1, Const n2) -> Const (Int32.(-) n1 n2)
-  | (Global _, Const _) -> Op (Minus, v1, v2)
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> const (Int32.(-) n1 n2)
+  | (Symbolic (Global _), Symbolic (Const _)) -> simplify (Symbolic (Op (Minus, v1, v2)))
   | _ -> top (Printf.sprintf "sub %s %s" (Value.to_string v1) (Value.to_string v2))
 
 let mul (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1, v2) with
-  | (Const n1, Const n2) -> Const (Int32.( * ) n1 n2)
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> const (Int32.( * ) n1 n2)
   | _ -> top (Printf.sprintf "mul %s %s" (Value.to_string v1) (Value.to_string v2))
 
 let rem_s (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1, v2) with
-  | (Const n1, Const n2) -> Const (Int32.rem n1 n2)
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> const (Int32.rem n1 n2)
   | _ -> top (Printf.sprintf "rem_s %s %s" (Value.to_string v1) (Value.to_string v2))
 
 let shl (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1, v2) with
-  | (Const n1, Const n2) -> Const (Int32.shift_left n1 (Int32.to_int_exn n2))
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> const (Int32.shift_left n1 (Int32.to_int_exn n2))
   | _ -> top (Printf.sprintf "shl %s %s" (Value.to_string v1) (Value.to_string v2))
 
 let (land) (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1, v2) with
-  | (Const n1, Const n2) -> Const (Int32.(land) n1 n2)
-  | (Interval (0l, 1l), Const 1l) -> v1
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> const (Int32.(land) n1 n2)
+  | (Interval (Const 0l, Const 1l), Symbolic (Const 1l)) -> v1
   | _ -> top (Printf.sprintf "land %s %s" (Value.to_string v1) (Value.to_string v2))
 
 (** Evaluates a binary operation on two values *)

@@ -33,7 +33,7 @@ let update (m : t) (ea : Value.t) (v : Value.t) : t =
       | None -> v
       | Some v' -> Value.join v v')
 
-(** Look up a value in the memory at effective address ea. Returns either the value (Some v), or None if the value is not directly found in the store (meaning it could be any value) *)
+(** Look up a value in the memory at effective address ea. Returns either the value (Some v), or None if the value is not directly found in the memory (meaning it could be any value) *)
 let find (m : t) (ea : Value.t) : Value.t option =
   (* Step 1. Find all values that subsume ea, or are subsumed by ea
      Example: find M[[[0,5]: 3][[1,3]: 0] 4 returns M[[0,5]: 3]
@@ -53,7 +53,7 @@ let find (m : t) (ea : Value.t) : Value.t option =
     else
       Some v
   | None ->
-    Logging.warn WarnNotFoundInMem (fun () -> Printf.sprintf "value not found in store (%s) at address %s" (to_string m) (Value.to_string ea));
+    Logging.warn WarnNotFoundInMem (fun () -> Printf.sprintf "value not found in memory (%s) at address %s" (to_string m) (Value.to_string ea));
     None
 
 let load (m : t) (addr : Value.t) (op : Memoryop.t) : Value.t =

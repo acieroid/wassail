@@ -34,27 +34,27 @@ let to_string (r : t) : string =
   | I32GeS -> "i32.ge_s"
 
 let eq (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
-  | (Const n1, Const n2) when n1 = n2 -> const 1l
+  | (Symbolic (Const n1), Symbolic (Const n2)) when n1 = n2 -> const 1l
   | _ -> bool
 
 let ne (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
-  | (Const n1, Const n2) when n1 <> n2 -> const 1l
+  | (Symbolic (Const n1), Symbolic (Const n2)) when n1 <> n2 -> const 1l
   | _ -> bool (* TODO *)
 
 let lt_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
-  | (Const n1, Const n2) when n1 < n2 -> const 1l
+  | (Symbolic (Const n1), Symbolic (Const n2)) when n1 < n2 -> const 1l
   | _ -> bool (* TODO *)
 
 let gt_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
-  | (Const n1, Const n2) when n1 > n2 -> const 1l
+  | (Symbolic (Const n1), Symbolic (Const n2)) when n1 > n2 -> const 1l
   | _ -> bool (* TODO *)
 
 let le_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
-  | (Const n1, Const n2) when n1 <= n2 -> const 1l
+  | (Symbolic (Const n1), Symbolic (Const n2)) when n1 <= n2 -> const 1l
   | _ -> bool (* TODO *)
 
 let ge_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
-  | (Const n1, Const n2) when n1 >= n2 -> const 1l
+  | (Symbolic (Const n1), Symbolic (Const n2)) when n1 >= n2 -> const 1l
   | _ -> bool (* TODO *)
 
 let eval (r : t) (v1 : Value.t) (v2 : Value.t) : Value.t =

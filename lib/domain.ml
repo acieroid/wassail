@@ -9,7 +9,7 @@ type state = {
 [@@deriving sexp, compare, yojson]
 
 let to_string (s : state) : string =
-  Printf.sprintf "{vstack: [%s],\n locals: [%s],\n globals: [%s]\n, heap: %s\n}"
+  Printf.sprintf "{vstack: [%s],\n locals: [%s],\n globals: [%s],\n heap: %s\n}"
     (Vstack.to_string s.vstack)
     (Locals.to_string s.locals)
     (Globals.to_string s.globals)

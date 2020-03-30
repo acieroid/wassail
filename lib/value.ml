@@ -6,17 +6,19 @@ module T = struct
   type operator =
     | Plus | Minus | Times
   [@@deriving sexp, compare, yojson]
-  type t =
-    | Bottom
-    | Const of int32
-    | Interval of int32 * int32 (* [a,b] *)
-    | LeftOpenInterval of int32 (* ]-inf,a] *)
-    | RightOpenInterval of int32 (* [a,+inf[ *)
-    | OpenInterval (* ]-inf,+inf[ *)
+  type symbolic =
     | Parameter of int (* p0 *)
     | Global of int (* g0 *)
     | Op of operator * t * t (* g0-16 *)
     | Deref of t (* *g0 *)
+    | Const of int32
+  and t =
+    | Bottom
+    | Interval of symbolic * symbolic (* [a,b] *)
+    | LeftOpenInterval of symbolic (* ]-inf,a] *)
+    | RightOpenInterval of symbolic (* [a,+inf[ *)
+    | OpenInterval (* ]-inf,+inf[ *)
+    | Symbolic of symbolic
     (* XXX: values are actually i32/i64/f32/f64, but we only support i32 *)
   [@@deriving sexp, compare, yojson]
 
@@ -26,18 +28,20 @@ include Comparator.Make(T)
 
 let of_wasm (v : Values.value) : t =
   match v with
-  | I32 x -> Const x
+  | I32 x -> Symbolic (Const x)
   | I64 _ -> failwith "unsupported type: I64"
   | F32 _ -> failwith "unsupported type: F32"
   | F64 _ -> failwith "unsupported type: F64"
 
 let rec to_string (v : t) : string = match v with
   | Bottom -> "bottom"
-  | Const n -> (Int32.to_string n)
-  | Interval (a, b) -> Printf.sprintf "[%s,%s]" (Int32.to_string a) (Int32.to_string b)
-  | LeftOpenInterval b -> Printf.sprintf "]-inf,%s]" (Int32.to_string b)
-  | RightOpenInterval a -> Printf.sprintf "[%s,+inf[" (Int32.to_string a)
+  | Interval (a, b) -> Printf.sprintf "[%s,%s]" (symbolic_to_string a) (symbolic_to_string b)
+  | LeftOpenInterval b -> Printf.sprintf "]-inf,%s]" (symbolic_to_string b)
+  | RightOpenInterval a -> Printf.sprintf "[%s,+inf[" (symbolic_to_string a)
   | OpenInterval -> "T"
+  | Symbolic sym -> symbolic_to_string sym
+and symbolic_to_string (v : symbolic) : string = match v with
+  | Const n -> Int32.to_string n
   | Parameter i -> Printf.sprintf "p%d" i
   | Global i -> Printf.sprintf "g%d" i
   | Op (op, left, right) -> Printf.sprintf "%s%s%s" (to_string left) (begin match op with
@@ -47,20 +51,48 @@ let rec to_string (v : t) : string = match v with
     end) (to_string right)
   | Deref v -> Printf.sprintf "*%s" (to_string v)
 
+let rec simplify_symbolic (sym : symbolic) : symbolic =
+  match sym with
+  | (Op (Plus, a, Symbolic (Const 0l))) ->
+    (* a+0 is handled in simplify *)
+    (Op (Plus, a, Symbolic (Const 0l)))
+  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when x = y ->
+    (* (a-x)+x = a *)
+    (Op (Plus, a, Symbolic (Const 0l)))
+  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when x > y ->
+    (* (a-x)+y when x > y = a-(x-y) *)
+    simplify_symbolic (Op (Minus, simplify a, Symbolic (Const (Int32.(-) x y))))
+  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when x < y ->
+    (* (a-x)+y when y > x = a+(y-x)*)
+    simplify_symbolic (Op (Plus, simplify a, Symbolic (Const (Int32.(-) y x))))
+  | (Op (Plus, (Symbolic (Op (Plus, a, Symbolic (Const x)))), Symbolic (Const y))) ->
+    (* (a+x)+y = a + (x+y) *)
+    simplify_symbolic (Op (Plus, simplify a, Symbolic (Const (Int32.(+) x y))))
+  | (Op (Minus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) ->
+    (* (a-x)-y = a-(x+y) *)
+    simplify_symbolic (Op (Minus, simplify a, Symbolic (Const (Int32.(+) x y))))
+  | (Global _) | (Parameter _) | Const _
+  | Op (_, Symbolic (Global _), Symbolic (Const _))
+  | Op (_, Symbolic (Parameter _), Symbolic (Const _)) ->
+    (* These cases cannot be simplified *)
+    sym
+  (* TODO: many more cases *)
+  | _ ->
+    Logging.warn WarnCannotSimplify (fun () -> Printf.sprintf "cannot simplify value %s" (symbolic_to_string sym));
+    sym
+and simplify (v : t) : t =
+  match (match v with
+  | Bottom -> Bottom
+  | Interval (a, b) -> Interval (simplify_symbolic a, simplify_symbolic b) (* TODO: refinement possible, if a = b, then interval is removed? *)
+  | LeftOpenInterval b -> LeftOpenInterval (simplify_symbolic b)
+  | RightOpenInterval a -> RightOpenInterval (simplify_symbolic a)
+  | OpenInterval -> OpenInterval
+  | Symbolic sym -> Symbolic (simplify_symbolic sym))
+  with
+  | Symbolic (Op (Plus, a, Symbolic (Const 0l))) -> a
+  | Symbolic (Op (Minus, a, Symbolic (Const 0l))) -> a
+  | res -> res
 
-let rec simplify (v : t) : t =
-  let res = match v with
-    | Op (Plus, (Op (Minus, a, Const x)), Const y) when x = y -> simplify a
-    | Op (Plus, (Op (Minus, a, Const x)), Const y) when x > y -> Op (Plus, simplify a, Const (Int32.(-) x y))
-    | Op (Plus, (Op (Minus, a, Const x)), Const y) when x < y -> Op (Minus, simplify a, Const (Int32.(-) y x))
-    | Op (Plus, (Op (Plus, a, Const x)), Const y) -> Op (Plus, simplify a, Const (Int32.(+) x y))
-    | Op (Plus, a, (Const 0l)) -> simplify a
-    | Op (Minus, (Op (Minus, a, Const x)), Const y) -> Op (Minus, simplify a, Const (Int32.(+) x y))
-    (* TODO: many more cases *)
-    | _ -> v
-  in
-  Logging.info (Printf.sprintf "Simplify %s into %s" (to_string v) (to_string res));
-  res
 
 (* TODO: substitute param / globals upon calls *)
 
@@ -69,32 +101,34 @@ let subsumes (v1 : t) (v2 : t) : bool = match (v1, v2) with
   | _, _ when v1 = v2 -> true
   | _, Bottom -> true
   | Bottom, _ -> false
-  | Const n1, Const n2 -> n1 = n2
-  | Const n, Interval (a, b) -> a = b && a = n
-  | Interval (a, b), Interval (a', b') -> a <= a' && b >= b'
-  | Interval (a, b), Const n -> a <= n && b >= n
-  | LeftOpenInterval b, Const n -> b >= n
-  | LeftOpenInterval b, Interval (_, b') -> b >= b'
-  | LeftOpenInterval b, LeftOpenInterval b' -> b >= b'
-  | RightOpenInterval a, Const n -> a <= n
-  | RightOpenInterval a, Interval (a', _) -> a <= a'
-  | RightOpenInterval a, RightOpenInterval a' -> a <= a'
-  | OpenInterval, Const _ -> true
+  | Symbolic (Const n1), Symbolic (Const n2) -> n1 = n2
+  | Symbolic (Const n), Interval (Const a, Const b) -> a = b && a = n
+  | Interval (Const a, Const b), Interval (Const a', Const b') -> a <= a' && b >= b'
+  | Interval (Const a, Const b), Symbolic (Const n) -> a <= n && b >= n
+  | LeftOpenInterval (Const b), Symbolic (Const n) -> b >= n
+  | LeftOpenInterval (Const b), Interval (_, Const b') -> b >= b'
+  | LeftOpenInterval (Const b), LeftOpenInterval (Const b') -> b >= b'
+  | RightOpenInterval (Const a), Symbolic (Const n) -> a <= n
+  | RightOpenInterval (Const a), Interval (Const a', _) -> a <= a'
+  | RightOpenInterval (Const a), RightOpenInterval (Const a') -> a <= a'
+  | OpenInterval, Symbolic (Const _) -> true
   | OpenInterval, Interval _ -> true
   | OpenInterval, LeftOpenInterval _ -> true
   | OpenInterval, RightOpenInterval _ -> true
   | OpenInterval, OpenInterval -> true
+  | Symbolic (Op (_, Symbolic (Global i), Symbolic (Const x))), Symbolic (Op (_, Symbolic (Global i'), Symbolic (Const x'))) when i = i' ->
+    x = x'
   | _, _ ->
     Logging.warn WarnSubsumesIncorrect (fun () -> Printf.sprintf "might be incorrect: assuming %s does not subsume %s" (to_string v1) (to_string v2));
     false
 
 let bottom : t = Bottom
-let zero : t = Const 0l
-let parameter (i : int) : t = Parameter i
-let global (i : int) : t = Global i
-let deref (addr : t) : t = Deref addr
-let const (n : int32) : t = Const n
-let bool : t = Interval (0l, 1l)
+let zero : t = Symbolic (Const 0l)
+let parameter (i : int) : t = Symbolic (Parameter i)
+let global (i : int) : t = Symbolic (Global i)
+let deref (addr : t) : t = Symbolic (Deref addr)
+let const (n : int32) : t = Symbolic (Const n)
+let bool : t = Interval (Const 0l, Const 1l)
 let top (source : string) : t = Logging.warn WarnImpreciseOp (fun () -> source); OpenInterval
 
 let list_to_string (l : t list) : string =
@@ -106,10 +140,15 @@ let join (v1 : t) (v2 : t) : t =
   | (Bottom, _) -> v2
   | (_, Bottom) -> v1
   | (_, _) when v1 = v2 -> v1
-  | (Const n1, Const n2) when n1 = n2 -> Const n1
-  | (Const n1, Const n2) -> Interval (min n1 n2, max n1 n2)
-  | (Const n, Interval (a, b)) -> Interval (min a n, max b n)
-  | (Interval (a, b), Const n) -> Interval (min a n, max b n)
+  | (Symbolic (Const n1), Symbolic (Const n2)) when n1 = n2 -> const n1
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> Interval (Const (min n1 n2), Const (max n1 n2))
+  | (Symbolic (Const n), Interval (Const a, Const b)) -> Interval (Const (min a n), Const (max b n))
+  | (Interval (Const a, Const b), Symbolic (Const n)) -> Interval (Const (min a n), Const (max b n))
+  | (OpenInterval, Symbolic (Const _))
+  | (Symbolic (Const _), OpenInterval)
+  | (OpenInterval, Interval (Const _, Const _))
+  | (Interval (Const _, Const _), OpenInterval)
+    -> OpenInterval
   | _ -> top (Printf.sprintf "Value.join %s %s" (to_string v1) (to_string v2))
 
 (** Joins two value lists together, assuming they have the same length *)
@@ -120,48 +159,49 @@ let join_vlist_exn (v1 : t list) (v2 : t list) : t list =
 let is_zero (v : t) =
   match v with
   | Bottom -> false
-  | Const 0l -> true
-  | Const _ -> false
-  | Interval (a, b) -> a <= Int32.zero && b >= Int32.zero
-  | LeftOpenInterval b -> b >= Int32.zero
-  | RightOpenInterval a -> a <= Int32.zero
+  | Symbolic (Const 0l) -> true
+  | Symbolic (Const _) -> false
+  | Interval (Const a, Const b) -> a <= Int32.zero && b >= Int32.zero
+  | Interval (_, Const b) -> b >= Int32.zero
+  | Interval (Const a, _) -> a <= Int32.zero
+  | Interval _ -> true
+  | LeftOpenInterval (Const b) -> b >= Int32.zero
+  | LeftOpenInterval _ -> true
+  | RightOpenInterval (Const a) -> a <= Int32.zero
+  | RightOpenInterval _ -> true
   | OpenInterval -> true
-  | Parameter _ -> true (* TODO: could be more precise here *)
-  | Global _ -> true (* TODO: could be more precise here *)
-  | Op _ -> true (* TODO: could be more precise here *)
-  | Deref _ -> true (* TODO: could be more precise here *)
+  | Symbolic _ -> true (* TODO: could be more precise here? Or not *)
 
 let is_not_zero (v : t) =
   match v with
   | Bottom -> false
-  | Const 0l -> false
-  | Const _ -> true
-  | Interval (a, b) -> not (a = 0l && b = 0l)
+  | Symbolic (Const 0l) -> false
+  | Symbolic (Const _) -> true
+  | Interval (Const a, Const b) -> not (a = 0l && b = 0l)
+  | Interval _ -> true (* TODO could be more precise *)
   | LeftOpenInterval _ -> true
   | RightOpenInterval _ -> true
   | OpenInterval -> true
-  | Parameter _ -> true (* TODO: could be more precise here *)
-  | Global _ -> true (* TODO: could be more precise here *)
-  | Op _ -> true (* TODO: could be more precise here *)
-  | Deref _ -> true (* TODO: could be more precise here *)
+  | Symbolic _ -> true (* TODO: could be more precise here *)
 
 let rec add_offset (v : t) (offset : int) : t =
   if offset = 0 then v else
     let off = Int32.of_int_exn offset in
     match v with
     | Bottom -> Bottom
-    | Const n -> Const (Int32.(+) n off)
-    | Interval (a, b) -> Interval ((Int32.(+) a off), (Int32.(+) b off))
-    | LeftOpenInterval b -> LeftOpenInterval (Int32.(+) b off)
-    | RightOpenInterval b -> LeftOpenInterval (Int32.(+) b off)
+    | Interval (Const a, Const b) -> Interval (Const (Int32.(+) a off), Const (Int32.(+) b off))
+    | Interval (a, b) -> Interval (Op (Plus, Symbolic a, const off), Op (Plus, Symbolic b, const off))
+    | LeftOpenInterval (Const b) -> LeftOpenInterval (Const (Int32.(+) b off))
+    | LeftOpenInterval b -> LeftOpenInterval (Op (Plus, Symbolic b, const off))
+    | RightOpenInterval (Const a) -> LeftOpenInterval (Const (Int32.(+) a off))
+    | RightOpenInterval a -> RightOpenInterval (Op (Plus, Symbolic a, const off))
     | OpenInterval -> OpenInterval
-    | Parameter i -> Op (Plus, Parameter i, Const off)
-    | Global i -> Op (Plus, Parameter i, Const off)
-    | Deref a -> Op (Plus, Deref a, Const off)
+    | Symbolic (Const n) -> const (Int32.(+) n off)
     (* TODO: choose between adding it to a or b? e.g., g0-16+8 is better represented as g0-8 than g0+8-16. Maybe introduce a simplification phase*)
-    | Op (Plus, a, b) -> simplify (Op (Plus, a, add_offset b offset))
-    | Op (Minus, a, b) -> simplify (Op (Minus, a, add_offset b (- offset)))
-    | Op (Times, a, b) -> Op (Plus, Op (Times, a, b), Const off)
+    | Symbolic (Op (Plus, a, b)) -> simplify (Symbolic (Op (Plus, a, simplify (add_offset b offset))))
+    | Symbolic (Op (Minus, a, b)) -> simplify (Symbolic (Op (Minus, a, simplify (add_offset b (- offset)))))
+    | Symbolic (Op (Times, a, b)) -> simplify (Symbolic (Op (Plus, Symbolic (Op (Times, a, b)), const off)))
+    | Symbolic _ -> simplify (Symbolic (Op (Plus, v, const off)))
 
 module ValueValueMap = struct
   module ValueMap = Map.Make(T)
@@ -173,19 +213,19 @@ end
 let rec adapt (v : t) (map : ValueValueMap.t) : t =
   match v with
   | Bottom
-  | Const _
   | Interval _
   | LeftOpenInterval _
   | RightOpenInterval _
   | OpenInterval
     -> v
-  | Parameter _
-  | Global _ ->
+  | Symbolic (Parameter _)
+  | Symbolic (Global _) ->
     begin match ValueValueMap.ValueMap.find map v with
     | Some v' -> Printf.printf "[ADAPT] %s into %s\n" (to_string v) (to_string v'); v'
     | None -> failwith (Printf.sprintf "Cannot adapt value %ss" (to_string v))
     end
-  | Op (op, v1, v2) ->
-    simplify (Op (op, adapt v1 map, adapt v2 map))
-  | Deref v ->
-    Deref (adapt v map)
+  | Symbolic (Op (op, v1, v2)) ->
+    simplify (Symbolic (Op (op, adapt v1 map, adapt v2 map)))
+  | Symbolic (Const _) -> v
+  | Symbolic (Deref v) ->
+    Symbolic (Deref (adapt v map))
