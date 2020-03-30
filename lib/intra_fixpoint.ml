@@ -14,6 +14,7 @@ let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : 
       () (* No more elements to consider. We can stop here *)
     else
       let block_idx = IntSet.min_elt_exn worklist in
+      Printf.printf "Analyzing block %d\n" block_idx;
       let predecessors = Cfg.predecessors cfg block_idx in
       (* in_state is the join of all the the out_state of the predecessors *)
       let in_state = Option.value (List.fold_left (List.map predecessors ~f:(fun idx -> snd (IntMap.find_exn !data idx))) ~init:bottom ~f:Domain.join_opt) ~default:init in
@@ -34,6 +35,7 @@ let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : 
         data := IntMap.set !data ~key:block_idx ~data:(Some in_state, new_out_state);
         (* And recurse by adding all successors *)
         let successors = Cfg.successors cfg block_idx in
+        List.iter successors ~f:(fun s -> Printf.printf "Successor of %d: %d\n" block_idx s);
         fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors)) (iteration+1)
   in
   fixpoint (IntSet.singleton cfg.entry_block) 1;

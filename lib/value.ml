@@ -53,7 +53,9 @@ let rec simplify (v : t) : t =
     | Op (Plus, (Op (Minus, a, Const x)), Const y) when x = y -> simplify a
     | Op (Plus, (Op (Minus, a, Const x)), Const y) when x > y -> Op (Plus, simplify a, Const (Int32.(-) x y))
     | Op (Plus, (Op (Minus, a, Const x)), Const y) when x < y -> Op (Minus, simplify a, Const (Int32.(-) y x))
+    | Op (Plus, (Op (Plus, a, Const x)), Const y) -> Op (Plus, simplify a, Const (Int32.(+) x y))
     | Op (Plus, a, (Const 0l)) -> simplify a
+    | Op (Minus, (Op (Minus, a, Const x)), Const y) -> Op (Minus, simplify a, Const (Int32.(+) x y))
     (* TODO: many more cases *)
     | _ -> v
   in
@@ -184,6 +186,6 @@ let rec adapt (v : t) (map : ValueValueMap.t) : t =
     | None -> failwith (Printf.sprintf "Cannot adapt value %ss" (to_string v))
     end
   | Op (op, v1, v2) ->
-    Op (op, adapt v1 map, adapt v2 map)
+    simplify (Op (op, adapt v1 map, adapt v2 map))
   | Deref v ->
     Deref (adapt v map)

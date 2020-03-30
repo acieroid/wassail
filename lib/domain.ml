@@ -1,12 +1,10 @@
 open Core_kernel
-open Helpers
 
 type state = {
   vstack : Vstack.t;
   locals : Locals.t;
   globals : Globals.t;
   memory : Memory.t;
-  calls : ValueListIntMap.t; (* A map of function called, from function index to parameters given *)
 }
 [@@deriving sexp, compare, yojson]
 
@@ -23,7 +21,6 @@ let init (args : Value.t list) (nlocals : int) (globals : Globals.t) (memory : M
   globals = globals;
   memory = memory;
   (* The list of calls is initially empty *)
-  calls = ValueListIntMap.IntMap.empty;
 }
 
 let join (s1 : state) (s2 : state) : state = {
@@ -42,10 +39,6 @@ let join (s1 : state) (s2 : state) : state = {
   locals = List.map2_exn s1.locals s2.locals ~f:Value.join;
   globals = Globals.join s1.globals s2.globals;
   memory = Memory.join s1.memory s2.memory;
-  calls = ValueListIntMap.IntMap.merge s1.calls s2.calls ~f:(fun ~key:_ data -> match data with
-      | `Both (a, b) -> Some (Value.join_vlist_exn a b)
-      | `Left a -> Some a
-      | `Right b -> Some b)
 }
 let join_opt (s1 : state option) (s2 : state option) : state option =
   match (s1, s2) with

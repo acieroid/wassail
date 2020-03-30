@@ -1,6 +1,5 @@
 (* A function summary *)
 open Core_kernel
-open Helpers
 
 (* For now it just models the number of arguments taken by the function, and the result on the vstack (in practice, either 0 or 1 value) *)
 type t = {
@@ -45,9 +44,6 @@ let apply (sum : t) (fidx : Var.t) (st : Domain.state) : Domain.state =
              ~data:v) in
   { st with
     vstack = sum.result @ (List.map (List.drop st.vstack sum.nargs) ~f:(fun v -> Value.adapt v map));
-    calls = ValueListIntMap.IntMap.update st.calls fidx ~f:(function
-        | None -> List.take st.vstack sum.nargs
-        | Some vs -> Value.join_vlist_exn vs (List.take st.vstack sum.nargs));
     memory = Memory.join st.memory (Memory.adapt sum.memory map);
-    globals = Globals.adapt sum.globals map; (* TODO: similarly, adapt globals *)
+    globals = Globals.adapt sum.globals map;
   }
