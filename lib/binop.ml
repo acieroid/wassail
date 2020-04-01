@@ -50,6 +50,9 @@ let add (v1 : Value.t) (v2 : Value.t) : Value.t =
   | (Symbolic (Op _), _) -> simplify (Symbolic (Op (Plus, v1, v2)))
   | (Symbolic (Parameter i), _) -> simplify (Symbolic (Op (Plus, Symbolic (Parameter i), v2)))
   | (Symbolic (Global i), _) -> simplify (Symbolic (Op (Plus, Symbolic (Global i), v2)))
+  | (Interval (Const a, Const b), Symbolic (Const n)) -> Interval (Const (Int32.(+) a n), Const (Int32.(+) b n))
+  | (RightOpenInterval (Const x), Symbolic (Const y)) -> RightOpenInterval (Const (Int32.(+) x y))
+  | (LeftOpenInterval (Const x), Symbolic (Const y)) -> RightOpenInterval (Const (Int32.(+) x y))
   | _ -> top (Printf.sprintf "add %s %s" (Value.to_string v1) (Value.to_string v2))
 
 let sub (v1 : Value.t) (v2 : Value.t) : Value.t =
@@ -71,7 +74,9 @@ let rem_s (v1 : Value.t) (v2 : Value.t) : Value.t =
 let shl (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1, v2) with
   | (Symbolic (Const n1), Symbolic (Const n2)) -> const (Int32.shift_left n1 (Int32.to_int_exn n2))
+  | (Interval (Const a, Const b), Symbolic (Const 2l)) -> Interval (Const (Int32.( * ) a 4l), Const (Int32.( * ) b 4l))
   | (Symbolic _, Symbolic (Const 2l)) -> symbolic (Op (Times, v1, Symbolic (Const 4l)))
+  | (RightOpenInterval (Const 0l), Symbolic (Const 2l)) -> v1
   | _ -> top (Printf.sprintf "shl %s %s" (Value.to_string v1) (Value.to_string v2))
 
 let (land) (v1 : Value.t) (v2 : Value.t) : Value.t =

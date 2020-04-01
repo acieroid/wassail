@@ -139,7 +139,7 @@ let global (i : int) : t = Symbolic (Global i)
 let deref (addr : t) : t = Symbolic (Deref addr)
 let const (n : int32) : t = Symbolic (Const n)
 let bool : t = Interval (Const 0l, Const 1l)
-let top (source : string) : t = Logging.warn WarnImpreciseOp (fun () -> source); OpenInterval
+let top (source : string) : t = Logging.warn WarnImpreciseOp (fun () -> Printf.sprintf "Top value originating from: %s" source); OpenInterval
 let symbolic (sym : symbolic) : t = Symbolic (simplify_symbolic sym)
 
 let list_to_string (l : t list) : string =
@@ -155,7 +155,13 @@ let join (v1 : t) (v2 : t) : t =
   | (Symbolic (Const n1), Symbolic (Const n2)) -> Interval (Const (min n1 n2), Const (max n1 n2))
   | (Symbolic (Const n), Interval (Const a, Const b)) -> Interval (Const (min a n), Const (max b n))
   | (Interval (Const a, Const b), Symbolic (Const n)) -> Interval (Const (min a n), Const (max b n))
+  | (Interval (Const 0l, Const b), Interval (Const 0l, Const b')) when b <> b' -> RightOpenInterval (Const 0l) (* TODO: this is a very simple widening when the right bound is unstable *)
   | (Interval (Const a, Const b), Interval (Const a', Const b')) -> Interval (Const (min a a'), Const (max b b')) (* TODO: need widen to ensure convergence *)
+  | (RightOpenInterval (Const a), RightOpenInterval (Const a')) -> RightOpenInterval (Const (min a a'))
+  | (LeftOpenInterval (Const b), LeftOpenInterval (Const b')) -> LeftOpenInterval (Const (max b b'))
+  | (Interval (Const a, _), RightOpenInterval (Const a')) -> RightOpenInterval (Const (min a a'))
+  | (RightOpenInterval (Const a), Symbolic (Const c)) -> RightOpenInterval (Const (min a c))
+  | (LeftOpenInterval (Const b), Symbolic (Const c)) -> LeftOpenInterval (Const (max b c))
   | (OpenInterval, Symbolic (Const _))
   | (Symbolic (Const _), OpenInterval)
   | (OpenInterval, Interval (Const _, Const _))

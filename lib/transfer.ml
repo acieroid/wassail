@@ -65,14 +65,14 @@ let rec instr_transfer (i : Instr.t) (state : Domain.state) : result =
   | Compare rel ->
     let (v2, vstack') = Vstack.pop state.vstack in
     let (v1, vstack'') = Vstack.pop vstack' in
-    let v = Relop.eval rel v1 v2 in
+    let v = Relop.eval rel v1 v2 in (* We don't resolve addresses in value here to keep conditionals in the shape we want them *)
     let vstack''' = v :: vstack'' in
     assert (List.length vstack''' = List.length state.vstack - 1);
     Simple { state with vstack =  vstack''' }
   | Binary bin ->
     let (v2, vstack') = Vstack.pop state.vstack in
     let (v1, vstack'') = Vstack.pop vstack' in
-    let v = Binop.eval bin v1 v2 in
+    let v = Binop.eval bin (Memory.resolve state.memory v1) (Memory.resolve state.memory v2) in (* We roselv addresses here *)
     let vstack''' = v :: vstack'' in
     assert (List.length vstack''' = List.length state.vstack - 1);
     Simple { state with vstack = vstack''' }

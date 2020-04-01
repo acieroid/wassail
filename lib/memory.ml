@@ -21,18 +21,6 @@ let of_yojson json = match [%of_yojson: (Value.t * Value.t) list] json with
 
 let initial = Map.empty
 
-(** Update an address in the memory, joining it with the previous value if there was already one stored at the same address *)
-let update (m : t) (ea : Value.t) (v : Value.t) : t =
-  (* TODO: what about overlapping values? e.g., M[0: 0][[0,1]: 1].
-     Possible solution: find the most general key, join the values
-     Hence, M[0: 0][[0,1]: 1] becomes M[[0,1]: [0,1]]
-     Other: split when possible:
-     M[[[0,3]: 1][[1,5]: 2] becomes M[[0,0]: 1][[1,3]: [1,2]][[4,5]: 2]
-  *)
-  Map.update m ea ~f:(function
-      | None -> v
-      | Some v' -> Value.join v v')
-
 (** Look up a value in the memory at effective address ea. Returns either the value (Some v), or None if the value is not directly found in the memory (meaning it could be any value) *)
 let find (m : t) (ea : Value.t) : Value.t option =
   (* Step 1. Find all values that subsume ea, or are subsumed by ea
@@ -55,6 +43,42 @@ let find (m : t) (ea : Value.t) : Value.t option =
   | None ->
     Logging.warn WarnNotFoundInMem (fun () -> Printf.sprintf "value not found in memory (%s) at address %s" (to_string m) (Value.to_string ea));
     None
+
+(** Resolves the pointers that are seen in v, if possible (if they are valid addresses in the memory) *)
+let rec resolve (m : t) (v : Value.t) : Value.t =
+  Printf.printf "Trying to resolve %s\n" (Value.to_string v);
+  match v with
+  | Interval (a, b) -> Interval (resolve_symbolic m a, resolve_symbolic m b)
+  | LeftOpenInterval a -> LeftOpenInterval (resolve_symbolic m a)
+  | RightOpenInterval b -> RightOpenInterval (resolve_symbolic m b)
+  | Symbolic (Deref a) -> begin match find m a with
+      | Some v' -> v'
+      | None -> (Symbolic (Deref (resolve m a)))
+    end
+  | Symbolic sym -> Symbolic (resolve_symbolic m sym)
+  | _ -> v
+and resolve_symbolic (m : t) (sym : Value.symbolic) : Value.symbolic =
+  Printf.printf "Trying to resolve symbolic: %s\n" (Value.symbolic_to_string sym);
+  match sym with
+  | Op (op, left, right) -> Op (op, resolve m left, resolve m right)
+  | Deref _ -> failwith "Memory.resolve_symbolic unsupported for Deref"
+  | _ -> sym
+
+(** Update an address in the memory, joining it with the previous value if there was already one stored at the same address *)
+let update (m : t) (ea : Value.t) (v : Value.t) : t =
+  (* TODO: what about overlapping values? e.g., M[0: 0][[0,1]: 1].
+     Possible solution: find the most general key, join the values
+     Hence, M[0: 0][[0,1]: 1] becomes M[[0,1]: [0,1]]
+     Other: split when possible:
+     M[[[0,3]: 1][[1,5]: 2] becomes M[[0,0]: 1][[1,3]: [1,2]][[4,5]: 2]
+  *)
+  let resolved_v = resolve m v in
+  begin if resolved_v <> v then
+    Printf.printf "Memory.update using %s instead of %s [ea: %s]\n" (Value.to_string resolved_v) (Value.to_string v) (Value.to_string ea)
+  end;
+  Map.update m ea ~f:(function
+      | None -> v
+      | Some v' -> Value.join resolved_v v')
 
 let load (m : t) (addr : Value.t) (op : Memoryop.t) : Value.t =
   assert (op.sz = None); (* We only support N = 32 for now. *)
