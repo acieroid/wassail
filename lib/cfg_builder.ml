@@ -136,7 +136,7 @@ let build (faddr : Address.t) (store : Store.t) : Cfg.t =
     (* Number of locals in the function *)
     nlocals = List.length funcinst.code.locals;
     (*The basic blocks *)
-    basic_blocks = BasicBlockIntMap.IntMap.of_alist_exn (List.map actual_blocks ~f:(fun b -> (b.idx, b)));
+    basic_blocks = BasicBlocks.IntMap.of_alist_exn (List.map actual_blocks ~f:(fun b -> (b.idx, b)));
     (* The forward edges *)
     edges = IntMap.of_alist_multi actual_edges;
     (* The backward edges *)

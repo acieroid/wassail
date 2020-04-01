@@ -71,12 +71,14 @@ let rem_s (v1 : Value.t) (v2 : Value.t) : Value.t =
 let shl (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1, v2) with
   | (Symbolic (Const n1), Symbolic (Const n2)) -> const (Int32.shift_left n1 (Int32.to_int_exn n2))
+  | (Symbolic _, Symbolic (Const 2l)) -> symbolic (Op (Times, v1, Symbolic (Const 4l)))
   | _ -> top (Printf.sprintf "shl %s %s" (Value.to_string v1) (Value.to_string v2))
 
 let (land) (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1, v2) with
   | (Symbolic (Const n1), Symbolic (Const n2)) -> const (Int32.(land) n1 n2)
-  | (Interval (Const 0l, Const 1l), Symbolic (Const 1l)) -> v1
+  | (_, Symbolic (Const 1l)) -> v1
+  | (Symbolic (Const 1l), _) -> v1
   | _ -> top (Printf.sprintf "land %s %s" (Value.to_string v1) (Value.to_string v2))
 
 (** Evaluates a binary operation on two values *)

@@ -1,10 +1,11 @@
 open Core_kernel
 
+(** A state of the wasm VM *)
 type state = {
-  vstack : Vstack.t;
-  locals : Locals.t;
-  globals : Globals.t;
-  memory : Memory.t;
+  vstack : Vstack.t; (** The value stack *)
+  locals : Locals.t; (** The locals *)
+  globals : Globals.t; (** The globals *)
+  memory : Memory.t; (** The linear memory *)
 }
 [@@deriving sexp, compare, yojson]
 
@@ -20,7 +21,6 @@ let init (args : Value.t list) (nlocals : int) (globals : Globals.t) (memory : M
   locals = args @ (List.init nlocals ~f:(fun _ -> Value.zero));
   globals = globals;
   memory = memory;
-  (* The list of calls is initially empty *)
 }
 
 let join (s1 : state) (s2 : state) : state = {
@@ -40,9 +40,3 @@ let join (s1 : state) (s2 : state) : state = {
   globals = Globals.join s1.globals s2.globals;
   memory = Memory.join s1.memory s2.memory;
 }
-let join_opt (s1 : state option) (s2 : state option) : state option =
-  match (s1, s2) with
-  | Some s1, Some s2 -> Some (join s1 s2)
-  | Some s1, None -> Some s1
-  | None, Some s2 -> Some s2
-  | None, None -> None

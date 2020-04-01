@@ -5,6 +5,7 @@ open Wasm
 module T = struct
   type operator =
     | Plus | Minus | Times
+    | Lt | LtE | Gt | GtE | Eq
   [@@deriving sexp, compare, yojson]
   type symbolic =
     | Parameter of int (* p0 *)
@@ -48,6 +49,11 @@ and symbolic_to_string (v : symbolic) : string = match v with
       | Plus -> "+"
       | Minus -> "-"
       | Times -> "*"
+      | Lt -> "<"
+      | LtE -> "<="
+      | Gt -> ">"
+      | GtE -> ">="
+      | Eq -> "="
     end) (to_string right)
   | Deref v -> Printf.sprintf "*%s" (to_string v)
 
@@ -71,23 +77,27 @@ let rec simplify_symbolic (sym : symbolic) : symbolic =
   | (Op (Minus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) ->
     (* (a-x)-y = a-(x+y) *)
     simplify_symbolic (Op (Minus, simplify a, Symbolic (Const (Int32.(+) x y))))
+  | Op (Eq, Symbolic (Op (Lt, a, b)), Symbolic (Const 0l)) ->
+    (* a<b=0 = a>b *)
+    Op (GtE, a, b)
+  (* TODO: many more cases *)
   | (Global _) | (Parameter _) | Const _
   | Op (_, Symbolic (Global _), Symbolic (Const _))
   | Op (_, Symbolic (Parameter _), Symbolic (Const _)) ->
     (* These cases cannot be simplified *)
     sym
-  (* TODO: many more cases *)
   | _ ->
     Logging.warn WarnCannotSimplify (fun () -> Printf.sprintf "cannot simplify value %s" (symbolic_to_string sym));
     sym
 and simplify (v : t) : t =
   match (match v with
-  | Bottom -> Bottom
-  | Interval (a, b) -> Interval (simplify_symbolic a, simplify_symbolic b) (* TODO: refinement possible, if a = b, then interval is removed? *)
-  | LeftOpenInterval b -> LeftOpenInterval (simplify_symbolic b)
-  | RightOpenInterval a -> RightOpenInterval (simplify_symbolic a)
-  | OpenInterval -> OpenInterval
-  | Symbolic sym -> Symbolic (simplify_symbolic sym))
+      | Bottom -> Bottom
+      | Interval (Const a, Const b) when a = b -> Symbolic (Const a)
+      | Interval (a, b) -> Interval (simplify_symbolic a, simplify_symbolic b)
+      | LeftOpenInterval b -> LeftOpenInterval (simplify_symbolic b)
+      | RightOpenInterval a -> RightOpenInterval (simplify_symbolic a)
+      | OpenInterval -> OpenInterval
+      | Symbolic sym -> Symbolic (simplify_symbolic sym))
   with
   | Symbolic (Op (Plus, a, Symbolic (Const 0l))) -> a
   | Symbolic (Op (Minus, a, Symbolic (Const 0l))) -> a
@@ -130,6 +140,7 @@ let deref (addr : t) : t = Symbolic (Deref addr)
 let const (n : int32) : t = Symbolic (Const n)
 let bool : t = Interval (Const 0l, Const 1l)
 let top (source : string) : t = Logging.warn WarnImpreciseOp (fun () -> source); OpenInterval
+let symbolic (sym : symbolic) : t = Symbolic (simplify_symbolic sym)
 
 let list_to_string (l : t list) : string =
   String.concat ~sep:", " (List.map l ~f:to_string)
@@ -144,16 +155,41 @@ let join (v1 : t) (v2 : t) : t =
   | (Symbolic (Const n1), Symbolic (Const n2)) -> Interval (Const (min n1 n2), Const (max n1 n2))
   | (Symbolic (Const n), Interval (Const a, Const b)) -> Interval (Const (min a n), Const (max b n))
   | (Interval (Const a, Const b), Symbolic (Const n)) -> Interval (Const (min a n), Const (max b n))
+  | (Interval (Const a, Const b), Interval (Const a', Const b')) -> Interval (Const (min a a'), Const (max b b')) (* TODO: need widen to ensure convergence *)
   | (OpenInterval, Symbolic (Const _))
   | (Symbolic (Const _), OpenInterval)
   | (OpenInterval, Interval (Const _, Const _))
   | (Interval (Const _, Const _), OpenInterval)
     -> OpenInterval
+  | (Symbolic (Const _), LeftOpenInterval (Parameter _))
+  | (Symbolic (Const _), LeftOpenInterval (Op (_, Symbolic (Parameter _), _)))
+  | (Symbolic (Const _), RightOpenInterval (Op (_, Symbolic (Parameter _), _)))
+  | (Symbolic (Const _), RightOpenInterval (Parameter _)) ->
+     Logging.warn WarnUnsoundAssumption (fun () -> Printf.sprintf "unsound assumption: %s contains %s" (to_string v2) (to_string v1));
+     v2
   | _ -> top (Printf.sprintf "Value.join %s %s" (to_string v1) (to_string v2))
 
 (** Joins two value lists together, assuming they have the same length *)
 let join_vlist_exn (v1 : t list) (v2 : t list) : t list =
   List.map2_exn v1 v2 ~f:join
+
+(** Meet two values together *)
+let meet (v1 : t) (v2 : t) : t =
+  match (v1, v2) with
+  | (Bottom, _)
+  | (_, Bottom) -> Bottom
+  | (_, _) when v1 = v2 -> v1
+  | (_, OpenInterval) -> v1
+  | (OpenInterval, _) -> v2
+  | _ ->
+    Logging.warn WarnImpreciseOp (fun () -> Printf.sprintf "meet %s with %s" (to_string v1) (to_string v2));
+    (* There are multiple "valid" choices here. We pick v1.
+       There could be more precise choices however, examples:
+       meet [0,1] [2,3] returns [0,1], but should return Bottom (not seen in practice)
+       meet ]-inf,p0] [0,1] has no best result, as we don't know if p0<0... (seen in practice)
+         -> we decide to keep the first value here, as we prefer abstract values with parameters in them
+    *)
+    v1
 
 (* TODO: maybe these functions should take the memory as argument, and return an updated version of it? *)
 let is_zero (v : t) =

@@ -44,6 +44,12 @@ let () =
         method init program = Wasmtaint.initialize (Js.to_string program)
         method cfgs = get_cfgs ()
 
+        method cfg (idx : int) =
+          match IntMap.find !(Wasmtaint.cfgs) idx with
+          | Some cfg ->
+            Js.string (Yojson.Safe.to_string (Cfg.to_yojson cfg))
+          | None -> Js.Unsafe.obj [| |]
+
         method analyze =
           let _ = Wasmtaint.Inter_fixpoint.analyze !(Wasmtaint.cfgs) !(Wasmtaint.nglobals) in
           ()

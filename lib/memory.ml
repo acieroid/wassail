@@ -60,8 +60,10 @@ let load (m : t) (addr : Value.t) (op : Memoryop.t) : Value.t =
   assert (op.sz = None); (* We only support N = 32 for now. *)
   let ea = Value.add_offset addr op.offset in (* effective address *)
   match find m ea with
-  | Some v -> v
-  | None -> Value.deref addr
+  | Some (Symbolic (Const _) as v) -> v
+  | Some (Symbolic (Parameter _) as v) -> v
+  | Some (Symbolic (Global _) as v) -> v
+  | _ -> Value.deref ea
 
 let store (m : t) (addr : Value.t) (value : Value.t) (op : Memoryop.t) : t =
   assert (op.sz = None); (* We only support N = 32 for now. *)
@@ -70,8 +72,9 @@ let store (m : t) (addr : Value.t) (value : Value.t) (op : Memoryop.t) : t =
 
 let join (m1 : t) (m2 : t) : t =
   (* M[a: b] joined with M[c: d] should be just like doing M[a: b][c: d] *)
-  Logging.warn WarnMemJoin (fun () -> Printf.sprintf "join %s with %s" (to_string m1) (to_string m2));
-  Map.fold m2 ~init:m1 ~f:(fun ~key:addr ~data:value m -> update m addr value)
+  let m = Map.fold m2 ~init:m1 ~f:(fun ~key:addr ~data:value m -> update m addr value) in
+  Logging.warn WarnMemJoin (fun () -> Printf.sprintf "join %s with %s gives %s" (to_string m1) (to_string m2) (to_string m));
+  m
 
 (** Adapt (both in the addresses and in the values), using the map given as argument
     1. globals, e.g., M[g0: a], with map: [g0: X] becomes M[X: a]
@@ -81,4 +84,24 @@ let join (m1 : t) (m2 : t) : t =
 let adapt (m : t) (map : Value.ValueValueMap.t) : t =
   Map.of_alist_exn (List.map (Map.to_alist m)
                   ~f:(fun (a, v) -> (Value.adapt a map, Value.adapt v map)))
-  
+
+(** Refines the value at M[ea], by meeting it with v *)
+let refine_value_at (m : t) (ea : Value.t) (v : Value.t) =
+  Map.update m ea ~f:(function
+      | None ->
+        Logging.warn WarnNotFoundInMem (fun () -> Printf.sprintf "refine_value_at should have found a value at address %s, none found instead, in memory %s" (Value.to_string ea) (to_string m));
+        v
+      | Some v' -> Value.meet v v')
+
+(** Refine the memory based on a condition cond (represented as a value), that either holds or not, according to holds *)
+let refine (m : t) (cond : Value.t) (holds : bool) : t=
+  match (cond, holds) with
+  | Symbolic (Op (GtE, Symbolic (Deref ea), Symbolic b)), true ->
+    (* M[*ea: X] with cond *ea >= b refines X with [b,+inf] *)
+    refine_value_at m ea (RightOpenInterval b)
+  | Symbolic (Op (GtE, Symbolic (Deref ea), Symbolic b)), false ->
+    (* M[*ea: X] with cond *ea >= b (false -> *ea < b) refines X with ]-inf,b-1] *)
+    refine_value_at m ea (LeftOpenInterval (Value.simplify_symbolic (Op (Minus, Symbolic b, Value.const 1l))))
+  | _ ->
+    Logging.warn WarnImpreciseOp (fun () -> Printf.sprintf "cannot refine memory %s based on condition %s" (to_string m) (Value.to_string cond));
+    m

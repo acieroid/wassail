@@ -21,7 +21,10 @@ let eqz (v : Value.t) : Value.t = match (is_zero v, is_not_zero v) with
   | (true, false) -> const 1l
   | (false, true) -> const 0l
   | (false, false) -> bottom
-  | (true, true) -> bool
+  | (true, true) -> begin match v with
+      | Symbolic _ -> simplify (Symbolic (Op (Eq, v, const 0l)))
+      | _ -> bool
+    end
 
 let eval (t : t) (v1 : Value.t) : Value.t =
   match (t, v1) with

@@ -7,8 +7,9 @@ type option =
   | WarnNotFoundInMem
   | WarnNotImplemented
   | WarnCannotSimplify
+  | WarnUnsoundAssumption
 
-let enabled_options = ref [WarnMemJoin; WarnImpreciseOp; WarnSubsumesIncorrect; WarnNotImplemented; WarnNotFoundInMem; WarnCannotSimplify]
+let enabled_options = ref [WarnMemJoin; WarnImpreciseOp; WarnSubsumesIncorrect; WarnNotImplemented; WarnNotFoundInMem; WarnCannotSimplify; WarnUnsoundAssumption]
 
 let info (msg : string) : unit =
   Printf.printf "[INFO] %s\n" msg

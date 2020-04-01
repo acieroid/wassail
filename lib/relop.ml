@@ -35,7 +35,7 @@ let to_string (r : t) : string =
 
 let eq (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
   | (Symbolic (Const n1), Symbolic (Const n2)) when n1 = n2 -> const 1l
-  | _ -> bool
+  | _ -> bool (* TODO *)
 
 let ne (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
   | (Symbolic (Const n1), Symbolic (Const n2)) when n1 <> n2 -> const 1l
@@ -43,7 +43,8 @@ let ne (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
 
 let lt_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
   | (Symbolic (Const n1), Symbolic (Const n2)) when n1 < n2 -> const 1l
-  | _ -> bool (* TODO *)
+  | (Symbolic a, Symbolic b) -> Symbolic (Op (Lt, (Symbolic a), (Symbolic b)))
+  | _ ->  bool (* TODO *)
 
 let gt_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1, v2) with
   | (Symbolic (Const n1), Symbolic (Const n2)) when n1 > n2 -> const 1l

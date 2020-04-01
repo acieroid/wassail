@@ -36,8 +36,6 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
            Callees for the same reason. *)
         let callees = Cfg.callees cfg in
         let callers = Cfg.callers cfgs cfg in
-(*        let new_globals = globals in         (* Globals don't change, we are compositional now *)
-          let new_memory = Domain.join_memory memory out_state.memory in *)
         let summary = Summary.make cfg out_state in
         let new_summaries = IntMap.set summaries ~key:cfg.idx ~data:summary in
         (* Update data of the analysis and recurse *)
