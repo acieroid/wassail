@@ -1,26 +1,125 @@
-// Create a new directed graph
-var g = new dagreD3.graphlib.Graph({compound: true});
+"use strict";
+function init() {
+    jsbridge.init(document.getElementById("code").value)
+}
 
-// Set an object for the graph label
-g.setGraph({});
+var returnBlock = {}; /* TODO */
 
-// Default to assigning a new object as a label for each new edge.
-g.setDefaultEdgeLabel(function() { return {}; });
+class View {
+    constructor() {
+        // Create a new directed graph
+        this.g = new dagreD3.graphlib.Graph({compound: true});
 
-var svg = d3.select("svg"),
-    inner = svg.select("g");
+        // Set an object for the graph label
+        this.g.setGraph({});
 
-// Set up zoom support
-var zoom = d3.zoom().on("zoom", function() {
-      inner.attr("transform", d3.event.transform);
-    });
-svg.call(zoom);
+        // Default to assigning a new object as a label for each new edge.
+        this.g.setDefaultEdgeLabel(function() { return {}; });
+
+        this.svg = d3.select("svg");
+        let inner = this.svg.select("g");
+        this.inner = inner;
+
+        // Set up zoom support
+        this.zoom = d3.zoom().on("zoom", function() {
+            inner.attr("transform", d3.event.transform);
+        });
+        this.svg.call(this.zoom);
 
 
-// Create the renderer
-var render = new dagreD3.render();
+        // Create the renderer
+        this.render = new dagreD3.render();
+    }
+    label(cfgIdx, block) {
+        switch (block.sort) {
+        case "Normal":
+            var str = `(Block ${block.idx})\n`
+            block.instrs.forEach(function (instr) {
+                str += instr + "\n";
+            });
+            return { label : str };
+        case "BlockEntry":
+            return { label: `Block entry (${block.idx})`, shape: "diamond" };
+        case "BlockExit":
+            return { label: `Block exit (${block.idx})`, shape: "diamond" };
+        case "LoopEntry":
+            return { label: `Loop entry (${block.idx})`, shape: "diamond" };
+        case "LoopExit":
+            return { label: `Loop exit (${block.idx})`, shape: "diamond" };
+        case "Return":
+            returnBlock[cfgIdx] = `block${cfgIdx}-${block.idx}`;
+            return { label : `Return` };
+        case "Function":
+            const instr = block.instrs[0];
+            return { label : `${instr}`, shape: "circle" };
+        default: return { label: block.sort };
+        }
+    }
+    draw(cfgIdx) {
+        let that = this;
+        let cfg = jsbridge.getCfg(cfgIdx);
+        console.log(cfg);
 
-var cfgs = undefined;
+        // Create the enclosing function node
+        that.g.setNode(`CFG-${cfgIdx}`, {label: `Function ${cfgIdx}`, style: "fill: #DDDDDD", clusterLabelPos: "top"});
+
+        // Loops over the basic blocks
+        cfg.blocks.forEach(function (block) {
+            if (block != undefined) {
+                let blockIdx = block.idx;
+                const nodeName = `block${cfgIdx}-${blockIdx}`
+                that.g.setNode(nodeName, that.label(cfgIdx, block));
+                that.g.setParent(nodeName, `CFG-${cfgIdx}`);
+            }
+        });
+
+        // Loops over the edges
+        cfg.edges.forEach(function (edge, from) {
+            if (edge != undefined) {
+                edge.forEach(function (to) {
+                    const fromName = `block${cfgIdx}-${from}`
+                    const toName = `block${cfgIdx}-${to}`
+                    that.g.setEdge(fromName, toName);
+                });
+            }
+        });
+
+        // Resize the svg to take full width
+        document.getElementById("view").width.baseVal.value = window.innerWidth;
+
+        // Render the graph
+        this.render(this.inner, this.g)
+
+        // Center the graph
+        let initialScale = 0.75;
+        this.svg.call(this.zoom.transform,
+                      d3.zoomIdentity.translate((this.svg.attr("width") - this.g.graph().width * initialScale) / 2, 20).scale(initialScale));
+
+        this.svg.attr('height', this.g.graph().height * initialScale + 40);
+    }
+
+    update(cfgIdx) {
+        let result = jsbridge.result(cfgIdx);
+        if (result != undefined) {
+            this.g.setNode(returnBlock[cfgIdx], {label: `Return\nResult: ${result}`, style: "fill: #DDAAAA"});
+        }
+        this.render(this.inner, this.g);
+    }
+}
+
+let view = new View();
+
+function load() {
+    init();
+    view.draw(2);
+}
+
+function analyze() {
+    jsbridge.analyze();
+    view.update(2);
+}
+
+/*
 var returnBlock = {};
 function load() {
     console.log("Width is:");
@@ -108,3 +207,4 @@ function analyze() {
     })
     render(inner, g);
 }
+ */

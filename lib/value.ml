@@ -141,13 +141,12 @@ let const (n : int32) : t = Symbolic (Const n)
 let bool : t = Interval (Const 0l, Const 1l)
 let top (source : string) : t = Logging.warn WarnImpreciseOp (fun () -> Printf.sprintf "Top value originating from: %s" source); OpenInterval
 let symbolic (sym : symbolic) : t = Symbolic (simplify_symbolic sym)
-
 let list_to_string (l : t list) : string =
   String.concat ~sep:", " (List.map l ~f:to_string)
 
 (** Joins two values together *)
 let join (v1 : t) (v2 : t) : t =
-  match (v1, v2) with
+  let vres = match (v1, v2) with
   | (Bottom, _) -> v2
   | (_, Bottom) -> v1
   | (_, _) when v1 = v2 -> v1
@@ -162,6 +161,7 @@ let join (v1 : t) (v2 : t) : t =
   | (Interval (Const a, _), RightOpenInterval (Const a')) -> RightOpenInterval (Const (min a a'))
   | (RightOpenInterval (Const a), Symbolic (Const c)) -> RightOpenInterval (Const (min a c))
   | (LeftOpenInterval (Const b), Symbolic (Const c)) -> LeftOpenInterval (Const (max b c))
+  | (RightOpenInterval (Op (Plus, Symbolic x, Symbolic (Const _))), RightOpenInterval x') when x = x' -> v2
   | (OpenInterval, Symbolic (Const _))
   | (Symbolic (Const _), OpenInterval)
   | (OpenInterval, Interval (Const _, Const _))
@@ -173,7 +173,9 @@ let join (v1 : t) (v2 : t) : t =
   | (Symbolic (Const _), RightOpenInterval (Parameter _)) ->
      Logging.warn WarnUnsoundAssumption (fun () -> Printf.sprintf "unsound assumption: %s contains %s" (to_string v2) (to_string v1));
      v2
-  | _ -> top (Printf.sprintf "Value.join %s %s" (to_string v1) (to_string v2))
+  | _ -> top (Printf.sprintf "Value.join %s %s" (to_string v1) (to_string v2)) in
+  Logging.info (Printf.sprintf "join %s with %s gives %s" (to_string v1) (to_string v2) (to_string vres));
+  vres
 
 (** Joins two value lists together, assuming they have the same length *)
 let join_vlist_exn (v1 : t list) (v2 : t list) : t list =
@@ -187,6 +189,12 @@ let meet (v1 : t) (v2 : t) : t =
   | (_, _) when v1 = v2 -> v1
   | (_, OpenInterval) -> v1
   | (OpenInterval, _) -> v2
+  (* TODO: 
+     a) meet ]-inf,p2-1[ with [a,b].
+        IF we know that p2-1>=a, then definitely we can say that the result is at least [a,p2-1]
+     b) meet [p2,+inf] with [0,1] -> probably [0,1] is better here...
+        But then we'll loop, and we'll have to meet [p2,+inf] with [0,2], then [0,3], then finally [0,+inf], hence [p2,+inf] is probably fine. Although just p2 is correct IN OUR EXAMPLE
+ *)
   | _ ->
     Logging.warn WarnImpreciseOp (fun () -> Printf.sprintf "meet %s with %s" (to_string v1) (to_string v2));
     (* There are multiple "valid" choices here. We pick v1.

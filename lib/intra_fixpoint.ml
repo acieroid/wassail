@@ -25,8 +25,16 @@ let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : 
       let in_state = match (List.fold_left pred_states ~init:bottom ~f:(fun acc res ->
           Transfer.join_result acc (match res with
               | Branch (t, f) -> begin match block.sort with
-                  | BlockExit -> Simple f
-                  | _ -> Simple t
+                  | BlockExit ->
+                    (* The analyzed block is an exit block, so it is the target
+                       of the break and the condition holds, hence we take the
+                       left part of the Branch result *)
+                    Simple t
+                  | _ ->
+                    (* For any other block, it can't be the target of the break,
+                       so we take the right hand side of the Branch result,
+                       corresponding to the condition not holding *)
+                    Simple f
                 end
               | _ -> res)))
         with

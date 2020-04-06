@@ -1,5 +1,4 @@
 open Core_kernel
-open Wasm
 open Value
 
 module T = struct
@@ -15,7 +14,7 @@ module T = struct
   [@@deriving sexp, compare, yojson]
 end
 include T
-let of_wasm (b : Ast.binop) : t =
+let of_wasm (b : Wasm.Ast.binop) : t =
   match b with
   | I32 Add -> I32Add
   | I32 Sub -> I32Sub
@@ -53,6 +52,7 @@ let add (v1 : Value.t) (v2 : Value.t) : Value.t =
   | (Interval (Const a, Const b), Symbolic (Const n)) -> Interval (Const (Int32.(+) a n), Const (Int32.(+) b n))
   | (RightOpenInterval (Const x), Symbolic (Const y)) -> RightOpenInterval (Const (Int32.(+) x y))
   | (LeftOpenInterval (Const x), Symbolic (Const y)) -> RightOpenInterval (Const (Int32.(+) x y))
+  | (RightOpenInterval (Parameter i), Symbolic (Const n)) -> RightOpenInterval (Op (Plus, parameter i, const n))
   | _ -> top (Printf.sprintf "add %s %s" (Value.to_string v1) (Value.to_string v2))
 
 let sub (v1 : Value.t) (v2 : Value.t) : Value.t =
@@ -87,11 +87,11 @@ let (land) (v1 : Value.t) (v2 : Value.t) : Value.t =
   | _ -> top (Printf.sprintf "land %s %s" (Value.to_string v1) (Value.to_string v2))
 
 (** Evaluates a binary operation on two values *)
-let eval (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
+let eval (m : Memory.t) (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
   match b with
-  | I32Add -> add v1 v2
-  | I32Sub -> sub v1 v2
-  | I32Mul -> mul v1 v2
-  | I32RemS -> rem_s v1 v2
-  | I32Shl -> shl v1 v2
-  | I32And -> (land) v1 v2
+  | I32Add -> add (Memory.resolve m v1) (Memory.resolve m v2)
+  | I32Sub -> sub (Memory.resolve m v1) (Memory.resolve m v2)
+  | I32Mul -> mul (Memory.resolve m v1) (Memory.resolve m v2)
+  | I32RemS -> rem_s (Memory.resolve m v1) (Memory.resolve m v2)
+  | I32Shl -> shl (v1) (v2)
+  | I32And -> (land) v1 v2 (* Don't resolve for and, because this is used for conditions mostly *)
