@@ -17,6 +17,9 @@ let array_of_intmap (map : 'a IntMap.t) (f : 'a -> 'b) : 'b array =
 let array_of_intlist (l : int list) : int array =
   Array.init (List.length l) (fun i -> (List.nth l i))
 
+let array_of_intmap_indices (map : 'a IntMap.t) : int array =
+  array_of_intlist (IntMap.keys map)
+
 let array_of_list (l : 'a list) (f : 'a -> 'b) : 'b array =
   Array.init (List.length l) (fun i -> f (List.nth l i))
 
@@ -50,6 +53,9 @@ let () =
         method init program = Wasmtaint.initialize (Js.to_string program)
         (* method cfgs = get_cfgs () *)
 
+        method cfgIndices =
+          array_of_intmap_indices !(Wasmtaint.cfgs)
+
         method getCfg (idx : int) : 'a Js.t =
           match IntMap.find !(Wasmtaint.cfgs) idx with
           | Some cfg -> js_of_cfg cfg
@@ -69,7 +75,7 @@ let () =
             (* memory: M *)
             Memory.top
 *)
-        method result (cfgidx : int) = match IntMap.find_exn !(Inter_fixpoint.data) cfgidx with
-          | Some state -> Js.Unsafe.inject (js_of_state state)
-          | None -> Js.Unsafe.inject (Js.undefined)
+        method result (cfgidx : int) = match IntMap.find !(Inter_fixpoint.data) cfgidx with
+          | Some (Some state) -> Js.Unsafe.inject (js_of_state state)
+          | _ -> Js.Unsafe.inject (Js.undefined)
       end)

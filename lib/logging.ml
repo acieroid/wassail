@@ -1,21 +1,26 @@
 open Core_kernel
 
 type option =
-  | WarnMemJoin
-  | WarnImpreciseOp
-  | WarnSubsumesIncorrect
-  | WarnNotFoundInMem
-  | WarnNotImplemented
-  | WarnCannotSimplify
-  | WarnUnsoundAssumption
+  | Info
+  | Warn of string
+[@@deriving sexp, compare]
 
-let enabled_options = ref [WarnMemJoin; WarnImpreciseOp; WarnSubsumesIncorrect; WarnNotImplemented; WarnNotFoundInMem; WarnCannotSimplify; WarnUnsoundAssumption]
+let option_to_string (opt : option) =
+  match opt with
+  | Info -> "INFO"
+  | Warn s -> (Printf.sprintf "WARN:%s" s)
 
-let info (msg : string) : unit =
-  Printf.printf "[INFO] %s\n" msg
+type callback = option -> string -> unit
 
-let warn (opt : option) (msg : unit -> string) : unit =
-  if List.mem !enabled_options opt ~equal:Pervasives.(=) then
-    Printf.printf "[WARNING] %s\n" (msg ())
-  else
-    ()
+let callbacks : (callback list) ref = ref []
+
+let add_callback (cb : option -> string -> unit) =
+  callbacks := cb :: !callbacks
+
+let log (opt : option) (msg : string) : unit =
+  List.iter !callbacks ~f:(fun cb -> cb opt (Printf.sprintf "%s\n" msg))
+
+let info (msg : string) : unit = log Info msg
+
+let warn (kind : string) (msg : string) : unit = log (Warn kind) msg
+

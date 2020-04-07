@@ -41,7 +41,7 @@ let find (m : t) (ea : Value.t) : Value.t option =
     else
       Some v
   | None ->
-    Logging.warn WarnNotFoundInMem (fun () -> Printf.sprintf "value not found in memory (%s) at address %s" (to_string m) (Value.to_string ea));
+    Logging.warn "ValueNotFoundInMemory" (Printf.sprintf "value %s at address %s" (to_string m) (Value.to_string ea));
     None
 
 (** Resolves the pointers that are seen in v, if possible (if they are valid addresses in the memory) *)
@@ -97,7 +97,7 @@ let store (m : t) (addr : Value.t) (value : Value.t) (op : Memoryop.t) : t =
 let join (m1 : t) (m2 : t) : t =
   (* M[a: b] joined with M[c: d] should be just like doing M[a: b][c: d] *)
   let m = Map.fold m2 ~init:m1 ~f:(fun ~key:addr ~data:value m -> update m addr value) in
-  Logging.warn WarnMemJoin (fun () -> Printf.sprintf "join %s with %s gives %s" (to_string m1) (to_string m2) (to_string m));
+  Logging.warn "Join" (Printf.sprintf "join %s with %s gives %s" (to_string m1) (to_string m2) (to_string m));
   m
 
 (** Adapt (both in the addresses and in the values), using the map given as argument
@@ -113,7 +113,7 @@ let adapt (m : t) (map : Value.ValueValueMap.t) : t =
 let refine_value_at (m : t) (ea : Value.t) (v : Value.t) =
   Map.update m ea ~f:(function
       | None ->
-        Logging.warn WarnNotFoundInMem (fun () -> Printf.sprintf "refine_value_at should have found a value at address %s, none found instead, in memory %s" (Value.to_string ea) (to_string m));
+        Logging.warn "NotFoundInMemory" (Printf.sprintf "refine_value_at should have found a value at address %s, none found instead, in memory %s" (Value.to_string ea) (to_string m));
         v
       | Some v' -> Value.meet v v')
 
@@ -127,5 +127,5 @@ let refine (m : t) (cond : Value.t) (holds : bool) : t=
     (* M[*ea: X] with cond *ea >= b (false -> *ea < b) refines X with ]-inf,b-1] *)
     refine_value_at m ea (LeftOpenInterval (Value.simplify_symbolic (Op (Minus, Symbolic b, Value.const 1l))))
   | _ ->
-    Logging.warn WarnImpreciseOp (fun () -> Printf.sprintf "cannot refine memory %s based on condition %s" (to_string m) (Value.to_string cond));
+    Logging.warn "ImpreciseOperation" (Printf.sprintf "cannot refine memory %s based on condition %s" (to_string m) (Value.to_string cond));
     m

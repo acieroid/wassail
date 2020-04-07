@@ -9,6 +9,7 @@ module Domain = Domain
 module Instr = Instr
 module Inter_fixpoint = Inter_fixpoint
 module Basic_block = Basic_block
+module Logging = Logging
 
 let trace name = print_endline ("-- " ^ name)
 

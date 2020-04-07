@@ -37,13 +37,9 @@
         <svg id="view" width="800"><g/></svg>
       </div>
       <div class="flex-item">
-        <a href="#" onclick="load();">Load</a>
-        <a href="#" onclick="analyze();">Analyze</a><br/>
-        <a href="#" onclick="inspect();">Inspect block</a>  <select id="block"></select>
-        <br/>
-        Input state: ...<br/>
-        Output state: ...<br/>
-        <br/>
+        Step 1: <a href="#" onclick="load();">Load program</a><br/>
+        Step 2: <a href="#" onclick="draw();">View CFG</a>  <select id="cfgIdx"></select> <br/>
+        Step 3: <a href="#" onclick="analyze();">Analyze</a><br/>
         <textarea id="code" rows="10" cols="50">
           (module
   (type (;0;) (func (param i32) (result i32)))
@@ -254,7 +250,7 @@
     </div>
     <script src="https://d3js.org/d3.v5.min.js"></script>
     <script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.js"></script>
-    <script src="../_build/default/js/jsbridge.bc.js"></script>
+    <script src="jsbridge.bc.js"></script>
 
     <script src="cfg-viz.js"></script>
 

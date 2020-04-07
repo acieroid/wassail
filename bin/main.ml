@@ -3,6 +3,7 @@ open Wasm
 open Wasmtaint
 
 let () =
+  Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
   let run (l : (Script.var option * Script.definition) list) =
     List.iter l ~f:(fun (_var_opt, def) ->
         match def.it with

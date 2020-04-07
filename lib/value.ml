@@ -87,7 +87,7 @@ let rec simplify_symbolic (sym : symbolic) : symbolic =
     (* These cases cannot be simplified *)
     sym
   | _ ->
-    Logging.warn WarnCannotSimplify (fun () -> Printf.sprintf "cannot simplify value %s" (symbolic_to_string sym));
+    Logging.warn "cannot simplify" (Printf.sprintf "value %s" (symbolic_to_string sym));
     sym
 and simplify (v : t) : t =
   match (match v with
@@ -103,8 +103,6 @@ and simplify (v : t) : t =
   | Symbolic (Op (Minus, a, Symbolic (Const 0l))) -> a
   | res -> res
 
-
-(* TODO: substitute param / globals upon calls *)
 
 (** Checks if v1 subsumes v2 (i.e., v1 contains v2) *)
 let subsumes (v1 : t) (v2 : t) : bool = match (v1, v2) with
@@ -129,7 +127,7 @@ let subsumes (v1 : t) (v2 : t) : bool = match (v1, v2) with
   | Symbolic (Op (_, Symbolic (Global i), Symbolic (Const x))), Symbolic (Op (_, Symbolic (Global i'), Symbolic (Const x'))) when i = i' ->
     x = x'
   | _, _ ->
-    Logging.warn WarnSubsumesIncorrect (fun () -> Printf.sprintf "might be incorrect: assuming %s does not subsume %s" (to_string v1) (to_string v2));
+    Logging.warn "SubsumesMightBeIncorrect" (Printf.sprintf "assuming %s does not subsume %s" (to_string v1) (to_string v2));
     false
 
 let bottom : t = Bottom
@@ -139,7 +137,7 @@ let global (i : int) : t = Symbolic (Global i)
 let deref (addr : t) : t = Symbolic (Deref addr)
 let const (n : int32) : t = Symbolic (Const n)
 let bool : t = Interval (Const 0l, Const 1l)
-let top (source : string) : t = Logging.warn WarnImpreciseOp (fun () -> Printf.sprintf "Top value originating from: %s" source); OpenInterval
+let top (source : string) : t = Logging.warn "TopCreated" (Printf.sprintf "Top value originating from: %s" source); OpenInterval
 let symbolic (sym : symbolic) : t = Symbolic (simplify_symbolic sym)
 let list_to_string (l : t list) : string =
   String.concat ~sep:", " (List.map l ~f:to_string)
@@ -171,7 +169,7 @@ let join (v1 : t) (v2 : t) : t =
   | (Symbolic (Const _), LeftOpenInterval (Op (_, Symbolic (Parameter _), _)))
   | (Symbolic (Const _), RightOpenInterval (Op (_, Symbolic (Parameter _), _)))
   | (Symbolic (Const _), RightOpenInterval (Parameter _)) ->
-     Logging.warn WarnUnsoundAssumption (fun () -> Printf.sprintf "unsound assumption: %s contains %s" (to_string v2) (to_string v1));
+     Logging.warn "UnsoundAssumption" (Printf.sprintf "%s contains %s" (to_string v2) (to_string v1));
      v2
   | _ -> top (Printf.sprintf "Value.join %s %s" (to_string v1) (to_string v2)) in
   Logging.info (Printf.sprintf "join %s with %s gives %s" (to_string v1) (to_string v2) (to_string vres));
@@ -196,7 +194,7 @@ let meet (v1 : t) (v2 : t) : t =
         But then we'll loop, and we'll have to meet [p2,+inf] with [0,2], then [0,3], then finally [0,+inf], hence [p2,+inf] is probably fine. Although just p2 is correct IN OUR EXAMPLE
  *)
   | _ ->
-    Logging.warn WarnImpreciseOp (fun () -> Printf.sprintf "meet %s with %s" (to_string v1) (to_string v2));
+    Logging.warn "ImpreciseOperation" (Printf.sprintf "meet %s with %s" (to_string v1) (to_string v2));
     (* There are multiple "valid" choices here. We pick v1.
        There could be more precise choices however, examples:
        meet [0,1] [2,3] returns [0,1], but should return Bottom (not seen in practice)
