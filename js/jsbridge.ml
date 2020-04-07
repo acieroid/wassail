@@ -51,7 +51,14 @@ let () =
     Js.export "jsbridge"
       (object%js
         method init program = Wasmtaint.initialize (Js.to_string program)
-        (* method cfgs = get_cfgs () *)
+
+        method addLogger cb =
+          Logging.add_callback (fun opt msg ->
+              let jsopt = match opt with
+                | Info -> Js.string "INFO"
+                | Warn s -> Js.string (Printf.sprintf "WARN:%s" s)
+              in
+              Js.Unsafe.fun_call cb [| Js.Unsafe.inject jsopt; Js.Unsafe.inject msg |])
 
         method cfgIndices =
           array_of_intmap_indices !(Wasmtaint.cfgs)

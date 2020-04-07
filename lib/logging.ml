@@ -23,4 +23,3 @@ let log (opt : option) (msg : string) : unit =
 let info (msg : string) : unit = log Info msg
 
 let warn (kind : string) (msg : string) : unit = log (Warn kind) msg
-

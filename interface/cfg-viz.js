@@ -106,6 +106,9 @@ let view = new View();
 
 function load() {
     // Loads the current code
+    jsbridge.addLogger(function (opt, msg) {
+        console.log(`[${opt}]: ${msg}`);
+    });
     jsbridge.init(document.getElementById("code").value)
 
     // Add all CFGs to the select input
