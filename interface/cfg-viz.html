@@ -29,12 +29,25 @@
       .flex-item{
           flex-grow: 1;
       }
+      .bottom{
+          margin: auto;
+          position:absolute;
+          padding: 5px;
+          height: 60px;
+          bottom: 5px;
+          border: 3px solid;
+          overflow-x: hidden;
+          overflow-x: auto;
+          background-color: white;
+      }
     </style>
   </head>
   <body>
     <div class="container">
       <div class="fixed">
         <svg id="view" width="800"><g/></svg>
+      </div>
+      <div class="fixed bottom" id="log">
       </div>
       <div class="flex-item">
         Step 1: <a href="#" onclick="load();">Load program</a><br/>

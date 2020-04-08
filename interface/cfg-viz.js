@@ -105,10 +105,13 @@ class View {
 let view = new View();
 
 function load() {
-    // Loads the current code
+    // Set up logging
     jsbridge.addLogger(function (opt, msg) {
-        console.log(`[${opt}]: ${msg}`);
+        document.getElementById("log").appendChild(document.createTextNode(`[${opt}]: ${msg}`));
+        document.getElementById("log").appendChild(document.createElement("br"));
     });
+
+    // Loads the current code
     jsbridge.init(document.getElementById("code").value)
 
     // Add all CFGs to the select input
