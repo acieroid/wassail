@@ -63,6 +63,19 @@ let () =
         method cfgIndices =
           array_of_intmap_indices !(Wasmtaint.cfgs)
 
+        method functionName idx =
+          match IntMap.find (!Wasmtaint.cfgs) idx with
+          | Some cfg -> Js.string (cfg.name)
+          | None -> failwith "CFG not found"
+
+        method deps =
+          match IntMap.max_elt (!Wasmtaint.cfg_deps) with
+          | None -> Js.array [| |]
+          | Some (maxIdx, _) -> Js.array (Array.init maxIdx (fun idx ->
+              match IntMap.find (!Wasmtaint.cfg_deps) idx with
+              | Some l -> Js.array (Array.of_list l)
+              | None -> Js.array [| |]))
+
         method getCfg (idx : int) : 'a Js.t =
           match IntMap.find !(Wasmtaint.cfgs) idx with
           | Some cfg -> js_of_cfg cfg

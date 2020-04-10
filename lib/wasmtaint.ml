@@ -54,6 +54,9 @@ let parse_string str run =
   success
 
 let cfgs : (Cfg.t IntMap.t) ref = ref IntMap.empty
+
+(** A map of CFG dependencies. Each entry is of the form idx -> [idx1, idx2, ...] meaning that CFG idx depends on the analysis of CFGs idx1, idx2, etc. *)
+let cfg_deps : (int list IntMap.t) ref = ref IntMap.empty
 let nglobals : int ref = ref (-1)
 let initialize (program : string) : unit =
   let run (l : (Script.var option * Script.definition) list) =
@@ -63,9 +66,9 @@ let initialize (program : string) : unit =
           let store = Store.init m in
           trace (Printf.sprintf "nglobals: %d\n" (List.length store.globals));
           nglobals := List.length store.globals;
-          cfgs := IntMap.of_alist_exn (List.mapi store.funcs ~f:(fun faddr _ -> (faddr, Cfg_builder.build faddr store)))
+          cfgs := IntMap.of_alist_exn (List.mapi store.funcs ~f:(fun faddr _ -> (faddr, Cfg_builder.build faddr store)));
+          cfg_deps := IntMap.mapi !cfgs ~f:(fun ~key:_ ~data:cfg -> Cfg.dependencies cfg)
         | Script.Encoded _ -> failwith "unsupported"
         | Script.Quoted _ -> failwith "unsupported"
       ) in
   trace (Printf.sprintf "Success? %b" (parse_string program run))
-

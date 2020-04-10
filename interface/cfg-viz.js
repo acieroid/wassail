@@ -52,6 +52,35 @@ class View {
         default: return { label: block.sort };
         }
     }
+    redraw() {
+        // Resize the svg to take full width
+        document.getElementById("view").width.baseVal.value = window.innerWidth;
+        document.getElementById("view").height.baseVal.value = window.innerHeight;
+
+        // Render the graph
+        this.render(this.inner, this.g)
+
+        // Center the graph
+        let initialScale = 0.75;
+        this.svg.call(this.zoom.transform,
+                      d3.zoomIdentity.translate((this.svg.attr("width") - this.g.graph().width * initialScale) / 2, 20).scale(initialScale));
+
+        this.svg.attr('height', this.g.graph().height * initialScale + 40);
+    }
+    drawDeps(deps) {
+        let that = this;
+        // deps is an array of arrays
+        deps.forEach(function (targets, src) {
+            const srcName = `cfg${src}`
+            that.g.setNode(srcName, {label: `Function ${src} (${jsbridge.functionName(src)})`});
+            targets.forEach(function (target) {
+                // draw an edge from src to target
+                const trgName = `cfg${target}`
+                that.g.setEdge(srcName, trgName);
+            });
+        });
+        this.redraw();
+    }
     draw(cfgIdx) {
         let that = this;
         let cfg = jsbridge.getCfg(cfgIdx);
@@ -86,19 +115,7 @@ class View {
             this.g.setNode(returnBlock[cfgIdx], {label: `Return\nResult: ${result}`, style: "fill: #DDAAAA"});
         }
 
-        // Resize the svg to take full width
-        document.getElementById("view").width.baseVal.value = window.innerWidth;
-        document.getElementById("view").height.baseVal.value = window.innerHeight;
-
-        // Render the graph
-        this.render(this.inner, this.g)
-
-        // Center the graph
-        let initialScale = 0.75;
-        this.svg.call(this.zoom.transform,
-                      d3.zoomIdentity.translate((this.svg.attr("width") - this.g.graph().width * initialScale) / 2, 20).scale(initialScale));
-
-        this.svg.attr('height', this.g.graph().height * initialScale + 40);
+        this.redraw();
     }
 }
 
@@ -133,4 +150,8 @@ function analyze() {
     jsbridge.analyze();
     let cfgIdx = document.getElementById("cfgIdx").value;
     view.draw(cfgIdx);
+}
+
+function viewDeps() {
+    view.drawDeps(jsbridge.deps());
 }

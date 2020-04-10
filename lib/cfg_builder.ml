@@ -129,6 +129,8 @@ let build (faddr : Address.t) (store : Store.t) : Cfg.t =
   Cfg.{
     (* Exported functions have names, non-exported don't *)
     exported = Option.is_some funcinst.name;
+    (* The name itself *)
+    name = Option.value funcinst.name ~default:"<unexported>";
     (* The index of this block is the integer that represent the address of this function *)
     idx = faddr;
     (* Arity of the function *)

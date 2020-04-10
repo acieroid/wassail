@@ -36,6 +36,8 @@ end
 type t = {
   (* Is this function exported or not? *)
   exported: bool;
+  (* The name of the function *)
+  name: string;
   (* The index of this CFG *)
   idx: int;
   (* The number of parameters and return values of that CFG *)
@@ -53,6 +55,14 @@ type t = {
   (* The exit block *)
   exit_block: int;
 }
+
+let dependencies (cfg : t) : int list =
+  List.filter_map (BasicBlocks.IntMap.to_alist cfg.basic_blocks) ~f:(fun (_idx, block) -> match block.sort with
+      | Function -> begin match List.nth block.instrs 0 with
+          | Some (Instr.Call n) -> Some n
+          | _ -> None
+        end
+      | _ -> None)
 [@@deriving sexp, compare, yojson]
 let to_string (cfg : t) : string = Printf.sprintf "CFG of function %d" cfg.idx
 let to_dot (cfg : t) : string =
