@@ -1,8 +1,8 @@
-open Core_kernel
+open Core
 open Wasm
 open Wasmtaint
 
-let () =
+let main file =
   Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
   let run (l : (Script.var option * Script.definition) list) =
     List.iter l ~f:(fun (_var_opt, def) ->
@@ -22,4 +22,17 @@ let () =
         | Script.Encoded _ -> failwith "unsupported"
         | Script.Quoted _ -> failwith "unsupported"
       ) in
-  Printf.printf "Success? %b" (parse_file "foo.wat" run)
+  Printf.printf "Success? %b" (parse_file file run)
+
+
+let spec =
+  let open Command.Param in
+  anon ("filename" %: string)
+
+let command =
+  Command.basic
+    ~summary:"WasmTaint"
+    (Command.Param.map spec ~f:(fun filename ->
+         (fun () -> main filename)))
+let () =
+  Command.run ~version:"0.0" command
