@@ -1,8 +1,8 @@
 open Core_kernel
 open Helpers
 
-let build (faddr : Address.t) (store : Store.t) : Cfg.t =
-  let funcinst = Store.get_funcinst store faddr in
+let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
+  let funcinst = Wasm_module.get_funcinst m faddr in
   let cur_idx : int ref = ref 0 in
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
   let mk_block (reverse_instrs : Instr.t list) : Basic_block.t =

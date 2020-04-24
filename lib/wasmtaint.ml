@@ -2,7 +2,7 @@ open Core_kernel
 open Wasm
 
 include Helpers
-module Store = Store
+module Wasm_module = Wasm_module
 module Cfg_builder = Cfg_builder
 module Cfg = Cfg
 module Domain = Domain
@@ -63,10 +63,10 @@ let initialize (program : string) : unit =
     List.iter l ~f:(fun (_, def) ->
         match def.it with
         | Script.Textual m ->
-          let store = Store.init m in
-          trace (Printf.sprintf "nglobals: %d\n" (List.length store.globals));
-          nglobals := List.length store.globals;
-          cfgs := IntMap.of_alist_exn (List.mapi store.funcs ~f:(fun faddr _ -> (faddr, Cfg_builder.build faddr store)));
+          let wasm_mod = Wasm_module.init m in
+          trace (Printf.sprintf "nglobals: %d\n" (List.length wasm_mod.globals));
+          nglobals := List.length wasm_mod.globals;
+          cfgs := IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun faddr _ -> (faddr, Cfg_builder.build faddr wasm_mod)));
           cfg_deps := IntMap.mapi !cfgs ~f:(fun ~key:_ ~data:cfg -> Cfg.dependencies cfg)
         | Script.Encoded _ -> failwith "unsupported"
         | Script.Quoted _ -> failwith "unsupported"
