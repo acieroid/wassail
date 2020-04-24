@@ -1,0 +1,28 @@
+Here's how JavaScript and Wasm can interact.
+
+Consider the following Wasm program:
+
+#+BEGIN_SRC wasm
+(module
+  (func $i (import "imports" "imported_func") (param i32))
+  (func (export "exported_func")
+    i32.const 42
+    call $i))
+#+END_SRC
+
+It can be downloaded from [[https://github.com/mdn/webassembly-examples/raw/master/js-api-examples/simple.wasm][here]] in a binary format.
+
+Then, from =node=, you can do the following to call the exported function:
+
+#+BEGIN_SRC javascript
+var fs = require('fs')
+// Read the wasm file
+var bytes = fs.readFileSync('simple.wasm')
+// Set up the import object
+// (Notice that our wasm file uses imported_func)
+var importObject = { imports: { imported_func: arg => console.log(arg) } };
+// Instantiate the wasm object
+// and call the exported function
+WebAssembly.instantiate(bytes, importObject).then(r => r.instance.exports.exported_func());
+#+END_SRC
+
