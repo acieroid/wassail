@@ -28,10 +28,10 @@ let join (s1 : state) (s2 : state) : state = {
     if List.length s1.vstack <> List.length s2.vstack then
       (* Different length, probably one has not been analyzed yet. Just take the maximal one *)
       if List.length s1.vstack > List.length s2.vstack then begin
-        assert (s2.vstack = []);
+        assert Stdlib.(s2.vstack = []);
         s1.vstack
       end else begin
-        assert (s1.vstack = []);
+        assert Stdlib.(s1.vstack = []);
         s2.vstack
       end
     else

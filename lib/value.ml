@@ -62,21 +62,21 @@ let rec simplify_symbolic (sym : symbolic) : symbolic =
   | (Op (Plus, a, Symbolic (Const 0l))) ->
     (* a+0 is handled in simplify *)
     (Op (Plus, a, Symbolic (Const 0l)))
-  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when x = y ->
+  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when Int32.(x = y) ->
     (* (a-x)+x = a *)
     (Op (Plus, a, Symbolic (Const 0l)))
-  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when x > y ->
+  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when Int32.(x > y) ->
     (* (a-x)+y when x > y = a-(x-y) *)
-    simplify_symbolic (Op (Minus, simplify a, Symbolic (Const (Int32.(-) x y))))
-  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when x < y ->
+    simplify_symbolic (Op (Minus, simplify a, Symbolic (Const (Int32.(x - y)))))
+  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when Int32.(x < y) ->
     (* (a-x)+y when y > x = a+(y-x)*)
-    simplify_symbolic (Op (Plus, simplify a, Symbolic (Const (Int32.(-) y x))))
+    simplify_symbolic (Op (Plus, simplify a, Symbolic (Const (Int32.(y - x)))))
   | (Op (Plus, (Symbolic (Op (Plus, a, Symbolic (Const x)))), Symbolic (Const y))) ->
     (* (a+x)+y = a + (x+y) *)
-    simplify_symbolic (Op (Plus, simplify a, Symbolic (Const (Int32.(+) x y))))
+    simplify_symbolic (Op (Plus, simplify a, Symbolic (Const (Int32.(x + y)))))
   | (Op (Minus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) ->
     (* (a-x)-y = a-(x+y) *)
-    simplify_symbolic (Op (Minus, simplify a, Symbolic (Const (Int32.(+) x y))))
+    simplify_symbolic (Op (Minus, simplify a, Symbolic (Const (Int32.(x + y)))))
   | Op (Eq, Symbolic (Op (Lt, a, b)), Symbolic (Const 0l)) ->
     (* a<b=0 = a>b *)
     Op (GtE, a, b)
@@ -92,7 +92,7 @@ let rec simplify_symbolic (sym : symbolic) : symbolic =
 and simplify (v : t) : t =
   match (match v with
       | Bottom -> Bottom
-      | Interval (Const a, Const b) when a = b -> Symbolic (Const a)
+      | Interval (Const a, Const b) when Int32.(=) a b -> Symbolic (Const a)
       | Interval (a, b) -> Interval (simplify_symbolic a, simplify_symbolic b)
       | LeftOpenInterval b -> LeftOpenInterval (simplify_symbolic b)
       | RightOpenInterval a -> RightOpenInterval (simplify_symbolic a)
@@ -106,26 +106,26 @@ and simplify (v : t) : t =
 
 (** Checks if v1 subsumes v2 (i.e., v1 contains v2) *)
 let subsumes (v1 : t) (v2 : t) : bool = match (v1, v2) with
-  | _, _ when v1 = v2 -> true
+  | _, _ when Stdlib.(v1 = v2) -> true
   | _, Bottom -> true
   | Bottom, _ -> false
-  | Symbolic (Const n1), Symbolic (Const n2) -> n1 = n2
-  | Symbolic (Const n), Interval (Const a, Const b) -> a = b && a = n
-  | Interval (Const a, Const b), Interval (Const a', Const b') -> a <= a' && b >= b'
-  | Interval (Const a, Const b), Symbolic (Const n) -> a <= n && b >= n
-  | LeftOpenInterval (Const b), Symbolic (Const n) -> b >= n
-  | LeftOpenInterval (Const b), Interval (_, Const b') -> b >= b'
-  | LeftOpenInterval (Const b), LeftOpenInterval (Const b') -> b >= b'
-  | RightOpenInterval (Const a), Symbolic (Const n) -> a <= n
-  | RightOpenInterval (Const a), Interval (Const a', _) -> a <= a'
-  | RightOpenInterval (Const a), RightOpenInterval (Const a') -> a <= a'
+  | Symbolic (Const n1), Symbolic (Const n2) -> Int32.(n1 = n2)
+  | Symbolic (Const n), Interval (Const a, Const b) -> Int32.(a = b && a = n)
+  | Interval (Const a, Const b), Interval (Const a', Const b') -> Int32.(a <= a' && b >= b')
+  | Interval (Const a, Const b), Symbolic (Const n) -> Int32.(a <= n && b >= n)
+  | LeftOpenInterval (Const b), Symbolic (Const n) -> Int32.(b >= n)
+  | LeftOpenInterval (Const b), Interval (_, Const b') -> Int32.(b >= b')
+  | LeftOpenInterval (Const b), LeftOpenInterval (Const b') -> Int32.(b >= b')
+  | RightOpenInterval (Const a), Symbolic (Const n) -> Int32.(a <= n)
+  | RightOpenInterval (Const a), Interval (Const a', _) -> Int32.(a <= a')
+  | RightOpenInterval (Const a), RightOpenInterval (Const a') -> Int32.(a <= a')
   | OpenInterval, Symbolic (Const _) -> true
   | OpenInterval, Interval _ -> true
   | OpenInterval, LeftOpenInterval _ -> true
   | OpenInterval, RightOpenInterval _ -> true
   | OpenInterval, OpenInterval -> true
   | Symbolic (Op (_, Symbolic (Global i), Symbolic (Const x))), Symbolic (Op (_, Symbolic (Global i'), Symbolic (Const x'))) when i = i' ->
-    x = x'
+    Int32.(x = x')
   | _, _ ->
     Logging.warn "SubsumesMightBeIncorrect" (Printf.sprintf "assuming %s does not subsume %s" (to_string v1) (to_string v2));
     false
@@ -147,19 +147,19 @@ let join (v1 : t) (v2 : t) : t =
   let vres = match (v1, v2) with
   | (Bottom, _) -> v2
   | (_, Bottom) -> v1
-  | (_, _) when v1 = v2 -> v1
-  | (Symbolic (Const n1), Symbolic (Const n2)) when n1 = n2 -> const n1
-  | (Symbolic (Const n1), Symbolic (Const n2)) -> Interval (Const (min n1 n2), Const (max n1 n2))
-  | (Symbolic (Const n), Interval (Const a, Const b)) -> Interval (Const (min a n), Const (max b n))
-  | (Interval (Const a, Const b), Symbolic (Const n)) -> Interval (Const (min a n), Const (max b n))
-  | (Interval (Const 0l, Const b), Interval (Const 0l, Const b')) when b <> b' -> RightOpenInterval (Const 0l) (* TODO: this is a very simple widening when the right bound is unstable *)
-  | (Interval (Const a, Const b), Interval (Const a', Const b')) -> Interval (Const (min a a'), Const (max b b')) (* TODO: need widen to ensure convergence *)
-  | (RightOpenInterval (Const a), RightOpenInterval (Const a')) -> RightOpenInterval (Const (min a a'))
-  | (LeftOpenInterval (Const b), LeftOpenInterval (Const b')) -> LeftOpenInterval (Const (max b b'))
-  | (Interval (Const a, _), RightOpenInterval (Const a')) -> RightOpenInterval (Const (min a a'))
-  | (RightOpenInterval (Const a), Symbolic (Const c)) -> RightOpenInterval (Const (min a c))
-  | (LeftOpenInterval (Const b), Symbolic (Const c)) -> LeftOpenInterval (Const (max b c))
-  | (RightOpenInterval (Op (Plus, Symbolic x, Symbolic (Const _))), RightOpenInterval x') when x = x' -> v2
+  (* | (_, _) when v1 = v2 -> v1 *)
+  | (Symbolic (Const n1), Symbolic (Const n2)) when Int32.(n1 = n2) -> const n1
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> Interval (Const Int32.(min n1 n2), Const Int32.(max n1 n2))
+  | (Symbolic (Const n), Interval (Const a, Const b)) -> Interval (Const Int32.(min a n), Const Int32.(max b n))
+  | (Interval (Const a, Const b), Symbolic (Const n)) -> Interval (Const Int32.(min a n), Const Int32.(max b n))
+  | (Interval (Const 0l, Const b), Interval (Const 0l, Const b')) when Int32.(b <> b') -> RightOpenInterval (Const 0l) (* TODO: this is a very simple widening when the right bound is unstable *)
+  | (Interval (Const a, Const b), Interval (Const a', Const b')) -> Interval (Const Int32.(min a a'), Const Int32.(max b b')) (* TODO: need widen to ensure convergence *)
+  | (RightOpenInterval (Const a), RightOpenInterval (Const a')) -> RightOpenInterval (Const Int32.(min a a'))
+  | (LeftOpenInterval (Const b), LeftOpenInterval (Const b')) -> LeftOpenInterval (Const Int32.(max b b'))
+  | (Interval (Const a, _), RightOpenInterval (Const a')) -> RightOpenInterval (Const Int32.(min a a'))
+  | (RightOpenInterval (Const a), Symbolic (Const c)) -> RightOpenInterval (Const Int32.(min a c))
+  | (LeftOpenInterval (Const b), Symbolic (Const c)) -> LeftOpenInterval (Const Int32.(max b c))
+  | (RightOpenInterval (Op (Plus, Symbolic x, Symbolic (Const _))), RightOpenInterval x') when (Stdlib.(=) x x') -> v2
   | (OpenInterval, Symbolic (Const _))
   | (Symbolic (Const _), OpenInterval)
   | (OpenInterval, Interval (Const _, Const _))
@@ -169,8 +169,8 @@ let join (v1 : t) (v2 : t) : t =
   | (Symbolic (Const _), LeftOpenInterval (Op (_, Symbolic (Parameter _), _)))
   | (Symbolic (Const _), RightOpenInterval (Op (_, Symbolic (Parameter _), _)))
   | (Symbolic (Const _), RightOpenInterval (Parameter _)) ->
-     Logging.warn "UnsoundAssumption" (Printf.sprintf "%s contains %s" (to_string v2) (to_string v1));
-     v2
+    Logging.warn "UnsoundAssumption" (Printf.sprintf "%s contains %s" (to_string v2) (to_string v1));
+    v2
   | _ -> top (Printf.sprintf "Value.join %s %s" (to_string v1) (to_string v2)) in
   Logging.info (Printf.sprintf "join %s with %s gives %s" (to_string v1) (to_string v2) (to_string vres));
   vres
@@ -184,7 +184,7 @@ let meet (v1 : t) (v2 : t) : t =
   match (v1, v2) with
   | (Bottom, _)
   | (_, Bottom) -> Bottom
-  | (_, _) when v1 = v2 -> v1
+  | (_, _) when Stdlib.(v1 = v2) -> v1
   | (_, OpenInterval) -> v1
   | (OpenInterval, _) -> v2
   (* TODO: 
@@ -209,13 +209,13 @@ let is_zero (v : t) =
   | Bottom -> false
   | Symbolic (Const 0l) -> true
   | Symbolic (Const _) -> false
-  | Interval (Const a, Const b) -> a <= Int32.zero && b >= Int32.zero
-  | Interval (_, Const b) -> b >= Int32.zero
-  | Interval (Const a, _) -> a <= Int32.zero
+  | Interval (Const a, Const b) -> Int32.(a <= 0l && b >= 0l)
+  | Interval (_, Const b) -> Int32.(b >= 0l)
+  | Interval (Const a, _) -> Int32.(a <= 0l)
   | Interval _ -> true
-  | LeftOpenInterval (Const b) -> b >= Int32.zero
+  | LeftOpenInterval (Const b) -> Int32.(b >= 0l)
   | LeftOpenInterval _ -> true
-  | RightOpenInterval (Const a) -> a <= Int32.zero
+  | RightOpenInterval (Const a) -> Int32.(a <= 0l)
   | RightOpenInterval _ -> true
   | OpenInterval -> true
   | Symbolic _ -> true (* TODO: could be more precise here? Or not *)
@@ -225,7 +225,7 @@ let is_not_zero (v : t) =
   | Bottom -> false
   | Symbolic (Const 0l) -> false
   | Symbolic (Const _) -> true
-  | Interval (Const a, Const b) -> not (a = 0l && b = 0l)
+  | Interval (Const a, Const b) -> not Int32.(a = 0l && b = 0l)
   | Interval _ -> true (* TODO could be more precise *)
   | LeftOpenInterval _ -> true
   | RightOpenInterval _ -> true

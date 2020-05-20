@@ -23,5 +23,5 @@ let of_wasm (g : Ast.global) : t =
       | Types.GlobalType (_, Types.Mutable) -> true
   }
 let join (g1 : t) (g2 : t) : t =
-  assert (g1.mut = g2.mut);
+  assert Stdlib.(g1.mut = g2.mut);
   { value = Value.join g1.value g2.value; mut = g1.mut }

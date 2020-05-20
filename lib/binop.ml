@@ -1,6 +1,8 @@
 open Core_kernel
 open Value
 
+exception UnsupportedBinOp of string
+
 module T = struct
   (** Binary operations *)
   type t =
@@ -10,28 +12,31 @@ module T = struct
     | I32RemS
     | I32Shl
     | I32And
+    | I32Or
     (* XXX: there are many other operations *)
   [@@deriving sexp, compare, yojson]
 end
 include T
+
+(** Convert a wasm binop to an internal binop *)
 let of_wasm (b : Wasm.Ast.binop) : t =
   match b with
   | I32 Add -> I32Add
   | I32 Sub -> I32Sub
   | I32 Mul -> I32Mul
-  | I32 DivS -> failwith "unsupported operation: DivS"
-  | I32 DivU -> failwith "unsupported operation: DivU"
+  | I32 DivS -> raise (UnsupportedBinOp "div_s")
+  | I32 DivU -> raise (UnsupportedBinOp "div_u")
   | I32 RemS -> I32RemS
-  | I32 RemU -> failwith "unsupported operation: RemU"
+  | I32 RemU -> raise (UnsupportedBinOp "rem_u")
   | I32 And -> I32And
-  | I32 Or -> failwith "unsupported operation: Or"
-  | I32 Xor -> failwith "unsupported operation: Xor"
+  | I32 Or -> I32Or
+  | I32 Xor -> raise (UnsupportedBinOp "xor")
   | I32 Shl -> I32Shl
-  | I32 ShrS -> failwith "unsupported operation: ShrS"
-  | I32 ShrU -> failwith "unsupported operation: ShrU"
+  | I32 ShrS -> raise (UnsupportedBinOp "shr_s")
+  | I32 ShrU -> raise (UnsupportedBinOp "shr_u")
   | I32 Rotl -> I32Shl
-  | I32 Rotr -> failwith "unsupported operation: Rotr"
-  | _ -> failwith "unsupported type"
+  | I32 Rotr -> raise (UnsupportedBinOp "rot_r")
+  | _ -> raise (UnsupportedBinOp "???")
 
 let to_string (b : t) : string =
   match b with
@@ -41,6 +46,7 @@ let to_string (b : t) : string =
   | I32RemS -> "i32.rem_s"
   | I32Shl -> "i32.shl"
   | I32And -> "i32.and"
+  | I32Or -> "i32.or"
 
 let add (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1, v2) with
@@ -86,6 +92,13 @@ let (land) (v1 : Value.t) (v2 : Value.t) : Value.t =
   | (Symbolic (Const 1l), _) -> v1
   | _ -> top (Printf.sprintf "land %s %s" (Value.to_string v1) (Value.to_string v2))
 
+let (lor) (v1 : Value.t) (v2 : Value.t) : Value.t =
+  match (v1, v2) with
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> const (Int32.(lor) n1 n2)
+  | (_, Symbolic (Const 1l)) -> v1
+  | (Symbolic (Const 1l), _) -> v1
+  | _ -> top (Printf.sprintf "land %s %s" (Value.to_string v1) (Value.to_string v2))
+
 (** Evaluates a binary operation on two values *)
 let eval (m : Memory.t) (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
   match b with
@@ -93,5 +106,7 @@ let eval (m : Memory.t) (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
   | I32Sub -> sub (Memory.resolve m v1) (Memory.resolve m v2)
   | I32Mul -> mul (Memory.resolve m v1) (Memory.resolve m v2)
   | I32RemS -> rem_s (Memory.resolve m v1) (Memory.resolve m v2)
+  (* Don't resolve for operations that are mostly used for conditions *)
   | I32Shl -> shl (v1) (v2)
-  | I32And -> (land) v1 v2 (* Don't resolve for and, because this is used for conditions mostly *)
+  | I32And -> (land) v1 v2
+  | I32Or -> (lor) v1 v2

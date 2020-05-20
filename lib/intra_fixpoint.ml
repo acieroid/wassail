@@ -19,24 +19,14 @@ let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : 
       let predecessors = Cfg.predecessors cfg block_idx in
       (* in_state is the join of all the the out_state of the predecessors.
          Special case: if the out_state of a predecessor is not a simple one, that means we are the target of a break.
-         This means two possible cases: either the current block is a block exit node, meaning the condition holds, and we use the left part of the Branch transfer result, or it is a normal node and we use the right part of the Branch transfer result
-      *)
-      let pred_states = (List.map predecessors ~f:(fun idx -> snd (IntMap.find_exn !data idx))) in
+         If this is the case, we pick the right branch, according to the edge data *)
+      let pred_states = (List.map predecessors ~f:(fun (idx, d) -> (snd (IntMap.find_exn !data idx)), d)) in
       let in_state = match (List.fold_left pred_states ~init:bottom ~f:(fun acc res ->
           Transfer.join_result acc (match res with
-              | Branch (t, f) -> begin match block.sort with
-                  | BlockExit ->
-                    (* The analyzed block is an exit block, so it is the target
-                       of the break and the condition holds, hence we take the
-                       left part of the Branch result *)
-                    Simple t
-                  | _ ->
-                    (* For any other block, it can't be the target of the break,
-                       so we take the right hand side of the Branch result,
-                       corresponding to the condition not holding *)
-                    Simple f
-                end
-              | _ -> res)))
+              | (Branch (t, _), Some true) -> Simple t
+              | (Branch (_, f), Some false) -> Simple f
+              | (Branch _, None) -> failwith "should not happen"
+              | (s, _) -> s)))
         with
         | Simple r -> r
         | Uninitialized -> init

@@ -12,7 +12,7 @@ module ByteAbstr = struct
   let zero = Const (Char.of_int_exn 0)
   let join (b1 : t) (b2 : t) : t =
     match (b1, b2) with
-    | Const x, Const y when x = y -> Const x
+    | Const x, Const y when Stdlib.(x = y) -> Const x
     | _, _ -> Byte
 end
 

@@ -36,7 +36,7 @@ let find (m : t) (ea : Value.t) : Value.t option =
       | None -> Some v) in
   match vopt with
   | Some v ->
-    if (Map.existsi m' ~f:(fun ~key:a ~data:_ -> ea <> a && Value.subsumes ea a)) then
+    if (Map.existsi m' ~f:(fun ~key:a ~data:_ -> Stdlib.(ea <> a) && Value.subsumes ea a)) then
       Some (Value.join v (Value.top (Printf.sprintf "Top created at memory.find %s %s" (to_string m) (Value.to_string ea))))
     else
       Some v
@@ -73,7 +73,7 @@ let update (m : t) (ea : Value.t) (v : Value.t) : t =
      M[[[0,3]: 1][[1,5]: 2] becomes M[[0,0]: 1][[1,3]: [1,2]][[4,5]: 2]
   *)
   let resolved_v = resolve m v in
-  begin if resolved_v <> v then
+  begin if Stdlib.(resolved_v <> v) then
     Printf.printf "Memory.update using %s instead of %s [ea: %s]\n" (Value.to_string resolved_v) (Value.to_string v) (Value.to_string ea)
   end;
   Map.update m ea ~f:(function
@@ -81,7 +81,7 @@ let update (m : t) (ea : Value.t) (v : Value.t) : t =
       | Some v' -> Value.join resolved_v v')
 
 let load (m : t) (addr : Value.t) (op : Memoryop.t) : Value.t =
-  assert (op.sz = None); (* We only support N = 32 for now. *)
+  assert Stdlib.(op.sz = None); (* We only support N = 32 for now. *)
   let ea = Value.add_offset addr op.offset in (* effective address *)
   match find m ea with
   | Some (Symbolic (Const _) as v) -> v
@@ -90,7 +90,7 @@ let load (m : t) (addr : Value.t) (op : Memoryop.t) : Value.t =
   | _ -> Value.deref ea
 
 let store (m : t) (addr : Value.t) (value : Value.t) (op : Memoryop.t) : t =
-  assert (op.sz = None); (* We only support N = 32 for now. *)
+  assert Stdlib.(op.sz = None); (* We only support N = 32 for now. *)
   let ea = Value.add_offset addr op.offset in
   update m ea value
 

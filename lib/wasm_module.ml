@@ -21,7 +21,7 @@ let set_global (s : t) (a : Address.t) (v : Value.t) : t =
 let get_meminst (s : t) (a : Address.t) : Memory_inst.t =
   List.nth_exn s.mems a
 let join (s1 : t) (s2 : t) : t =
-  assert (s1.funcs = s2.funcs);
+  assert Stdlib.(s1.funcs = s2.funcs);
   { s1 with
     globals = List.map2_exn s1.globals s2.globals ~f:Global_inst.join
   }
