@@ -2,6 +2,7 @@ open Core_kernel
 open Helpers
 
 let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
+  Printf.printf "-----------------\nBuilding block for %d\n--------------------------\n" faddr;
   let funcinst = Wasm_module.get_funcinst m faddr in
   let cur_idx : int ref = ref 0 in
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
@@ -61,13 +62,23 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
           let (blocks', edges', breaks', returns', else_entry, else_exit) = helper [] instrs2 in
           (* Construct the rest of the CFG *)
           let (blocks'', edges'', breaks'', returns'', entry, exit) = helper [] rest in
+          (* Compute the new break levels (just like for Block and Loop)
+             All breaks with level 0 break the current block
+             All other breaks see their level decreased by one *)
+          let all_breaks = breaks @ breaks' in
+          let new_breaks = List.map (List.filter all_breaks
+                                       ~f:(fun (_, level, _) -> level > 0))
+              ~f:(fun (idx, level, branch) -> (idx, level - 1, branch)) in
+          let break_edges = List.map (List.filter all_breaks
+                                        ~f:(fun (_, level, _) -> level = 0))
+              ~f:(fun (idx, _, branch) -> (idx, entry, branch)) in
           (block :: if_block :: (blocks @ blocks' @ blocks''),
            (* Edges *)
            (* TODO: t and f branch *)
            (block.idx, if_block.idx, None) :: (if_block.idx, then_entry, Some true) :: (if_block.idx, else_entry, Some false) ::
-           (then_exit, entry, None) :: (else_exit, entry, None) :: (edges @ edges' @ edges''),
+           (then_exit, entry, None) :: (else_exit, entry, None) :: (break_edges @ edges @ edges' @ edges''),
            (* no breaks and returns *)
-           breaks @ breaks' @ breaks'',
+           new_breaks @ breaks'',
            returns @ returns' @ returns'',
            block.idx, exit)
         | Br level ->
@@ -83,7 +94,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
            (br_block.idx, level, None) :: breaks (* add the break *),
            returns (* no return *),
            block.idx, exit')
-        | Call _f ->
+        | Call _ | CallIndirect _ ->
           (* Also similar to br, but connects the edges differently. Moreover,
              we don't include the call in this block because it has to be
              treated differently. *)
@@ -116,7 +127,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
           (* Compute the new break levels:
              All breaks with level 0 break the current block
              All other breaks see their level decreased by one *)
-          let all_breaks = breaks @ breaks' in
+          let all_breaks = breaks @ breaks' in (* TODO: shouldn't it be without breaks'? *)
           let new_breaks = List.map (List.filter all_breaks
                                        ~f:(fun (_, level, _) -> level > 0))
               ~f:(fun (idx, level, branch) -> (idx, level - 1, branch)) in
@@ -144,14 +155,31 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
           let block = mk_data_block instrs in
           (* It is not connected to anything, but is marked as to be connected to a return block *)
           ([block], [], [], [block.idx], block.idx, block.idx)
+        | Unreachable ->
+          (* Simply construct a block containig the unreachable instruction *)
+          let block = mk_data_block instrs in
+          let unreachable_block = mk_control_block instr in
+          let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
+          (block :: unreachable_block :: blocks,
+           (block.idx, unreachable_block.idx, None) :: (unreachable_block.idx, entry', None) :: edges,
+           breaks, returns, block.idx, exit')
+
       end
   in
+  Printf.printf "%s\n" (Instr.list_to_string funcinst.code.body);
   let (blocks, edges, breaks, returns, _entry_idx, exit_idx) = helper [] funcinst.code.body in
   (* Create the return block *)
   let return_block = mk_empty_block () in
   let blocks' = return_block :: blocks in
+  List.iter blocks' ~f:(fun b ->
+      Printf.printf "%s\n" (Basic_block.to_string b)
+    );
   (* Connect the return block *)
   let edges' = (exit_idx, return_block.idx, None) :: List.map returns ~f:(fun from -> (from, return_block.idx, None)) @ edges in
+  List.iter edges' ~f:(fun (src, dst, data) ->
+      Printf.printf "edge: %d ->[%s] %d\n" src (Option.value ~default:"none" (Option.map data ~f:string_of_bool)) dst);
+  if not (List.is_empty breaks) then
+    Printf.printf "there is a break outside of the funciton (function %d)\n" faddr;
   assert (List.is_empty breaks); (* there shouldn't be any breaks outside the function *)
   (* We now filter empty normal blocks *)
   let (actual_blocks, filtered_blocks) = List.partition_tf blocks' ~f:(fun block -> match block.content with
@@ -160,14 +188,18 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
   let filtered_blocks_idx = List.map filtered_blocks ~f:(fun b -> b.idx) in
   (* And we have to redirect the edges: if there is an edge to a removed block, we make it point to its successors *)
   let actual_edges = List.fold_left filtered_blocks_idx ~init:edges' ~f:(fun edges idx ->
+      Printf.printf "%d is removed\n" idx;
       (* idx is removed, so we find all edges pointing to idx (and we keep track of the other ones, as only these should be kept) *)
       let (pointing_to, edges') = List.partition_tf edges ~f:(fun (_, dst, _) -> dst = idx) in
       (* and we find all edges pointing from idx (again, keeping track of the other ones) *)
       let (pointing_from, edges'') = List.partition_tf edges' ~f:(fun (src, _, _) -> src = idx) in
       (* now we connect everything from both sets *)
       List.concat (List.map pointing_to ~f:(fun (src, _, data) -> List.map pointing_from ~f:(fun (_, dst, data') ->
-          assert(Option.is_empty data && Option.is_empty data');
-          (src, dst, None)))) @ edges'') in
+          match (data, data') with
+          | Some b, None -> (src, dst, Some b)
+          | None, Some b -> (src, dst, Some b)
+          | None, None -> (src, dst, None)
+          | Some _, Some _ -> failwith "trying to merge two conditional edges, should not happen"))) @ edges'') in
   Cfg.{
     (* Exported functions have names, non-exported don't *)
     exported = Option.is_some funcinst.name;

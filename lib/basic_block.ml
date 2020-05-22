@@ -15,8 +15,11 @@ type t = {
 } [@@deriving sexp, compare]
 
 let to_string (b : t) : string = Printf.sprintf "block %d, %s" b.idx (match b.content with
-    | Control _ -> "control"
-    | Data _ -> "data"
+    | Control instr -> Printf.sprintf "control block:%s" (Instr.control_to_string instr)
+    | Data instrs -> Printf.sprintf "data block: %s" (String.concat ~sep:"\\l"
+         (List.map instrs
+            ~f:(fun instr ->
+                Printf.sprintf "%s" (Instr.data_to_string instr))))
     | Nothing -> "empty")
 
 (* let to_dot (b : t) : string =

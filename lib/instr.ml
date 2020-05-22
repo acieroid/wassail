@@ -1,13 +1,12 @@
 open Core_kernel
 open Wasm
 
-exception UnsupportedInstruction of string
-
 module T = struct
   (** Data instructions *)
   type data =
     | Nop
     | Drop
+    | Select
     | Const of Value.t
     | Binary of Binop.t
     | Compare of Relop.t
@@ -25,9 +24,11 @@ module T = struct
     | Loop of t list
     | If of (t list * t list)
     | Call of Var.t
+    | CallIndirect of Var.t
     | Br of Var.t
     | BrIf of Var.t
     | Return
+    | Unreachable
   (** All instructions *)
   and  t =
     | Data of data
@@ -35,10 +36,14 @@ module T = struct
   [@@deriving sexp, compare]
 end
 include T
+
+exception UnsupportedInstruction of t
+
 let data_to_string (instr : data) : string =
   match instr with
      | Nop -> "nop"
      | Drop -> "drop"
+     | Select -> "select"
      | Const v -> Printf.sprintf "const %s" (Value.to_string v)
      | Binary b -> Printf.sprintf "binary %s" (Binop.to_string b)
      | Compare r -> Printf.sprintf "compare %s" (Relop.to_string r)
@@ -53,9 +58,11 @@ let data_to_string (instr : data) : string =
 let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : control) : string =
   match instr with
   | Call v -> Printf.sprintf "call %d" v
+  | CallIndirect v -> Printf.sprintf "call_indirect %d" v
   | Br b -> Printf.sprintf "br %d" b
   | BrIf b -> Printf.sprintf "brif %d" b
   | Return -> "return"
+  | Unreachable -> "unreachable"
   | Block instrs -> Printf.sprintf "block%s%s" sep (list_to_string instrs ~indent:(i+2) ~sep:sep)
   | Loop instrs -> Printf.sprintf "loop%s%s" sep (list_to_string instrs ~indent:(i+2) ~sep:sep)
   | If (instrs1, instrs2) -> Printf.sprintf "if%s%s%selse%s%s" sep
@@ -85,18 +92,18 @@ let rec of_wasm (i : Ast.instr) : t =
   | Ast.Br v -> Control (Br (Var.of_wasm v))
   | Ast.Call v -> Control (Call (Var.of_wasm v))
   | Ast.Return -> Control Return
-  | Ast.Unreachable -> raise (UnsupportedInstruction "unreachable")
-  | Ast.Select -> raise (UnsupportedInstruction "select")
+  | Ast.Unreachable -> Control Unreachable
+  | Ast.Select -> Data Select
   | Ast.Loop (_st, instrs) -> Control (Loop (List.map instrs ~f:of_wasm))
   | Ast.If (_st, instrs1, instrs2) -> Control (If (List.map instrs1 ~f:of_wasm, List.map instrs2 ~f:of_wasm))
-  | Ast.BrTable (_vs, _v) -> raise (UnsupportedInstruction "brtable")
-  | Ast.CallIndirect _v -> raise (UnsupportedInstruction "call_indirect")
+  | Ast.BrTable (_vs, _v) -> failwith "br_table unsupported"
+  | Ast.CallIndirect v -> Control (CallIndirect (Var.of_wasm v))
   | Ast.GlobalGet v -> Data (GlobalGet (Var.of_wasm v))
   | Ast.GlobalSet v -> Data (GlobalSet (Var.of_wasm v))
   | Ast.Load op -> Data (Load (Memoryop.of_wasm_load op))
   | Ast.Store op -> Data (Store (Memoryop.of_wasm_store op))
-  | Ast.MemorySize -> raise (UnsupportedInstruction "memory_size")
-  | Ast.MemoryGrow -> raise (UnsupportedInstruction "memory_grow")
+  | Ast.MemorySize -> failwith "memory_size unsupported"
+  | Ast.MemoryGrow -> failwith "memory_grow unsupported"
   | Ast.Test op -> Data (Test (Testop.of_wasm op))
-  | Ast.Convert _op -> raise (UnsupportedInstruction "convert")
-  | Ast.Unary _op -> raise (UnsupportedInstruction "unary")
+  | Ast.Convert _op -> failwith "convert unsupported"
+  | Ast.Unary _op -> failwith "unary unsupported"

@@ -27,6 +27,7 @@ let rec data_instr_transfer (i : Instr.data) (state : Domain.state) : Domain.sta
     let (_, vstack') = Vstack.pop state.vstack in
     assert (List.length vstack' = List.length state.vstack - 1);
     { state with vstack = vstack' }
+  | Select -> failwith "NYI: select"
   | LocalGet x ->
     let vstack' = (Locals.get_local state.locals x) :: state.vstack in
     assert (List.length vstack' = 1 + List.length state.vstack);
@@ -96,6 +97,7 @@ let control_instr_transfer (i : Instr.control) (state : Domain.state) (summaries
       (* We assume all summaries are defined *)
       let summary = IntMap.find_exn summaries f in
       Simple (Summary.apply summary f state)
+  | CallIndirect _ -> failwith "NYI: call_indirect"
   | Br _ ->
     Simple state
   | BrIf _ ->
