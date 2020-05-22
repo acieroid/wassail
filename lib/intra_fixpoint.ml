@@ -4,8 +4,8 @@ open Helpers
 (** Analyzes a CFG. Returns a map where each basic block is mappped to its input state and the result of applying the transfer function to it *)
 let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : Memory.t) (summaries : Summary.t IntMap.t) : (Domain.state * Transfer.result) IntMap.t =
   let bottom = Transfer.Uninitialized in
-  assert (List.length args = (fst cfg.arity)); (* Given number of arguments should match the in arity of the function *)
-  let init = Domain.init args cfg.nlocals globals memory in
+  assert (List.length args = List.length cfg.arg_types); (* Given number of arguments should match the in arity of the function *)
+  let init = Domain.init args cfg.local_types globals memory in
   let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
                                          ~f:(fun idx ->
                                              (idx, (bottom, bottom))))) in

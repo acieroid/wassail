@@ -32,7 +32,7 @@ module T = struct
   and  t =
     | Data of data
     | Control of control
-  [@@deriving sexp, compare, yojson]
+  [@@deriving sexp, compare]
 end
 include T
 let data_to_string (instr : data) : string =

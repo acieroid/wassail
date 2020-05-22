@@ -6,7 +6,7 @@ module ByteAbstr = struct
     type t =
       | Const of char
       | Byte
-    [@@deriving sexp, compare, yojson]
+    [@@deriving sexp, compare]
   end
   include T
   let zero = Const (Char.of_int_exn 0)
@@ -21,7 +21,7 @@ module T = struct
     data: ByteAbstr.t; (* Abstraction: everything merged into the same value *)
     max_size: int option;
   }
-  [@@deriving sexp, compare, yojson]
+  [@@deriving sexp, compare]
 end
 include T
 let page_size = 65536

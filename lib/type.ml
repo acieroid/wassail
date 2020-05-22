@@ -4,27 +4,27 @@ open Wasm
 (** These are types of values during the execution of wasm *)
 module T = struct
   type t =
-    | I32Type
-    | I64Type
-    | F32Type
-    | F64Type
-  [@@deriving sexp, compare, yojson]
+    | I32
+    | I64
+    | F32
+    | F64
+  [@@deriving sexp, compare]
 end
 include T
 
 let of_wasm (vt : Types.value_type) : t =
   match vt with
-  | Types.I32Type -> I32Type
-  | Types.I64Type -> I64Type
-  | Types.F32Type -> F32Type
-  | Types.F64Type -> F64Type
+  | Types.I32Type -> I32
+  | Types.I64Type -> I64
+  | Types.F32Type -> F32
+  | Types.F64Type -> F64
 
 let to_string (t : t) : string =
   match t with
-  | I32Type -> "i32"
-  | I64Type -> "i64"
-  | F32Type -> "f32"
-  | F64Type -> "f64"
+  | I32 -> "i32"
+  | I64 -> "i64"
+  | F32 -> "f32"
+  | F64 -> "f64"
 
 let list_to_string (l : t list) : string =
   String.concat ~sep:", " (List.map l ~f:to_string)

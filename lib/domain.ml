@@ -7,7 +7,7 @@ type state = {
   globals : Globals.t; (** The globals *)
   memory : Memory.t; (** The linear memory *)
 }
-[@@deriving sexp, compare, yojson]
+[@@deriving sexp, compare]
 
 let to_string (s : state) : string =
   Printf.sprintf "{vstack: [%s],\n locals: [%s],\n globals: [%s],\n heap: %s\n}"
@@ -16,9 +16,9 @@ let to_string (s : state) : string =
     (Globals.to_string s.globals)
     (Memory.to_string s.memory)
 
-let init (args : Value.t list) (nlocals : int) (globals : Globals.t) (memory : Memory.t) = {
+let init (args : Value.t list) (locals : Type.t list) (globals : Globals.t) (memory : Memory.t) = {
   vstack = [];
-  locals = args @ (List.init nlocals ~f:(fun _ -> Value.zero));
+  locals = args @ (List.map locals ~f:Value.zero);
   globals = globals;
   memory = memory;
 }

@@ -11,7 +11,7 @@ module T = struct
        - tableddrs: we don't support tables (yet)
        - exports: we don't take exports into account (yet) *)
   }
-  [@@deriving sexp, compare, yojson]
+  [@@deriving sexp, compare]
 end
 include T
 

@@ -1,6 +1,6 @@
 (library
    (name wasmtaint)
    (modules Wasmtaint Helpers Type Address Binop Memoryop Testop Relop Value Var Instr Basic_block Memory_inst Module_inst Global_inst Func Func_inst Wasm_module Cfg Cfg_builder Domain Summary Transfer Intra_fixpoint Inter_fixpoint Compositional Vstack Locals Globals Memory Logging)
-   (libraries core_kernel wasm yojson ppx_deriving_yojson.runtime)
+   (libraries core_kernel wasm)
    (inline_tests)
-   (preprocess (pps ppx_jane ppx_compare ppx_deriving_yojson ppx_inline_test)))
+   (preprocess (pps ppx_jane ppx_compare ppx_inline_test)))

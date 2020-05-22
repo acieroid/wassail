@@ -6,14 +6,6 @@ module IntListIntMap = struct
 
   type t = (int list) IntMap.t
   [@@deriving sexp, compare]
-  let to_yojson m = IntMap.to_alist m
-                    |> [%to_yojson: (int * int list) list]
-  let of_yojson json = match [%of_yojson: (int * int list) list] json with
-    | Ok a -> begin match IntMap.of_alist a with
-        | `Duplicate_key n -> Error (Printf.sprintf "IntListIntMap.of_yojson: duplicate key %d" n)
-        | `Ok v -> Ok v
-      end
-    | Error err -> Error err
 end
 
 module EdgesIntMap = struct
@@ -21,14 +13,6 @@ module EdgesIntMap = struct
 
   type t = ((int * bool option) list) IntMap.t
   [@@deriving sexp, compare]
-  let to_yojson m = IntMap.to_alist m
-                    |> [%to_yojson: (int * (int * bool option)) list]
-  let of_yojson json = match [%of_yojson: (int * (int * bool option)) list] json with
-    | Ok a -> begin match IntMap.of_alist a with
-        | `Duplicate_key n -> Error (Printf.sprintf "IntListIntMap.of_yojson: duplicate key %d" n)
-        | `Ok v -> Ok v
-      end
-    | Error err -> Error err
 end
 
 module BasicBlocks = struct
@@ -36,14 +20,6 @@ module BasicBlocks = struct
 
   type t = Basic_block.t IntMap.t
   [@@deriving sexp, compare]
-  let to_yojson (m : t) = IntMap.to_alist m
-                    |> [%to_yojson: (int * Basic_block.t) list]
-  let of_yojson json = match [%of_yojson: (int * Basic_block.t) list] json with
-    | Ok a -> begin match IntMap.of_alist a with
-        | `Duplicate_key n -> Error (Printf.sprintf "BasicBlockIntMap.of_yojson: duplicate key %d" n)
-        | `Ok v -> Ok v
-      end
-    | Error err -> Error err
 end
 
 type t = {
@@ -53,10 +29,12 @@ type t = {
   name: string;
   (* The index of this CFG *)
   idx: int;
-  (* The number of parameters and return values of that CFG *)
-  arity: (int * int);
-  (* The number of locals in that CFG *)
-  nlocals: int;
+  (* Types of arguments *)
+  arg_types: Type.t list;
+  (* Types of locals *)
+  local_types: Type.t list;
+  (* Typpes of return values *)
+  return_types: Type.t list;
   (* All basic blocks contained in this CFG, indexed in a map by their index *)
   basic_blocks: BasicBlocks.t;
   (* The edges between basic blocks (forward direction) *)

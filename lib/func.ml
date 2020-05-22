@@ -4,7 +4,7 @@ type t = {
   locals : Type.t list;
   body : Instr.t list;
 }
-[@@deriving sexp, compare, yojson]
+[@@deriving sexp, compare]
 
 let of_wasm (f : Ast.func) : t = {
   body = List.map f.it.body ~f:Instr.of_wasm;

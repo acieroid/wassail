@@ -8,18 +8,14 @@ B /home/quentin/.opam/ocaml-system.4.10.0/lib/base_bigstring
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/base_quickcheck
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/bin_prot
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/bin_prot/shape
-B /home/quentin/.opam/ocaml-system.4.10.0/lib/biniou
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/core_kernel
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/core_kernel/base_for_tests
-B /home/quentin/.opam/ocaml-system.4.10.0/lib/easy-format
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/fieldslib
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/jane-street-headers
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/parsexp
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_assert/runtime-lib
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_bench/runtime-lib
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_compare/runtime-lib
-B /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_deriving/runtime
-B /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_deriving_yojson/runtime
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_enumerate/runtime-lib
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_expect/collector
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_expect/common
@@ -30,7 +26,6 @@ B /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_inline_test/config
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_inline_test/runtime-lib
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_module_timer/runtime
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_sexp_conv/runtime-lib
-B /home/quentin/.opam/ocaml-system.4.10.0/lib/result
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/sexplib
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/sexplib0
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/splittable_random
@@ -39,7 +34,6 @@ B /home/quentin/.opam/ocaml-system.4.10.0/lib/time_now
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/typerep
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/variantslib
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/wasm
-B /home/quentin/.opam/ocaml-system.4.10.0/lib/yojson
 B /usr/lib/ocaml
 B ../_build/default/lib/.wasmtaint.objs/byte
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/base
@@ -51,18 +45,14 @@ S /home/quentin/.opam/ocaml-system.4.10.0/lib/base_bigstring
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/base_quickcheck
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/bin_prot
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/bin_prot/shape
-S /home/quentin/.opam/ocaml-system.4.10.0/lib/biniou
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/core_kernel
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/core_kernel/base_for_tests
-S /home/quentin/.opam/ocaml-system.4.10.0/lib/easy-format
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/fieldslib
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/jane-street-headers
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/parsexp
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_assert/runtime-lib
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_bench/runtime-lib
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_compare/runtime-lib
-S /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_deriving/runtime
-S /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_deriving_yojson/runtime
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_enumerate/runtime-lib
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_expect/collector
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_expect/common
@@ -73,7 +63,6 @@ S /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_inline_test/config
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_inline_test/runtime-lib
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_module_timer/runtime
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_sexp_conv/runtime-lib
-S /home/quentin/.opam/ocaml-system.4.10.0/lib/result
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/sexplib
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/sexplib0
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/splittable_random
@@ -82,8 +71,7 @@ S /home/quentin/.opam/ocaml-system.4.10.0/lib/time_now
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/typerep
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/variantslib
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/wasm
-S /home/quentin/.opam/ocaml-system.4.10.0/lib/yojson
 S /usr/lib/ocaml
 S .
-FLG -ppx '/home/quentin/p/wasmtaint/_build/default/.ppx/7305137aa15c5977195c83b61c0d6020/ppx.exe --as-ppx --cookie '\''inline_tests="enabled"'\'' --cookie '\''library-name="wasmtaint"'\'''
+FLG -ppx '/home/quentin/p/wasmtaint/_build/default/.ppx/b25febcec82391b63df83fd6c2ead495/ppx.exe --as-ppx --cookie '\''inline_tests="enabled"'\'' --cookie '\''library-name="wasmtaint"'\'''
 FLG -open Wasmtaint__ -w @1..3@5..28@30..39@43@46..47@49..57@61..62-40 -strict-sequence -strict-formats -short-paths -keep-locs

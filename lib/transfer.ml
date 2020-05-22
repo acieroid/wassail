@@ -74,7 +74,7 @@ let rec data_instr_transfer (i : Instr.data) (state : Domain.state) : Domain.sta
     { state with vstack = vstack'' }
   | Load op ->
     let (i, vstack') = Vstack.pop state.vstack in
-    let c = Memory.load state.memory i op in
+    let c = Memory.load state.memory i.value op in
     let state' = { state with vstack = c :: vstack' } in
     assert (List.length state'.vstack = List.length state.vstack);
     state'
@@ -85,7 +85,7 @@ let rec data_instr_transfer (i : Instr.data) (state : Domain.state) : Domain.sta
     let (i, vstack'') = Vstack.pop vstack' in
     (* let b be the byte sequence of c *)
     assert (Option.is_empty op.sz); (* We only support N = 32 for now *)
-    let memory' = Memory.store state.memory i c op in
+    let memory' = Memory.store state.memory i.value c op in
     assert (List.length vstack'' = List.length state.vstack - 2);
     { state with vstack = vstack''; memory = memory' }
 

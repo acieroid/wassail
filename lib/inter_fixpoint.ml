@@ -20,7 +20,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) : Domain.state IntMap.t =
       let cfg_idx = IntSet.min_elt_exn worklist in
       let cfg = IntMap.find_exn cfgs cfg_idx in
       (* The arguments to this CFG. They all map to top because we perform a compositional analysis *)
-      let args = List.init (fst cfg.arity) ~f:Value.parameter in
+      let args = List.mapi cfg.arg_types ~f:(fun i t -> Value.parameter t i) in
       Printf.printf "Analyzing cfg %d with globals: [%s] and args: [%s]\n" cfg_idx (Globals.to_string globals) (Value.list_to_string args);
       (* Perform intra-procedural analysis *)
       let out_state = Intra_fixpoint.analyze_coarse cfg args globals memory summaries in

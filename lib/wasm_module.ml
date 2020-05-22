@@ -8,7 +8,7 @@ module T = struct
     mems : Memory_inst.t list;
     (* XXX: other fields *)
   }
-  [@@deriving sexp, compare, yojson]
+  [@@deriving sexp, compare]
 end
 include T
 let get_funcinst (s : t) (a : Address.t) : Func_inst.t =

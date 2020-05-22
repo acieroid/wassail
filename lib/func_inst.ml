@@ -3,12 +3,11 @@ open Core_kernel
 module T = struct
   type t = {
     name : string option;
-    arity : (int * int);
     typ : (Type.t list * Type.t list);
     module_: Module_inst.t;
     code: Func.t;
   }
-  [@@deriving sexp, compare, yojson]
+  [@@deriving sexp, compare]
 end
 include T
 let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (index : int) (f : Wasm.Ast.func) : t =
@@ -21,7 +20,6 @@ let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (index : int) (f : Wa
   match Wasm.Ast.func_type_for m f.it.ftype with
   | FuncType (input, output) -> {
       name = name;
-      arity = (List.length input, List.length output);
       typ = (List.map input ~f:Type.of_wasm, List.map output ~f:Type.of_wasm);
       module_ = minst;
       code = Func.of_wasm f

@@ -6,7 +6,7 @@ open Value
 module T = struct
   type t =
     | I32Eqz
-  [@@deriving sexp, compare, yojson]
+  [@@deriving sexp, compare]
 end
 include T
 let of_wasm (t : Ast.testop) : t =
@@ -18,16 +18,20 @@ let to_string (t : t) : string =
   | I32Eqz -> "i32.eqz"
 
 let eqz (v : Value.t) : Value.t = match (is_zero v, is_not_zero v) with
-  | (true, false) -> const 1l
-  | (false, true) -> const 0l
-  | (false, false) -> bottom
-  | (true, true) -> begin match v with
-      | Symbolic _ -> simplify (Symbolic (Op (Eq, v, const 0l)))
+  | (true, false) -> i32_const 1l
+  | (false, true) -> i32_const 0l
+  | (false, false) -> bottom I32
+  | (true, true) -> begin match v.value with
+      | Symbolic _ -> {
+          value = simplify_value (Symbolic (Op (Eq, v.value,
+                                                Symbolic (Const (PrimValue.zero_of_t v.typ))))); (* TODO: may be i64 *)
+          typ = I32
+        }
       | _ -> bool
     end
 
 let eval (t : t) (v1 : Value.t) : Value.t =
-  match (t, v1) with
-  | (_, Bottom) -> Bottom
-  | (I32Eqz, v) -> eqz v
+  match (t, v1.value) with
+  | (_, Bottom) -> v1
+  | (I32Eqz, _) -> eqz v1
 

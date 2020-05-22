@@ -1,18 +1,18 @@
 open Core_kernel
 
 type block_sort = BlockEntry | BlockExit | LoopEntry | LoopExit | Normal | Function | Return
-[@@deriving sexp, compare, yojson]
+[@@deriving sexp, compare]
 
 type block_content =
   | Control of Instr.control
   | Data of Instr.data list
   | Nothing
-[@@deriving sexp, compare, yojson]
+[@@deriving sexp, compare]
 
 type t = {
   idx: int;
   content: block_content;
-} [@@deriving sexp, compare, yojson]
+} [@@deriving sexp, compare]
 
 let to_string (b : t) : string = Printf.sprintf "block %d, %s" b.idx (match b.content with
     | Control _ -> "control"

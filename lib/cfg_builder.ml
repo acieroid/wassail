@@ -175,10 +175,12 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
     name = Option.value funcinst.name ~default:"<unexported>";
     (* The index of this block is the integer that represent the address of this function *)
     idx = faddr;
-    (* Arity of the function *)
-    arity = funcinst.arity;
-    (* Number of locals in the function *)
-    nlocals = List.length funcinst.code.locals;
+    (* Argument types *)
+    arg_types = fst funcinst.typ;
+    (* Return types *)
+    return_types = snd funcinst.typ;
+    (* Types of the locals *)
+    local_types = funcinst.code.locals;
     (*The basic blocks *)
     basic_blocks = BasicBlocks.IntMap.of_alist_exn (List.map actual_blocks ~f:(fun b -> (b.idx, b)));
     (* The forward edges *)
