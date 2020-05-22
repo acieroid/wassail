@@ -75,6 +75,12 @@ let update (m : t) (ea : Value.value) (v : Value.t) : t =
       | None -> v
       | Some v' -> Value.join resolved_v v')
 
+(** Load a byte from memory, at effective address ea *)
+let load_byte (m : t) (ea : Value.value) : Value.value =
+  match find m ea with
+  | Some v -> v.value
+  | None -> (Value.deref ea).value
+
 (** Load a value from the memory m, stored at address addr. Argument op
    indicates, among others, the size of the value loaded.
  *)
@@ -83,17 +89,17 @@ let load (m : t) (addr : Value.value) (op : Memoryop.t) : Value.t =
   let ea = Value.add_offset addr op.offset in (* effective address *)
   match op.sz with
   | None -> (* load instruction *)
-    (* N unspecified, loads the full value.
-       Reference interpreter: memory.ml/load_value
-    *)
-    begin match find m ea with
-    | Some Value.({ value = Symbolic (Const _); _ } as v) -> v
-    | Some Value.({ value = Symbolic (Parameter _); _} as v) -> v
-    | Some Value.({ value = Symbolic (Global _); _} as v) -> v
-    | _ -> Value.deref ea
+    (* N unspecified, loads 4 bytes for an i32, 8 for i64
+       Reference interpreter: memory.ml/load_value *)
+    begin match op.typ with
+      | I32 ->
+        Value.symbolic op.typ
+          (Value.Bytes4 (load_byte m ea, load_byte m (Value.add_offset ea 1),
+                         load_byte m (Value.add_offset ea 2), load_byte m (Value.add_offset ea 3)))
+      | _ -> failwith "unsupported: load with non-i32"
     end
   | Some Memoryop.(Pack8, ZX) -> (* load8_u *)
-    failwith "NYI: load8_u"
+    { value = load_byte m ea; typ = op.typ }
   | Some Memoryop.(Pack8, SX) -> (* load8_s *)
     (* Just like ZX, but does extend the value through two shifts, see reference implementation: memory.ml/extend *)
     failwith "NYI: load8_s"
@@ -107,9 +113,22 @@ let load (m : t) (addr : Value.value) (op : Memoryop.t) : Value.t =
     failwith "NYI: load32_u"
 
 let store (m : t) (addr : Value.value) (value : Value.t) (op : Memoryop.t) : t =
-  assert Stdlib.(op.sz = None); (* We only support N = 32 for now. *)
   let ea = Value.add_offset addr op.offset in
-  update m ea value
+  match op.sz with
+  | None -> (* store instruction *)
+    begin match op.typ with
+      | I32 ->
+        let m' = update m ea (Value.symbolic op.typ (Value.Byte (value.value, 0))) in
+        let m'' = update m' (Value.add_offset ea 1) (Value.symbolic op.typ (Value.Byte (value.value, 1))) in
+        let m''' = update m'' (Value.add_offset ea 2) (Value.symbolic op.typ (Value.Byte (value.value, 2))) in
+        let m'''' = update m''' (Value.add_offset ea 3) (Value.symbolic op.typ (Value.Byte (value.value, 3))) in
+        m''''
+      | _ -> failwith "unsupported: store with non-i32"
+    end
+  | Some Memoryop.(Pack8, _) -> (* store8 *)
+    (* We should in practice only keep the first byte, but we ignore that *)
+    update m ea value
+  | _ -> failwith (Printf.sprintf "NYI: store with op as %s" (Memoryop.to_string op))
 
 let join (m1 : t) (m2 : t) : t =
   (* M[a: b] joined with M[c: d] should be just like doing M[a: b][c: d] *)

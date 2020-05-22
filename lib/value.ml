@@ -41,7 +41,6 @@ module PrimValue = struct
 
   let of_int (n : int) : t = I32 (Int32.of_int_exn n)
 
-
   let add_int (v : t) (n : int) : t = match v with
     | I32 x -> I32 Int32.(x + (of_int_exn n))
     | I64 x -> I64 Int64.(x + (of_int_exn n))
@@ -124,6 +123,8 @@ end
 
 (** These are the values (and their abstractions) *)
 module T = struct
+  type bytepos = int (* in practice, between 0 and 7 *)
+  [@@deriving sexp, compare]
   type operator =
     | Plus | Minus | Times
     | Lt | LtE | Gt | GtE | Eq
@@ -132,6 +133,8 @@ module T = struct
     | Parameter of int (* p0 *)
     | Global of int (* g0 *)
     | Op of operator * value * value (* g0-16 *)
+    | Bytes4 of value * value * value * value (* b0b1b2b3 *)
+    | Byte of value * int (* x@0 is byte 0 of value x *)
     | Deref of value (* *g0 *)
     | Const of PrimValue.t
   and value =
@@ -141,6 +144,7 @@ module T = struct
     | RightOpenInterval of symbolic (* [a,+inf[ *)
     | OpenInterval (* ]-inf,+inf[ *)
     | Symbolic of symbolic
+  and byte = value * int (* a byte in a value *)
   [@@deriving sexp, compare]
   module ValueT = struct
     type t = value
@@ -184,6 +188,8 @@ and symbolic_to_string (v : symbolic) : string = match v with
       | Eq -> "="
     end) (value_to_string right)
   | Deref v -> Printf.sprintf "*%s" (value_to_string v)
+  | Bytes4 (b0, b1, b2, b3) -> Printf.sprintf "bytes[%s,%s,%s,%s]" (value_to_string b0) (value_to_string b1) (value_to_string b2) (value_to_string b3)
+  | Byte (v, b) -> Printf.sprintf "%s@%d" (value_to_string v) b
 let to_string (v : t) : string = value_to_string v.value
 
 let rec simplify_symbolic (sym : symbolic) : symbolic =
@@ -276,7 +282,7 @@ let global (i : int) : t = { value = Symbolic (Global i); typ = I32 } (* TODO: t
 let deref (addr : value) : t = { value = Symbolic (Deref addr); typ = I32 } (* TODO: typ *)
 let bool : t = { value = Interval (Const (I32 0l), Const (I32 1l)); typ = I32 }
 let top (source : string) : t = Logging.warn "TopCreated" (Printf.sprintf "Top value originating from: %s" source); { value = OpenInterval; typ = I32 } (* TODO: typ *)
-let symbolic (sym : symbolic) : t = { value = Symbolic (simplify_symbolic sym); typ = I32 } (* TODO: typ *)
+let symbolic (t : Type.t) (sym : symbolic) : t = { value = Symbolic (simplify_symbolic sym); typ = t }
 let list_to_string (l : t list) : string =
   String.concat ~sep:", " (List.map l ~f:to_string)
 
@@ -430,6 +436,8 @@ let rec adapt_value (v : value) (map : ValueValueMap.t) : value =
   | Symbolic (Const _) -> v
   | Symbolic (Deref v) ->
     Symbolic (Deref (adapt_value v map))
+  | Symbolic (Bytes4 (b0, b1, b2, b3)) -> Symbolic (Bytes4 (adapt_value b0 map, adapt_value b1 map, adapt_value b2 map, adapt_value b3 map))
+  | Symbolic (Byte (v, b)) -> Symbolic (Byte (adapt_value v map, b))
 
 let adapt (v : t) (map : ValueValueMap.t) : t =
   { value = adapt_value v.value map; typ = v.typ }
