@@ -6,7 +6,7 @@ Installing the dependencies
 
 > git clone https://github.com/WebAssembly/spec
 > cd spec/
-> git checkout4eb91f19
+> git checkout 92b9ce
 > opam pin add wasm .
 
 2. Install dependencies for this project

@@ -37,19 +37,19 @@ let of_wasm_load (op : Ast.loadop) : t = {
   offset = Int32.to_int_exn op.offset;
   sz = Option.map op.sz ~f:(fun (pack, ext) ->
       (match pack with
-       | Wasm.Memory.Pack8 -> Pack8
-       | Wasm.Memory.Pack16 -> Pack16
-       | Wasm.Memory.Pack32 -> Pack32),
+       | Wasm.Types.Pack8 -> Pack8
+       | Wasm.Types.Pack16 -> Pack16
+       | Wasm.Types.Pack32 -> Pack32),
       match ext with
-      | Wasm.Memory.SX -> SX
-      | Wasm.Memory.ZX -> ZX);
+      | Wasm.Types.SX -> SX
+      | Wasm.Types.ZX -> ZX);
 }
 let of_wasm_store (op : Ast.storeop) : t = {
   typ = Type.of_wasm op.ty;
   align = op.align;
   offset = Int32.to_int_exn op.offset;
   sz = Option.map op.sz ~f:(function
-      | Wasm.Memory.Pack8 -> (Pack8, SX)
-      | Wasm.Memory.Pack16 -> (Pack16, SX)
-      | Wasm.Memory.Pack32 -> (Pack32, SX));
+      | Wasm.Types.Pack8 -> (Pack8, SX)
+      | Wasm.Types.Pack16 -> (Pack16, SX)
+      | Wasm.Types.Pack32 -> (Pack32, SX));
 }
