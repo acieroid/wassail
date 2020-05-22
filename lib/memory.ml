@@ -1,14 +1,16 @@
 open Core_kernel
 
 module Map = Map.Make(Value.ValueT)
+
+(** The memory is a map from values (without types) to values *)
 type t = Value.t Map.t
 [@@deriving sexp, compare]
-
 
 let to_string (m : t) : string =
   Printf.sprintf "M%s" (String.concat ~sep:"" (List.map (Map.to_alist m) ~f:(fun (a, v) ->
       Printf.sprintf "[%s: %s]" (Value.value_to_string a) (Value.to_string v))))
 
+(** The initial memory is empty *)
 let initial = Map.empty
 
 (** Look up a value in the memory at effective address ea. Returns either the value (Some v), or None if the value is not directly found in the memory (meaning it could be any value) *)
@@ -34,7 +36,6 @@ let find (m : t) (ea : Value.value) : Value.t option =
     Logging.warn "ValueNotFoundInMemory" (Printf.sprintf "value %s at address %s" (to_string m) (Value.value_to_string ea));
     None
 
-(** Resolves the pointers that are seen in v, if possible (if they are valid addresses in the memory) *)
 let rec resolve_value (m : t) (v : Value.value) : Value.value =
   Printf.printf "Trying to resolve %s\n" (Value.value_to_string v);
   match v with
@@ -54,6 +55,7 @@ and resolve_symbolic (m : t) (sym : Value.symbolic) : Value.symbolic =
   | Deref _ -> failwith "Memory.resolve_symbolic unsupported for Deref"
   | _ -> sym
 
+(** Resolves the pointers that are seen in v, if possible (if they are valid addresses in the memory) *)
 let resolve (m : t) (v : Value.t) : Value.t =
   { value = resolve_value m v.value; typ = v.typ }
 
@@ -73,14 +75,36 @@ let update (m : t) (ea : Value.value) (v : Value.t) : t =
       | None -> v
       | Some v' -> Value.join resolved_v v')
 
+(** Load a value from the memory m, stored at address addr. Argument op
+   indicates, among others, the size of the value loaded.
+ *)
 let load (m : t) (addr : Value.value) (op : Memoryop.t) : Value.t =
-  assert Stdlib.(op.sz = None); (* We only support N = 32 for now. *)
+  Printf.printf "load %s %s\n" (Value.value_to_string addr) (Memoryop.to_string op);
   let ea = Value.add_offset addr op.offset in (* effective address *)
-  match find m ea with
-  | Some Value.({ value = Symbolic (Const _); _ } as v) -> v
-  | Some Value.({ value = Symbolic (Parameter _); _} as v) -> v
-  | Some Value.({ value = Symbolic (Global _); _} as v) -> v
-  | _ -> Value.deref ea
+  match op.sz with
+  | None -> (* load instruction *)
+    (* N unspecified, loads the full value.
+       Reference interpreter: memory.ml/load_value
+    *)
+    begin match find m ea with
+    | Some Value.({ value = Symbolic (Const _); _ } as v) -> v
+    | Some Value.({ value = Symbolic (Parameter _); _} as v) -> v
+    | Some Value.({ value = Symbolic (Global _); _} as v) -> v
+    | _ -> Value.deref ea
+    end
+  | Some Memoryop.(Pack8, ZX) -> (* load8_u *)
+    failwith "NYI: load8_u"
+  | Some Memoryop.(Pack8, SX) -> (* load8_s *)
+    (* Just like ZX, but does extend the value through two shifts, see reference implementation: memory.ml/extend *)
+    failwith "NYI: load8_s"
+  | Some Memoryop.(Pack16, SX) -> (* load16_s *)
+    failwith "NYI: load16_s"
+  | Some Memoryop.(Pack16, ZX) -> (* load16_u *)
+    failwith "NYI: load16_u"
+  | Some Memoryop.(Pack32, SX) -> (* load32_s *)
+    failwith "NYI: load32_s"
+  | Some Memoryop.(Pack32, ZX) -> (* load32_u *)
+    failwith "NYI: load32_u"
 
 let store (m : t) (addr : Value.value) (value : Value.t) (op : Memoryop.t) : t =
   assert Stdlib.(op.sz = None); (* We only support N = 32 for now. *)
