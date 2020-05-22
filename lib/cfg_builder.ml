@@ -2,7 +2,6 @@ open Core_kernel
 open Helpers
 
 let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
-  Printf.printf "-----------------\nBuilding block for %d\n--------------------------\n" faddr;
   let funcinst = Wasm_module.get_funcinst m faddr in
   let cur_idx : int ref = ref 0 in
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
@@ -166,20 +165,12 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
 
       end
   in
-  Printf.printf "%s\n" (Instr.list_to_string funcinst.code.body);
   let (blocks, edges, breaks, returns, _entry_idx, exit_idx) = helper [] funcinst.code.body in
   (* Create the return block *)
   let return_block = mk_empty_block () in
   let blocks' = return_block :: blocks in
-  List.iter blocks' ~f:(fun b ->
-      Printf.printf "%s\n" (Basic_block.to_string b)
-    );
   (* Connect the return block *)
   let edges' = (exit_idx, return_block.idx, None) :: List.map returns ~f:(fun from -> (from, return_block.idx, None)) @ edges in
-  List.iter edges' ~f:(fun (src, dst, data) ->
-      Printf.printf "edge: %d ->[%s] %d\n" src (Option.value ~default:"none" (Option.map data ~f:string_of_bool)) dst);
-  if not (List.is_empty breaks) then
-    Printf.printf "there is a break outside of the funciton (function %d)\n" faddr;
   assert (List.is_empty breaks); (* there shouldn't be any breaks outside the function *)
   (* We now filter empty normal blocks *)
   let (actual_blocks, filtered_blocks) = List.partition_tf blocks' ~f:(fun block -> match block.content with
@@ -188,7 +179,6 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
   let filtered_blocks_idx = List.map filtered_blocks ~f:(fun b -> b.idx) in
   (* And we have to redirect the edges: if there is an edge to a removed block, we make it point to its successors *)
   let actual_edges = List.fold_left filtered_blocks_idx ~init:edges' ~f:(fun edges idx ->
-      Printf.printf "%d is removed\n" idx;
       (* idx is removed, so we find all edges pointing to idx (and we keep track of the other ones, as only these should be kept) *)
       let (pointing_to, edges') = List.partition_tf edges ~f:(fun (_, dst, _) -> dst = idx) in
       (* and we find all edges pointing from idx (again, keeping track of the other ones) *)
