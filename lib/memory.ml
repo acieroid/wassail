@@ -118,12 +118,30 @@ let store (m : t) (addr : Value.value) (value : Value.t) (op : Memoryop.t) : t =
   | None -> (* store instruction *)
     begin match op.typ with
       | I32 ->
-        let m' = update m ea (Value.symbolic op.typ (Value.Byte (value.value, 0))) in
-        let m'' = update m' (Value.add_offset ea 1) (Value.symbolic op.typ (Value.Byte (value.value, 1))) in
-        let m''' = update m'' (Value.add_offset ea 2) (Value.symbolic op.typ (Value.Byte (value.value, 2))) in
-        let m'''' = update m''' (Value.add_offset ea 3) (Value.symbolic op.typ (Value.Byte (value.value, 3))) in
-        m''''
-      | _ -> failwith "unsupported: store with non-i32"
+        update
+          (update
+            (update
+               (update m ea (Value.symbolic op.typ (Value.Byte (value.value, 0))))
+               (Value.add_offset ea 1) (Value.symbolic op.typ (Value.Byte (value.value, 1))))
+            (Value.add_offset ea 2) (Value.symbolic op.typ (Value.Byte (value.value, 2))))
+          (Value.add_offset ea 3) (Value.symbolic op.typ (Value.Byte (value.value, 3)))
+      | I64 ->
+        update
+          (update
+             (update
+                (update
+                   (update
+                      (update
+                         (update
+                            (update m ea (Value.symbolic op.typ (Value.Byte (value.value, 0))))
+                            (Value.add_offset ea 1) (Value.symbolic op.typ (Value.Byte (value.value, 1))))
+                         (Value.add_offset ea 2) (Value.symbolic op.typ (Value.Byte (value.value, 2))))
+                      (Value.add_offset ea 3) (Value.symbolic op.typ (Value.Byte (value.value, 3))))
+                   (Value.add_offset ea 4) (Value.symbolic op.typ (Value.Byte (value.value, 4))))
+                (Value.add_offset ea 5) (Value.symbolic op.typ (Value.Byte (value.value, 5))))
+             (Value.add_offset ea 6) (Value.symbolic op.typ (Value.Byte (value.value, 6))))
+          (Value.add_offset ea 7) (Value.symbolic op.typ (Value.Byte (value.value, 7)))
+      | _ -> failwith "unsupported: store with floats"
     end
   | Some Memoryop.(Pack8, _) -> (* store8 *)
     (* We should in practice only keep the first byte, but we ignore that *)

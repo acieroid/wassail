@@ -104,9 +104,16 @@ let control_instr_transfer (i : Instr.control) (state : Domain.state) (summaries
     assert (List.length vstack' = List.length state.vstack - 1);
     Branch ({ state with vstack = vstack'; memory = Memory.refine state.memory cond true },
             { state with vstack = vstack'; memory = Memory.refine state.memory cond false })
+  | If _ ->
+    (* If is similar to br_if, and the control flow is handled by the CFG visitor.
+       We only need to propagate the right state in the right branch, just like br_if *)
+    let (cond, vstack') = Vstack.pop state.vstack in
+    assert (List.length vstack' = List.length state.vstack - 1);
+    Branch ({ state with vstack = vstack'; memory = Memory.refine state.memory cond true },
+            { state with vstack = vstack'; memory = Memory.refine state.memory cond false })
   | Return ->
     Simple state
-  | _ -> failwith "TODO"
+  | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i))
 
 let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t IntMap.t) : result =
   match b.content with
