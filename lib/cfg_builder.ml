@@ -1,7 +1,10 @@
 open Core_kernel
 open Helpers
 
+
 let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
+  (* true to simplify the CFG, false to disable simplification *)
+  let simplify = true in
   let funcinst = Wasm_module.get_funcinst m faddr in
   let cur_idx : int ref = ref 0 in
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
@@ -60,7 +63,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
           let (blocks, edges, breaks, returns, then_entry, then_exit) = helper [] instrs1 in
           let (blocks', edges', breaks', returns', else_entry, else_exit) = helper [] instrs2 in
           (* Construct the rest of the CFG *)
-          let (blocks'', edges'', breaks'', returns'', entry, exit) = helper [] rest in
+          let (blocks'', edges'', breaks'', returns'', entry, exit') = helper [] rest in
           (* Compute the new break levels (just like for Block and Loop)
              All breaks with level 0 break the current block
              All other breaks see their level decreased by one *)
@@ -73,13 +76,12 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
               ~f:(fun (idx, _, branch) -> (idx, entry, branch)) in
           (block :: if_block :: (blocks @ blocks' @ blocks''),
            (* Edges *)
-           (* TODO: t and f branch *)
            (block.idx, if_block.idx, None) :: (if_block.idx, then_entry, Some true) :: (if_block.idx, else_entry, Some false) ::
            (then_exit, entry, None) :: (else_exit, entry, None) :: (break_edges @ edges @ edges' @ edges''),
            (* no breaks and returns *)
            new_breaks @ breaks'',
            returns @ returns' @ returns'',
-           block.idx, exit)
+           block.idx, exit')
         | Br level ->
           (* Similar to break, but because it is inconditional, there is no edge
              from this block to the next. In practice, rest should always be
@@ -169,12 +171,12 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
   (* Create the return block *)
   let return_block = mk_empty_block () in
   let blocks' = return_block :: blocks in
-  (* Connect the return block *)
-  let edges' = (exit_idx, return_block.idx, None) :: List.map returns ~f:(fun from -> (from, return_block.idx, None)) @ edges in
+  (* Connect the return block, and remove all edges that start from a return block (as they are unreachable) *)
+  let edges' = (exit_idx, return_block.idx, None) :: List.map returns ~f:(fun from -> (from, return_block.idx, None)) @ (List.filter edges ~f:(fun (src, _, _) -> not (List.mem returns src ~equal:Stdlib.(=)))) in
   assert (List.is_empty breaks); (* there shouldn't be any breaks outside the function *)
   (* We now filter empty normal blocks *)
   let (actual_blocks, filtered_blocks) = List.partition_tf blocks' ~f:(fun block -> match block.content with
-      | Data [] -> false
+      | Data [] -> not simplify (* only filter if we need to simplify *)
       | _ -> true) in
   let filtered_blocks_idx = List.map filtered_blocks ~f:(fun b -> b.idx) in
   (* And we have to redirect the edges: if there is an edge to a removed block, we make it point to its successors *)
