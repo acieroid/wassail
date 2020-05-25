@@ -102,7 +102,9 @@ let load (m : t) (addr : Value.value) (op : Memoryop.t) : Value.t =
     { value = load_byte m ea; typ = op.typ }
   | Some Memoryop.(Pack8, SX) -> (* load8_s *)
     (* Just like ZX, but does extend the value through two shifts, see reference implementation: memory.ml/extend *)
-    failwith "NYI: load8_s"
+    let v = load_byte m ea in
+    Logging.warn "Unsigned" (Printf.sprintf "unsigned to signed conversion not performed for value %s" (Value.value_to_string v));
+    { value = v; typ = op.typ }
   | Some Memoryop.(Pack16, SX) -> (* load16_s *)
     failwith "NYI: load16_s"
   | Some Memoryop.(Pack16, ZX) -> (* load16_u *)
