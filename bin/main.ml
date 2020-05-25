@@ -15,7 +15,7 @@ let apply_to_textual (filename : string) (f : Ast.module_ -> unit) =
 let main filename =
   Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
   apply_to_textual filename (fun m ->
-      let wasm_mod = Wasm_module.init m in
+      let wasm_mod = Wasm_module.of_wasm m in
       let nglobals = List.length wasm_mod.globals in
       let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun faddr _ -> (faddr, Cfg_builder.build faddr wasm_mod))) in
       (*IntMap.iter cfgs ~f:(fun cfg ->

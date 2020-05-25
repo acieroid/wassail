@@ -15,7 +15,7 @@ module T = struct
 end
 include T
 
-let init (m : Ast.module_) : t =
+let of_wasm (m : Ast.module_) : t =
   let funcaddrs = List.mapi m.it.funcs ~f:(fun i _ -> i) in
   let globaladdrs = List.mapi m.it.globals ~f:(fun i _ -> i) in
   let memaddrs = List.mapi m.it.memories ~f:(fun i _ -> i) in

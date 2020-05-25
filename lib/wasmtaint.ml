@@ -63,7 +63,7 @@ let initialize (program : string) : unit =
     List.iter l ~f:(fun (_, def) ->
         match def.it with
         | Script.Textual m ->
-          let wasm_mod = Wasm_module.init m in
+          let wasm_mod = Wasm_module.of_wasm m in
           trace (Printf.sprintf "nglobals: %d\n" (List.length wasm_mod.globals));
           nglobals := List.length wasm_mod.globals;
           cfgs := IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun faddr _ -> (faddr, Cfg_builder.build faddr wasm_mod)));
