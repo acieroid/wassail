@@ -1,12 +1,11 @@
 open Core_kernel
-open Wasm
 
 module T = struct
   type t = {
     funcs : Func_inst.t list;
     globals : Global_inst.t list;
     mems : Memory_inst.t list;
-    elems : Elem.t list;
+    tables : Table_inst.t list;
     (* XXX: other fields *)
   }
   [@@deriving sexp, compare]
@@ -26,11 +25,14 @@ let join (s1 : t) (s2 : t) : t =
   { s1 with
     globals = List.map2_exn s1.globals s2.globals ~f:Global_inst.join
   }
-let of_wasm (m : Ast.module_) : t =
+let of_wasm (m : Wasm.Ast.module_) : t =
   let minst = Module_inst.of_wasm m in
   ({
     funcs = List.mapi m.it.funcs ~f:(Func_inst.of_wasm m minst);
     globals = List.map m.it.globals ~f:Global_inst.of_wasm;
     mems = List.map m.it.memories ~f:Memory_inst.of_wasm;
-    elems = List.map m.it.elems ~f:Elem.of_wasm;
+    tables = List.map m.it.tables ~f:(fun t ->
+        Table_inst.init
+          (Table.of_wasm t)
+          (List.map m.it.elems ~f:Elem.of_wasm))
   })

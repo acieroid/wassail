@@ -89,7 +89,12 @@ let rec data_instr_transfer (i : Instr.data) (state : Domain.state) : Domain.sta
     assert (List.length vstack'' = List.length state.vstack - 2);
     { state with vstack = vstack''; memory = memory' }
 
-let control_instr_transfer (i : Instr.control) (state : Domain.state) (summaries : Summary.t IntMap.t) : result =
+let control_instr_transfer
+    (i : Instr.control) (* The instruction *)
+    (state : Domain.state) (* The pre state *)
+    (summaries : Summary.t IntMap.t) (* Summaries to apply function calls *)
+    (_tables : Table_inst.t list) (* The tables *)
+  : result =
   match i with
   | Call f ->
       (* We encounter a function call, retrieve its summary and apply it *)
@@ -115,7 +120,7 @@ let control_instr_transfer (i : Instr.control) (state : Domain.state) (summaries
     Simple state
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i))
 
-let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t IntMap.t) : result =
+let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t IntMap.t) (tables : Table_inst.t list) : result =
   match b.content with
   | Data instrs ->
     Simple (List.fold_left instrs ~init:state ~f:(fun prestate i ->
@@ -124,6 +129,5 @@ let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t I
         poststate))
   | Control instr ->
     Printf.printf "pre: %s\ncontrol: %s\n" (Domain.to_string state) (Instr.control_to_string instr);
-    control_instr_transfer instr state summaries
+    control_instr_transfer instr state summaries tables
   | Nothing -> Simple state
-

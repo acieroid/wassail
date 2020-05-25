@@ -16,5 +16,9 @@ let of_wasm (e : Ast.var list Ast.segment) : t = {
   offset = List.map e.it.offset.it ~f:Instr.of_wasm;
   init = List.map e.it.init ~f:Var.of_wasm
 }
-             
-      
+
+let to_string (e : t) : string =
+  Printf.sprintf "elem idx:%d offset:%s init:%s"
+    e.index
+    (Instr.list_to_string e.offset)
+    (String.concat ~sep:"," (List.map e.init ~f:string_of_int))

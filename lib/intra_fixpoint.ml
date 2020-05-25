@@ -2,7 +2,7 @@ open Core_kernel
 open Helpers
 
 (** Analyzes a CFG. Returns a map where each basic block is mappped to its input state and the result of applying the transfer function to it *)
-let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : Memory.t) (summaries : Summary.t IntMap.t) : (Domain.state * Transfer.result) IntMap.t =
+let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : Memory.t) (summaries : Summary.t IntMap.t) (tables : Table_inst.t list) : (Domain.state * Transfer.result) IntMap.t =
   let bottom = Transfer.Uninitialized in
   assert (List.length args = List.length cfg.arg_types); (* Given number of arguments should match the in arity of the function *)
   let init = Domain.init args cfg.local_types globals memory in
@@ -32,7 +32,7 @@ let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : 
         | Uninitialized -> init
         | _ -> failwith "should not happen" in
       (* We analyze it *)
-      let out_state = Transfer.transfer block in_state summaries in
+      let out_state = Transfer.transfer block in_state summaries tables in
       (* Has out state changed? *)
       let previous_out_state = snd (IntMap.find_exn !data block_idx) in
       match previous_out_state with
@@ -54,8 +54,8 @@ let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : 
       | _ -> failwith "TODO"), out_state)
 
 (* Similar to analyze, but only return the out state for a CFG *)
-let analyze_coarse (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : Memory.t) (summaries : Summary.t IntMap.t) : Domain.state =
-  let results = analyze cfg args globals memory summaries in
+let analyze_coarse (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : Memory.t) (summaries : Summary.t IntMap.t) (tables : Table_inst.t list) : Domain.state =
+  let results = analyze cfg args globals memory summaries tables in
   match snd (IntMap.find_exn results cfg.exit_block) with
   | Simple s -> s
   | _ -> failwith "TODO"
