@@ -12,6 +12,7 @@ end
 include T
 
 exception UnsupportedRelOp of t
+[@@deriving sexp]
 
 let of_wasm (r : Ast.relop) : t =
   let of_op (op : Wasm.Ast.IntOp.relop) : op = match op with
@@ -30,6 +31,7 @@ let of_wasm (r : Ast.relop) : t =
   | I32 op -> { typ = I32; op = of_op op }
   | I64 op -> { typ = I64; op = of_op op }
   | _ -> failwith "unsupported type"
+
 let to_string (r : t) : string =
   Printf.sprintf "%s.%s"
     (Type.to_string r.typ)
@@ -60,24 +62,43 @@ let lt_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) wi
     { value = Symbolic (Op (Lt, (Symbolic a), (Symbolic b))); typ = I32 };
   | _ ->  bool (* TODO *)
 
+let lt_u (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
+  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.lt_u n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | _ ->  bool (* TODO *)
+
 let gt_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
   | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.gt_s n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | _ -> bool (* TODO *)
+
+let gt_u (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
+  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.gt_u n1 n2 -> const (PrimValue.of_int_t n1 1)
   | _ -> bool (* TODO *)
 
 let le_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
   | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.le_s n1 n2 -> const (PrimValue.of_int_t n1 1)
   | _ -> bool (* TODO *)
 
+let le_u (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
+  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.le_u n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | _ -> bool (* TODO *)
+
 let ge_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
   | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.ge_s n1 n2 -> const (PrimValue.of_int_t n1 1)
   | _ -> bool (* TODO *)
 
+let ge_u (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
+  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.ge_u n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | _ -> bool (* TODO *)
+
 let eval (r : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
-  match r with
-  | { typ = I32; op = Eq } -> eq v1 v2
-  | { typ = I32; op = Ne } -> ne v1 v2
-  | { typ = I32; op = LtS } -> lt_s v1 v2
-  | { typ = I32; op = GtS } -> gt_s v1 v2
-  | { typ = I32; op = LeS } -> le_s v1 v2
-  | { typ = I32; op = GeS } -> ge_s v1 v2
-  | _ -> raise (UnsupportedRelOp r)
+  match r.op with
+  | Eq -> eq v1 v2
+  | Ne -> ne v1 v2
+  | LtS -> lt_s v1 v2
+  | LtU -> lt_u v1 v2
+  | GtS -> gt_s v1 v2
+  | GtU -> gt_u v1 v2
+  | LeS -> le_s v1 v2
+  | LeU -> le_u v1 v2
+  | GeS -> ge_s v1 v2
+  | GeU -> ge_u v1 v2
