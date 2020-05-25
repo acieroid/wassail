@@ -25,8 +25,9 @@ let init (args : Value.t list) (locals : Type.t list) (globals : Globals.t) (mem
 
 let join (s1 : state) (s2 : state) : state = {
   vstack =
-    if List.length s1.vstack <> List.length s2.vstack then
+    if List.length s1.vstack <> List.length s2.vstack then begin
       (* Different length, probably one has not been analyzed yet. Just take the maximal one *)
+      Printf.printf "different length, vstack1: %s, vstack2: %s\n" (Vstack.to_string s1.vstack) (Vstack.to_string s2.vstack);
       if List.length s1.vstack > List.length s2.vstack then begin
         assert Stdlib.(s2.vstack = []);
         s1.vstack
@@ -34,7 +35,7 @@ let join (s1 : state) (s2 : state) : state = {
         assert Stdlib.(s1.vstack = []);
         s2.vstack
       end
-    else
+    end else
       List.map2_exn s1.vstack s2.vstack ~f:Value.join;
   locals = List.map2_exn s1.locals s2.locals ~f:Value.join;
   globals = Globals.join s1.globals s2.globals;

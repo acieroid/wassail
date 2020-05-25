@@ -305,7 +305,8 @@ let join (v1 : t) (v2 : t) : t =
   let vres: value = match (v1.value, v2.value) with
   | (Bottom, _) -> v2.value
   | (_, Bottom) -> v1.value
-  (* | (_, _) when v1 = v2 -> v1 *)
+  | (OpenInterval, _) | (_, OpenInterval) -> OpenInterval
+  | (_, _) when Stdlib.(v1 = v2) -> v1.value 
   | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.eq n1 n2 ->
     Symbolic (Const n1)
   | (Symbolic (Const n1), Symbolic (Const n2)) ->
@@ -325,11 +326,6 @@ let join (v1 : t) (v2 : t) : t =
   | (LeftOpenInterval (Const b), Symbolic (Const c)) -> LeftOpenInterval (Const PrimValue.(max b c))
   | (RightOpenInterval (Op (Plus, Symbolic x, Symbolic (Const _))), RightOpenInterval x') when (Stdlib.(=) x x') ->
     v2.value
-  | (OpenInterval, Symbolic (Const _))
-  | (Symbolic (Const _), OpenInterval)
-  | (OpenInterval, Interval (Const _, Const _))
-  | (Interval (Const _, Const _), OpenInterval)
-    -> OpenInterval
   | (Symbolic (Const _), LeftOpenInterval (Parameter _))
   | (Symbolic (Const _), LeftOpenInterval (Op (_, Symbolic (Parameter _), _)))
   | (Symbolic (Const _), RightOpenInterval (Op (_, Symbolic (Parameter _), _)))
