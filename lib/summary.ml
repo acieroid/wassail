@@ -4,6 +4,7 @@ open Core_kernel
 (* For now it just models the number of arguments taken by the function, and the result on the vstack (in practice, either 0 or 1 value) *)
 type t = {
   nargs : int;
+  typ: Type.t list * Type.t list;
   result : Value.t list;
   globals: Globals.t;
   memory: Memory.t;
@@ -18,6 +19,7 @@ let to_string (s : t) : string =
 (* Constructs a summary given a CFG and a domain state resulting from that CFG *)
 let make (cfg : Cfg.t) (state : Domain.state) : t = {
   nargs = List.length cfg.arg_types;
+  typ = (cfg.arg_types, cfg.return_types);
   result = List.take state.vstack (List.length cfg.return_types);
   globals = state.globals;
   memory = state.memory;
@@ -26,6 +28,7 @@ let make (cfg : Cfg.t) (state : Domain.state) : t = {
 (* Constructs an empty bottom summary given a CFG *)
 let bottom (nglobals : int) (cfg : Cfg.t) : t = {
   nargs = List.length cfg.arg_types;
+  typ = [], [];
   result = List.map cfg.return_types ~f:Value.bottom;
   globals = List.init nglobals ~f:Value.global;
   memory = Memory.initial

@@ -40,3 +40,8 @@ let join (s1 : state) (s2 : state) : state = {
   globals = Globals.join s1.globals s2.globals;
   memory = Memory.join s1.memory s2.memory;
 }
+
+let join_opt (s1 : state) (s2 : state option) : state option =
+  match s2 with
+  | None -> Some s1
+  | Some s2 -> Some (join s1 s2)

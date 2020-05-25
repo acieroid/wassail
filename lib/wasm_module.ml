@@ -6,6 +6,7 @@ module T = struct
     globals : Global_inst.t list;
     mems : Memory_inst.t list;
     tables : Table_inst.t list;
+    types : (Type.t list * Type.t list) list;
     (* XXX: other fields *)
   }
   [@@deriving sexp, compare]
@@ -34,5 +35,8 @@ let of_wasm (m : Wasm.Ast.module_) : t =
     tables = List.map m.it.tables ~f:(fun t ->
         Table_inst.init
           (Table.of_wasm t)
-          (List.map m.it.elems ~f:Elem.of_wasm))
+          (List.map m.it.elems ~f:Elem.of_wasm));
+    types = List.map m.it.types ~f:(fun t -> match t.it with
+        | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
+                              List.map b ~f:Type.of_wasm))
   })

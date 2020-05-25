@@ -28,3 +28,6 @@ let to_string (t : t) : string =
 
 let list_to_string (l : t list) : string =
   String.concat ~sep:", " (List.map l ~f:to_string)
+
+let funtype_to_string (l : t list * t list) : string =
+  Printf.sprintf "%s -> %s" (list_to_string (fst l)) (list_to_string (snd l))

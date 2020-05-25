@@ -93,7 +93,7 @@ let control_instr_transfer
     (i : Instr.control) (* The instruction *)
     (state : Domain.state) (* The pre state *)
     (summaries : Summary.t IntMap.t) (* Summaries to apply function calls *)
-    (_tables : Table_inst.t list) (* The tables *)
+    (module_ : Wasm_module.t) (* The wasm module (read-only) *)
   : result =
   match i with
   | Call f ->
@@ -101,7 +101,27 @@ let control_instr_transfer
       (* We assume all summaries are defined *)
       let summary = IntMap.find_exn summaries f in
       Simple (Summary.apply summary f state)
-  | CallIndirect _ -> failwith "NYI: call_indirect"
+  | CallIndirect typ ->
+    let (v, vstack') = Vstack.pop state.vstack in
+    let state' = { state with vstack = vstack' } in
+    let table = List.nth_exn module_.tables 0 in
+    let funs = Table_inst.get_subsumed_by_index table v in
+    let resulting_state = List.fold_left funs ~init:None ~f:(fun acc f ->
+        match f with
+        | Some fa ->
+          Printf.printf "fa:%d\n" fa;
+          if Stdlib.(List.nth module_.types typ = (List.nth module_.funcs fa).typ) then
+            (* Types match, apply the summary *)
+            let summary = IntMap.find_exn summaries fa in
+            Domain.join_opt (Summary.apply summary fa state') acc
+          else
+            (* Types don't match, can't apply this function so we ignore it *)
+            acc
+        | None -> acc) in
+    begin match resulting_state with
+      | Some st -> Simple st
+      | None -> failwith "call_indirect cannot resolve call"
+    end
   | Br _ ->
     Simple state
   | BrIf _ ->
@@ -120,7 +140,7 @@ let control_instr_transfer
     Simple state
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i))
 
-let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t IntMap.t) (tables : Table_inst.t list) : result =
+let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t IntMap.t) (module_ : Wasm_module.t) : result =
   match b.content with
   | Data instrs ->
     Simple (List.fold_left instrs ~init:state ~f:(fun prestate i ->
@@ -129,5 +149,5 @@ let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t I
         poststate))
   | Control instr ->
     Printf.printf "pre: %s\ncontrol: %s\n" (Domain.to_string state) (Instr.control_to_string instr);
-    control_instr_transfer instr state summaries tables
+    control_instr_transfer instr state summaries module_
   | Nothing -> Simple state

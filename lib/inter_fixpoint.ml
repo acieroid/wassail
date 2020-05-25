@@ -5,7 +5,7 @@ open Helpers
 let data : ((Domain.state option) IntMap.t) ref = ref IntMap.empty
 
 (* Analyze multiple CFGS, returns a map from CFG id to out_state for each CFG *)
-let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) (tables : Table_inst.t list) : Domain.state IntMap.t =
+let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) (module_ : Wasm_module.t) : Domain.state IntMap.t =
   data := (IntMap.of_alist_exn (List.map (IntMap.keys cfgs)
                                   ~f:(fun idx ->
                                       (idx, None))));
@@ -23,7 +23,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) (tables : Table_inst.t list
       let args = List.mapi cfg.arg_types ~f:(fun i t -> Value.parameter t i) in
       Printf.printf "Analyzing cfg %d with globals: [%s] and args: [%s]\n" cfg_idx (Globals.to_string globals) (Value.list_to_string args);
       (* Perform intra-procedural analysis *)
-      let out_state = Intra_fixpoint.analyze_coarse cfg args globals memory summaries tables in
+      let out_state = Intra_fixpoint.analyze_coarse cfg args globals memory summaries module_ in
       (* Check difference with previous state, if there was any *)
       let previous_out_state = IntMap.find_exn !data cfg_idx in
       match previous_out_state with

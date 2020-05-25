@@ -22,7 +22,7 @@ let main filename =
           Printf.printf "CFG for function %d\n" cfg.idx;
           Printf.printf "---------------\n%s\n---------------\n" (Cfg.to_dot cfg)
         );*)
-      let results = Inter_fixpoint.analyze cfgs nglobals wasm_mod.tables in
+      let results = Inter_fixpoint.analyze cfgs nglobals wasm_mod in
       Printf.printf "--------- Results ---------\n";
       IntMap.iteri results ~f:(fun ~key:cfg_idx ~data:res ->
           Printf.printf "Results for function %d: %s\n" cfg_idx (Domain.to_string res)))

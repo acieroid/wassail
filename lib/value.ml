@@ -260,10 +260,23 @@ let value_subsumes (v1 : value) (v2 : value) : bool = match (v1, v2) with
   | OpenInterval, LeftOpenInterval _ -> true
   | OpenInterval, RightOpenInterval _ -> true
   | OpenInterval, OpenInterval -> true
-  | Symbolic (Op (_, Symbolic (Global i), Symbolic (Const x))), Symbolic (Op (_, Symbolic (Global i'), Symbolic (Const x'))) when i = i' ->
+  | Symbolic (Op (_, Symbolic (Global i), Symbolic (Const x))), (* gi OP x *)
+    Symbolic (Op (_, Symbolic (Global i'), Symbolic (Const x'))) (* gi' OP x' *)
+    when i = i' ->
     PrimValue.eq x x'
+  | Symbolic (Op (_, Symbolic (Parameter i), Symbolic (Const x))),
+    Symbolic (Op (_, Symbolic (Parameter i'), Symbolic (Const x')))
+    when i = i' ->
+    PrimValue.eq x x'
+  | Symbolic (Bytes4 (Symbolic (Deref OpenInterval),
+                      Symbolic (Deref OpenInterval),
+                      Symbolic (Deref OpenInterval),
+                      Symbolic (Deref OpenInterval))), _ ->
+    (* If this case ever applies, then we have definitely lost too much precision *)
+    true
   | _, _ ->
     Logging.warn "SubsumesMightBeIncorrect" (Printf.sprintf "assuming %s does not subsume %s" (value_to_string v1) (value_to_string v2));
+    (* Definitely not sound, these cases have to be investigated one by one *)
     false
 
 let subsumes (v1 : t) (v2 : t) : bool = value_subsumes v1.value v2.value

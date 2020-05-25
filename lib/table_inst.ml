@@ -27,3 +27,23 @@ let init (t : Table.t) (elems : Elem.t list) : t =
 
 let get (t : t) (idx : Int32.t) : funcelem =
   Wasm.Lib.Array32.get t.elems idx
+
+let get_subsumed_by_index (t : t) (idx : Value.t) : funcelem list =
+  let rec loop (i : Int32.t) (acc : Int32.t list) : Int32.t list =
+    Printf.printf "index: %d\n" (Int32.to_int_exn i);
+    if Int32.(i >= Wasm.Lib.Array32.length t.elems) then
+      acc
+    else begin
+      Printf.printf "%s subsumes %s? %b\n" (Value.to_string idx) (Value.to_string (Value.i32_const i)) (Value.subsumes idx (Value.i32_const i));
+      loop Int32.(i + 1l) (if Value.subsumes idx (Value.i32_const i) then i :: acc else acc)
+    end
+  in
+  let indices = loop 0l [] in
+  List.map indices ~f:(get t)
+
+let to_string (t : t) : string =
+  Printf.sprintf "elems: %s\n" (String.concat ~sep:","
+                                  (List.map (Array.to_list t.elems)
+                                     ~f:(function
+                                         | None -> "/"
+                                         | Some v -> string_of_int v)))
