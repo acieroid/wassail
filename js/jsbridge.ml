@@ -36,13 +36,23 @@ let js_of_block_sort (sort : Basic_block.block_sort) = Js.string (match sort wit
 
 let js_of_block (block : Basic_block.t) = object%js (self)
   val idx = block.idx
-  val sort = js_of_block_sort block.sort
-  val instrs = Js.array (array_of_list block.instrs js_of_instr)
+  val sort = match block.content with
+    | Nothing -> Js.string "Normal"
+    | Control (Block _) -> Js.string "BlockEntry"
+    | Control (Loop _) -> Js.string "LoopEntry"
+    | Control (Call _) -> Js.string "Function"
+    | Control (Return) -> Js.string "Return"
+    | _ -> Js.string "Normal"
+  val instrs = Js.array (array_of_list (match block.content with
+      | Nothing -> []
+      | Control i -> [Instr.control_to_string i]
+      | Data is -> List.map Instr.data_to_string is)
+      Js.string)
 end
 
 let js_of_cfg (cfg : Cfg.t) = object%js (self)
   val blocks = Js.array (array_of_intmap cfg.basic_blocks (fun x -> Js.def (js_of_block x)))
-  val edges = Js.array (array_of_intmap cfg.edges (fun targets -> Js.def (Js.array (array_of_intlist targets))))
+  val edges = Js.array (array_of_intmap cfg.edges (fun targets -> Js.def (Js.array (array_of_intlist (List.map fst targets)))))
 end
 
 let js_of_state (state : Domain.state) = Js.string (Domain.to_string state)
@@ -82,7 +92,7 @@ let () =
           | None -> failwith "CFG not found"
 
         method analyze =
-          let _ = Wasmtaint.Inter_fixpoint.analyze !(Wasmtaint.cfgs) !(Wasmtaint.nglobals) in
+          let _: Domain.state IntMap.t = Wasmtaint.Inter_fixpoint.analyze !(Wasmtaint.cfgs) !(Wasmtaint.nglobals) in
           ()
 
 (*        method initial_state (nargs : int) (nlocals : int) (nglobals : int) =
