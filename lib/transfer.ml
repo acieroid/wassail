@@ -27,7 +27,20 @@ let rec data_instr_transfer (i : Instr.data) (state : Domain.state) : Domain.sta
     let (_, vstack') = Vstack.pop state.vstack in
     assert (List.length vstack' = List.length state.vstack - 1);
     { state with vstack = vstack' }
-  | Select -> failwith "NYI: select"
+  | Select ->
+    let (c, vstack') = Vstack.pop state.vstack in
+    let (v2, vstack'') = Vstack.pop vstack' in
+    let (v1, vstack''') = Vstack.pop vstack'' in
+    begin match (Value.is_zero c, Value.is_not_zero c) with
+      | (true, false) -> (* definitely 0, keep v2 *)
+        { state with vstack = v2 :: vstack''' }
+      | (false, true) -> (* definitely not 0, keep v1 *)
+        { state with vstack = v1 :: vstack''' }
+      | (true, true) -> (* could be 0 or not 0, join v1 and v2 *)
+        { state with vstack = (Value.join v1 v2) :: vstack''' }
+      | (false, false) -> (* none, push bottom *)
+        { state with vstack = Value.bottom v1.typ :: vstack''' }
+    end
   | LocalGet x ->
     let vstack' = (Locals.get_local state.locals x) :: state.vstack in
     assert (List.length vstack' = 1 + List.length state.vstack);
