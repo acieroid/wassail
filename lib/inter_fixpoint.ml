@@ -1,11 +1,12 @@
 open Core_kernel
 open Helpers
 
-(* TODO: change to Domain.state IntMap.t, adapt find_exn to find in fixpoint *)
-let data : ((Domain.state option) IntMap.t) ref = ref IntMap.empty
+type inter_results = ((((Transfer.result * Transfer.result) IntMap.t) option) IntMap.t)
+(* The results of the inter analysis *)
+let data : inter_results ref = ref IntMap.empty
 
 (* Analyze multiple CFGS, returns a map from CFG id to out_state for each CFG *)
-let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) (module_ : Wasm_module.t) : Domain.state IntMap.t =
+let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) (module_ : Wasm_module.t) : unit =
   data := (IntMap.of_alist_exn (List.map (IntMap.keys cfgs)
                                   ~f:(fun idx ->
                                       (idx, None))));
@@ -23,11 +24,12 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) (module_ : Wasm_module.t) :
       let args = List.mapi cfg.arg_types ~f:(fun i t -> Value.parameter t i) in
       Printf.printf "Analyzing cfg %d with globals: [%s] and args: [%s]\n" cfg_idx (Globals.to_string globals) (Value.list_to_string args);
       (* Perform intra-procedural analysis *)
-      let out_state = Intra_fixpoint.analyze_coarse cfg args globals memory summaries module_ in
+      let results = Intra_fixpoint.analyze cfg args globals memory summaries module_ in
+      let out_state = Intra_fixpoint.out_state cfg results in
       (* Check difference with previous state, if there was any *)
-      let previous_out_state = IntMap.find_exn !data cfg_idx in
-      match previous_out_state with
-      | Some st when Domain.compare_state out_state st = 0 ->
+      let previous_results = IntMap.find_exn !data cfg_idx in
+      match previous_results with
+      | Some res when Domain.compare_state out_state (Intra_fixpoint.out_state cfg res) = 0 ->
         (* Same results as before, we can just recurse without having to recompute globals nor memory *)
         fixpoint (IntSet.remove worklist cfg_idx) globals memory summaries
       | _ ->
@@ -37,9 +39,10 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) (module_ : Wasm_module.t) :
         let callees = Cfg.callees cfg in
         let callers = Cfg.callers cfgs cfg in
         let summary = Summary.make cfg out_state in
+        Printf.printf "Final summary is: %s\n" (Summary.to_string summary);
         let new_summaries = IntMap.set summaries ~key:cfg.idx ~data:summary in
         (* Update data of the analysis and recurse *)
-        data := IntMap.set !data ~key:cfg_idx ~data:(Some out_state);
+        data := IntMap.set !data ~key:cfg_idx ~data:(Some results);
         fixpoint (IntSet.union (IntSet.remove worklist cfg_idx) (IntSet.union callees callers))
           (* These should always remain the same, and not be necessary anymore *)
           globals memory new_summaries
@@ -49,6 +52,3 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) (module_ : Wasm_module.t) :
   (* Globals are symbolic variables, values are top *)
   let globals = List.init nglobals ~f:Value.global in
   fixpoint (IntSet.of_list (IntMap.keys cfgs)) globals Memory.initial summaries0 ;
-  IntMap.map !data ~f:(fun v -> match v with
-      | Some result -> result
-      | None -> failwith "...")

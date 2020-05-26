@@ -8,6 +8,11 @@ type result =
   | Branch of Domain.state * Domain.state (** Upon a brif, there are two successor states: one where the condition holds, and where where it does not hold. This is used to model that. *)
 [@@deriving sexp, compare]
 
+let result_to_string (r : result) : string = match r with
+  | Uninitialized -> "uninitialized"
+  | Simple st -> Domain.to_string st
+  | Branch (st1, st2) -> Printf.sprintf "branch:\n%s\n%s" (Domain.to_string st1) (Domain.to_string st2)
+
 let join_result (r1 : result) (r2 : result) =
   match (r1, r2) with
   | Uninitialized, _ -> r2

@@ -2,7 +2,15 @@ open Core_kernel
 open Helpers
 
 (** Analyzes a CFG. Returns the final state after computing the transfer of the entire function *)
-let analyze_coarse (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : Memory.t) (summaries : Summary.t IntMap.t) (module_ : Wasm_module.t) : Domain.state =
+let analyze
+    (cfg : Cfg.t) (* The CFG to analyze *)
+    (args : Value.t list) (* The arguments *) (* TODO: always p0, p1, etc? If so, can be initialized here instead of taken as argument *)
+    (globals : Globals.t) (* The initial value for globals *) (* TODO: same todo, maybe nglobals is sufficient *)
+    (memory : Memory.t) (* The memory *) (* TODO: again, memory can be initialized here *)
+    (summaries : Summary.t IntMap.t) (* The current summaries *)
+    (module_ : Wasm_module.t) : (* The overall module, needed to access types, tables, etc. *)
+  (Transfer.result * Transfer.result) IntMap.t (* Returns a mapping from block ids to their in and out values *)
+  =
   let bottom = Transfer.Uninitialized in
   assert (List.length args = List.length cfg.arg_types); (* Given number of arguments should match the in arity of the function *)
   let init = Domain.init args cfg.local_types globals memory in
@@ -14,6 +22,7 @@ let analyze_coarse (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (me
       () (* No more elements to consider. We can stop here *)
     else
       let block_idx = IntSet.min_elt_exn worklist in
+      Printf.printf "Analyzing block %d\n" block_idx;
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
       let predecessors = Cfg.predecessors cfg block_idx in
@@ -49,9 +58,10 @@ let analyze_coarse (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (me
         fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors)) (iteration+1)
   in
   fixpoint (IntSet.singleton cfg.entry_block) 1;
-  (* IntMap.map !data ~f:(fun (in_state, out_state) -> (match in_state with
-      | Simple s -> s
-      | _ -> failwith "TODO"), out_state) *)
-  match snd (IntMap.find_exn !data cfg.exit_block) with
+  !data
+
+(* Extract the out state from intra-procedural results *)
+let out_state (cfg : Cfg.t) (results : (Transfer.result * Transfer.result) IntMap.t) : Domain.state =
+    match snd (IntMap.find_exn results cfg.exit_block) with
   | Simple s -> s
   | _ -> failwith "Multiple exits for function?"

@@ -177,6 +177,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
   (* We now filter empty normal blocks *)
   let (actual_blocks, filtered_blocks) = List.partition_tf blocks' ~f:(fun block -> match block.content with
       | Data [] -> not simplify (* only filter if we need to simplify *)
+      | Nothing -> not simplify || block.idx = return_block.idx (* Don't remove the return block *)
       | _ -> true) in
   let filtered_blocks_idx = List.map filtered_blocks ~f:(fun b -> b.idx) in
   (* And we have to redirect the edges: if there is an edge to a removed block, we make it point to its successors *)

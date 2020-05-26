@@ -10,6 +10,7 @@ module Instr = Instr
 module Inter_fixpoint = Inter_fixpoint
 module Basic_block = Basic_block
 module Logging = Logging
+module Transfer = Transfer
 
 let trace name = print_endline ("-- " ^ name)
 
@@ -54,6 +55,7 @@ let parse_string str run =
   success
 
 let cfgs : (Cfg.t IntMap.t) ref = ref IntMap.empty
+let module_ : (Wasm_module.t option) ref = ref None
 
 (** A map of CFG dependencies. Each entry is of the form idx -> [idx1, idx2, ...] meaning that CFG idx depends on the analysis of CFGs idx1, idx2, etc. *)
 let cfg_deps : (int list IntMap.t) ref = ref IntMap.empty
@@ -64,6 +66,7 @@ let initialize (program : string) : unit =
         match def.it with
         | Script.Textual m ->
           let wasm_mod = Wasm_module.of_wasm m in
+          module_ := Some wasm_mod;
           trace (Printf.sprintf "nglobals: %d\n" (List.length wasm_mod.globals));
           nglobals := List.length wasm_mod.globals;
           cfgs := IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun faddr _ -> (faddr, Cfg_builder.build faddr wasm_mod)));

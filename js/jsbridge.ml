@@ -57,6 +57,8 @@ end
 
 let js_of_state (state : Domain.state) = Js.string (Domain.to_string state)
 
+let js_of_result (result : Transfer.result) = Js.string (Transfer.result_to_string result)
+
 let () =
     Js.export "jsbridge"
       (object%js
@@ -92,8 +94,9 @@ let () =
           | None -> failwith "CFG not found"
 
         method analyze =
-          let _: Domain.state IntMap.t = Wasmtaint.Inter_fixpoint.analyze !(Wasmtaint.cfgs) !(Wasmtaint.nglobals) in
-          ()
+          Wasmtaint.Inter_fixpoint.analyze !(Wasmtaint.cfgs) !(Wasmtaint.nglobals) (match !(Wasmtaint.module_) with
+              | Some m -> m
+              | None -> failwith "Module not loaded")
 
 (*        method initial_state (nargs : int) (nlocals : int) (nglobals : int) =
           Domain.init
@@ -105,7 +108,10 @@ let () =
             (* memory: M *)
             Memory.top
 *)
-        method result (cfgidx : int) = match IntMap.find !(Inter_fixpoint.data) cfgidx with
-          | Some (Some state) -> Js.Unsafe.inject (js_of_state state)
+        method result (cfgidx : int) (blockidx : int) = match IntMap.find !(Inter_fixpoint.data) cfgidx with
+          | Some (Some results) -> begin match IntMap.find results blockidx with
+              | Some st -> Js.Unsafe.inject (js_of_result (snd st))
+              | None -> Js.Unsafe.inject (Js.undefined)
+            end
           | _ -> Js.Unsafe.inject (Js.undefined)
       end)
