@@ -1,8 +1,8 @@
 open Core_kernel
 open Helpers
 
-(** Analyzes a CFG. Returns a map where each basic block is mappped to its input state and the result of applying the transfer function to it *)
-let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : Memory.t) (summaries : Summary.t IntMap.t) (module_ : Wasm_module.t) : (Domain.state * Transfer.result) IntMap.t =
+(** Analyzes a CFG. Returns the final state after computing the transfer of the entire function *)
+let analyze_coarse (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : Memory.t) (summaries : Summary.t IntMap.t) (module_ : Wasm_module.t) : Domain.state =
   let bottom = Transfer.Uninitialized in
   assert (List.length args = List.length cfg.arg_types); (* Given number of arguments should match the in arity of the function *)
   let init = Domain.init args cfg.local_types globals memory in
@@ -49,13 +49,9 @@ let analyze (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : 
         fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors)) (iteration+1)
   in
   fixpoint (IntSet.singleton cfg.entry_block) 1;
-  IntMap.map !data ~f:(fun (in_state, out_state) -> (match in_state with
+  (* IntMap.map !data ~f:(fun (in_state, out_state) -> (match in_state with
       | Simple s -> s
-      | _ -> failwith "TODO"), out_state)
-
-(* Similar to analyze, but only return the out state for a CFG *)
-let analyze_coarse (cfg : Cfg.t) (args : Value.t list) (globals : Globals.t) (memory : Memory.t) (summaries : Summary.t IntMap.t) (module_ : Wasm_module.t) : Domain.state =
-  let results = analyze cfg args globals memory summaries module_ in
-  match snd (IntMap.find_exn results cfg.exit_block) with
+      | _ -> failwith "TODO"), out_state) *)
+  match snd (IntMap.find_exn !data cfg.exit_block) with
   | Simple s -> s
-  | _ -> failwith "TODO"
+  | _ -> failwith "Multiple exits for function?"
