@@ -57,15 +57,13 @@
         Step 4: <a href="#" onclick="draw();">View CFG</a>  <select id="cfgIdx"></select> <br/>
         Step 5: <a href="#" onclick="analyze();">Analyze</a><br/>
         Info:<br/>
-        <textarea id="info" rows="20" cols="80"></textarea>
+        <textarea id="info" rows="25" cols="80"></textarea>
         Log:<br/>
-        <textarea id="log" rows="25" cols="80"></textarea>
+        <textarea id="log" rows="10" cols="80"></textarea>
       </div>
       <div class="fixed">
-        <svg id="view" height="100%" width="800"><g/></svg>
+        <svg id="view" height="100%" width="100%" style="border: 1px solid;"><g/></svg>
       </div>
-
-
     </div>
     <script src="https://d3js.org/d3.v5.min.js"></script>
     <script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.js"></script>

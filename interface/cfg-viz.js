@@ -1,6 +1,5 @@
 "use strict";
 
-var returnBlock = {}; /* TODO */
 var indices = {}
 
 class View {
@@ -29,7 +28,10 @@ class View {
         this.render = new dagreD3.render();
     }
     clear() {
+        let that = this;
+        this.g.nodes().forEach(function (node) { that.g.removeNode(node) })
         this.inner.selectAll("g").remove();
+        this.redraw();
     }
     label(cfgIdx, block) {
         switch (block.sort) {
@@ -48,7 +50,6 @@ class View {
         case "LoopExit":
             return { label: `Loop exit (${block.idx})`, shape: "diamond" };
         case "Return":
-            returnBlock[cfgIdx] = `block${cfgIdx}-${block.idx}`;
             return { label : `Return` };
         case "Function":
             const instr = block.instrs[0];
@@ -63,13 +64,6 @@ class View {
 
         // Render the graph
         this.render(this.inner, this.g)
-
-        // Center the graph
-        let initialScale = 0.75;
-        this.svg.call(this.zoom.transform,
-                      d3.zoomIdentity.translate((this.svg.attr("width") - this.g.graph().width * initialScale) / 2, 20).scale(initialScale));
-
-        this.svg.attr('height', this.g.graph().height * initialScale + 40);
     }
     drawDeps(deps) {
         let that = this;
@@ -137,8 +131,9 @@ let view = new View();
 function load() {
     // Set up logging
     jsbridge.addLogger(function (opt, msg) {
-        document.getElementById("log").appendChild(document.createTextNode(`[${opt}]: ${msg}`));
-        document.getElementById("log").appendChild(document.createElement("br"));
+        // document.getElementById("log").appendChild(document.createTextNode(`[${opt}]: ${msg}`));
+        // document.getElementById("log").appendChild(document.createElement("br"));
+        // textarea.scrollTop = textarea.scrollHeight;
     });
 
     // Loads the current code
