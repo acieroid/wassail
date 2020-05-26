@@ -1,5 +1,5 @@
 EMCC=/usr/lib/emscripten/emcc
-EMCCFLAGS= -Oz # full size optimizations
+EMCCFLAGS= -g2 -Oz # full size optimizations, keep debug information
 
 WASM2WAT=wasm2wat
 
