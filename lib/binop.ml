@@ -111,6 +111,11 @@ let or_ (v1 : Value.t) (v2 : Value.t) : Value.t =
   | (Symbolic (Const one), _) when PrimValue.is one 1 -> v1
   | _ -> { value = Symbolic (Op (Or, v1.value, v2.value)); typ = v1.typ }
 
+let xor (v1 : Value.t) (v2 : Value.t) : Value.t =
+  match (v1.value, v2.value) with
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> const PrimValue.(xor n1 n2)
+  | _ -> { value = Symbolic (Op (Xor, v1.value, v2.value)); typ = v1.typ }
+
 (** Evaluates a binary operation on two values *)
 let eval (m : Memory.t) (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
   match b.op with
@@ -119,7 +124,8 @@ let eval (m : Memory.t) (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
   | Mul -> mul (Memory.resolve m v1) (Memory.resolve m v2)
   | RemS -> rem_s (Memory.resolve m v1) (Memory.resolve m v2)
   (* Don't resolve for operations that are mostly used for conditions *)
-  | Shl -> shl (v1) (v2)
+  | Shl -> shl v1 v2
   | And -> and_ v1 v2
   | Or -> or_ v1 v2
+  | Xor -> xor v1 v2
   | _ -> raise (UnsupportedBinOp b)

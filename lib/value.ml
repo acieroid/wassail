@@ -128,7 +128,7 @@ module T = struct
   type operator =
     | Plus | Minus | Times
     | Lt | LtE | Gt | GtE | Eq
-    | And | Or
+    | And | Or | Xor
   [@@deriving sexp, compare]
   type symbolic =
     | Parameter of int (* p0 *)
@@ -188,7 +188,8 @@ and symbolic_to_string (v : symbolic) : string = match v with
       | GtE -> ">="
       | Eq -> "="
       | And -> "&"
-      | Or -> "|"
+      | Or -> "or"
+      | Xor -> "xor"
     end) (value_to_string right)
   | Deref v -> Printf.sprintf "*%s" (value_to_string v)
   | Bytes4 (b0, b1, b2, b3) -> Printf.sprintf "bytes[%s,%s,%s,%s]" (value_to_string b0) (value_to_string b1) (value_to_string b2) (value_to_string b3)
