@@ -58,6 +58,7 @@ end
 let js_of_state (state : Domain.state) = Js.string (Domain.to_string state)
 
 let js_of_result (result : Transfer.result) = Js.string (Transfer.result_to_string result)
+let js_of_result_pair (result : (Transfer.result * Transfer.result)) = Js.string (Printf.sprintf "pre:\n%s\npost:\n%s" (Transfer.result_to_string (fst result)) (Transfer.result_to_string (snd result)))
 
 let () =
     Js.export "jsbridge"
@@ -110,7 +111,7 @@ let () =
 *)
         method result (cfgidx : int) (blockidx : int) = match IntMap.find !(Inter_fixpoint.data) cfgidx with
           | Some (Some results) -> begin match IntMap.find results blockidx with
-              | Some st -> Js.Unsafe.inject (js_of_result (snd st))
+              | Some st -> Js.Unsafe.inject (js_of_result_pair st)
               | None -> Js.Unsafe.inject (Js.undefined)
             end
           | _ -> Js.Unsafe.inject (Js.undefined)

@@ -120,14 +120,13 @@ class View {
         this.redraw();
 
         let allNodes = this.inner.selectAll("g.node");
-        console.log(allNodes);
         allNodes.on("click", function (blockName) {
             let blockIdx = indices[blockName];
             let result = jsbridge.result(cfgIdx, blockIdx);
             if (result != undefined) {
-                alert(`Analysis results for block ${blockIdx}:\n${result}`);
+                document.getElementById("info").value = `Analysis results for block ${blockIdx}:\n${result}`;
             } else {
-                alert(`No analysis result for block ${blockIdx}`);
+                document.getElementById("info").value = `No analysis results for block ${blockIdx}:`;
             }
         });
     }

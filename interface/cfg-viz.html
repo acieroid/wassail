@@ -44,24 +44,27 @@
   </head>
   <body>
     <div class="container">
-      <div class="fixed">
-        <svg id="view" width="800"><g/></svg>
-      </div>
-      <div class="fixed bottom" id="log">
-      </div>
-      <div class="flex-item">
+      <div class="flix-item">
         Step 1: <a href="#" onclick="paste();">Paste program</a>
         <select id="program">
           <option value="0">Simple</option>
           <option value="1">Emscripten helloworld</option>
         </select><br/>
-        <textarea id="code" rows="10" cols="50"></textarea>
+        <textarea id="code" rows="10" cols="80"></textarea>
         <br/>
         Step 2: <a href="#" onclick="load();">Load program</a><br/>
         Step 2': <a href="#" onclick="viewDeps();">View dependencies</a></br>
         Step 4: <a href="#" onclick="draw();">View CFG</a>  <select id="cfgIdx"></select> <br/>
         Step 5: <a href="#" onclick="analyze();">Analyze</a><br/>
+        Info:<br/>
+        <textarea id="info" rows="20" cols="80"></textarea>
+        Log:<br/>
+        <textarea id="log" rows="25" cols="80"></textarea>
       </div>
+      <div class="fixed">
+        <svg id="view" height="100%" width="800"><g/></svg>
+      </div>
+
 
     </div>
     <script src="https://d3js.org/d3.v5.min.js"></script>
