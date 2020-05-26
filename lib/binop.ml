@@ -64,6 +64,7 @@ let add (v1 : Value.t) (v2 : Value.t) : Value.t =
   | (Symbolic (Op _), _) -> simplify_value (Symbolic (Op (Plus, v1.value, v2.value)))
   | (Symbolic (Parameter i), _) -> simplify_value (Symbolic (Op (Plus, Symbolic (Parameter i), v2.value)))
   | (Symbolic (Global i), _) -> simplify_value (Symbolic (Op (Plus, Symbolic (Global i), v2.value)))
+  | (Symbolic (Deref _), _) -> Symbolic (Op (Plus, v1.value, v2.value))
   | (Interval (Const a, Const b), Symbolic (Const n)) -> Interval (Const (PrimValue.add a n), Const (PrimValue.add b n))
   | (RightOpenInterval (Const x), Symbolic (Const y)) -> RightOpenInterval (Const (PrimValue.add x y))
   | (LeftOpenInterval (Const x), Symbolic (Const y)) -> RightOpenInterval (Const (PrimValue.add x y))
@@ -101,14 +102,14 @@ let and_ (v1 : Value.t) (v2 : Value.t) : Value.t =
   | (Symbolic (Const n1), Symbolic (Const n2)) -> const PrimValue.(and_ n1 n2)
   | (_, Symbolic (Const one)) when PrimValue.is one 1 -> v1
   | (Symbolic (Const one), _) when PrimValue.is one 1 -> v1
-  | _ -> top (Printf.sprintf "land %s %s" (Value.to_string v1) (Value.to_string v2))
+  | _ -> { value = Symbolic (Op (And, v1.value, v2.value)); typ = v1.typ }
 
 let or_ (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1.value, v2.value) with
   | (Symbolic (Const n1), Symbolic (Const n2)) -> const PrimValue.(or_ n1 n2)
   | (_, Symbolic (Const one)) when PrimValue.is one 1 -> v1
   | (Symbolic (Const one), _) when PrimValue.is one 1 -> v1
-  | _ -> top (Printf.sprintf "land %s %s" (Value.to_string v1) (Value.to_string v2))
+  | _ -> { value = Symbolic (Op (Or, v1.value, v2.value)); typ = v1.typ }
 
 (** Evaluates a binary operation on two values *)
 let eval (m : Memory.t) (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
