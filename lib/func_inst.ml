@@ -2,6 +2,7 @@ open Core_kernel
 
 module T = struct
   type t = {
+    idx : int;
     name : string option;
     typ : (Type.t list * Type.t list);
     module_: Module_inst.t;
@@ -19,6 +20,7 @@ let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (index : int) (f : Wa
   in
   match Wasm.Ast.func_type_for m f.it.ftype with
   | FuncType (input, output) -> {
+      idx = index;
       name = name;
       typ = (List.map input ~f:Type.of_wasm, List.map output ~f:Type.of_wasm);
       module_ = minst;

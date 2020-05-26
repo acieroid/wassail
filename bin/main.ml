@@ -17,7 +17,9 @@ let main filename =
   apply_to_textual filename (fun m ->
       let wasm_mod = Wasm_module.of_wasm m in
       let nglobals = List.length wasm_mod.globals in
-      let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun faddr _ -> (faddr, Cfg_builder.build faddr wasm_mod))) in
+      let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
+          let faddr = wasm_mod.nimports + i in
+          (faddr, Cfg_builder.build faddr wasm_mod))) in
       (*IntMap.iter cfgs ~f:(fun cfg ->
           Printf.printf "CFG for function %d\n" cfg.idx;
           Printf.printf "---------------\n%s\n---------------\n" (Cfg.to_dot cfg)
