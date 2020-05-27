@@ -128,19 +128,38 @@ class View {
 
 let view = new View();
 
-function load() {
-    // Set up logging
-    jsbridge.addLogger(function (opt, msg) {
-        // document.getElementById("log").appendChild(document.createTextNode(`[${opt}]: ${msg}`));
-        // document.getElementById("log").appendChild(document.createElement("br"));
-        // textarea.scrollTop = textarea.scrollHeight;
-    });
+function clearLog() {
+    // document.getElementById("log").value = "";
+}
+function log(msg) {
+    document.getElementById("log").appendChild(document.createTextNode(msg));
+}
 
+var initialized = false
+function init() {
+    // Set up logging
+    if (!initialized) jsbridge.addLogger(function (opt, msg) { log(`[${opt}]: ${msg}`); });
+    initialized = true;
+}
+
+function load() {
+    init();
+    clearLog();
     // Loads the current code
-    jsbridge.init(document.getElementById("code").value)
+    try {
+        jsbridge.init(document.getElementById("code").value);
+    } catch (err) {
+        log(`Error when parsing: ${err}\n`);
+        return;
+    }
+    log(`Program successfully loaded\n`);
 
     // Add all CFGs to the select input
     let sel = document.getElementById("cfgIdx");
+    // First clear the previous CFG indices
+    sel.childNodes.forEach(function (child) {
+        sel.removeChild(child);
+    });
     jsbridge.cfgIndices().forEach(function (idx) {
         var opt = document.createElement("option");
         opt.appendChild(document.createTextNode(`CFG ${idx}`));
@@ -155,7 +174,11 @@ function draw() {
 }
 
 function analyze() {
+    log(`Running analysis...\n`)
+    let start = window.performance.now();
     jsbridge.analyze();
+    let end = window.performance.now();
+    log(`Analysis terminated in ${end - start}ms\n`);
     let cfgIdx = document.getElementById("cfgIdx").value;
     view.draw(cfgIdx);
 }
@@ -164,7 +187,25 @@ function viewDeps() {
     view.drawDeps(jsbridge.deps());
 }
 
-var programs = [`
+var programs = [
+`(module
+  ;; i32 -> i32 type
+  (type (;0;) (func (param i32) (result i32)))
+  ;; identitiy function
+  (func (;0;) (type 0) (param i32) (result i32)
+    local.get 0)
+  ;; every wasm program has to have one table
+  (table (;0;) 1 1 funcref)
+  ;; linear memory, of size 2 (initial and minimal size, in pages of 64kB)
+  (memory (;0;) 2)
+  ;; one global pointing to the last 4 bytes in memory
+  (global (;0;) (mut i32) (i32.const 66560))
+  ;; the memory is exported
+  (export "memory" (memory 0))
+  ;; the identity fuunction is exported
+  (export "id" (func 0)))
+`,
+`
 (module
   (type (;0;) (func (param i32) (result i32)))
   (type (;1;) (func (param i32 i32 i32)))
@@ -1210,7 +1251,9 @@ var programs = [`
   (data (;4;) (i32.const 1123) "\\0a\\ff\\ff\\ff\\ff")
   (data (;5;) (i32.const 2752) "\`\\0bP"))
 `]
+
 function paste() {
     let idx = document.getElementById("program").value;
     document.getElementById("code").value = programs[idx];
 }
+

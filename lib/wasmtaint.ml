@@ -15,16 +15,13 @@ module Transfer = Transfer
 let trace name = print_endline ("-- " ^ name)
 
 let error at category msg =
-  trace ("Error: ");
-  prerr_endline (Source.string_of_region at ^ ": " ^ category ^ ": " ^ msg);
-  false
+  failwith (Printf.sprintf "Error: %s" (Source.string_of_region at ^ ": " ^ category ^ ": " ^ msg))
 
 let input_from get_script run =
   try
     let script = get_script () in
     trace "Running...";
     run script;
-    true
   with
   | Decode.Code (at, msg) -> error at "decoding error" msg
   | Parse.Syntax (at, msg) -> error at "syntax error" msg
@@ -49,10 +46,10 @@ let parse_file name run =
 
 let parse_string str run =
   let lexbuf = Lexing.from_string str in
-    let success = input_from (fun _ ->
-        let var_opt, def = Parse.parse "foo.wat" lexbuf Parse.Module in
-        [(var_opt, def)]) run in
-  success
+  input_from (fun _ ->
+      let var_opt, def = Parse.parse "foo.wat" lexbuf Parse.Module in
+      [(var_opt, def)])
+    run
 
 let cfgs : (Cfg.t IntMap.t) ref = ref IntMap.empty
 let module_ : (Wasm_module.t option) ref = ref None
@@ -74,4 +71,4 @@ let initialize (program : string) : unit =
         | Script.Encoded _ -> failwith "unsupported"
         | Script.Quoted _ -> failwith "unsupported"
       ) in
-  trace (Printf.sprintf "Success? %b" (parse_string program run))
+  (parse_string program run)

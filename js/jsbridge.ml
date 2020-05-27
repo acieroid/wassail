@@ -14,10 +14,10 @@ let array_of_intmap (map : 'a IntMap.t) (f : 'a -> 'b) : 'b array =
     | None -> Js.undefined)
   | None -> [| |]
 
-let array_of_intlist (l : int list) : int array =
-  Array.init (List.length l) (fun i -> (List.nth l i))
+let array_of_intlist (l : int list) : int Js.js_array Js.t =
+  Js.array (Array.init (List.length l) (fun i -> (List.nth l i)))
 
-let array_of_intmap_indices (map : 'a IntMap.t) : int array =
+let array_of_intmap_indices (map : 'a IntMap.t) : int Js.js_array Js.t =
   array_of_intlist (IntMap.keys map)
 
 let array_of_list (l : 'a list) (f : 'a -> 'b) : 'b array =
@@ -52,7 +52,7 @@ end
 
 let js_of_cfg (cfg : Cfg.t) = object%js (self)
   val blocks = Js.array (array_of_intmap cfg.basic_blocks (fun x -> Js.def (js_of_block x)))
-  val edges = Js.array (array_of_intmap cfg.edges (fun targets -> Js.def (Js.array (array_of_intlist (List.map fst targets)))))
+  val edges = Js.array (array_of_intmap cfg.edges (fun targets -> Js.def (array_of_intlist (List.map fst targets))))
 end
 
 let js_of_state (state : Domain.state) = Js.string (Domain.to_string state)
