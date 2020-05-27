@@ -91,7 +91,7 @@ let rem_s (v1 : Value.t) (v2 : Value.t) : Value.t =
 
 let shl (v1 : Value.t) (v2 : Value.t) : Value.t =
   match (v1.value, v2.value) with
-  (* | (Symbolic (Const n1), Symbolic (Const n2)) -> const (Int32.shift_left n1 (Int32.to_int_exn n2)) *) (* TODO *)
+   (Symbolic (Const n1), Symbolic (Const n2)) -> const (PrimValue.shl n1 n2)
   (* | (Interval (Const a, Const b), Symbolic (Const 2l)) -> Interval (Const (Int32.( * ) a 4l), Const (Int32.( * ) b 4l)) *) (* TODO *)
   (* | (Symbolic _, Symbolic (Const 2l)) -> symbolic (Op (Times, v1, Symbolic (Const 4l))) *) (* TODO *)
   (* | (RightOpenInterval (Const 0l), Symbolic (Const 2l)) -> v1 *) (* TODO *)
