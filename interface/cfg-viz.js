@@ -129,10 +129,17 @@ class View {
 let view = new View();
 
 function clearLog() {
-    // document.getElementById("log").value = "";
+    let textarea = document.getElementById("log");
+    textarea.childNodes.forEach(function (child) {
+        textarea.removeChild(child);
+    });
 }
 function log(msg) {
     document.getElementById("log").appendChild(document.createTextNode(msg));
+}
+function logGoToBottom() {
+    let textarea = document.getElementById("log");
+    textarea.scrollTop = textarea.scrollHeight;
 }
 
 var initialized = false
@@ -166,6 +173,7 @@ function load() {
         opt.value = `${idx}`;
         sel.appendChild(opt);
     });
+    logGoToBottom();
 }
 
 function draw() {
@@ -174,13 +182,16 @@ function draw() {
 }
 
 function analyze() {
-    log(`Running analysis...\n`)
+    clearLog();
+    log(`Running analysis...\n`);
     let start = window.performance.now();
     jsbridge.analyze();
     let end = window.performance.now();
     log(`Analysis terminated in ${end - start}ms\n`);
+    logGoToBottom();
     let cfgIdx = document.getElementById("cfgIdx").value;
     view.draw(cfgIdx);
+    logGoToBottom();
 }
 
 function viewDeps() {
