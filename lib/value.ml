@@ -20,6 +20,17 @@ module PrimValue = struct
     | I32 0l | I64 0L -> true
     | _ -> false
 
+  let byte_of (v : t) (byte : int) = match (v, byte) with
+    | (I32 x, 0) -> I32 Int32.(x land  0xFFl)
+    | (I32 x, 1) -> I32 Int32.(shift_left (x land 0xFF00l) 8)
+    | (I32 x, 2) -> I32 Int32.(shift_left (x land 0xFF0000l) 16)
+    | (I32 x, 3) -> I32 Int32.(shift_left (x land 0xFF000000l) 24)
+    | (I64 x, 0) -> I64 Int64.(x land 0xFFL)
+    | (I64 x, 1) -> I64 Int64.(shift_left (x land 0xFF00L) 8)
+    | (I64 x, 2) -> I64 Int64.(shift_left (x land 0xFF0000L) 16)
+    | (I64 x, 3) -> I64 Int64.(shift_left (x land 0xFF000000L) 24)
+    | _ -> failwith "invalid call to byte_of"
+
   let is (v : t) (n : int) : bool = match v with
     | I32 n' -> Int32.(n' = of_int_exn n)
     | I64 n' -> Int64.(n' = of_int_exn n)
@@ -134,7 +145,7 @@ module T = struct
     | Parameter of int (* p0 *)
     | Global of int (* g0 *)
     | Op of operator * value * value (* g0-16 *)
-    | Bytes4 of value * value * value * value (* b0b1b2b3 *)
+    | Bytes4 of value * value * value * value (* b0b1b2b3, ordered as expected: b3 is the rightmost byte, and the righmost value in Bytes4 *)
     | Byte of value * int (* x@0 is byte 0 of value x *)
     | Deref of value (* *g0 *)
     | Const of PrimValue.t
@@ -219,8 +230,23 @@ let rec simplify_symbolic (sym : symbolic) : symbolic =
   | Op (Eq, Symbolic (Op (Lt, a, b)), Symbolic (Const (I32 0l))) ->
     (* a<b=0 = a>b *)
     Op (GtE, a, b)
+  | Bytes4 (Symbolic (Byte (Symbolic (Const a), byte_a)),
+            Symbolic (Byte (Symbolic (Const b), byte_b)),
+            Symbolic (Byte (Symbolic (Const c), byte_c)),
+            Symbolic (Byte (Symbolic (Const d), byte_d))) ->
+    Const (PrimValue.or_
+             (PrimValue.shl (PrimValue.byte_of a byte_a) (I32 24l))
+             (PrimValue.or_ (PrimValue.shl (PrimValue.byte_of b byte_b) (I32 16l))
+                (PrimValue.or_ (PrimValue.shl (PrimValue.byte_of c byte_c) (I32 8l))
+                   (PrimValue.byte_of d byte_d))))
+  | Bytes4 (Symbolic (Byte (Symbolic x, 3)),
+            Symbolic (Byte (Symbolic x', 2)),
+            Symbolic (Byte (Symbolic x'', 1)),
+            Symbolic (Byte (Symbolic x''', 0))) when Stdlib.(x = x' && x' = x'' && x'' = x''') ->
+    x
   (* TODO: many more cases *)
   | (Global _) | (Parameter _) | Const _
+  | Byte (Symbolic (Const _), _) | Byte (Symbolic (Global _), _) | Byte (Symbolic (Parameter _), _)
   | Op (_, Symbolic (Global _), Symbolic (Const _))
   | Op (_, Symbolic (Parameter _), Symbolic (Const _)) ->
     (* These cases cannot be simplified *)
@@ -259,11 +285,7 @@ let value_subsumes (v1 : value) (v2 : value) : bool = match (v1, v2) with
   | RightOpenInterval (Const a), Symbolic (Const n) -> PrimValue.(le_s a n)
   | RightOpenInterval (Const a), Interval (Const a', _) -> PrimValue.(le_s a a')
   | RightOpenInterval (Const a), RightOpenInterval (Const a') -> PrimValue.(le_s a a')
-  | OpenInterval, Symbolic (Const _) -> true
-  | OpenInterval, Interval _ -> true
-  | OpenInterval, LeftOpenInterval _ -> true
-  | OpenInterval, RightOpenInterval _ -> true
-  | OpenInterval, OpenInterval -> true
+  | OpenInterval, _ -> true
   | Symbolic (Op (_, Symbolic (Global i), Symbolic (Const x))), (* gi OP x *)
     Symbolic (Op (_, Symbolic (Global i'), Symbolic (Const x'))) (* gi' OP x' *)
     when i = i' ->
@@ -272,11 +294,14 @@ let value_subsumes (v1 : value) (v2 : value) : bool = match (v1, v2) with
     Symbolic (Op (_, Symbolic (Parameter i'), Symbolic (Const x')))
     when i = i' ->
     PrimValue.eq x x'
+  | Symbolic (Op (_, Symbolic (Parameter _), Symbolic (Const _))), OpenInterval
+  | Symbolic (Op (_, Symbolic (Global _), Symbolic (Const _))), OpenInterval ->
+    false
   | Symbolic (Bytes4 (Symbolic (Deref OpenInterval),
                       Symbolic (Deref OpenInterval),
                       Symbolic (Deref OpenInterval),
                       Symbolic (Deref OpenInterval))), _ ->
-    (* If this case ever applies, then we have definitely lost too much precision *)
+    (* If this case ever applies, then we probably have lost too much precision *)
     true
   | _, _ ->
     Logging.warn "SubsumesMightBeIncorrect" (Printf.sprintf "assuming %s does not subsume %s" (value_to_string v1) (value_to_string v2));

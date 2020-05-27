@@ -94,8 +94,9 @@ let load (m : t) (addr : Value.value) (op : Memoryop.t) : Value.t =
     begin match op.typ with
       | I32 ->
         Value.symbolic op.typ
-          (Value.Bytes4 (load_byte m ea, load_byte m (Value.add_offset ea 1),
-                         load_byte m (Value.add_offset ea 2), load_byte m (Value.add_offset ea 3)))
+          (* Put all bytes together, the rightmost byte to the right of Bytes4 *)
+          (Value.Bytes4 (load_byte m (Value.add_offset ea 3), load_byte m (Value.add_offset ea 2),
+                         load_byte m (Value.add_offset ea 1), load_byte m ea))
       | _ -> failwith "unsupported: load with non-i32"
     end
   | Some Memoryop.(Pack8, ZX) -> (* load8_u *)
