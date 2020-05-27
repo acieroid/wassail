@@ -21,7 +21,7 @@ let find (m : t) (ea : Value.value) : Value.t option =
      Step 2. Join all the values.
      Step 3. If there are addresses subsumed by ea, but that do not subsume ea (e.g., second example above): join with top *)
   let m' = Map.filteri m ~f:(fun ~key:a ~data:_ -> Value.value_subsumes a ea || Value.value_subsumes ea a) in
-  Logging.info (Printf.sprintf "Memory.find %s %s" (to_string m) (Value.value_to_string ea));
+  (* Logging.info (Printf.sprintf "Memory.find %s %s" (to_string m) (Value.value_to_string ea)); *)
   let vopt = Map.fold m' ~init:None ~f:(fun ~key:_ ~data:v acc ->
       match acc with
       | Some v' -> Some (Value.join v v')

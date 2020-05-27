@@ -230,10 +230,18 @@ let rec simplify_symbolic (sym : symbolic) : symbolic =
   | Op (Eq, Symbolic (Op (Lt, a, b)), Symbolic (Const (I32 0l))) ->
     (* a<b=0 = a>b *)
     Op (GtE, a, b)
+  | Bytes4 (Symbolic (Const a), Symbolic (Const b), Symbolic (Const c), Symbolic (Const d)) ->
+    (* First check that a | 0xFF000000 is 0, etc, because a, b, c, and d should be proper bytes *)
+    assert (PrimValue.is_zero (PrimValue.and_ a (I32 0xFF000000l)) &&
+            PrimValue.is_zero (PrimValue.and_ b (I32 0xFF0000l)) &&
+            PrimValue.is_zero (PrimValue.and_ c (I32 0xFF00l)) &&
+            PrimValue.is_zero (PrimValue.and_ d (I32 0xFFl)));
+    Const (PrimValue.or_ a (PrimValue.or_ b (PrimValue.or_ c d)))
   | Bytes4 (Symbolic (Byte (Symbolic (Const a), byte_a)),
             Symbolic (Byte (Symbolic (Const b), byte_b)),
             Symbolic (Byte (Symbolic (Const c), byte_c)),
             Symbolic (Byte (Symbolic (Const d), byte_d))) ->
+    Logging.warn "UNEXPECTED" "simplify called with %s, but this value should have been simplified first";
     Const (PrimValue.or_
              (PrimValue.shl (PrimValue.byte_of a byte_a) (I32 24l))
              (PrimValue.or_ (PrimValue.shl (PrimValue.byte_of b byte_b) (I32 16l))
@@ -244,9 +252,11 @@ let rec simplify_symbolic (sym : symbolic) : symbolic =
             Symbolic (Byte (Symbolic x'', 1)),
             Symbolic (Byte (Symbolic x''', 0))) when Stdlib.(x = x' && x' = x'' && x'' = x''') ->
     x
+  | Byte (Symbolic (Const x), b) ->
+    Const (PrimValue.and_ x (I32 (Int32.shift_left 0xFFl  (b * 8))))
   (* TODO: many more cases *)
   | (Global _) | (Parameter _) | Const _
-  | Byte (Symbolic (Const _), _) | Byte (Symbolic (Global _), _) | Byte (Symbolic (Parameter _), _)
+  | Byte (Symbolic (Global _), _) | Byte (Symbolic (Parameter _), _)
   | Op (_, Symbolic (Global _), Symbolic (Const _))
   | Op (_, Symbolic (Parameter _), Symbolic (Const _)) ->
     (* These cases cannot be simplified *)
