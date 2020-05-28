@@ -114,6 +114,20 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
         | ((Loop instrs') as b) ->
           (* Create a new block with all instructions collected, without the
              last one *)
+          (*
+          /--[ instrs ] <- block the current block, before the loop
+          \--[] <- block_entry
+             |
+             [ ... ] <- entry'
+             [ [ instrs' ] ] <- blocks (the loop body), starting at entry', finishing at exit'
+             [ ... ] <- exit'
+             
+             [ ... ] <- entry''
+             [ [ rest ] ... ] <- blocks', starting at entry'', finishing at exit''
+             [ ... ] <- exit''
+
+             [ ] <- block_exit
+          *)
           let block = mk_data_block instrs in
           let is_loop = match b with
             | Loop _ -> true
@@ -121,27 +135,32 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
           let block_entry = mk_empty_block () in
           (* Recurse inside the block *)
           let (blocks, edges, breaks, returns, entry', exit') = helper [] instrs' in
+          Logging.info (Printf.sprintf "loop body entry: %d, loop body exit: %d" entry' exit');
           (* Create a node for the exit of the block *)
           let block_exit = mk_empty_block () in
+          Logging.info (Printf.sprintf "block_entry: %d, block_exit: %d\n" block_entry.idx block_exit.idx);
           (* Recurse after the block *)
           let (blocks', edges', breaks', returns', entry'', exit'') = helper [] rest in
+          Logging.info (Printf.sprintf "after loop entry: %d, after loop exit: %d" entry'' exit'');
           (* Compute the new break levels:
              All breaks with level 0 break the current block
-             All other breaks see their level decreased by one *)
+             All other breaks see their level decreased by one.
+             Important: break are handled differently within loop: a break goes back to the loop entry*)
           let all_breaks = breaks @ breaks' in (* TODO: shouldn't it be without breaks'? *)
           let new_breaks = List.map (List.filter all_breaks
                                        ~f:(fun (_, level, _) -> level > 0))
               ~f:(fun (idx, level, branch) -> (idx, level - 1, branch)) in
           let break_edges = List.map (List.filter all_breaks
                                         ~f:(fun (_, level, _) -> level = 0))
-              ~f:(fun (idx, _, branch) -> (idx, block_exit.idx, branch)) in
+              ~f:(fun (idx, _, branch) -> (idx, (if is_loop then block_entry.idx else block_exit.idx), branch)) in
           (* Compute the new edges. This is different between a loop and a
              block, for the exit of the inside of the block *)
           let new_edges = if is_loop then
-              [(block.idx, block_entry.idx, None); (block_entry.idx, entry', None); (exit', block_entry.idx, None); (block_exit.idx, block_entry.idx, None)]
+              [(block.idx, block_entry.idx, None); (block_entry.idx, entry', None); (exit', block_exit.idx, None); (block_exit.idx, entry'', None)]
             else
               [(block.idx, block_entry.idx, None); (block_entry.idx, entry', None); (exit', block_exit.idx, None); (block_exit.idx, entry'', None)]
           in
+          List.iter break_edges ~f:(fun (src, dst, _) -> Logging.info (Printf.sprintf "break edge %d -> %d" src dst));
           (block :: block_entry :: block_exit :: (blocks @ blocks') (* add all blocks *),
            new_edges @ break_edges @ edges @ edges' (* add edges *),
            new_breaks (* filtered breaks *),

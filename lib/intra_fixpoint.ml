@@ -22,7 +22,7 @@ let analyze
       () (* No more elements to consider. We can stop here *)
     else
       let block_idx = IntSet.min_elt_exn worklist in
-      Printf.printf "Analyzing block %d\n" block_idx;
+
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
       let predecessors = Cfg.predecessors cfg block_idx in

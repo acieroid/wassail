@@ -76,6 +76,18 @@ and to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : t) : str
 and list_to_string ?indent:(i : int = 0) ?sep:(sep : string = ", ") (l : t list) : string =
   String.concat ~sep:sep (List.map l ~f:(to_string ?sep:(Some sep) ?indent:(Some i)))
 
+let control_to_short_string (instr : control) : string =
+  match instr with
+  | Call v -> Printf.sprintf "call %d" v
+  | CallIndirect v -> Printf.sprintf "call_indirect %d" v
+  | Br b -> Printf.sprintf "br %d" b
+  | BrIf b -> Printf.sprintf "brif %d" b
+  | Return -> "return"
+  | Unreachable -> "unreachable"
+  | Block _ -> "block"
+  | Loop _ -> "loop"
+  | If (_, _) -> "if"
+
 let rec of_wasm (i : Ast.instr) : t =
   match i.it with
   | Ast.Nop -> Data Nop

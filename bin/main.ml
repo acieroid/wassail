@@ -20,10 +20,10 @@ let main filename =
       let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
           let faddr = wasm_mod.nimports + i in
           (faddr, Cfg_builder.build faddr wasm_mod))) in
-      (*IntMap.iter cfgs ~f:(fun cfg ->
+      IntMap.iter cfgs ~f:(fun cfg ->
           Printf.printf "CFG for function %d\n" cfg.idx;
           Printf.printf "---------------\n%s\n---------------\n" (Cfg.to_dot cfg)
-        );*)
+        );
       let _results = Inter_fixpoint.analyze cfgs nglobals wasm_mod in
       Printf.printf "--------- Results ---------\n";
       ())

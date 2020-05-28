@@ -55,14 +55,17 @@ let dependencies (cfg : t) : int list =
       | _ -> None)
 [@@deriving sexp, compare, yojson]
 let to_string (cfg : t) : string = Printf.sprintf "CFG of function %d" cfg.idx
-    (*
+
 let to_dot (cfg : t) : string =
   Printf.sprintf "digraph \"CFG of function %d\" {\n%s\n%s}\n"
     cfg.idx
     (String.concat ~sep:"\n" (List.map (BasicBlocks.IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, b) -> Basic_block.to_dot b)))
-    (String.concat ~sep:"\n" (List.concat_map (IntListIntMap.IntMap.to_alist cfg.edges) ~f:(fun (left, right) ->
-         List.map right ~f:(Printf.sprintf "block%d -> block%d;\n" left))))
-*)
+    (String.concat ~sep:"\n" (List.concat_map (IntListIntMap.IntMap.to_alist cfg.edges) ~f:(fun (src, dsts) ->
+         List.map dsts ~f:(fun (dst, br) -> Printf.sprintf "block%d -> block%d [label=\"%s\"];\n" src dst (match br with
+             | Some true -> "t"
+             | Some false -> "f"
+             | None -> "")))))
+
 let find_block_exn (cfg : t) (idx : int) : Basic_block.t =
   BasicBlocks.IntMap.find_exn cfg.basic_blocks idx
 

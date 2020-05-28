@@ -37,7 +37,6 @@ let find (m : t) (ea : Value.value) : Value.t option =
     None
 
 let rec resolve_value (m : t) (v : Value.value) : Value.value =
-  Printf.printf "Trying to resolve %s\n" (Value.value_to_string v);
   match v with
   | Interval (a, b) -> Value.Interval (resolve_symbolic m a, resolve_symbolic m b)
   | LeftOpenInterval a -> Value.LeftOpenInterval (resolve_symbolic m a)
@@ -49,7 +48,6 @@ let rec resolve_value (m : t) (v : Value.value) : Value.value =
   | Symbolic sym -> Symbolic (resolve_symbolic m sym)
   | _ -> v
 and resolve_symbolic (m : t) (sym : Value.symbolic) : Value.symbolic =
-  Printf.printf "Trying to resolve symbolic: %s\n" (Value.symbolic_to_string sym);
   match sym with
   | Op (op, left, right) -> Op (op, resolve_value m left, resolve_value m right)
   | Deref _ -> failwith "Memory.resolve_symbolic unsupported for Deref"

@@ -296,6 +296,7 @@ let value_subsumes (v1 : value) (v2 : value) : bool = match (v1, v2) with
   | RightOpenInterval (Const a), Interval (Const a', _) -> PrimValue.(le_s a a')
   | RightOpenInterval (Const a), RightOpenInterval (Const a') -> PrimValue.(le_s a a')
   | OpenInterval, _ -> true
+  | _, OpenInterval -> false
   | Symbolic (Op (_, Symbolic (Global i), Symbolic (Const x))), (* gi OP x *)
     Symbolic (Op (_, Symbolic (Global i'), Symbolic (Const x'))) (* gi' OP x' *)
     when i = i' ->
@@ -304,9 +305,6 @@ let value_subsumes (v1 : value) (v2 : value) : bool = match (v1, v2) with
     Symbolic (Op (_, Symbolic (Parameter i'), Symbolic (Const x')))
     when i = i' ->
     PrimValue.eq x x'
-  | Symbolic (Op (_, Symbolic (Parameter _), Symbolic (Const _))), OpenInterval
-  | Symbolic (Op (_, Symbolic (Global _), Symbolic (Const _))), OpenInterval ->
-    false
   | Symbolic (Bytes4 (Symbolic (Deref OpenInterval),
                       Symbolic (Deref OpenInterval),
                       Symbolic (Deref OpenInterval),
@@ -345,7 +343,7 @@ let join (v1 : t) (v2 : t) : t =
   | (Bottom, _) -> v2.value
   | (_, Bottom) -> v1.value
   | (OpenInterval, _) | (_, OpenInterval) -> OpenInterval
-  | (_, _) when Stdlib.(v1 = v2) -> v1.value 
+  | (_, _) when Stdlib.(v1 = v2) -> v1.value
   | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.eq n1 n2 ->
     Symbolic (Const n1)
   | (Symbolic (Const n1), Symbolic (Const n2)) ->
@@ -365,6 +363,9 @@ let join (v1 : t) (v2 : t) : t =
   | (LeftOpenInterval (Const b), Symbolic (Const c)) -> LeftOpenInterval (Const PrimValue.(max b c))
   | (RightOpenInterval (Op (Plus, Symbolic x, Symbolic (Const _))), RightOpenInterval x') when (Stdlib.(=) x x') ->
     v2.value
+  | (Symbolic (Op (Plus, Symbolic (Parameter i), Symbolic (Const a))), Symbolic (Parameter i')) when i = i'->
+    (* p0+X joined with p0 is [p0,p0+X] *)
+    Interval (Parameter i, Op (Plus, Symbolic (Parameter i), Symbolic (Const a)))
   | (Symbolic (Const _), LeftOpenInterval (Parameter _))
   | (Symbolic (Const _), LeftOpenInterval (Op (_, Symbolic (Parameter _), _)))
   | (Symbolic (Const _), RightOpenInterval (Op (_, Symbolic (Parameter _), _)))
@@ -372,7 +373,7 @@ let join (v1 : t) (v2 : t) : t =
     Logging.warn "UnsoundAssumption" (Printf.sprintf "%s contains %s" (to_string v2) (to_string v1));
     v2.value
   | _ -> (top (Printf.sprintf "Value.join %s %s" (to_string v1) (to_string v2))).value in
-  Logging.info (Printf.sprintf "join %s with %s gives %s" (to_string v1) (to_string v2) (value_to_string vres));
+  (* Logging.info (Printf.sprintf "join %s with %s gives %s" (to_string v1) (to_string v2) (value_to_string vres)); *)
   { typ = v1.typ;
     value = vres }
 

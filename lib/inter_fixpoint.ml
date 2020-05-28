@@ -22,7 +22,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) (module_ : Wasm_module.t) :
       let cfg = IntMap.find_exn cfgs cfg_idx in
       (* The arguments to this CFG. They all map to top because we perform a compositional analysis *)
       let args = List.mapi cfg.arg_types ~f:(fun i t -> Value.parameter t i) in
-      Printf.printf "Analyzing cfg %d with globals: [%s] and args: [%s]\n" cfg_idx (Globals.to_string globals) (Value.list_to_string args);
+      Printf.printf "Analyzing cfg %d (name: %s) with globals: [%s] and args: [%s]\n" cfg_idx cfg.name (Globals.to_string globals) (Value.list_to_string args);
       (* Perform intra-procedural analysis *)
       let results = Intra_fixpoint.analyze cfg args globals memory summaries module_ in
       let out_state = Intra_fixpoint.out_state cfg results in
