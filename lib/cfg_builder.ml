@@ -166,15 +166,21 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
           (* Return block. The rest of the instructions does not matter (it
              should be empty) *)
           assert (List.is_empty rest);
-          (* We create a new block with all instructions collected, and return
-             it *)
-          (* TODO: there could be multiple return blocks, and their behavior
-             depends on what is on the stack... (they have to only keep the
-             values that matter). A better solution to have multiple return
-             blocks, each pointing to a final block.  *)
+          (* We create a new block with all instructions collected *)
           let block = mk_data_block instrs in
-          (* It is not connected to anything, but is marked as to be connected to a return block *)
-          ([block], [], [], [block.idx], block.idx, block.idx)
+          (* We create a control block for this return *)
+          let return_block = mk_control_block instr in
+          ([return_block; block],
+           (* The previous block is connected to the return *)
+           [(block.idx, return_block.idx, None)],
+           (* No breaks *)
+           [],
+           (* The return block is marked as returning *)
+           [return_block.idx],
+           (* The entry block *)
+           block.idx,
+           (* The exit block (it should not matter here) *)
+           return_block.idx)
         | Unreachable ->
           (* Simply construct a block containig the unreachable instruction *)
           let block = mk_data_block instrs in

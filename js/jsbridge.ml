@@ -37,23 +37,41 @@ let js_of_block_sort (sort : Basic_block.block_sort) = Js.string (match sort wit
 let js_of_block (block : Basic_block.t) = object%js (self)
   val idx = block.idx
   val sort = match block.content with
-    | Nothing -> Js.string "Normal"
-    | Control (Block _) -> Js.string "BlockEntry"
-    | Control (Loop _) -> Js.string "LoopEntry"
-    | Control (Call _) -> Js.string "Function"
-    | Control (Return) -> Js.string "Return"
-    | _ -> Js.string "Normal"
+    | Nothing -> Js.string "Empty"
+    | Control _ -> Js.string "Control"
+    | Data _ -> Js.string "Data"
+  val name = match block.content with
+    | Nothing -> Js.string ""
+    | Control i -> Js.string (Instr.control_to_short_string i)
+    | Data _ -> Js.string ""
+  val shape = match block.content with
+    | Data _ -> "rect"
+    | Control (Call _)
+    | Control (CallIndirect _) -> "circle"
+    | Control Return -> "diamond"
+    | Control _ -> "ellipse"
+    | Nothing -> "circle"
   val instrs = Js.array (array_of_list (match block.content with
       | Nothing -> []
       | Control (Call i) -> [Instr.control_to_string (Call i)]
       | Control _ -> []
       | Data is -> List.map Instr.data_to_string is)
       Js.string)
+  val label = Js.string (match block.content with
+    | Nothing -> ""
+    | Data is -> Printf.sprintf "%s" (String.concat "\n" (List.map Instr.data_to_string is))
+    | Control i -> Printf.sprintf "%s" (Instr.control_to_short_string i))
 end
 
 let js_of_cfg (cfg : Cfg.t) = object%js (self)
   val blocks = Js.array (array_of_intmap cfg.basic_blocks (fun x -> Js.def (js_of_block x)))
-  val edges = Js.array (array_of_intmap cfg.edges (fun targets -> Js.def (array_of_intlist (List.map fst targets))))
+  val edges = Js.array (array_of_intmap cfg.edges (fun targets ->
+      Js.def (Js.array (array_of_list targets (fun (target, data) ->
+          Js.array (array_of_list [Js.string (string_of_int target); match data with
+            | None -> Js.string ""
+            | Some true -> Js.string "t"
+            | Some false -> Js.string "f"]
+            (fun x -> x)))))))
 end
 
 let js_of_state (state : Domain.state) = Js.string (Domain.to_string state)

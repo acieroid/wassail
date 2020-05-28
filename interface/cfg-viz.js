@@ -34,28 +34,8 @@ class View {
         this.redraw();
     }
     label(cfgIdx, block) {
-        switch (block.sort) {
-        case "Normal":
-            var str = `(Block ${block.idx})\n`
-            block.instrs.forEach(function (instr) {
-                str += instr + "\n";
-            });
-            return { label : str };
-        case "BlockEntry":
-            return { label: `Block entry (${block.idx})`, shape: "diamond" };
-        case "BlockExit":
-            return { label: `Block exit (${block.idx})`, shape: "diamond" };
-        case "LoopEntry":
-            return { label: `Loop entry (${block.idx})`, shape: "diamond" };
-        case "LoopExit":
-            return { label: `Loop exit (${block.idx})`, shape: "diamond" };
-        case "Return":
-            return { label : `Return` };
-        case "Function":
-            const instr = block.instrs[0];
-            return { label : `${instr}`, shape: "circle" };
-        default: return { label: block.sort };
-        }
+        return { label: block.label,
+                 shape: block.shape }
     }
     redraw() {
         // Resize the svg to take full width
@@ -103,10 +83,12 @@ class View {
         // Loops over the edges
         cfg.edges.forEach(function (edge, from) {
             if (edge != undefined) {
-                edge.forEach(function (to) {
+                edge.forEach(function (toData) {
+                    let to = toData[0];
+                    let data = toData[1];
                     const fromName = `block${cfgIdx}-${from}`
                     const toName = `block${cfgIdx}-${to}`
-                    that.g.setEdge(fromName, toName);
+                    that.g.setEdge(fromName, toName, { label: data });
                 });
             }
         });
