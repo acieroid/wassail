@@ -112,6 +112,7 @@ let control_instr_transfer
     (state : Domain.state) (* The pre state *)
     (summaries : Summary.t IntMap.t) (* Summaries to apply function calls *)
     (module_ : Wasm_module.t) (* The wasm module (read-only) *)
+    (cfg : Cfg.t) (* The CFG analyzed *)
   : result =
   match i with
   | Call f ->
@@ -155,10 +156,12 @@ let control_instr_transfer
     Branch ({ state with vstack = vstack'; memory = Memory.refine state.memory cond true },
             { state with vstack = vstack'; memory = Memory.refine state.memory cond false })
   | Return ->
-    Simple state
+    (* return only keeps the necessary number of values from the stack *)
+    let arity = List.length cfg.return_types in
+    Simple { state with vstack = List.take state.vstack arity }
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i))
 
-let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t IntMap.t) (module_ : Wasm_module.t) : result =
+let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t IntMap.t) (module_ : Wasm_module.t) (cfg : Cfg.t) : result =
   match b.content with
   | Data instrs ->
     Simple (List.fold_left instrs ~init:state ~f:(fun prestate i ->
@@ -167,5 +170,5 @@ let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t I
         poststate))
   | Control instr ->
     Printf.printf "pre: %s\ncontrol: %s\n" (Domain.to_string state) (Instr.control_to_string instr);
-    control_instr_transfer instr state summaries module_
+    control_instr_transfer instr state summaries module_ cfg
   | Nothing -> Simple state

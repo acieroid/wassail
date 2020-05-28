@@ -45,7 +45,8 @@ let js_of_block (block : Basic_block.t) = object%js (self)
     | _ -> Js.string "Normal"
   val instrs = Js.array (array_of_list (match block.content with
       | Nothing -> []
-      | Control i -> [Instr.control_to_string i]
+      | Control (Call i) -> [Instr.control_to_string (Call i)]
+      | Control _ -> []
       | Data is -> List.map Instr.data_to_string is)
       Js.string)
 end

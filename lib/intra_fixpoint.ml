@@ -41,7 +41,7 @@ let analyze
         | Uninitialized -> init
         | _ -> failwith "should not happen" in
       (* We analyze it *)
-      let out_state = Transfer.transfer block in_state summaries module_ in
+      let out_state = Transfer.transfer block in_state summaries module_ cfg in
       (* Has out state changed? *)
       let previous_out_state = snd (IntMap.find_exn !data block_idx) in
       match previous_out_state with
