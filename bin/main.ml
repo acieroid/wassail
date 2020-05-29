@@ -64,12 +64,24 @@ let intra =
       fun () ->
         apply_to_textual filename (fun m ->
             let wasm_mod = Wasm_module.of_wasm m in
-            let _cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
+            let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
                 let faddr = wasm_mod.nimports + i in
                 (faddr, Cfg_builder.build faddr wasm_mod))) in
-            List.iter funs ~f:(fun _fid ->
-                failwith "TODO"
-                  (* Intra_fixpoint.analyze cfg summaries wasm_mod *))))
+            let summaries = List.fold_left funs
+              (* All summaries are initially bottom *)
+              ~init:(IntMap.map cfgs ~f:(fun cfg -> Summary.bottom cfg wasm_mod))
+              ~f:(fun summaries fid ->
+                  Printf.printf "Analyzing function %d\n" fid;
+                  let cfg = IntMap.find_exn cfgs fid in
+                  let results = Intra_fixpoint.analyze cfg summaries wasm_mod in
+                  let out_state = Intra_fixpoint.out_state cfg results in
+                  let summary = Summary.make cfg out_state in
+                  Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
+                  IntMap.set summaries ~key:fid ~data:summary) in
+            Printf.printf "---------------\nAnalysis done, resulting summaries are:\n";
+            IntMap.iteri summaries ~f:(fun ~key:fid ~data:summary ->
+                                        Printf.printf "function %d:\n%s\n" fid (Summary.to_string summary))))
+
 
 let inter =
   Command.basic

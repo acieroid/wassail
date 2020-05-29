@@ -8,6 +8,7 @@ module Cfg = Cfg
 module Domain = Domain
 module Instr = Instr
 module Inter_fixpoint = Inter_fixpoint
+module Intra_fixpoint = Intra_fixpoint
 module Basic_block = Basic_block
 module Logging = Logging
 module Transfer = Transfer
