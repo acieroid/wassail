@@ -41,7 +41,9 @@ let analyze
         | Uninitialized -> init
         | _ -> failwith "should not happen" in
       (* We analyze it *)
+      Printf.printf "Block %d\npre: %s\n" block.idx (Domain.to_string in_state);
       let out_state = Transfer.transfer block in_state summaries module_ cfg in
+      Printf.printf "post:%s\n" (Transfer.result_to_string out_state);
       (* Has out state changed? *)
       let previous_out_state = snd (IntMap.find_exn !data block_idx) in
       match previous_out_state with
