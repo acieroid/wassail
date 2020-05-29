@@ -279,6 +279,9 @@ let join (v1 : t) (v2 : t) : t =
   | (Symbolic (Op (Plus, Symbolic (Parameter i), Symbolic (Const a))), Symbolic (Parameter i')) when i = i'->
     (* p0+X joined with p0 is [p0,p0+X] *)
     Interval (Parameter i, Op (Plus, Symbolic (Parameter i), Symbolic (Const a)))
+  | (Symbolic (Parameter i), Symbolic (Op (Plus, Symbolic (Parameter i'), Symbolic (Const a)))) when i = i' ->
+    (* p0 joined with p0+X is [p0,p0+X] *)
+    Interval (Parameter i, Op (Plus, Symbolic (Parameter i), Symbolic (Const a)))
   | (Symbolic (Const _), LeftOpenInterval (Parameter _))
   | (Symbolic (Const _), LeftOpenInterval (Op (_, Symbolic (Parameter _), _)))
   | (Symbolic (Const _), RightOpenInterval (Op (_, Symbolic (Parameter _), _)))
@@ -412,20 +415,46 @@ let rec add_offset (v : value) (offset : int) : value =
     | Symbolic (Op (Times, a, b)) -> simplify_value (Symbolic (Op (Plus, Symbolic (Op (Times, a, b)), Symbolic (Const (Prim_value.of_int offset)))))
     | Symbolic _ -> simplify_value (Symbolic (Op (Plus, v, Symbolic (Const (Prim_value.of_int offset)))))
 
-let add (v1 : t) (v2 : t) : t =
+let rec add (v1 : t) (v2 : t) : t =
   assert Stdlib.(v1.typ = v2.typ);
   let v = match (v1.value, v2.value) with
-  | (_, Symbolic (Const z)) when Prim_value.is_zero z -> v1.value
-  | (Symbolic (Const n1), Symbolic (Const n2)) -> (Symbolic (Const (Prim_value.add n1 n2)))
-  | (Symbolic (Op _), _) -> simplify_value (Symbolic (Op (Plus, v1.value, v2.value)))
-  | (Symbolic (Parameter i), _) -> simplify_value (Symbolic (Op (Plus, Symbolic (Parameter i), v2.value)))
-  | (Symbolic (Global i), _) -> simplify_value (Symbolic (Op (Plus, Symbolic (Global i), v2.value)))
-  | (Symbolic (Deref _), _) -> Symbolic (Op (Plus, v1.value, v2.value))
-  | (Interval (Const a, Const b), Symbolic (Const n)) -> Interval (Const (Prim_value.add a n), Const (Prim_value.add b n))
-  | (RightOpenInterval (Const x), Symbolic (Const y)) -> RightOpenInterval (Const (Prim_value.add x y))
-  | (LeftOpenInterval (Const x), Symbolic (Const y)) -> RightOpenInterval (Const (Prim_value.add x y))
-  | (RightOpenInterval (Parameter i), Symbolic (Const n)) -> RightOpenInterval (Op (Plus, (Symbolic (Parameter i)), (Symbolic (Const n))))
-  | _ -> (top v1.typ (Printf.sprintf "add %s %s" (to_string v1) (to_string v2))).value
+    | (_, Symbolic (Const z)) when Prim_value.is_zero z ->
+      (* v + 0 is v *)
+      v1.value
+    | (Symbolic (Const n1), Symbolic (Const n2)) ->
+      (* X+Y when X and Y are const, can directly be computed *)
+      (Symbolic (Const (Prim_value.add n1 n2)))
+    | (Symbolic (Op _), _) ->
+      (* (a op b) + c, adds +c to the operations *)
+      simplify_value (Symbolic (Op (Plus, v1.value, v2.value)))
+    | (Symbolic (Parameter i), _) ->
+      (* pi + c becomes pi+c as an op *)
+      simplify_value (Symbolic (Op (Plus, Symbolic (Parameter i), v2.value)))
+    | (Symbolic (Global i), _) ->
+      (* g0 + c becomes g0+c as an op *)
+      simplify_value (Symbolic (Op (Plus, Symbolic (Global i), v2.value)))
+    | (Symbolic (Deref _), _) -> Symbolic (Op (Plus, v1.value, v2.value))
+    | (Interval (Const a, Const b), Symbolic (Const n)) ->
+      (* [a,b] + n becomes [a+n,b+n], where a, b and n are constants *)
+      Interval (Const (Prim_value.add a n), Const (Prim_value.add b n))
+    | (Interval (a, b), Symbolic (Const n)) ->
+      (* [a,b] + n becomes [a+n, b+n] where a and b are any symbolic values, n is a constant.
+         Only applies when a+n and b+n result in symbolic values *)
+      begin match ((add { value = (Symbolic a); typ = v1.typ } { value = (Symbolic (Const n)); typ = v2.typ }).value,
+                   (add { value = (Symbolic b); typ = v1.typ } { value = (Symbolic (Const n)); typ = v2.typ }).value) with
+      | (Symbolic a', Symbolic b') -> Interval (a', b')
+      | _ -> (top v1.typ (Printf.sprintf "add %s %s" (to_string v1) (to_string v2))).value
+      end
+    | (RightOpenInterval (Const x), Symbolic (Const y)) ->
+      (* [x,+inf[ + y becomes [x+y,+inf[ *)
+      RightOpenInterval (Const (Prim_value.add x y))
+    | (LeftOpenInterval (Const x), Symbolic (Const y)) ->
+      (* ]-inf,x] + y becomes ]-inf,x+y] *)
+      RightOpenInterval (Const (Prim_value.add x y))
+    | (RightOpenInterval (Parameter i), Symbolic (Const n)) ->
+      (* [p0,+inf[ + n becomes [p0+n,+inf[ *)
+      RightOpenInterval (Op (Plus, (Symbolic (Parameter i)), (Symbolic (Const n))))
+    | _ -> (top v1.typ (Printf.sprintf "add %s %s" (to_string v1) (to_string v2))).value
   in { value = v; typ = v1.typ }
 
 let sub (v1 : t) (v2 : t) : t =
