@@ -1,6 +1,8 @@
 open Core_kernel
 open Wasm
 
+(******************** Types *****************)
+
 (** These are the values (and their abstractions) *)
 module T = struct
   (** A byte position, to index bytes in i32/i64 values. Should always be between 0 and 7 in practice. *)
@@ -45,6 +47,8 @@ end
 include T
 include Comparator.Make(T)
 
+(***************** Constructors ******************)
+
 (** Constructs a value from a wasm value.
     @param v the wasm value *)
 let of_wasm (v : Values.value) : t =
@@ -68,7 +72,10 @@ let zero (t : Type.t) : t = { value = Symbolic (Const (Prim_value.zero_of_t t));
 let true_ : t = i32_const 1l
 
 (** The false value, which is 0 *)
-let ffalse_ : t = i32_const 0l
+let false_ : t = i32_const 0l
+
+(** Any boolean, i.e., 0 or 1 *)
+let bool : t = { value = Interval (Const (I32 0l), Const (I32 1l)); typ = I32 } (* could also just be defined join true_ false_ *)
 
 (** Injects a parameter into the value domain
     @param typ the type of the parameter
@@ -79,9 +86,17 @@ let parameter (typ : Type.t) (idx : int) : t = { value = Symbolic (Parameter idx
     @param typ the type of the global
     @param idx the index of the global *)
 let global (typ : Type.t) (i : int) : t = { value = Symbolic (Global i); typ = typ }
+
 let deref (addr : value) : t = { value = Symbolic (Deref addr); typ = I32 } (* TODO: typ *)
-let bool : t = { value = Interval (Const (I32 0l), Const (I32 1l)); typ = I32 }
-let top (source : string) : t = Logging.warn "TopCreated" (Printf.sprintf "Top value originating from: %s" source); { value = OpenInterval; typ = I32 } (* TODO: typ *)
+
+(** Creates the top value
+    @param typ the type for this value
+    @param source a string indicating where this value is originating from, to use as warning *)
+let top (typ : Type.t) (source : string) : t =
+  Logging.warn "TopCreated" (Printf.sprintf "Top value originating from: %s" source);
+  { value = OpenInterval; typ = typ }
+
+(********************** String conversion ******************)
 
 let rec value_to_string (v : value) : string = match v with
   | Bottom -> "bottom"
@@ -113,6 +128,9 @@ and symbolic_to_string (v : symbolic) : string = match v with
 let to_string (v : t) : string = value_to_string v.value
 let list_to_string (l : t list) : string =
   String.concat ~sep:", " (List.map l ~f:to_string)
+
+
+(*************** Simplifications ******************)
 
 let rec simplify_symbolic (sym : symbolic) : symbolic =
   match sym with
@@ -189,6 +207,7 @@ let simplify (v : t) : t = { value = simplify_value v.value; typ = v.typ }
 
 let symbolic (t : Type.t) (sym : symbolic) : t = { value = Symbolic (simplify_symbolic sym); typ = t }
 
+(************************ Subsumption *********************)
 
 (** Checks if v1 subsumes v2 (i.e., v1 contains v2) *)
 let value_subsumes (v1 : value) (v2 : value) : bool = match (v1, v2) with
@@ -228,6 +247,8 @@ let value_subsumes (v1 : value) (v2 : value) : bool = match (v1, v2) with
 
 let subsumes (v1 : t) (v2 : t) : bool = value_subsumes v1.value v2.value
 
+
+(************************ Joining *****************)
 (** Joins two values together *)
 let join (v1 : t) (v2 : t) : t =
   assert Stdlib.(v1.typ = v2.typ);
@@ -264,14 +285,18 @@ let join (v1 : t) (v2 : t) : t =
   | (Symbolic (Const _), RightOpenInterval (Parameter _)) ->
     Logging.warn "UnsoundAssumption" (Printf.sprintf "%s contains %s" (to_string v2) (to_string v1));
     v2.value
-  | _ -> (top (Printf.sprintf "Value.join %s %s" (to_string v1) (to_string v2))).value in
+  | _ -> (top v1.typ (Printf.sprintf "Value.join %s %s" (to_string v1) (to_string v2))).value in
   (* Logging.info (Printf.sprintf "join %s with %s gives %s" (to_string v1) (to_string v2) (value_to_string vres)); *)
   { typ = v1.typ;
     value = vres }
 
+let%test "bool is join true_ false_" = Stdlib.(bool = join true_ false_)
+
 (** Joins two value lists together, assuming they have the same length *)
 let join_vlist_exn (v1 : t list) (v2 : t list) : t list =
   List.map2_exn v1 v2 ~f:join
+
+(********************* Meeting **********************)
 
 (** Meet two values together *)
 let meet (v1 : t) (v2 : t) : t =
@@ -302,6 +327,8 @@ let meet (v1 : t) (v2 : t) : t =
     typ = v1.typ
   }
 
+(************** Checkers ******************)
+
 (* TODO: maybe these functions should take the memory as argument, and return an updated version of it? *)
 let is_zero (v : t) =
   match v.value with
@@ -331,24 +358,7 @@ let is_not_zero (v : t) =
   | OpenInterval -> true
   | Symbolic _ -> true (* TODO: could be more precise here *)
 
-let rec add_offset (v : value) (offset : int) : value =
-  if offset = 0 then v else
-    match v with
-    | Bottom -> Bottom
-    | Interval (Const a, Const b) -> Interval (Const Prim_value.(add_int a offset), Const Prim_value.(add_int b offset))
-    | Interval (a, b) -> Interval (Op (Plus, Symbolic a, Symbolic (Const (Prim_value.of_int offset))), Op (Plus, Symbolic b, Symbolic (Const (Prim_value.of_int offset))))
-    | LeftOpenInterval (Const b) -> LeftOpenInterval (Const Prim_value.(add_int b offset))
-    | LeftOpenInterval b -> LeftOpenInterval (Op (Plus, Symbolic b, Symbolic (Const (Prim_value.of_int offset))))
-    | RightOpenInterval (Const a) -> LeftOpenInterval (Const Prim_value.(add_int a offset))
-    | RightOpenInterval a -> RightOpenInterval (Op (Plus, Symbolic a, Symbolic (Const (Prim_value.of_int offset))))
-    | OpenInterval -> OpenInterval
-    | Symbolic (Const n) -> Symbolic (Const Prim_value.(add_int n offset))
-    (* TODO: choose between adding it to a or b? e.g., g0-16+8 is better represented as g0-8 than g0+8-16. Maybe introduce a simplification phase*)
-    | Symbolic (Op (Plus, a, b)) -> simplify_value (Symbolic (Op (Plus, a, simplify_value (add_offset b offset))))
-    | Symbolic (Op (Minus, a, b)) -> simplify_value (Symbolic (Op (Minus, a, simplify_value (add_offset b (- offset)))))
-    | Symbolic (Op (Times, a, b)) -> simplify_value (Symbolic (Op (Plus, Symbolic (Op (Times, a, b)), Symbolic (Const (Prim_value.of_int offset)))))
-    | Symbolic _ -> simplify_value (Symbolic (Op (Plus, v, Symbolic (Const (Prim_value.of_int offset)))))
-
+(******************** Adaptation **********************)
 module ValueValueMap = struct
   module ValueMap = Map.Make(ValueT)
 
@@ -383,6 +393,25 @@ let rec adapt_value (v : value) (map : ValueValueMap.t) : value =
 let adapt (v : t) (map : ValueValueMap.t) : t =
   { value = adapt_value v.value map; typ = v.typ }
 
+(********************** Operations *********************)
+let rec add_offset (v : value) (offset : int) : value =
+  if offset = 0 then v else
+    match v with
+    | Bottom -> Bottom
+    | Interval (Const a, Const b) -> Interval (Const Prim_value.(add_int a offset), Const Prim_value.(add_int b offset))
+    | Interval (a, b) -> Interval (Op (Plus, Symbolic a, Symbolic (Const (Prim_value.of_int offset))), Op (Plus, Symbolic b, Symbolic (Const (Prim_value.of_int offset))))
+    | LeftOpenInterval (Const b) -> LeftOpenInterval (Const Prim_value.(add_int b offset))
+    | LeftOpenInterval b -> LeftOpenInterval (Op (Plus, Symbolic b, Symbolic (Const (Prim_value.of_int offset))))
+    | RightOpenInterval (Const a) -> LeftOpenInterval (Const Prim_value.(add_int a offset))
+    | RightOpenInterval a -> RightOpenInterval (Op (Plus, Symbolic a, Symbolic (Const (Prim_value.of_int offset))))
+    | OpenInterval -> OpenInterval
+    | Symbolic (Const n) -> Symbolic (Const Prim_value.(add_int n offset))
+    (* TODO: choose between adding it to a or b? e.g., g0-16+8 is better represented as g0-8 than g0+8-16. Maybe introduce a simplification phase*)
+    | Symbolic (Op (Plus, a, b)) -> simplify_value (Symbolic (Op (Plus, a, simplify_value (add_offset b offset))))
+    | Symbolic (Op (Minus, a, b)) -> simplify_value (Symbolic (Op (Minus, a, simplify_value (add_offset b (- offset)))))
+    | Symbolic (Op (Times, a, b)) -> simplify_value (Symbolic (Op (Plus, Symbolic (Op (Times, a, b)), Symbolic (Const (Prim_value.of_int offset)))))
+    | Symbolic _ -> simplify_value (Symbolic (Op (Plus, v, Symbolic (Const (Prim_value.of_int offset)))))
+
 let add (v1 : t) (v2 : t) : t =
   assert Stdlib.(v1.typ = v2.typ);
   let v = match (v1.value, v2.value) with
@@ -396,7 +425,7 @@ let add (v1 : t) (v2 : t) : t =
   | (RightOpenInterval (Const x), Symbolic (Const y)) -> RightOpenInterval (Const (Prim_value.add x y))
   | (LeftOpenInterval (Const x), Symbolic (Const y)) -> RightOpenInterval (Const (Prim_value.add x y))
   | (RightOpenInterval (Parameter i), Symbolic (Const n)) -> RightOpenInterval (Op (Plus, (Symbolic (Parameter i)), (Symbolic (Const n))))
-  | _ -> (top (Printf.sprintf "add %s %s" (to_string v1) (to_string v2))).value
+  | _ -> (top v1.typ (Printf.sprintf "add %s %s" (to_string v1) (to_string v2))).value
   in { value = v; typ = v1.typ }
 
 let sub (v1 : t) (v2 : t) : t =
@@ -404,19 +433,19 @@ let sub (v1 : t) (v2 : t) : t =
   match (v1.value, v2.value) with
   | (Symbolic (Const n1), Symbolic (Const n2)) -> { value = Symbolic (Const (Prim_value.sub n1 n2)); typ = v1.typ }
   | (Symbolic (Global _), Symbolic (Const _)) -> { value = simplify_value (Symbolic (Op (Minus, v1.value, v2.value))); typ = v1.typ }
-  | _ -> top (Printf.sprintf "sub %s %s" (to_string v1) (to_string v2))
+  | _ -> top v1.typ (Printf.sprintf "sub %s %s" (to_string v1) (to_string v2))
 
 let mul (v1 : t) (v2 : t) : t =
   assert Stdlib.(v1.typ = v2.typ);
   match (v1.value, v2.value) with
   | (Symbolic (Const n1), Symbolic (Const n2)) -> { value = Symbolic (Const (Prim_value.mul n1 n2)); typ = v1.typ }
-  | _ -> top (Printf.sprintf "mul %s %s" (to_string v1) (to_string v2))
+  | _ -> top v1.typ (Printf.sprintf "mul %s %s" (to_string v1) (to_string v2))
 
 let rem_s (v1 : t) (v2 : t) : t =
   assert Stdlib.(v1.typ = v2.typ);
   match (v1.value, v2.value) with
   | (Symbolic (Const n1), Symbolic (Const n2)) -> { value = Symbolic (Const (Prim_value.rem_s n1 n2)); typ = v1.typ }
-  | _ -> top (Printf.sprintf "rem_s %s %s" (to_string v1) (to_string v2))
+  | _ -> top v1.typ (Printf.sprintf "rem_s %s %s" (to_string v1) (to_string v2))
 
 let shl (v1 : t) (v2 : t) : t =
   assert Stdlib.(v1.typ = v2.typ);
@@ -425,7 +454,7 @@ let shl (v1 : t) (v2 : t) : t =
   (* | (Interval (Const a, Const b), Symbolic (Const 2l)) -> Interval (Const (Int32.( * ) a 4l), Const (Int32.( * ) b 4l)) *) (* TODO *)
   (* | (Symbolic _, Symbolic (Const 2l)) -> symbolic (Op (Times, v1, Symbolic (Const 4l))) *) (* TODO *)
   (* | (RightOpenInterval (Const 0l), Symbolic (Const 2l)) -> v1 *) (* TODO *)
-  | _ -> top (Printf.sprintf "shl %s %s" (to_string v1) (to_string v2))
+  | _ -> top v1.typ (Printf.sprintf "shl %s %s" (to_string v1) (to_string v2))
 
 let and_ (v1 : t) (v2 : t) : t =
   assert Stdlib.(v1.typ = v2.typ);

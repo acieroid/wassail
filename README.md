@@ -20,6 +20,8 @@ Running the tests
 
 > make test
 
+If there is no output, this means all tests successfully passed.
+
 Running the executable
 ----------------------
 > make

@@ -5,7 +5,7 @@ bin:
 js:
 	dune build ./js/jsbridge.bc.js
 
-tests:
+test:
 	dune runtest
 
 clean:

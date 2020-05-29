@@ -29,7 +29,7 @@ let find (m : t) (ea : Value.value) : Value.t option =
   match vopt with
   | Some v ->
     if (Map.existsi m' ~f:(fun ~key:a ~data:_ -> Stdlib.(ea <> a) && Value.value_subsumes ea a)) then
-      Some (Value.join v (Value.top (Printf.sprintf "Top created at memory.find %s %s" (to_string m) (Value.value_to_string ea))))
+      Some (Value.join v (Value.top I32 (* TODO: typ *)(Printf.sprintf "Top created at memory.find %s %s" (to_string m) (Value.value_to_string ea))))
     else
       Some v
   | None ->
