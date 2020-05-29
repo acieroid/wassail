@@ -297,6 +297,11 @@ let rec join (v1 : t) (v2 : t) : t =
   | Symbolic (Op (op, a, b)), Symbolic (Op (op', a', b')) when Stdlib.(op = op' && a = a') ->
     (* a op b joined with a op b' becomes a op (b joined with b') *)
     Symbolic (Op (op, a, (join { value = b; typ = v1.typ } { value = b'; typ = v2.typ }).value))
+  | Symbolic (Parameter i), Interval (Op (Plus, Symbolic (Parameter i'), Symbolic (Const n)),
+                                      Op (Plus, Symbolic (Parameter i''), Symbolic (Const m)))
+    when Stdlib.(i = i' && i' = i'') && Prim_value.is_positive n ->
+    (* pi joined with [pi+n,p1+m]  becomes [p1, p1+m] *)
+    Interval (Parameter i, Op (Plus, Symbolic (Parameter i), Symbolic (Const m)))
   | (Symbolic (Const _), LeftOpenInterval (Parameter _))
   | (Symbolic (Const _), LeftOpenInterval (Op (_, Symbolic (Parameter _), _)))
   | (Symbolic (Const _), RightOpenInterval (Op (_, Symbolic (Parameter _), _)))
