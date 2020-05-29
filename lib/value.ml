@@ -64,11 +64,21 @@ let i32_const (n : int32) : t = { value = Symbolic (Const (I32 n)); typ = I32 }
 (** Creates the zero value of the given type *)
 let zero (t : Type.t) : t = { value = Symbolic (Const (Prim_value.zero_of_t t)); typ = t }
 
+(** The true value, which is 1 *)
 let true_ : t = i32_const 1l
+
+(** The false value, which is 0 *)
 let ffalse_ : t = i32_const 0l
 
-let parameter (t : Type.t) (i : int) : t = { value = Symbolic (Parameter i); typ = t }
-let global (i : int) : t = { value = Symbolic (Global i); typ = I32 } (* TODO: typ *)
+(** Injects a parameter into the value domain
+    @param typ the type of the parameter
+    @param idx the index of the parameter *)
+let parameter (typ : Type.t) (idx : int) : t = { value = Symbolic (Parameter idx); typ = typ }
+
+(** Injects a global into the value domain
+    @param typ the type of the global
+    @param idx the index of the global *)
+let global (typ : Type.t) (i : int) : t = { value = Symbolic (Global i); typ = typ }
 let deref (addr : value) : t = { value = Symbolic (Deref addr); typ = I32 } (* TODO: typ *)
 let bool : t = { value = Interval (Const (I32 0l), Const (I32 1l)); typ = I32 }
 let top (source : string) : t = Logging.warn "TopCreated" (Printf.sprintf "Top value originating from: %s" source); { value = OpenInterval; typ = I32 } (* TODO: typ *)

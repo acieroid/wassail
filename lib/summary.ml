@@ -26,24 +26,24 @@ let make (cfg : Cfg.t) (state : Domain.state) : t = {
 }
 
 (* Constructs an empty bottom summary given a CFG *)
-let bottom (nglobals : int) (cfg : Cfg.t) : t = {
+let bottom (cfg : Cfg.t) (module_ : Wasm_module.t) : t = {
   nargs = List.length cfg.arg_types;
   typ = [], [];
   result = List.map cfg.return_types ~f:Value.bottom;
-  globals = List.init nglobals ~f:Value.global;
+  globals = List.mapi module_.globals ~f:(fun i g -> Value.global g.typ i);
   memory = Memory.initial
 }
 
 (* Apply the summary to a state, updating the vstack as if the function was
    called, AND updating the set of called functions *)
-let apply (sum : t) (fidx : Var.t) (st : Domain.state) : Domain.state =
+let apply (sum : t) (fidx : Var.t) (st : Domain.state) (module_ : Wasm_module.t) : Domain.state =
   Printf.printf "[fidx: %d] Applying summary %s to state %s!" fidx (to_string sum) (Domain.to_string st);
   let map = List.foldi st.globals ~init:(List.foldi (List.rev st.vstack) ~init:Value.ValueValueMap.ValueMap.empty
                                            ~f:(fun i acc v -> Value.ValueValueMap.ValueMap.add_exn acc
                                                   ~key:(Value.parameter I32 i).value
                                                   ~data:v.value))
       ~f:(fun i acc v -> Value.ValueValueMap.ValueMap.add_exn acc
-             ~key:(Value.global i).value
+             ~key:(Value.global (List.nth_exn module_.globals i).typ i).value
              ~data:v.value) in
   { st with
     vstack = sum.result @ (List.map (List.drop st.vstack sum.nargs) ~f:(fun v -> Value.adapt v map));

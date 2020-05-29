@@ -6,7 +6,7 @@ type inter_results = ((((Transfer.result * Transfer.result) IntMap.t) option) In
 let data : inter_results ref = ref IntMap.empty
 
 (* Analyze multiple CFGS, returns a map from CFG id to out_state for each CFG *)
-let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) (module_ : Wasm_module.t) : unit =
+let analyze (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : unit =
   data := (IntMap.of_alist_exn (List.map (IntMap.keys cfgs)
                                   ~f:(fun idx ->
                                       (idx, None))));
@@ -48,7 +48,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (nglobals : int) (module_ : Wasm_module.t) :
           globals memory new_summaries
   in
   (* Initial summaries are all empty *)
-  let summaries0 = IntMap.map cfgs ~f:(fun cfg -> Summary.bottom nglobals cfg) in
+  let summaries0 = IntMap.map cfgs ~f:(fun cfg -> Summary.bottom cfg module_) in
   (* Globals are symbolic variables, values are top *)
-  let globals = List.init nglobals ~f:Value.global in
+  let globals = List.mapi module_.globals ~f:(fun i g -> Value.global g.typ i) in
   fixpoint (IntSet.of_list (IntMap.keys cfgs)) globals Memory.initial summaries0 ;

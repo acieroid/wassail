@@ -119,7 +119,7 @@ let control_instr_transfer
       (* We encounter a function call, retrieve its summary and apply it *)
       (* We assume all summaries are defined *)
       let summary = IntMap.find_exn summaries f in
-      Simple (Summary.apply summary f state)
+      Simple (Summary.apply summary f state module_)
   | CallIndirect typ ->
     let (v, vstack') = Vstack.pop state.vstack in
     let state' = { state with vstack = vstack' } in
@@ -132,7 +132,7 @@ let control_instr_transfer
           if Stdlib.(List.nth module_.types typ = (List.nth module_.funcs fa).typ) then
             (* Types match, apply the summary *)
             let summary = IntMap.find_exn summaries fa in
-            Domain.join_opt (Summary.apply summary fa state') acc
+            Domain.join_opt (Summary.apply summary fa state' module_) acc
           else
             (* Types don't match, can't apply this function so we ignore it *)
             acc

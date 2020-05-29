@@ -16,7 +16,6 @@ let main filename =
   Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
   apply_to_textual filename (fun m ->
       let wasm_mod = Wasm_module.of_wasm m in
-      let nglobals = List.length wasm_mod.globals in
       let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
           let faddr = wasm_mod.nimports + i in
           (faddr, Cfg_builder.build faddr wasm_mod))) in
@@ -24,7 +23,7 @@ let main filename =
           Printf.printf "CFG for function %d\n" cfg.idx;
           Printf.printf "---------------\n%s\n---------------\n" (Cfg.to_dot cfg)
         );
-      let _results = Inter_fixpoint.analyze cfgs nglobals wasm_mod in
+      let _results = Inter_fixpoint.analyze cfgs wasm_mod in
       Printf.printf "--------- Results ---------\n";
       ())
         (* IntMap.iteri results ~f:(fun ~key:cfg_idx ~data:res ->
