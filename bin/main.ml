@@ -68,8 +68,7 @@ let intra =
                 let faddr = wasm_mod.nimports + i in
                 (faddr, Cfg_builder.build faddr wasm_mod))) in
             let summaries = List.fold_left funs
-              (* All summaries are initially bottom *)
-              ~init:(IntMap.map cfgs ~f:(fun cfg -> Summary.bottom cfg wasm_mod))
+              ~init:(Summary.initial_summaries cfgs wasm_mod)
               ~f:(fun summaries fid ->
                   Printf.printf "Analyzing function %d\n" fid;
                   let cfg = IntMap.find_exn cfgs fid in

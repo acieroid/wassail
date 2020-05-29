@@ -1,5 +1,6 @@
 (* A function summary *)
 open Core_kernel
+open Helpers
 
 (* For now it just models the number of arguments taken by the function, and the result on the vstack (in practice, either 0 or 1 value) *)
 type t = {
@@ -16,7 +17,7 @@ let to_string (s : t) : string =
     (Memory.to_string s.memory)
     (Globals.to_string s.globals)
 
-(* Constructs a summary given a CFG and a domain state resulting from that CFG *)
+(** Constructs a summary given a CFG and a domain state resulting from that CFG *)
 let make (cfg : Cfg.t) (state : Domain.state) : t = {
   nargs = List.length cfg.arg_types;
   typ = (cfg.arg_types, cfg.return_types);
@@ -25,7 +26,7 @@ let make (cfg : Cfg.t) (state : Domain.state) : t = {
   memory = state.memory;
 }
 
-(* Constructs an empty bottom summary given a CFG *)
+(** Constructs an empty bottom summary given a CFG *)
 let bottom (cfg : Cfg.t) (module_ : Wasm_module.t) : t = {
   nargs = List.length cfg.arg_types;
   typ = [], [];
@@ -33,6 +34,15 @@ let bottom (cfg : Cfg.t) (module_ : Wasm_module.t) : t = {
   globals = List.mapi module_.globals ~f:(fun i g -> Value.global g.typ i);
   memory = Memory.initial
 }
+
+(** Constructs all summaries for a given module *)
+let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntMap.t =
+  (* TODO: add models for imports (basically, either return top, or be a specific model, such as:
+     fd_write returns 0 (always)
+     proc_exit returns nothing
+     unsupported functions should probably be flagged in the output
+  *)
+  IntMap.map cfgs ~f:(fun cfg -> bottom cfg module_)
 
 (* Apply the summary to a state, updating the vstack as if the function was
    called, AND updating the set of called functions *)

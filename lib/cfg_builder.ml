@@ -232,7 +232,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
     (* Types of the locals *)
     local_types = funcinst.code.locals;
     (*The basic blocks *)
-    basic_blocks = BasicBlocks.IntMap.of_alist_exn (List.map actual_blocks ~f:(fun b -> (b.idx, b)));
+    basic_blocks = IntMap.of_alist_exn (List.map actual_blocks ~f:(fun b -> (b.idx, b)));
     (* The forward edges *)
     edges = IntMap.of_alist_multi (List.map actual_edges ~f:(fun (src, dst, data) -> (src, (dst, data))));
     (* The backward edges *)

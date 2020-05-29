@@ -8,7 +8,7 @@
   (type (;6;) (func (result i32)))
   (type (;7;) (func (param i32 i32 i32 i32) (result i32)))
   (type (;8;) (func (param i32 i64 i32) (result i64)))
-  (import "wasi_snapshot_preview1" "fd_write" (func $__wasi_fd_write (type 7)))
+  (import "wasi_snapshot_preview1r" "fd_write" (func $__wasi_fd_write (type 7)))
   (import "wasi_snapshot_preview1" "proc_exit" (func $__wasi_proc_exit (type 4)))
   (func $puts (type 1)
     (local i32 i32)

@@ -2,22 +2,16 @@ open Core_kernel
 open Helpers
 
 module IntListIntMap = struct
-  module IntMap = Map.Make(I)
-
   type t = (int list) IntMap.t
   [@@deriving sexp, compare]
 end
 
 module EdgesIntMap = struct
-  module IntMap = Map.Make(I)
-
   type t = ((int * bool option) list) IntMap.t
   [@@deriving sexp, compare]
 end
 
 module BasicBlocks = struct
-  module IntMap = Map.Make(I)
-
   type t = Basic_block.t IntMap.t
   [@@deriving sexp, compare]
 end
@@ -50,7 +44,7 @@ type t = {
 }
 
 let dependencies (cfg : t) : int list =
-  List.filter_map (BasicBlocks.IntMap.to_alist cfg.basic_blocks) ~f:(fun (_idx, block) -> match block.content with
+  List.filter_map (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_idx, block) -> match block.content with
       | Control (Call n) -> Some n
       | _ -> None)
 [@@deriving sexp, compare, yojson]
@@ -59,25 +53,25 @@ let to_string (cfg : t) : string = Printf.sprintf "CFG of function %d" cfg.idx
 let to_dot (cfg : t) : string =
   Printf.sprintf "digraph \"CFG of function %d\" {\n%s\n%s}\n"
     cfg.idx
-    (String.concat ~sep:"\n" (List.map (BasicBlocks.IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, b) -> Basic_block.to_dot b)))
-    (String.concat ~sep:"\n" (List.concat_map (IntListIntMap.IntMap.to_alist cfg.edges) ~f:(fun (src, dsts) ->
+    (String.concat ~sep:"\n" (List.map (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, b) -> Basic_block.to_dot b)))
+    (String.concat ~sep:"\n" (List.concat_map (IntMap.to_alist cfg.edges) ~f:(fun (src, dsts) ->
          List.map dsts ~f:(fun (dst, br) -> Printf.sprintf "block%d -> block%d [label=\"%s\"];\n" src dst (match br with
              | Some true -> "t"
              | Some false -> "f"
              | None -> "")))))
 
 let find_block_exn (cfg : t) (idx : int) : Basic_block.t =
-  BasicBlocks.IntMap.find_exn cfg.basic_blocks idx
+  IntMap.find_exn cfg.basic_blocks idx
 
 let successors (cfg : t) (idx : int) : int list =
-  List.map (BasicBlocks.IntMap.find_multi cfg.edges idx) ~f:fst
+  List.map (IntMap.find_multi cfg.edges idx) ~f:fst
 
 let predecessors (cfg : t) (idx : int) : (int * bool option) list =
-  BasicBlocks.IntMap.find_multi cfg.back_edges idx
+  IntMap.find_multi cfg.back_edges idx
 
 let callees (cfg : t) : IntSet.t =
   (* Loop through all the blocks of the cfg, collecting the targets of call instructions *)
-  BasicBlocks.IntMap.fold cfg.basic_blocks
+  IntMap.fold cfg.basic_blocks
     ~init:IntSet.empty
     ~f:(fun ~key:_ ~data:block callees -> match block.content with
         | Control (Call n) -> IntSet.union (IntSet.singleton n) callees
