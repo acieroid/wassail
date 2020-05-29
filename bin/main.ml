@@ -27,8 +27,8 @@ let cfg =
   Command.basic
     ~summary:"Generate a DOT file representing the CFG of function [fid] from the wat file [in], in file [out]"
     Command.Let_syntax.(
-      let%map_open fid = anon ("fid" %: int)
-      and file_in = anon ("in" %: string)
+      let%map_open file_in = anon ("in" %: string)
+      and fid = anon ("fid" %: int)
       and file_out = anon ("out" %: string) in
       fun () ->
         apply_to_textual file_in (fun m ->
@@ -108,4 +108,4 @@ let () =
        ["cfg", cfg
        ; "cfgs", cfgs
        ; "inter", inter
-       ; "nitra", intra])
+       ; "intra", intra])

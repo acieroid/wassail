@@ -14,15 +14,12 @@ module Logging = Logging
 module Transfer = Transfer
 module Summary = Summary
 
-let trace name = print_endline ("-- " ^ name)
-
 let error at category msg =
   failwith (Printf.sprintf "Error: %s" (Source.string_of_region at ^ ": " ^ category ^ ": " ^ msg))
 
 let input_from get_script run =
   try
     let script = get_script () in
-    trace "Running...";
     run script;
   with
   | Decode.Code (at, msg) -> error at "decoding error" msg
@@ -66,7 +63,6 @@ let initialize (program : string) : unit =
         | Script.Textual m ->
           let wasm_mod = Wasm_module.of_wasm m in
           module_ := Some wasm_mod;
-          trace (Printf.sprintf "nglobals: %d\n" (List.length wasm_mod.globals));
           nglobals := List.length wasm_mod.globals;
           cfgs := IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun faddr _ -> (faddr, Cfg_builder.build faddr wasm_mod)));
           cfg_deps := IntMap.mapi !cfgs ~f:(fun ~key:_ ~data:cfg -> Cfg.dependencies cfg)
