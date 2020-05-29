@@ -250,7 +250,7 @@ let subsumes (v1 : t) (v2 : t) : bool = value_subsumes v1.value v2.value
 
 (************************ Joining *****************)
 (** Joins two values together *)
-let join (v1 : t) (v2 : t) : t =
+let rec join (v1 : t) (v2 : t) : t =
   assert Stdlib.(v1.typ = v2.typ);
   let vres: value = match (v1.value, v2.value) with
   | (Bottom, _) -> v2.value
@@ -282,6 +282,21 @@ let join (v1 : t) (v2 : t) : t =
   | (Symbolic (Parameter i), Symbolic (Op (Plus, Symbolic (Parameter i'), Symbolic (Const a)))) when i = i' ->
     (* p0 joined with p0+X is [p0,p0+X] *)
     Interval (Parameter i, Op (Plus, Symbolic (Parameter i), Symbolic (Const a)))
+  | Interval (a, _), (Symbolic a') when Stdlib.(a = a') ->
+    (* [a,b] joined with a is [a,b]*)
+    v1.value
+  | Interval (_, b), (Symbolic b') when Stdlib.(b = b') ->
+    (* [a,b] joined with b is [a,b]*)
+    v1.value
+  | Symbolic (Byte (v, i)), Symbolic (Byte (v', i')) when Stdlib.(i = i') ->
+    (* v@i joined with v'@i is (join v v')@i *)
+    Symbolic (Byte ((join { value = v; typ = v1.typ } { value = v'; typ = v2.typ }).value, i))
+  | Symbolic (Op (op, a, b)), Symbolic (Op (op', a', b')) when Stdlib.(op = op' && b = b') ->
+    (* a op b joined with a' op b becomes (a joined with a') op b *)
+    Symbolic (Op (op, (join { value = a; typ = v1.typ } { value = a'; typ = v2.typ }).value, b))
+  | Symbolic (Op (op, a, b)), Symbolic (Op (op', a', b')) when Stdlib.(op = op' && a = a') ->
+    (* a op b joined with a op b' becomes a op (b joined with b') *)
+    Symbolic (Op (op, a, (join { value = b; typ = v1.typ } { value = b'; typ = v2.typ }).value))
   | (Symbolic (Const _), LeftOpenInterval (Parameter _))
   | (Symbolic (Const _), LeftOpenInterval (Op (_, Symbolic (Parameter _), _)))
   | (Symbolic (Const _), RightOpenInterval (Op (_, Symbolic (Parameter _), _)))
