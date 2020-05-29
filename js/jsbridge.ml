@@ -114,7 +114,7 @@ let () =
           | None -> failwith "CFG not found"
 
         method analyze =
-          Wasmtaint.Inter_fixpoint.analyze !(Wasmtaint.cfgs) !(Wasmtaint.nglobals) (match !(Wasmtaint.module_) with
+          Wasmtaint.Inter_fixpoint.analyze !(Wasmtaint.cfgs) (match !(Wasmtaint.module_) with
               | Some m -> m
               | None -> failwith "Module not loaded")
 
