@@ -11,6 +11,7 @@ module Inter_fixpoint = Inter_fixpoint
 module Basic_block = Basic_block
 module Logging = Logging
 module Transfer = Transfer
+module Summary = Summary
 
 let trace name = print_endline ("-- " ^ name)
 

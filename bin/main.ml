@@ -59,10 +59,17 @@ let intra =
   Command.basic
     ~summary:"Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)"
     Command.Let_syntax.(
-      let%map_open _file = anon ("file" %: string)
-      and _funs = anon (sequence ("funs" %: int)) in
+      let%map_open filename = anon ("file" %: string)
+      and funs = anon (sequence ("funs" %: int)) in
       fun () ->
-        failwith "Not yet implemented")
+        apply_to_textual filename (fun m ->
+            let wasm_mod = Wasm_module.of_wasm m in
+            let _cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
+                let faddr = wasm_mod.nimports + i in
+                (faddr, Cfg_builder.build faddr wasm_mod))) in
+            List.iter funs ~f:(fun _fid ->
+                failwith "TODO"
+                  (* Intra_fixpoint.analyze cfg summaries wasm_mod *))))
 
 let inter =
   Command.basic
@@ -70,24 +77,20 @@ let inter =
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string) in
       fun () ->
-        Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
         apply_to_textual filename (fun m ->
             let wasm_mod = Wasm_module.of_wasm m in
             let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
                 let faddr = wasm_mod.nimports + i in
                 (faddr, Cfg_builder.build faddr wasm_mod))) in
-            IntMap.iter cfgs ~f:(fun cfg ->
-                Printf.printf "CFG for function %d\n" cfg.idx;
-                Printf.printf "---------------\n%s\n---------------\n" (Cfg.to_dot cfg)
-              );
-            let _results = Inter_fixpoint.analyze cfgs wasm_mod in
+            Inter_fixpoint.analyze cfgs wasm_mod;
             Printf.printf "--------- Results ---------\n";
-            ()))
-      (* IntMap.iteri results ~f:(fun ~key:cfg_idx ~data:res ->
-           Printf.printf "Results for function %d: %s\n" cfg_idx (Domain.to_string res))) *) (* TODO *)
+            IntMap.iteri !(Inter_fixpoint.summaries)
+              ~f:(fun ~key:fid ~data:summary ->
+                  Printf.printf "Summary of function %d:\n%s" fid (Summary.to_string summary))))
 
 
 let () =
+  Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
   Command.run ~version:"0.0"
     (Command.group ~summary:"Static analysis of WebAssembly"
        ["cfg", cfg

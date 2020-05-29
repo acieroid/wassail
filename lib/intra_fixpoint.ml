@@ -1,16 +1,19 @@
 open Core_kernel
 open Helpers
 
+(** The results of an intra analysis are a mapping from block ids to their in and out values *)
+type intra_results = (Transfer.result * Transfer.result) IntMap.t
+
 (** Analyzes a CFG. Returns the final state after computing the transfer of the entire function *)
 let analyze
     (cfg : Cfg.t) (* The CFG to analyze *)
-    (args : Value.t list) (* The arguments *) (* TODO: always p0, p1, etc? If so, can be initialized here instead of taken as argument *)
-    (globals : Globals.t) (* The initial value for globals *) (* TODO: same todo, maybe nglobals is sufficient *)
-    (memory : Memory.t) (* The memory *) (* TODO: again, memory can be initialized here *)
     (summaries : Summary.t IntMap.t) (* The current summaries *)
     (module_ : Wasm_module.t) : (* The overall module, needed to access types, tables, etc. *)
-  (Transfer.result * Transfer.result) IntMap.t (* Returns a mapping from block ids to their in and out values *)
+  intra_results
   =
+  let args = List.mapi cfg.arg_types ~f:(fun i t -> Value.parameter t i) in
+  let memory = Memory.initial in
+  let globals = List.mapi module_.globals ~f:(fun i g -> Value.global g.typ i) in
   let bottom = Transfer.Uninitialized in
   assert (List.length args = List.length cfg.arg_types); (* Given number of arguments should match the in arity of the function *)
   let init = Domain.init args cfg.local_types globals memory in
