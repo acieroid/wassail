@@ -11,20 +11,23 @@ Installing the dependencies
 
 2. Install dependencies for this project
 
-> opam install core incremental incr_map pps ppx_jane ppx_compare
+> opam install - core core_kernel ppx_compare ppx_inline_test ppx_jane wasm
+
+(This list of dependencies may be outdated, you can find it by running `dune external-lib-deps ./bin/main.exe`)
 
 Running the tests
 -----------------
 
-> dune runtest
+> make test
 
 Running the executable
 ----------------------
-> dune exec ./bin/main.exe foo.wat
+> make
+> ./main.exe foo.wat
 
 Running the interface
 ---------------------
 
-> dune build ./js/jsbridge.bc.js
+> make js
 
-Then you can open interface.html
+Then you can open `interface/cfg-viz.html`.
