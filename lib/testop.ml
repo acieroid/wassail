@@ -36,7 +36,7 @@ let eqz (v : Value.t) : Value.t = match (is_zero v, is_not_zero v) with
     begin match v.value with
       | Symbolic _ -> {
           value = simplify_value (Symbolic (Op (Eq, v.value,
-                                                Symbolic (Const (PrimValue.zero_of_t v.typ)))));
+                                                Symbolic (Const (Prim_value.zero_of_t v.typ)))));
           typ = I32
         }
       | _ -> bool

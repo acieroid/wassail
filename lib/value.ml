@@ -1,154 +1,28 @@
 open Core_kernel
 open Wasm
 
-module PrimValue = struct
-  module T = struct
-    type t =
-      | I32 of int32
-      | I64 of int64
-      (* TODO: f32 & f64 *)
-    [@@deriving sexp, compare]
-  end
-  include T
-  include Comparator.Make(T)
-
-  let to_string (v : t) : string = match v with
-    | I32 n -> Int32.to_string n
-    | I64 n -> Int64.to_string n
-
-  let is_zero (v : t) : bool = match v with
-    | I32 0l | I64 0L -> true
-    | _ -> false
-
-  let byte_of (v : t) (byte : int) = match (v, byte) with
-    | (I32 x, 0) -> I32 Int32.(x land  0xFFl)
-    | (I32 x, 1) -> I32 Int32.(shift_left (x land 0xFF00l) 8)
-    | (I32 x, 2) -> I32 Int32.(shift_left (x land 0xFF0000l) 16)
-    | (I32 x, 3) -> I32 Int32.(shift_left (x land 0xFF000000l) 24)
-    | (I64 x, 0) -> I64 Int64.(x land 0xFFL)
-    | (I64 x, 1) -> I64 Int64.(shift_left (x land 0xFF00L) 8)
-    | (I64 x, 2) -> I64 Int64.(shift_left (x land 0xFF0000L) 16)
-    | (I64 x, 3) -> I64 Int64.(shift_left (x land 0xFF000000L) 24)
-    | _ -> failwith "invalid call to byte_of"
-
-  let is (v : t) (n : int) : bool = match v with
-    | I32 n' -> Int32.(n' = of_int_exn n)
-    | I64 n' -> Int64.(n' = of_int_exn n)
-
-  (** Returns zero of type t *)
-  let zero_of_t (t : Type.t) : t = match t with
-    | I32 -> I32 0l
-    | I64 -> I64 0L
-    | _ -> failwith "unsupported type"
-
-  (** Returns zero in the same type as v *)
-  let zero_of_same_t (v : t) : t = match v with
-    | I32 _ -> I32 0l
-    | I64 _ -> I64 0L
-
-  let of_int_t (v : t) (n : int) : t = match v with
-    | I32 _ -> I32 (Int32.of_int_exn n)
-    | I64 _ -> I64 (Int64.of_int_exn n)
-
-  let of_int (n : int) : t = I32 (Int32.of_int_exn n)
-
-  let add_int (v : t) (n : int) : t = match v with
-    | I32 x -> I32 Int32.(x + (of_int_exn n))
-    | I64 x -> I64 Int64.(x + (of_int_exn n))
-
-  let min (v1 : t) (v2 : t) : t  = match (v1, v2) with
-    | (I32 x, I32 y) -> I32 (Int32.(min x y))
-    | (I64 x, I64 y) -> I64 (Int64.(min x y))
-    | _ -> failwith "comparing wrong values"
-
-  let max (v1 : t) (v2 : t) : t  = match (v1, v2) with
-    | (I32 x, I32 y) -> I32 (Int32.(max x y))
-    | (I64 x, I64 y) -> I64 (Int64.(max x y))
-    | _ -> failwith "comparing wrong values"
-
-  (** Lift a wasm operation to PrimValue *)
-  let lift_wasm_bin
-      (op32 : Wasm.I32.t -> Wasm.I32.t -> Wasm.I32.t)
-      (op64 : Wasm.I64.t -> Wasm.I64.t -> Wasm.I64.t)
-    : t -> t -> t = fun v1 v2 -> match (v1, v2) with
-    | (I32 x, I32 y) -> I32 (op32 x y)
-    | (I64 x, I64 y) -> I64 (op64 x y)
-    | _ -> failwith "wrong types"
-
-  let lift_wasm_un
-      (op32 : Wasm.I32.t -> Wasm.I32.t)
-      (op64 : Wasm.I64.t -> Wasm.I64.t)
-    : t -> t = function
-    | I32 x -> I32 (op32 x)
-    | I64 x -> I64 (op64 x)
-
-  let lift_wasm_test
-      (op32 : Wasm.I32.t -> bool)
-      (op64 : Wasm.I64.t -> bool)
-    : t -> bool = function
-    | I32 x -> op32 x
-    | I64 x -> op64 x
-
-  let lift_wasm_rel
-      (op32 : Wasm.I32.t -> Wasm.I32.t -> bool)
-      (op64 : Wasm.I64.t -> Wasm.I64.t -> bool)
-    : t -> t -> bool = fun v1 v2 -> match (v1, v2) with
-    | (I32 x, I32 y) -> op32 x y
-    | (I64 x, I64 y) -> op64 x y
-    | _ -> failwith "wrong types"
-
-  let add = lift_wasm_bin Wasm.I32.add Wasm.I64.add
-  let sub = lift_wasm_bin Wasm.I32.sub Wasm.I64.sub
-  let mul = lift_wasm_bin Wasm.I32.mul Wasm.I64.mul
-  let div_s = lift_wasm_bin Wasm.I32.div_s Wasm.I64.div_s
-  let div_u = lift_wasm_bin Wasm.I32.div_u Wasm.I64.div_u
-  let rem_s = lift_wasm_bin Wasm.I32.rem_s Wasm.I64.rem_s
-  let rem_u = lift_wasm_bin Wasm.I32.rem_u Wasm.I64.rem_u
-  let and_ = lift_wasm_bin Wasm.I32.and_ Wasm.I64.and_
-  let or_ = lift_wasm_bin Wasm.I32.or_ Wasm.I64.or_
-  let xor = lift_wasm_bin Wasm.I32.xor Wasm.I64.xor
-  let shl = lift_wasm_bin Wasm.I32.shl Wasm.I64.shl
-  let shr_s = lift_wasm_bin Wasm.I32.shr_s Wasm.I64.shr_s
-  let shr_u = lift_wasm_bin Wasm.I32.shr_u Wasm.I64.shr_u
-  let rotl = lift_wasm_bin Wasm.I32.rotl Wasm.I64.rotl
-  let rotr = lift_wasm_bin Wasm.I32.rotr Wasm.I64.rotr
-
-  let clz = lift_wasm_un Wasm.I32.clz Wasm.I64.clz
-  let popcnt = lift_wasm_un Wasm.I32.popcnt Wasm.I64.popcnt
-
-  (* TODO extend_s is a wasm op that is not defined here*)
-
-  let eqz = lift_wasm_test Wasm.I32.eqz Wasm.I64.eqz
-
-  let eq = lift_wasm_rel Wasm.I32.eq Wasm.I64.eq
-  let ne = lift_wasm_rel Wasm.I32.ne Wasm.I64.ne
-  let lt_s = lift_wasm_rel Wasm.I32.lt_s Wasm.I64.lt_s
-  let lt_u = lift_wasm_rel Wasm.I32.lt_u Wasm.I64.lt_u
-  let le_s = lift_wasm_rel Wasm.I32.le_s Wasm.I64.le_s
-  let le_u = lift_wasm_rel Wasm.I32.le_u Wasm.I64.le_u
-  let gt_s = lift_wasm_rel Wasm.I32.gt_s Wasm.I64.gt_s
-  let gt_u = lift_wasm_rel Wasm.I32.gt_u Wasm.I64.gt_u
-  let ge_s = lift_wasm_rel Wasm.I32.ge_s Wasm.I64.ge_s
-  let ge_u = lift_wasm_rel Wasm.I32.ge_u Wasm.I64.ge_u
-end
-
 (** These are the values (and their abstractions) *)
 module T = struct
-  type bytepos = int (* in practice, between 0 and 7 *)
+  (** A byte position, to index bytes in i32/i64 values. Should always be between 0 and 7 in practice. *)
+  type bytepos = int
   [@@deriving sexp, compare]
+
+  (** Operators that can be used in symbolic values *)
   type operator =
-    | Plus | Minus | Times
+    | Plus | Minus | Times (* TODO: minus should be removed, as a-x is also a+(-x) *)
     | Lt | LtE | Gt | GtE | Eq
     | And | Or | Xor
   [@@deriving sexp, compare]
+
+  (** Symbolic values *)
   type symbolic =
-    | Parameter of int (* p0 *)
-    | Global of int (* g0 *)
-    | Op of operator * value * value (* g0-16 *)
-    | Bytes4 of value * value * value * value (* b0b1b2b3, ordered as expected: b3 is the rightmost byte, and the righmost value in Bytes4 *)
-    | Byte of value * int (* x@0 is byte 0 of value x *)
-    | Deref of value (* *g0 *)
-    | Const of PrimValue.t
+    | Parameter of int (** A parameter, e.g. p0 *)
+    | Global of int (** A global, e.g., g0 *)
+    | Op of operator * value * value (** An operation on two values, e.g., g0-16 *)
+    | Bytes4 of value * value * value * value (** Four bytes, b0b1b2b3, ordered as expected: b3 is the rightmost byte, and the righmost value in Bytes4 *)
+    | Byte of value * int (** A specific byte of a value, e.g., x@0 is byte 0 of value x *)
+    | Deref of value (** A dereference, e.g., *g0 *)
+    | Const of Prim_value.t (** A constant value *)
   and value =
     | Bottom
     | Interval of symbolic * symbolic (* [a,b] *)
@@ -171,12 +45,33 @@ end
 include T
 include Comparator.Make(T)
 
+(** Constructs a value from a wasm value.
+    @param v the wasm value *)
 let of_wasm (v : Values.value) : t =
   match v with
   | I32 x -> { value = Symbolic (Const (I32 x)); typ = Type.I32 }
   | I64 x -> { value = Symbolic (Const (I64 x)); typ = Type.I64 }
   | F32 _ -> failwith "unsupported type: F32"
   | F64 _ -> failwith "unsupported type: F64"
+
+(** Creates the bottom value.
+    @param typ is the type of that value *)
+let bottom (typ : Type.t) : t = { value = Bottom; typ = typ }
+
+(** Creates a value from an i32 *)
+let i32_const (n : int32) : t = { value = Symbolic (Const (I32 n)); typ = I32 }
+
+(** Creates the zero value of the given type *)
+let zero (t : Type.t) : t = { value = Symbolic (Const (Prim_value.zero_of_t t)); typ = t }
+
+let true_ : t = i32_const 1l
+let ffalse_ : t = i32_const 0l
+
+let parameter (t : Type.t) (i : int) : t = { value = Symbolic (Parameter i); typ = t }
+let global (i : int) : t = { value = Symbolic (Global i); typ = I32 } (* TODO: typ *)
+let deref (addr : value) : t = { value = Symbolic (Deref addr); typ = I32 } (* TODO: typ *)
+let bool : t = { value = Interval (Const (I32 0l), Const (I32 1l)); typ = I32 }
+let top (source : string) : t = Logging.warn "TopCreated" (Printf.sprintf "Top value originating from: %s" source); { value = OpenInterval; typ = I32 } (* TODO: typ *)
 
 let rec value_to_string (v : value) : string = match v with
   | Bottom -> "bottom"
@@ -186,7 +81,7 @@ let rec value_to_string (v : value) : string = match v with
   | OpenInterval -> "T"
   | Symbolic sym -> symbolic_to_string sym
 and symbolic_to_string (v : symbolic) : string = match v with
-  | Const n -> PrimValue.to_string n
+  | Const n -> Prim_value.to_string n
   | Parameter i -> Printf.sprintf "p%d" i
   | Global i -> Printf.sprintf "g%d" i
   | Op (op, left, right) -> Printf.sprintf "%s%s%s" (value_to_string left) (begin match op with
@@ -206,54 +101,56 @@ and symbolic_to_string (v : symbolic) : string = match v with
   | Bytes4 (b0, b1, b2, b3) -> Printf.sprintf "bytes[%s,%s,%s,%s]" (value_to_string b0) (value_to_string b1) (value_to_string b2) (value_to_string b3)
   | Byte (v, b) -> Printf.sprintf "%s@%d" (value_to_string v) b
 let to_string (v : t) : string = value_to_string v.value
+let list_to_string (l : t list) : string =
+  String.concat ~sep:", " (List.map l ~f:to_string)
 
 let rec simplify_symbolic (sym : symbolic) : symbolic =
   match sym with
-  | (Op (Plus, a, Symbolic (Const z))) when PrimValue.is_zero z->
+  | (Op (Plus, a, Symbolic (Const z))) when Prim_value.is_zero z->
     (* a+0 is handled in simplify *)
     (Op (Plus, a, Symbolic (Const z)))
-  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when PrimValue.eq x y ->
+  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when Prim_value.eq x y ->
     (* (a-x)+x = a *)
-    (Op (Plus, a, Symbolic (Const (PrimValue.zero_of_same_t x))))
-  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when PrimValue.gt_s x y ->
+    (Op (Plus, a, Symbolic (Const (Prim_value.zero_of_same_t x))))
+  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when Prim_value.gt_s x y ->
     (* (a-x)+y when x > y = a-(x-y) *)
-    simplify_symbolic (Op (Minus, simplify_value a, Symbolic (Const (PrimValue.sub x y))))
-  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when PrimValue.lt_s x y ->
+    simplify_symbolic (Op (Minus, simplify_value a, Symbolic (Const (Prim_value.sub x y))))
+  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when Prim_value.lt_s x y ->
     (* (a-x)+y when y > x = a+(y-x)*)
-    simplify_symbolic (Op (Plus, simplify_value a, Symbolic (Const (PrimValue.sub y x))))
+    simplify_symbolic (Op (Plus, simplify_value a, Symbolic (Const (Prim_value.sub y x))))
   | (Op (Plus, (Symbolic (Op (Plus, a, Symbolic (Const x)))), Symbolic (Const y))) ->
     (* (a+x)+y = a + (x+y) *)
-    simplify_symbolic (Op (Plus, simplify_value a, Symbolic (Const (PrimValue.add x y))))
+    simplify_symbolic (Op (Plus, simplify_value a, Symbolic (Const (Prim_value.add x y))))
   | (Op (Minus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) ->
     (* (a-x)-y = a-(x+y) *)
-    simplify_symbolic (Op (Minus, simplify_value a, Symbolic (Const (PrimValue.add x y))))
+    simplify_symbolic (Op (Minus, simplify_value a, Symbolic (Const (Prim_value.add x y))))
   | Op (Eq, Symbolic (Op (Lt, a, b)), Symbolic (Const (I32 0l))) ->
     (* a<b=0 = a>b *)
     Op (GtE, a, b)
   | Bytes4 (Symbolic (Const a), Symbolic (Const b), Symbolic (Const c), Symbolic (Const d)) ->
     (* First check that a | 0xFF000000 is 0, etc, because a, b, c, and d should be proper bytes *)
-    assert (PrimValue.is_zero (PrimValue.and_ a (I32 0xFF000000l)) &&
-            PrimValue.is_zero (PrimValue.and_ b (I32 0xFF0000l)) &&
-            PrimValue.is_zero (PrimValue.and_ c (I32 0xFF00l)) &&
-            PrimValue.is_zero (PrimValue.and_ d (I32 0xFFl)));
-    Const (PrimValue.or_ a (PrimValue.or_ b (PrimValue.or_ c d)))
+    assert (Prim_value.is_zero (Prim_value.and_ a (I32 0xFF000000l)) &&
+            Prim_value.is_zero (Prim_value.and_ b (I32 0xFF0000l)) &&
+            Prim_value.is_zero (Prim_value.and_ c (I32 0xFF00l)) &&
+            Prim_value.is_zero (Prim_value.and_ d (I32 0xFFl)));
+    Const (Prim_value.or_ a (Prim_value.or_ b (Prim_value.or_ c d)))
   | Bytes4 (Symbolic (Byte (Symbolic (Const a), byte_a)),
             Symbolic (Byte (Symbolic (Const b), byte_b)),
             Symbolic (Byte (Symbolic (Const c), byte_c)),
             Symbolic (Byte (Symbolic (Const d), byte_d))) ->
     Logging.warn "UNEXPECTED" "simplify called with %s, but this value should have been simplified first";
-    Const (PrimValue.or_
-             (PrimValue.shl (PrimValue.byte_of a byte_a) (I32 24l))
-             (PrimValue.or_ (PrimValue.shl (PrimValue.byte_of b byte_b) (I32 16l))
-                (PrimValue.or_ (PrimValue.shl (PrimValue.byte_of c byte_c) (I32 8l))
-                   (PrimValue.byte_of d byte_d))))
+    Const (Prim_value.or_
+             (Prim_value.shl (Prim_value.byte_of a byte_a) (I32 24l))
+             (Prim_value.or_ (Prim_value.shl (Prim_value.byte_of b byte_b) (I32 16l))
+                (Prim_value.or_ (Prim_value.shl (Prim_value.byte_of c byte_c) (I32 8l))
+                   (Prim_value.byte_of d byte_d))))
   | Bytes4 (Symbolic (Byte (Symbolic x, 3)),
             Symbolic (Byte (Symbolic x', 2)),
             Symbolic (Byte (Symbolic x'', 1)),
             Symbolic (Byte (Symbolic x''', 0))) when Stdlib.(x = x' && x' = x'' && x'' = x''') ->
     x
   | Byte (Symbolic (Const x), b) ->
-    Const (PrimValue.and_ x (I32 (Int32.shift_left 0xFFl  (b * 8))))
+    Const (Prim_value.and_ x (I32 (Int32.shift_left 0xFFl  (b * 8))))
   (* TODO: many more cases *)
   | (Global _) | (Parameter _) | Const _
   | Byte (Symbolic (Global _), _) | Byte (Symbolic (Parameter _), _)
@@ -267,44 +164,47 @@ let rec simplify_symbolic (sym : symbolic) : symbolic =
 and simplify_value (v : value) : value =
   match (match v with
       | Bottom -> Bottom
-      | Interval (Const a, Const b) when PrimValue.eq a b -> Symbolic (Const a)
+      | Interval (Const a, Const b) when Prim_value.eq a b -> Symbolic (Const a)
       | Interval (a, b) -> Interval (simplify_symbolic a, simplify_symbolic b)
       | LeftOpenInterval b -> LeftOpenInterval (simplify_symbolic b)
       | RightOpenInterval a -> RightOpenInterval (simplify_symbolic a)
       | OpenInterval -> OpenInterval
       | Symbolic sym -> Symbolic (simplify_symbolic sym))
   with
-  | Symbolic (Op (Plus, a, Symbolic (Const z))) when PrimValue.is_zero z -> a
-  | Symbolic (Op (Minus, a, Symbolic (Const z))) when PrimValue.is_zero z -> a
+  | Symbolic (Op (Plus, a, Symbolic (Const z))) when Prim_value.is_zero z -> a
+  | Symbolic (Op (Minus, a, Symbolic (Const z))) when Prim_value.is_zero z -> a
   | res -> res
 
 let simplify (v : t) : t = { value = simplify_value v.value; typ = v.typ }
+
+let symbolic (t : Type.t) (sym : symbolic) : t = { value = Symbolic (simplify_symbolic sym); typ = t }
+
 
 (** Checks if v1 subsumes v2 (i.e., v1 contains v2) *)
 let value_subsumes (v1 : value) (v2 : value) : bool = match (v1, v2) with
   | _, _ when Stdlib.(v1 = v2) -> true
   | _, Bottom -> true
   | Bottom, _ -> false
-  | Symbolic (Const n1), Symbolic (Const n2) -> PrimValue.eq n1 n2
-  | Symbolic (Const n), Interval (Const a, Const b) -> PrimValue.(eq a b && eq a n)
-  | Interval (Const a, Const b), Interval (Const a', Const b') -> PrimValue.(le_s a a' && ge_s b b')
-  | Interval (Const a, Const b), Symbolic (Const n) -> PrimValue.(le_s a n && ge_s b n)
-  | LeftOpenInterval (Const b), Symbolic (Const n) -> PrimValue.(ge_s b n)
-  | LeftOpenInterval (Const b), Interval (_, Const b') -> PrimValue.(ge_s b b')
-  | LeftOpenInterval (Const b), LeftOpenInterval (Const b') -> PrimValue.(ge_s b b')
-  | RightOpenInterval (Const a), Symbolic (Const n) -> PrimValue.(le_s a n)
-  | RightOpenInterval (Const a), Interval (Const a', _) -> PrimValue.(le_s a a')
-  | RightOpenInterval (Const a), RightOpenInterval (Const a') -> PrimValue.(le_s a a')
+  | Symbolic (Const n1), Symbolic (Const n2) -> Prim_value.eq n1 n2
+  | Symbolic (Const n), Interval (Const a, Const b) -> Prim_value.(eq a b && eq a n)
+  | Interval (Const a, Const b), Interval (Const a', Const b') -> Prim_value.(le_s a a' && ge_s b b')
+  | Interval (Const a, Const b), Symbolic (Const n) -> Prim_value.(le_s a n && ge_s b n)
+  | LeftOpenInterval (Const b), Symbolic (Const n) -> Prim_value.(ge_s b n)
+  | LeftOpenInterval (Const b), Interval (_, Const b') -> Prim_value.(ge_s b b')
+  | LeftOpenInterval (Const b), LeftOpenInterval (Const b') -> Prim_value.(ge_s b b')
+  | RightOpenInterval (Const a), Symbolic (Const n) -> Prim_value.(le_s a n)
+  | RightOpenInterval (Const a), Interval (Const a', _) -> Prim_value.(le_s a a')
+  | RightOpenInterval (Const a), RightOpenInterval (Const a') -> Prim_value.(le_s a a')
   | OpenInterval, _ -> true
   | _, OpenInterval -> false
   | Symbolic (Op (_, Symbolic (Global i), Symbolic (Const x))), (* gi OP x *)
     Symbolic (Op (_, Symbolic (Global i'), Symbolic (Const x'))) (* gi' OP x' *)
     when i = i' ->
-    PrimValue.eq x x'
+    Prim_value.eq x x'
   | Symbolic (Op (_, Symbolic (Parameter i), Symbolic (Const x))),
     Symbolic (Op (_, Symbolic (Parameter i'), Symbolic (Const x')))
     when i = i' ->
-    PrimValue.eq x x'
+    Prim_value.eq x x'
   | Symbolic (Bytes4 (Symbolic (Deref OpenInterval),
                       Symbolic (Deref OpenInterval),
                       Symbolic (Deref OpenInterval),
@@ -318,24 +218,6 @@ let value_subsumes (v1 : value) (v2 : value) : bool = match (v1, v2) with
 
 let subsumes (v1 : t) (v2 : t) : bool = value_subsumes v1.value v2.value
 
-let bottom (typ : Type.t) : t = { value = Bottom; typ = typ }
-let i32_zero : t = { value = Symbolic (Const (I32 0l)); typ = I32 }
-let i64_zero : t = { value = Symbolic (Const (I64 0L)); typ = I64 }
-let i32_const (n : int32) : t = { value = Symbolic (Const (I32 n)); typ = I32 }
-let i64_const (n : int64) : t = { value = Symbolic (Const (I64 n)); typ = I64 }
-let zero (t : Type.t) : t = { value = Symbolic (Const (PrimValue.zero_of_t t)); typ = t }
-let const (n : PrimValue.t) : t = match n with
-  | I32 _ -> { value = Symbolic (Const n); typ = I32 }
-  | I64 _ -> { value = Symbolic (Const n); typ = I64 }
-let parameter (t : Type.t) (i : int) : t = { value = Symbolic (Parameter i); typ = t }
-let global (i : int) : t = { value = Symbolic (Global i); typ = I32 } (* TODO: typ *)
-let deref (addr : value) : t = { value = Symbolic (Deref addr); typ = I32 } (* TODO: typ *)
-let bool : t = { value = Interval (Const (I32 0l), Const (I32 1l)); typ = I32 }
-let top (source : string) : t = Logging.warn "TopCreated" (Printf.sprintf "Top value originating from: %s" source); { value = OpenInterval; typ = I32 } (* TODO: typ *)
-let symbolic (t : Type.t) (sym : symbolic) : t = { value = Symbolic (simplify_symbolic sym); typ = t }
-let list_to_string (l : t list) : string =
-  String.concat ~sep:", " (List.map l ~f:to_string)
-
 (** Joins two values together *)
 let join (v1 : t) (v2 : t) : t =
   assert Stdlib.(v1.typ = v2.typ);
@@ -344,23 +226,23 @@ let join (v1 : t) (v2 : t) : t =
   | (_, Bottom) -> v1.value
   | (OpenInterval, _) | (_, OpenInterval) -> OpenInterval
   | (_, _) when Stdlib.(v1 = v2) -> v1.value
-  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.eq n1 n2 ->
+  | (Symbolic (Const n1), Symbolic (Const n2)) when Prim_value.eq n1 n2 ->
     Symbolic (Const n1)
   | (Symbolic (Const n1), Symbolic (Const n2)) ->
-    Interval (Const PrimValue.(min n1 n2), Const PrimValue.(max n1 n2))
-  | (Symbolic (Const n), Interval (Const a, Const b)) -> Interval (Const PrimValue.(min a n), Const PrimValue.(max b n))
-  | (Interval (Const a, Const b), Symbolic (Const n)) -> Interval (Const PrimValue.(min a n), Const PrimValue.(max b n))
-  | (Interval (Const z, Const b), Interval (Const z', Const b')) when PrimValue.(is_zero z && is_zero z' && not (eq b b')) ->
+    Interval (Const Prim_value.(min n1 n2), Const Prim_value.(max n1 n2))
+  | (Symbolic (Const n), Interval (Const a, Const b)) -> Interval (Const Prim_value.(min a n), Const Prim_value.(max b n))
+  | (Interval (Const a, Const b), Symbolic (Const n)) -> Interval (Const Prim_value.(min a n), Const Prim_value.(max b n))
+  | (Interval (Const z, Const b), Interval (Const z', Const b')) when Prim_value.(is_zero z && is_zero z' && not (eq b b')) ->
     (* TODO: this is a very simple widening when the right bound is unstable *)
-    RightOpenInterval (Const (PrimValue.zero_of_same_t z))
+    RightOpenInterval (Const (Prim_value.zero_of_same_t z))
   | (Interval (Const a, Const b), Interval (Const a', Const b')) ->
     (* TODO: need widen to ensure convergence *)
-    Interval (Const PrimValue.(min a a'), Const PrimValue.(max b b'))
-  | (RightOpenInterval (Const a), RightOpenInterval (Const a')) -> RightOpenInterval (Const PrimValue.(min a a'))
-  | (LeftOpenInterval (Const b), LeftOpenInterval (Const b')) -> LeftOpenInterval (Const PrimValue.(max b b'))
-  | (Interval (Const a, _), RightOpenInterval (Const a')) -> RightOpenInterval (Const PrimValue.(min a a'))
-  | (RightOpenInterval (Const a), Symbolic (Const c)) -> RightOpenInterval (Const PrimValue.(min a c))
-  | (LeftOpenInterval (Const b), Symbolic (Const c)) -> LeftOpenInterval (Const PrimValue.(max b c))
+    Interval (Const Prim_value.(min a a'), Const Prim_value.(max b b'))
+  | (RightOpenInterval (Const a), RightOpenInterval (Const a')) -> RightOpenInterval (Const Prim_value.(min a a'))
+  | (LeftOpenInterval (Const b), LeftOpenInterval (Const b')) -> LeftOpenInterval (Const Prim_value.(max b b'))
+  | (Interval (Const a, _), RightOpenInterval (Const a')) -> RightOpenInterval (Const Prim_value.(min a a'))
+  | (RightOpenInterval (Const a), Symbolic (Const c)) -> RightOpenInterval (Const Prim_value.(min a c))
+  | (LeftOpenInterval (Const b), Symbolic (Const c)) -> LeftOpenInterval (Const Prim_value.(max b c))
   | (RightOpenInterval (Op (Plus, Symbolic x, Symbolic (Const _))), RightOpenInterval x') when (Stdlib.(=) x x') ->
     v2.value
   | (Symbolic (Op (Plus, Symbolic (Parameter i), Symbolic (Const a))), Symbolic (Parameter i')) when i = i'->
@@ -414,15 +296,15 @@ let meet (v1 : t) (v2 : t) : t =
 let is_zero (v : t) =
   match v.value with
   | Bottom -> false
-  | Symbolic (Const z) when PrimValue.is_zero z -> true
+  | Symbolic (Const z) when Prim_value.is_zero z -> true
   | Symbolic (Const _) -> false
-  | Interval (Const a, Const b) -> PrimValue.(le_s a (PrimValue.zero_of_same_t a) && ge_s b (PrimValue.zero_of_same_t b))
-  | Interval (_, Const b) -> PrimValue.ge_s b (PrimValue.zero_of_same_t b)
-  | Interval (Const a, _) -> PrimValue.le_s a (PrimValue.zero_of_same_t a)
+  | Interval (Const a, Const b) -> Prim_value.(le_s a (Prim_value.zero_of_same_t a) && ge_s b (Prim_value.zero_of_same_t b))
+  | Interval (_, Const b) -> Prim_value.ge_s b (Prim_value.zero_of_same_t b)
+  | Interval (Const a, _) -> Prim_value.le_s a (Prim_value.zero_of_same_t a)
   | Interval _ -> true
-  | LeftOpenInterval (Const b) -> PrimValue.ge_s b (PrimValue.zero_of_same_t b)
+  | LeftOpenInterval (Const b) -> Prim_value.ge_s b (Prim_value.zero_of_same_t b)
   | LeftOpenInterval _ -> true
-  | RightOpenInterval (Const a) -> PrimValue.le_s a (PrimValue.zero_of_same_t a)
+  | RightOpenInterval (Const a) -> Prim_value.le_s a (Prim_value.zero_of_same_t a)
   | RightOpenInterval _ -> true
   | OpenInterval -> true
   | Symbolic _ -> true (* TODO: could be more precise here? Or not *)
@@ -430,9 +312,9 @@ let is_zero (v : t) =
 let is_not_zero (v : t) =
   match v.value with
   | Bottom -> false
-  | Symbolic (Const z) when PrimValue.is_zero z -> false
+  | Symbolic (Const z) when Prim_value.is_zero z -> false
   | Symbolic (Const _) -> true
-  | Interval (Const a, Const b) -> not PrimValue.(eq a (PrimValue.zero_of_same_t a) && eq b (PrimValue.zero_of_same_t b))
+  | Interval (Const a, Const b) -> not Prim_value.(eq a (Prim_value.zero_of_same_t a) && eq b (Prim_value.zero_of_same_t b))
   | Interval _ -> true (* TODO could be more precise *)
   | LeftOpenInterval _ -> true
   | RightOpenInterval _ -> true
@@ -443,19 +325,19 @@ let rec add_offset (v : value) (offset : int) : value =
   if offset = 0 then v else
     match v with
     | Bottom -> Bottom
-    | Interval (Const a, Const b) -> Interval (Const PrimValue.(add_int a offset), Const PrimValue.(add_int b offset))
-    | Interval (a, b) -> Interval (Op (Plus, Symbolic a, Symbolic (Const (PrimValue.of_int offset))), Op (Plus, Symbolic b, Symbolic (Const (PrimValue.of_int offset))))
-    | LeftOpenInterval (Const b) -> LeftOpenInterval (Const PrimValue.(add_int b offset))
-    | LeftOpenInterval b -> LeftOpenInterval (Op (Plus, Symbolic b, Symbolic (Const (PrimValue.of_int offset))))
-    | RightOpenInterval (Const a) -> LeftOpenInterval (Const PrimValue.(add_int a offset))
-    | RightOpenInterval a -> RightOpenInterval (Op (Plus, Symbolic a, Symbolic (Const (PrimValue.of_int offset))))
+    | Interval (Const a, Const b) -> Interval (Const Prim_value.(add_int a offset), Const Prim_value.(add_int b offset))
+    | Interval (a, b) -> Interval (Op (Plus, Symbolic a, Symbolic (Const (Prim_value.of_int offset))), Op (Plus, Symbolic b, Symbolic (Const (Prim_value.of_int offset))))
+    | LeftOpenInterval (Const b) -> LeftOpenInterval (Const Prim_value.(add_int b offset))
+    | LeftOpenInterval b -> LeftOpenInterval (Op (Plus, Symbolic b, Symbolic (Const (Prim_value.of_int offset))))
+    | RightOpenInterval (Const a) -> LeftOpenInterval (Const Prim_value.(add_int a offset))
+    | RightOpenInterval a -> RightOpenInterval (Op (Plus, Symbolic a, Symbolic (Const (Prim_value.of_int offset))))
     | OpenInterval -> OpenInterval
-    | Symbolic (Const n) -> Symbolic (Const PrimValue.(add_int n offset))
+    | Symbolic (Const n) -> Symbolic (Const Prim_value.(add_int n offset))
     (* TODO: choose between adding it to a or b? e.g., g0-16+8 is better represented as g0-8 than g0+8-16. Maybe introduce a simplification phase*)
     | Symbolic (Op (Plus, a, b)) -> simplify_value (Symbolic (Op (Plus, a, simplify_value (add_offset b offset))))
     | Symbolic (Op (Minus, a, b)) -> simplify_value (Symbolic (Op (Minus, a, simplify_value (add_offset b (- offset)))))
-    | Symbolic (Op (Times, a, b)) -> simplify_value (Symbolic (Op (Plus, Symbolic (Op (Times, a, b)), Symbolic (Const (PrimValue.of_int offset)))))
-    | Symbolic _ -> simplify_value (Symbolic (Op (Plus, v, Symbolic (Const (PrimValue.of_int offset)))))
+    | Symbolic (Op (Times, a, b)) -> simplify_value (Symbolic (Op (Plus, Symbolic (Op (Times, a, b)), Symbolic (Const (Prim_value.of_int offset)))))
+    | Symbolic _ -> simplify_value (Symbolic (Op (Plus, v, Symbolic (Const (Prim_value.of_int offset)))))
 
 module ValueValueMap = struct
   module ValueMap = Map.Make(ValueT)
@@ -490,3 +372,67 @@ let rec adapt_value (v : value) (map : ValueValueMap.t) : value =
 
 let adapt (v : t) (map : ValueValueMap.t) : t =
   { value = adapt_value v.value map; typ = v.typ }
+
+let add (v1 : t) (v2 : t) : t =
+  assert Stdlib.(v1.typ = v2.typ);
+  let v = match (v1.value, v2.value) with
+  | (_, Symbolic (Const z)) when Prim_value.is_zero z -> v1.value
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> (Symbolic (Const (Prim_value.add n1 n2)))
+  | (Symbolic (Op _), _) -> simplify_value (Symbolic (Op (Plus, v1.value, v2.value)))
+  | (Symbolic (Parameter i), _) -> simplify_value (Symbolic (Op (Plus, Symbolic (Parameter i), v2.value)))
+  | (Symbolic (Global i), _) -> simplify_value (Symbolic (Op (Plus, Symbolic (Global i), v2.value)))
+  | (Symbolic (Deref _), _) -> Symbolic (Op (Plus, v1.value, v2.value))
+  | (Interval (Const a, Const b), Symbolic (Const n)) -> Interval (Const (Prim_value.add a n), Const (Prim_value.add b n))
+  | (RightOpenInterval (Const x), Symbolic (Const y)) -> RightOpenInterval (Const (Prim_value.add x y))
+  | (LeftOpenInterval (Const x), Symbolic (Const y)) -> RightOpenInterval (Const (Prim_value.add x y))
+  | (RightOpenInterval (Parameter i), Symbolic (Const n)) -> RightOpenInterval (Op (Plus, (Symbolic (Parameter i)), (Symbolic (Const n))))
+  | _ -> (top (Printf.sprintf "add %s %s" (to_string v1) (to_string v2))).value
+  in { value = v; typ = v1.typ }
+
+let sub (v1 : t) (v2 : t) : t =
+  assert Stdlib.(v1.typ = v2.typ);
+  match (v1.value, v2.value) with
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> { value = Symbolic (Const (Prim_value.sub n1 n2)); typ = v1.typ }
+  | (Symbolic (Global _), Symbolic (Const _)) -> { value = simplify_value (Symbolic (Op (Minus, v1.value, v2.value))); typ = v1.typ }
+  | _ -> top (Printf.sprintf "sub %s %s" (to_string v1) (to_string v2))
+
+let mul (v1 : t) (v2 : t) : t =
+  assert Stdlib.(v1.typ = v2.typ);
+  match (v1.value, v2.value) with
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> { value = Symbolic (Const (Prim_value.mul n1 n2)); typ = v1.typ }
+  | _ -> top (Printf.sprintf "mul %s %s" (to_string v1) (to_string v2))
+
+let rem_s (v1 : t) (v2 : t) : t =
+  assert Stdlib.(v1.typ = v2.typ);
+  match (v1.value, v2.value) with
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> { value = Symbolic (Const (Prim_value.rem_s n1 n2)); typ = v1.typ }
+  | _ -> top (Printf.sprintf "rem_s %s %s" (to_string v1) (to_string v2))
+
+let shl (v1 : t) (v2 : t) : t =
+  assert Stdlib.(v1.typ = v2.typ);
+  match (v1.value, v2.value) with
+   (Symbolic (Const n1), Symbolic (Const n2)) -> { value = Symbolic (Const (Prim_value.shl n1 n2)); typ = v1.typ }
+  (* | (Interval (Const a, Const b), Symbolic (Const 2l)) -> Interval (Const (Int32.( * ) a 4l), Const (Int32.( * ) b 4l)) *) (* TODO *)
+  (* | (Symbolic _, Symbolic (Const 2l)) -> symbolic (Op (Times, v1, Symbolic (Const 4l))) *) (* TODO *)
+  (* | (RightOpenInterval (Const 0l), Symbolic (Const 2l)) -> v1 *) (* TODO *)
+  | _ -> top (Printf.sprintf "shl %s %s" (to_string v1) (to_string v2))
+
+let and_ (v1 : t) (v2 : t) : t =
+  assert Stdlib.(v1.typ = v2.typ);
+  match (v1.value, v2.value) with
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> { value = Symbolic (Const (Prim_value.(and_ n1 n2))); typ = v1.typ }
+  | (_, Symbolic (Const one)) when Prim_value.is one 1 -> v1
+  | (Symbolic (Const one), _) when Prim_value.is one 1 -> v1
+  | _ -> { value = Symbolic (Op (And, v1.value, v2.value)); typ = v1.typ }
+
+let or_ (v1 : t) (v2 : t) : t =
+  match (v1.value, v2.value) with
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> { value = Symbolic (Const (Prim_value.(or_ n1 n2))); typ = v1.typ }
+  | (_, Symbolic (Const one)) when Prim_value.is one 1 -> v1
+  | (Symbolic (Const one), _) when Prim_value.is one 1 -> v1
+  | _ -> { value = Symbolic (Op (Or, v1.value, v2.value)); typ = v1.typ }
+
+let xor (v1 : t) (v2 : t) : t =
+  match (v1.value, v2.value) with
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> { value = Symbolic (Const (Prim_value.(xor n1 n2))); typ = v1.typ }
+  | _ -> { value = Symbolic (Op (Xor, v1.value, v2.value)); typ = v1.typ }

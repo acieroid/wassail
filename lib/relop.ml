@@ -48,46 +48,46 @@ let to_string (r : t) : string =
      | GeU -> "ge_u")
 
 let eq (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
-  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.eq n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | (Symbolic (Const n1), Symbolic (Const n2)) when Prim_value.eq n1 n2 -> Value.true_
   | _ -> bool (* TODO *)
 
 let ne (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
-  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.ne n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | (Symbolic (Const n1), Symbolic (Const n2)) when Prim_value.ne n1 n2 -> Value.true_
   | _ -> bool (* TODO *)
 
 let lt_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
-  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.lt_s n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | (Symbolic (Const n1), Symbolic (Const n2)) when Prim_value.lt_s n1 n2 -> Value.true_
   | (Symbolic a, Symbolic b) ->
     assert Stdlib.(v1.typ = v2.typ);
     { value = Symbolic (Op (Lt, (Symbolic a), (Symbolic b))); typ = I32 };
   | _ ->  bool (* TODO *)
 
 let lt_u (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
-  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.lt_u n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | (Symbolic (Const n1), Symbolic (Const n2)) when Prim_value.lt_u n1 n2 -> Value.true_
   | _ ->  bool (* TODO *)
 
 let gt_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
-  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.gt_s n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | (Symbolic (Const n1), Symbolic (Const n2)) when Prim_value.gt_s n1 n2 -> Value.true_
   | _ -> bool (* TODO *)
 
 let gt_u (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
-  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.gt_u n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | (Symbolic (Const n1), Symbolic (Const n2)) when Prim_value.gt_u n1 n2 -> Value.true_
   | _ -> bool (* TODO *)
 
 let le_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
-  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.le_s n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | (Symbolic (Const n1), Symbolic (Const n2)) when Prim_value.le_s n1 n2 -> Value.true_
   | _ -> bool (* TODO *)
 
 let le_u (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
-  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.le_u n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | (Symbolic (Const n1), Symbolic (Const n2)) when Prim_value.le_u n1 n2 -> Value.true_
   | _ -> bool (* TODO *)
 
 let ge_s (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
-  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.ge_s n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | (Symbolic (Const n1), Symbolic (Const n2)) when Prim_value.ge_s n1 n2 -> Value.true_
   | _ -> bool (* TODO *)
 
 let ge_u (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
-  | (Symbolic (Const n1), Symbolic (Const n2)) when PrimValue.ge_u n1 n2 -> const (PrimValue.of_int_t n1 1)
+  | (Symbolic (Const n1), Symbolic (Const n2)) when Prim_value.ge_u n1 n2 -> Value.true_
   | _ -> bool (* TODO *)
 
 let eval (r : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
