@@ -23,28 +23,6 @@ let apply_to_textual (filename : string) (f : Ast.module_ -> unit) =
       ) in
   parse_file filename extract
 
-let inter =
-  Command.basic
-    ~summary:"Fully analyzes the wat file [file]"
-    Command.Let_syntax.(
-      let%map_open filename = anon ("file" %: string) in
-      fun () ->
-        Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
-        apply_to_textual filename (fun m ->
-            let wasm_mod = Wasm_module.of_wasm m in
-            let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
-                let faddr = wasm_mod.nimports + i in
-                (faddr, Cfg_builder.build faddr wasm_mod))) in
-            IntMap.iter cfgs ~f:(fun cfg ->
-                Printf.printf "CFG for function %d\n" cfg.idx;
-                Printf.printf "---------------\n%s\n---------------\n" (Cfg.to_dot cfg)
-              );
-            let _results = Inter_fixpoint.analyze cfgs wasm_mod in
-            Printf.printf "--------- Results ---------\n";
-            ()))
-      (* IntMap.iteri results ~f:(fun ~key:cfg_idx ~data:res ->
-           Printf.printf "Results for function %d: %s\n" cfg_idx (Domain.to_string res))) *) (* TODO *)
-
 let cfg =
   Command.basic
     ~summary:"Generate a DOT file representing the CFG of function [fid] from the wat file [in], in file [out]"
@@ -77,10 +55,42 @@ let cfgs =
                   Out_channel.with_file (Printf.sprintf "%s/%d.dot" out_dir faddr)
                     ~f:(fun ch ->
                         Out_channel.output_string ch (Cfg.to_dot cfg)))))
+let intra =
+  Command.basic
+    ~summary:"Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)"
+    Command.Let_syntax.(
+      let%map_open _file = anon ("file" %: string)
+      and _funs = anon (sequence ("funs" %: int)) in
+      fun () ->
+        failwith "Not yet implemented")
+
+let inter =
+  Command.basic
+    ~summary:"Fully analyzes the wat file [file]"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string) in
+      fun () ->
+        Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
+        apply_to_textual filename (fun m ->
+            let wasm_mod = Wasm_module.of_wasm m in
+            let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
+                let faddr = wasm_mod.nimports + i in
+                (faddr, Cfg_builder.build faddr wasm_mod))) in
+            IntMap.iter cfgs ~f:(fun cfg ->
+                Printf.printf "CFG for function %d\n" cfg.idx;
+                Printf.printf "---------------\n%s\n---------------\n" (Cfg.to_dot cfg)
+              );
+            let _results = Inter_fixpoint.analyze cfgs wasm_mod in
+            Printf.printf "--------- Results ---------\n";
+            ()))
+      (* IntMap.iteri results ~f:(fun ~key:cfg_idx ~data:res ->
+           Printf.printf "Results for function %d: %s\n" cfg_idx (Domain.to_string res))) *) (* TODO *)
+
 
 let () =
   Command.run ~version:"0.0"
     (Command.group ~summary:"Static analysis of WebAssembly"
        ["cfg", cfg
        ; "cfgs", cfgs
-       ; "inter", inter])
+       ; "inter", inter
+       ; "nitra", intra])
