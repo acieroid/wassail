@@ -2,7 +2,7 @@ open Core_kernel
 
 module T = struct
   type t = {
-    nimports : int;
+    imported_funcs : (int * string * (Type.t list * Type.t list)) list;
     funcs : Func_inst.t list;
     globals : Global_inst.t list;
     mems : Memory_inst.t list;
@@ -13,15 +13,15 @@ module T = struct
   [@@deriving sexp, compare]
 end
 include T
-let get_funcinst (s : t) (a : Address.t) : Func_inst.t =
-  List.nth_exn s.funcs (a-s.nimports)
-let get_global (s : t) (a : Address.t) : Global_inst.t =
-  List.nth_exn s.globals a
-let set_global (s : t) (a : Address.t) (v : Value.t) : t =
-  { s with globals = List.mapi s.globals ~f:(fun i g ->
+let get_funcinst (m : t) (a : Address.t) : Func_inst.t =
+  List.nth_exn m.funcs (a-(List.length m.imported_funcs))
+let get_global (m : t) (a : Address.t) : Global_inst.t =
+  List.nth_exn m.globals a
+let set_global (m : t) (a : Address.t) (v : Value.t) : t =
+  { m with globals = List.mapi m.globals ~f:(fun i g ->
         if i = a then { g with value = Value.join g.value v } else g) }
-let get_meminst (s : t) (a : Address.t) : Memory_inst.t =
-  List.nth_exn s.mems a
+let get_meminst (m : t) (a : Address.t) : Memory_inst.t =
+  List.nth_exn m.mems a
 let join (s1 : t) (s2 : t) : t =
   assert Stdlib.(s1.funcs = s2.funcs);
   { s1 with
@@ -29,9 +29,15 @@ let join (s1 : t) (s2 : t) : t =
   }
 let of_wasm (m : Wasm.Ast.module_) : t =
   let minst = Module_inst.of_wasm m in
-  let nimports = List.length m.it.imports in
+  let nimports = 2 in (* TODO *)
   ({
-    nimports = nimports;
+    imported_funcs = List.filter_mapi m.it.imports ~f:(fun idx import -> match import.it.idesc.it with
+        | FuncImport v ->
+          Some (idx, Wasm.Ast.string_of_name import.it.item_name,
+                match (List.nth_exn m.it.types (Var.of_wasm v)).it with
+                | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
+                                                 List.map b ~f:Type.of_wasm))
+        | _ -> None);
     funcs = List.mapi m.it.funcs ~f:(fun i -> Func_inst.of_wasm m minst (i+nimports));
     globals = List.map m.it.globals ~f:Global_inst.of_wasm;
     mems = List.map m.it.memories ~f:Memory_inst.of_wasm;
@@ -41,5 +47,5 @@ let of_wasm (m : Wasm.Ast.module_) : t =
           (List.map m.it.elems ~f:Elem.of_wasm));
     types = List.map m.it.types ~f:(fun t -> match t.it with
         | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
-                              List.map b ~f:Type.of_wasm))
+                                         List.map b ~f:Type.of_wasm))
   })

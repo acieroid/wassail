@@ -35,14 +35,33 @@ let bottom (cfg : Cfg.t) (module_ : Wasm_module.t) : t = {
   memory = Memory.initial
 }
 
-(** Constructs all summaries for a given module *)
+(** Constructs a summary from an imported function *)
+let of_import (name : string) (args : Type.t list) (ret : Type.t list) (module_ : Wasm_module.t) : t = {
+  nargs = List.length args;
+  typ = args, ret;
+  result = begin match name with
+    | "fd_write" ->
+      (* fd_write always returns 0 *)
+      [Value.zero Type.I32]
+    | "proc_exit" ->
+      (* proc_exit does not return anything *)
+      []
+    | _ ->
+      (* We have not model this imported function, so we return top *)
+      List.map ret ~f:(fun t -> Value.top t (Printf.sprintf "import %s" name))
+  end;
+  (* We assume (probably unsoundly) that imports don't change memory nor globals *)
+  globals = List.mapi module_.globals ~f:(fun i g -> Value.global g.typ i);
+  memory = Memory.initial
+}
+
+(** Constructs all summaries for a given module, including imported functions *)
 let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntMap.t =
-  (* TODO: add models for imports (basically, either return top, or be a specific model, such as:
-     fd_write returns 0 (always)
-     proc_exit returns nothing
-     unsupported functions should probably be flagged in the output
-  *)
-  IntMap.map cfgs ~f:(fun cfg -> bottom cfg module_)
+  List.fold_left module_.imported_funcs
+    (* Summaries for defined functions are all initialized to bottom *)
+    ~init:(IntMap.map cfgs ~f:(fun cfg -> bottom cfg module_))
+    ~f:(fun sum import -> match import with
+        | (idx, name, (args, ret)) -> IntMap.set sum ~key:idx ~data:(of_import name args ret module_))
 
 (* Apply the summary to a state, updating the vstack as if the function was
    called, AND updating the set of called functions *)

@@ -48,9 +48,10 @@ let cfgs =
         apply_to_textual file_in (fun m ->
             let wasm_mod = Wasm_module.of_wasm m in
             Core.Unix.mkdir_p out_dir;
+            let nimports = List.length wasm_mod.imported_funcs in
             List.iteri wasm_mod.funcs
               ~f:(fun i _ ->
-                  let faddr = wasm_mod.nimports + i in
+                  let faddr = nimports + i in
                   let cfg = Cfg_builder.build faddr wasm_mod in
                   Out_channel.with_file (Printf.sprintf "%s/%d.dot" out_dir faddr)
                     ~f:(fun ch ->
@@ -64,8 +65,9 @@ let intra =
       fun () ->
         apply_to_textual filename (fun m ->
             let wasm_mod = Wasm_module.of_wasm m in
+            let nimports = List.length wasm_mod.imported_funcs in
             let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
-                let faddr = wasm_mod.nimports + i in
+                let faddr = nimports + i in
                 (faddr, Cfg_builder.build faddr wasm_mod))) in
             let summaries = List.fold_left funs
               ~init:(Summary.initial_summaries cfgs wasm_mod)
@@ -90,8 +92,9 @@ let inter =
       fun () ->
         apply_to_textual filename (fun m ->
             let wasm_mod = Wasm_module.of_wasm m in
+            let nimports = List.length wasm_mod.imported_funcs in
             let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
-                let faddr = wasm_mod.nimports + i in
+                let faddr = nimports + i in
                 (faddr, Cfg_builder.build faddr wasm_mod))) in
             Inter_fixpoint.analyze cfgs wasm_mod;
             Printf.printf "--------- Results ---------\n";
