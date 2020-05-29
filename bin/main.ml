@@ -73,12 +73,18 @@ let intra =
               ~init:(Summary.initial_summaries cfgs wasm_mod)
               ~f:(fun summaries fid ->
                   Printf.printf "Analyzing function %d\n" fid;
-                  let cfg = IntMap.find_exn cfgs fid in
-                  let results = Intra_fixpoint.analyze cfg summaries wasm_mod in
-                  let out_state = Intra_fixpoint.out_state cfg results in
-                  let summary = Summary.make cfg out_state in
-                  Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
-                  IntMap.set summaries ~key:fid ~data:summary) in
+                  if fid <= nimports then begin
+                    Printf.printf "This is an imported function, it does not have to be analyzed.\n";
+                    let summary = IntMap.find_exn summaries fid in
+                    Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
+                    summaries
+                  end else
+                    let cfg = IntMap.find_exn cfgs fid in
+                    let results = Intra_fixpoint.analyze cfg summaries wasm_mod in
+                    let out_state = Intra_fixpoint.out_state cfg results in
+                    let summary = Summary.make cfg out_state in
+                    Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
+                    IntMap.set summaries ~key:fid ~data:summary) in
             Printf.printf "---------------\nAnalysis done, resulting summaries are:\n";
             IntMap.iteri summaries ~f:(fun ~key:fid ~data:summary ->
                                         Printf.printf "function %d:\n%s\n" fid (Summary.to_string summary))))
