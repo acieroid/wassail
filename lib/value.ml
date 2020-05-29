@@ -302,6 +302,11 @@ let rec join (v1 : t) (v2 : t) : t =
     when Stdlib.(i = i' && i' = i'') && Prim_value.is_positive n ->
     (* pi joined with [pi+n,p1+m]  becomes [p1, p1+m] *)
     Interval (Parameter i, Op (Plus, Symbolic (Parameter i), Symbolic (Const m)))
+  | Interval (a, Op (Plus, Symbolic b, Symbolic (Const x))),
+    Interval (a', Op (Plus, Symbolic b', Symbolic (Const y)))
+    when Stdlib.(a = a' && b = b') ->
+    (*  [a,b+X] joined with [a,b+Y] where X and Y are constants, becomes [a,b+max(X,Y)] *)
+    Interval (a, Op (Plus, Symbolic b, Symbolic (Const (Prim_value.max x y))))
   | (Symbolic (Const _), LeftOpenInterval (Parameter _))
   | (Symbolic (Const _), LeftOpenInterval (Op (_, Symbolic (Parameter _), _)))
   | (Symbolic (Const _), RightOpenInterval (Op (_, Symbolic (Parameter _), _)))
