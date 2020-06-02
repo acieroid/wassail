@@ -14,7 +14,7 @@ opam pin add wasm .
 2. Install dependencies for this project
 
 ```sh
-opam install - core core_kernel ppx_compare ppx_inline_test ppx_jane wasm
+opam install core core_kernel ppx_compare ppx_inline_test ppx_jane wasm js_of_ocaml js_of_ocaml-ppx
 ```
 
 (This list of dependencies may be outdated, you can find it by running `dune external-lib-deps ./bin/main.exe`)

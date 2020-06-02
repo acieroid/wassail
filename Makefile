@@ -6,6 +6,7 @@ bin:
 
 js:
 	dune build ./js/jsbridge.bc.js
+	cp -f _build/default/js/jsbridge.bc.js interface/jsbridge.bc.js
 
 test:
 	dune runtest
