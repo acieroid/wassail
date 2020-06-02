@@ -73,7 +73,7 @@ let intra =
               ~init:(Summary.initial_summaries cfgs wasm_mod)
               ~f:(fun summaries fid ->
                   Printf.printf "Analyzing function %d\n" fid;
-                  if fid <= nimports then begin
+                  if fid < nimports then begin
                     Printf.printf "This is an imported function, it does not have to be analyzed.\n";
                     let summary = IntMap.find_exn summaries fid in
                     Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
