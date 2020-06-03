@@ -251,6 +251,24 @@ let value_subsumes (v1 : value) (v2 : value) : bool = match (v1, v2) with
     Symbolic (Op (_, Symbolic (Parameter i'), Symbolic (Const x')))
     when i = i' ->
     Prim_value.eq x x'
+  | Symbolic (Parameter _), Symbolic (Global _)
+  | Symbolic (Global _), Symbolic (Parameter _)
+  | Symbolic (Op (_, Symbolic (Parameter _), _)), Symbolic (Global _)
+  | Symbolic (Op (_, Symbolic (Global _), _)), Symbolic (Parameter _)
+  | Symbolic (Global _), Symbolic (Op (_, Symbolic (Parameter _), _))
+  | Symbolic (Parameter _), Symbolic (Op (_, Symbolic (Global _), _))
+  | Symbolic (Op (_, Symbolic (Parameter _), _)),
+    Symbolic (Op (_, Symbolic (Global _), _))
+  | Symbolic (Op (_, Symbolic (Global _), _)),
+    Symbolic (Op (_, Symbolic (Parameter _), _)) ->
+    (* g0+x does not subsume p0+y, and vice versa *)
+    (* TODO: that does depend on the interpretation of g0 and p0, if we consider that they are top values, then they subsume each other.
+       But here we don't treat them as top. The question is what is the concretization of g0 or p0? *)
+    false
+  | Symbolic (Op (Plus, Symbolic v, Interval (Const negzero, Const pos))),
+    Symbolic v' when Stdlib.(v' = v) && (Prim_value.is_negative negzero || Prim_value.is_zero negzero) && Prim_value.is_positive pos ->
+    (* x+[0,5] DOES subsume x *)
+    true
   | _, _ ->
     Logging.warn "SubsumesMightBeIncorrect" (Printf.sprintf "assuming %s does not subsume %s" (value_to_string v1) (value_to_string v2));
     (* Definitely not sound, these cases have to be investigated one by one *)

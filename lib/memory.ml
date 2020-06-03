@@ -89,7 +89,6 @@ let load_byte (m : t) (ea : Value.value) : Value.byte =
    indicates, among others, the size of the value loaded.
  *)
 let load (m : t) (addr : Value.value) (op : Memoryop.t) : Value.t =
-  Printf.printf "load %s %s\n" (Value.value_to_string addr) (Memoryop.to_string op);
   let ea = Value.add_offset addr op.offset in (* effective address *)
   match op.sz with
   | None -> (* load instruction *)
@@ -125,13 +124,11 @@ let load (m : t) (addr : Value.value) (op : Memoryop.t) : Value.t =
     failwith "NYI: load32_u"
 
 let store (m : t) (addr : Value.value) (value : Value.t) (op : Memoryop.t) : t =
-  Printf.printf "store %s+%d: %s\n" (Value.value_to_string addr) op.offset (Value.to_string value);
   let ea = Value.add_offset addr op.offset in
   match op.sz with
   | None -> (* store instruction *)
     begin match op.typ with
       | I32 ->
-        Printf.printf "I32\n";
         update
           (update
             (update
@@ -140,7 +137,6 @@ let store (m : t) (addr : Value.value) (value : Value.t) (op : Memoryop.t) : t =
             (Value.add_offset ea 2) (Value.byte value.value 2))
           (Value.add_offset ea 3) (Value.byte value.value 3)
       | I64 ->
-        Printf.printf "I64\n";
         update
           (update
              (update

@@ -29,6 +29,10 @@ let is_positive (v : t) : bool = match v with
   | I32 n -> Int32.(n > 0l)
   | I64 n -> Int64.(n > 0L)
 
+let is_negative (v : t) : bool = match v with
+  | I32 n -> Int32.(n < 0l)
+  | I64 n -> Int64.(n < 0L)
+
 let byte_of (v : t) (byte : int) = match (v, byte) with
   | (I32 x, 0) -> I32 Int32.(x land  0xFFl)
   | (I32 x, 1) -> I32 Int32.(shift_left (x land 0xFF00l) 8)
