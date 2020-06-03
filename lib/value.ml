@@ -87,13 +87,6 @@ let parameter (typ : Type.t) (idx : int) : t = { value = Symbolic (Parameter idx
     @param idx the index of the global *)
 let global (typ : Type.t) (i : int) : t = { value = Symbolic (Global i); typ = typ }
 
-(** Creates an i32 value from four bytes *)
-let bytes4 (b3 : value) (b2 : value) (b1 : value) (b0 : value) : t =
-  { value = begin match (b3, b2, b1, b0) with
-        | OpenInterval, OpenInterval, OpenInterval, OpenInterval -> OpenInterval
-        | _ -> Symbolic (Bytes4 (b3, b2, b1, b0) )
-      end;
-    typ = I32 }
 
 let deref (addr : value) : t = { value = Symbolic (Deref addr); typ = I32 } (* TODO: typ *)
 
@@ -137,6 +130,27 @@ let to_string (v : t) : string = value_to_string v.value
 let list_to_string (l : t list) : string =
   String.concat ~sep:", " (List.map l ~f:to_string)
 
+(** Creates an i32 value from four bytes *)
+let bytes4 (b3 : value) (b2 : value) (b1 : value) (b0 : value) : t =
+  let shift (n : Prim_value.t) (by : int) : Prim_value.t =
+    Prim_value.and_ n (I32 (Int32.shift_left 0xFFl (by * 8))) in
+  { value = begin match (b3, b2, b1, b0) with
+      | OpenInterval, OpenInterval, OpenInterval, OpenInterval -> OpenInterval
+      | Symbolic (Byte (v, 3)), Symbolic (Byte (v', 2)), Symbolic (Byte (v'', 1)), Symbolic (Byte (v''', 0))
+        when Stdlib.(v = v' && v' = v'' && v'' = v''') ->
+        (* bytes[x@3, x@2, x@1, x@0] is just x *)
+        v
+      | Symbolic (Byte (Symbolic (Const v3), v3b)),
+        Symbolic (Byte (Symbolic (Const v2), v2b)),
+        Symbolic (Byte (Symbolic (Const v1), v1b)),
+        Symbolic (Byte (Symbolic (Const v0), v0b)) ->
+        (* bytes applied to constants, we can directly compute the result *)
+        Symbolic (Const (Prim_value.or_ (shift v3 v3b)
+                           (Prim_value.or_ (shift v2 v2b)
+                              (Prim_value.or_ (shift v1 v1b) (shift v0 v0b)))))
+        | _ -> Symbolic (Bytes4 (b3, b2, b1, b0) )
+      end;
+    typ = I32 }
 
 (*************** Simplifications ******************)
 
@@ -185,8 +199,9 @@ let rec simplify_symbolic (sym : symbolic) : symbolic =
             Symbolic (Byte (Symbolic x'', 1)),
             Symbolic (Byte (Symbolic x''', 0))) when Stdlib.(x = x' && x' = x'' && x'' = x''') ->
     x
-  | Byte (Symbolic (Const x), b) ->
-    Const (Prim_value.and_ x (I32 (Int32.shift_left 0xFFl  (b * 8))))
+  (* | Byte (Symbolic (Const x), b) ->
+    (* Disabled, as this changes Byte into an actual value *)
+     Const (Prim_value.and_ x (I32 (Int32.shift_left 0xFFl  (b * 8)))) *)
   (* TODO: many more cases *)
   | (Global _) | (Parameter _) | Const _
   | Byte (Symbolic (Global _), _) | Byte (Symbolic (Parameter _), _)

@@ -69,6 +69,7 @@ let update (m : t) (ea : Value.value) (v : Value.t) : t =
   begin if Stdlib.(resolved_v <> v) then
     Printf.printf "Memory.update using %s instead of %s [ea: %s]\n" (Value.to_string resolved_v) (Value.to_string v) (Value.value_to_string ea)
   end;
+  Printf.printf "update %s to become %s\n" (Value.value_to_string ea) (Value.to_string resolved_v);
   Map.update m ea ~f:(function
       | None -> v
       | Some v' -> Value.join resolved_v v')
@@ -116,11 +117,13 @@ let load (m : t) (addr : Value.value) (op : Memoryop.t) : Value.t =
     failwith "NYI: load32_u"
 
 let store (m : t) (addr : Value.value) (value : Value.t) (op : Memoryop.t) : t =
+  Printf.printf "store %s+%d: %s\n" (Value.value_to_string addr) op.offset (Value.to_string value);
   let ea = Value.add_offset addr op.offset in
   match op.sz with
   | None -> (* store instruction *)
     begin match op.typ with
       | I32 ->
+        Printf.printf "I32\n";
         update
           (update
             (update
@@ -129,6 +132,7 @@ let store (m : t) (addr : Value.value) (value : Value.t) (op : Memoryop.t) : t =
             (Value.add_offset ea 2) (Value.symbolic op.typ (Value.Byte (value.value, 2))))
           (Value.add_offset ea 3) (Value.symbolic op.typ (Value.Byte (value.value, 3)))
       | I64 ->
+        Printf.printf "I64\n";
         update
           (update
              (update
@@ -147,8 +151,9 @@ let store (m : t) (addr : Value.value) (value : Value.t) (op : Memoryop.t) : t =
       | _ -> failwith "unsupported: store with floats"
     end
   | Some Memoryop.(Pack8, _) -> (* store8 *)
+    Printf.printf "I8\n";
     (* We should in practice only keep the first byte, but we ignore that *)
-    update m ea value
+    update m ea (Value.symbolic op.typ (Value.Byte (value.value, 0)))
   | _ -> failwith (Printf.sprintf "NYI: store with op as %s" (Memoryop.to_string op))
 
 let join (m1 : t) (m2 : t) : t =
