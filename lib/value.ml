@@ -21,9 +21,7 @@ module T = struct
     | Parameter of int (** A parameter, e.g. p0 *)
     | Global of int (** A global, e.g., g0 *)
     | Op of operator * value * value (** An operation on two values, e.g., g0-16 *)
-    | Bytes4 of value * value * value * value (** Four bytes, b0b1b2b3, ordered as expected: b3 is the rightmost byte, and the righmost value in Bytes4 *)
-    | Byte of value * int (** A specific byte of a value, e.g., x@0 is byte 0 of value x *)
-    | Deref of value (** A dereference, e.g., *g0 *)
+    | Bytes4 of byte * byte * byte * byte (** Four bytes, b0b1b2b3, ordered as expected: b3 is the rightmost byte, and the righmost value in Bytes4 *)
     | Const of Prim_value.t (** A constant value *)
   and value =
     | Bottom
@@ -32,7 +30,10 @@ module T = struct
     | RightOpenInterval of symbolic (* [a,+inf[ *)
     | OpenInterval (* ]-inf,+inf[ *)
     | Symbolic of symbolic
-  and byte = value * int (* a byte in a value *)
+  and byte =
+    | ByteOfValue of value * int (* a byte in a value *)
+    | Deref of value (* a byte at a given address in the heap *)
+    | AnyByteOf of value (* any byte of the given value *)
   [@@deriving sexp, compare]
   module ValueT = struct
     type t = value
@@ -87,8 +88,47 @@ let parameter (typ : Type.t) (idx : int) : t = { value = Symbolic (Parameter idx
     @param idx the index of the global *)
 let global (typ : Type.t) (i : int) : t = { value = Symbolic (Global i); typ = typ }
 
+(** Creates an i32 value from four bytes *)
+let bytes4 (b3 : byte) (b2 : byte) (b1 : byte) (b0 : byte) : t =
+  let shift (n : Prim_value.t) (by : int) : Prim_value.t =
+    Prim_value.and_ n (I32 (Int32.shift_left 0xFFl (by * 8))) in
+  { value = begin match (b3, b2, b1, b0) with
+        | ByteOfValue (OpenInterval, _),
+          ByteOfValue (OpenInterval, _),
+          ByteOfValue (OpenInterval, _),
+          ByteOfValue (OpenInterval, _) ->
+          (* bytes[T@_, T@_, T@_, T@_] is T *)
+          OpenInterval
+        | ByteOfValue (v, 3),
+          ByteOfValue (v', 2),
+          ByteOfValue (v'', 1),
+          ByteOfValue (v''', 0)
+        when Stdlib.(v = v' && v' = v'' && v'' = v''') ->
+        (* bytes[x@3, x@2, x@1, x@0] is just x *)
+        v
+        | ByteOfValue (Symbolic (Const v3), v3b),
+          ByteOfValue (Symbolic (Const v2), v2b),
+          ByteOfValue (Symbolic (Const v1), v1b),
+          ByteOfValue (Symbolic (Const v0), v0b) ->
+          (* bytes applied to constants, we can directly compute the result *)
+          Symbolic (Const (Prim_value.or_ (shift v3 v3b)
+                             (Prim_value.or_ (shift v2 v2b)
+                                (Prim_value.or_ (shift v1 v1b) (shift v0 v0b)))))
+        | _ -> Symbolic (Bytes4 (b3, b2, b1, b0) )
+      end;
+    typ = I32 }
 
-let deref (addr : value) : t = { value = Symbolic (Deref addr); typ = I32 } (* TODO: typ *)
+let byte (v : value) (b : int) : byte =
+  assert (b >= 0 && b <= 3);
+  match (v, b) with
+  | Symbolic (Bytes4 (b3, _, _, _)), 3 -> b3
+  | Symbolic (Bytes4 (_, b2, _, _)), 2 -> b2
+  | Symbolic (Bytes4 (_, _, b1, _)), 1 -> b1
+  | Symbolic (Bytes4 (_, _, _, b0)), 0 -> b0
+  | _ -> ByteOfValue (v, b)
+
+let deref (addr : value) : byte =
+  Deref addr
 
 (** Creates the top value
     @param typ the type for this value
@@ -123,34 +163,14 @@ and symbolic_to_string (v : symbolic) : string = match v with
       | Or -> "or"
       | Xor -> "xor"
     end) (value_to_string right)
-  | Deref v -> Printf.sprintf "*%s" (value_to_string v)
-  | Bytes4 (b0, b1, b2, b3) -> Printf.sprintf "bytes[%s,%s,%s,%s]" (value_to_string b0) (value_to_string b1) (value_to_string b2) (value_to_string b3)
-  | Byte (v, b) -> Printf.sprintf "%s@%d" (value_to_string v) b
+  | Bytes4 (b0, b1, b2, b3) -> Printf.sprintf "bytes[%s,%s,%s,%s]" (byte_to_string b0) (byte_to_string b1) (byte_to_string b2) (byte_to_string b3)
+and byte_to_string (b : byte) : string = match b with
+  | ByteOfValue (v, pos) -> Printf.sprintf "%s@%d" (value_to_string v) pos
+  | Deref addr -> Printf.sprintf "*%s" (value_to_string addr)
+  | AnyByteOf v -> Printf.sprintf "%s@_" (value_to_string v)
 let to_string (v : t) : string = value_to_string v.value
 let list_to_string (l : t list) : string =
   String.concat ~sep:", " (List.map l ~f:to_string)
-
-(** Creates an i32 value from four bytes *)
-let bytes4 (b3 : value) (b2 : value) (b1 : value) (b0 : value) : t =
-  let shift (n : Prim_value.t) (by : int) : Prim_value.t =
-    Prim_value.and_ n (I32 (Int32.shift_left 0xFFl (by * 8))) in
-  { value = begin match (b3, b2, b1, b0) with
-      | OpenInterval, OpenInterval, OpenInterval, OpenInterval -> OpenInterval
-      | Symbolic (Byte (v, 3)), Symbolic (Byte (v', 2)), Symbolic (Byte (v'', 1)), Symbolic (Byte (v''', 0))
-        when Stdlib.(v = v' && v' = v'' && v'' = v''') ->
-        (* bytes[x@3, x@2, x@1, x@0] is just x *)
-        v
-      | Symbolic (Byte (Symbolic (Const v3), v3b)),
-        Symbolic (Byte (Symbolic (Const v2), v2b)),
-        Symbolic (Byte (Symbolic (Const v1), v1b)),
-        Symbolic (Byte (Symbolic (Const v0), v0b)) ->
-        (* bytes applied to constants, we can directly compute the result *)
-        Symbolic (Const (Prim_value.or_ (shift v3 v3b)
-                           (Prim_value.or_ (shift v2 v2b)
-                              (Prim_value.or_ (shift v1 v1b) (shift v0 v0b)))))
-        | _ -> Symbolic (Bytes4 (b3, b2, b1, b0) )
-      end;
-    typ = I32 }
 
 (*************** Simplifications ******************)
 
@@ -177,34 +197,8 @@ let rec simplify_symbolic (sym : symbolic) : symbolic =
   | Op (Eq, Symbolic (Op (Lt, a, b)), Symbolic (Const (I32 0l))) ->
     (* a<b=0 = a>b *)
     Op (GtE, a, b)
-  | Bytes4 (Symbolic (Const a), Symbolic (Const b), Symbolic (Const c), Symbolic (Const d)) ->
-    (* First check that a | 0xFF000000 is 0, etc, because a, b, c, and d should be proper bytes *)
-    assert (Prim_value.is_zero (Prim_value.and_ a (I32 0xFF000000l)) &&
-            Prim_value.is_zero (Prim_value.and_ b (I32 0xFF0000l)) &&
-            Prim_value.is_zero (Prim_value.and_ c (I32 0xFF00l)) &&
-            Prim_value.is_zero (Prim_value.and_ d (I32 0xFFl)));
-    Const (Prim_value.or_ a (Prim_value.or_ b (Prim_value.or_ c d)))
-  | Bytes4 (Symbolic (Byte (Symbolic (Const a), byte_a)),
-            Symbolic (Byte (Symbolic (Const b), byte_b)),
-            Symbolic (Byte (Symbolic (Const c), byte_c)),
-            Symbolic (Byte (Symbolic (Const d), byte_d))) ->
-    Logging.warn "UNEXPECTED" "simplify called with %s, but this value should have been simplified first";
-    Const (Prim_value.or_
-             (Prim_value.shl (Prim_value.byte_of a byte_a) (I32 24l))
-             (Prim_value.or_ (Prim_value.shl (Prim_value.byte_of b byte_b) (I32 16l))
-                (Prim_value.or_ (Prim_value.shl (Prim_value.byte_of c byte_c) (I32 8l))
-                   (Prim_value.byte_of d byte_d))))
-  | Bytes4 (Symbolic (Byte (Symbolic x, 3)),
-            Symbolic (Byte (Symbolic x', 2)),
-            Symbolic (Byte (Symbolic x'', 1)),
-            Symbolic (Byte (Symbolic x''', 0))) when Stdlib.(x = x' && x' = x'' && x'' = x''') ->
-    x
-  (* | Byte (Symbolic (Const x), b) ->
-    (* Disabled, as this changes Byte into an actual value *)
-     Const (Prim_value.and_ x (I32 (Int32.shift_left 0xFFl  (b * 8)))) *)
   (* TODO: many more cases *)
   | (Global _) | (Parameter _) | Const _
-  | Byte (Symbolic (Global _), _) | Byte (Symbolic (Parameter _), _)
   | Op (_, Symbolic (Global _), Symbolic (Const _))
   | Op (_, Symbolic (Parameter _), Symbolic (Const _)) ->
     (* These cases cannot be simplified *)
@@ -257,12 +251,6 @@ let value_subsumes (v1 : value) (v2 : value) : bool = match (v1, v2) with
     Symbolic (Op (_, Symbolic (Parameter i'), Symbolic (Const x')))
     when i = i' ->
     Prim_value.eq x x'
-  | Symbolic (Bytes4 (Symbolic (Deref OpenInterval),
-                      Symbolic (Deref OpenInterval),
-                      Symbolic (Deref OpenInterval),
-                      Symbolic (Deref OpenInterval))), _ ->
-    (* If this case ever applies, then we probably have lost too much precision *)
-    true
   | _, _ ->
     Logging.warn "SubsumesMightBeIncorrect" (Printf.sprintf "assuming %s does not subsume %s" (value_to_string v1) (value_to_string v2));
     (* Definitely not sound, these cases have to be investigated one by one *)
@@ -311,9 +299,6 @@ let rec join (v1 : t) (v2 : t) : t =
   | Interval (_, b), (Symbolic b') when Stdlib.(b = b') ->
     (* [a,b] joined with b is [a,b]*)
     v1.value
-  | Symbolic (Byte (v, i)), Symbolic (Byte (v', i')) when Stdlib.(i = i') ->
-    (* v@i joined with v'@i is (join v v')@i *)
-    Symbolic (Byte ((join { value = v; typ = v1.typ } { value = v'; typ = v2.typ }).value, i))
   | Symbolic (Op (op, a, b)), Symbolic (Op (op', a', b')) when Stdlib.(op = op' && b = b') ->
     (* a op b joined with a' op b becomes (a joined with a') op b *)
     Symbolic (Op (op, (join { value = a; typ = v1.typ } { value = a'; typ = v2.typ }).value, b))
@@ -347,6 +332,20 @@ let rec join (v1 : t) (v2 : t) : t =
   (* Logging.info (Printf.sprintf "join %s with %s gives %s" (to_string v1) (to_string v2) (value_to_string vres)); *)
   { typ = v1.typ;
     value = vres }
+
+let join_value (v1 : value) (v2 : value) : value =
+  (join { value = v1; typ = I32 } { value = v2; typ = I32 }).value
+
+let join_byte (b1 : byte) (b2 : byte) : byte =
+  match (b1, b2) with
+  | ByteOfValue (v1, pos1), ByteOfValue (v2, pos2) when pos1 = pos2 -> ByteOfValue (join_value v1 v2, pos1)
+  | ByteOfValue (v1, _), ByteOfValue (v2, _)
+  | AnyByteOf v1, ByteOfValue (v2, _)
+  | ByteOfValue (v1, _), AnyByteOf v2
+  | AnyByteOf v1, AnyByteOf v2 ->
+    AnyByteOf (join_value v1 v2)
+  | Deref v1, Deref v2 -> Deref (join_value v1 v2)
+  | _ -> AnyByteOf (top I32 (Printf.sprintf "join_byte %s and %s" (byte_to_string b1) (byte_to_string b2))).value
 
 let%test "bool is join true_ false_" = Stdlib.(bool = join true_ false_)
 
@@ -384,6 +383,18 @@ let meet (v1 : t) (v2 : t) : t =
     value = v;
     typ = v1.typ
   }
+
+let meet_value (v1 : value) (_v2 : value) : value = v1
+
+let meet_byte (b1 : byte) (b2 : byte) : byte = match (b1, b2) with
+  | ByteOfValue (b, pos), ByteOfValue (b', pos') when pos = pos' -> ByteOfValue ((meet_value b b'), pos)
+  | ByteOfValue _, ByteOfValue _ -> failwith "unsupported meet_byte"
+  | AnyByteOf b, ByteOfValue (b', pos)
+  | ByteOfValue (b, pos), AnyByteOf b' ->
+    ByteOfValue ((meet_value b b'), pos)
+  | AnyByteOf b, AnyByteOf b' -> AnyByteOf (meet_value b b')
+  | Deref v, Deref v' -> Deref (meet_value v v')
+  | _, _ -> failwith "unsupported meet_byte"
 
 (************** Checkers ******************)
 
@@ -443,10 +454,13 @@ let rec adapt_value (v : value) (map : ValueValueMap.t) : value =
   | Symbolic (Op (op, v1, v2)) ->
     simplify_value (Symbolic (Op (op, (adapt_value v1 map), (adapt_value v2 map))))
   | Symbolic (Const _) -> v
-  | Symbolic (Deref v) ->
-    Symbolic (Deref (adapt_value v map))
-  | Symbolic (Bytes4 (b0, b1, b2, b3)) -> Symbolic (Bytes4 (adapt_value b0 map, adapt_value b1 map, adapt_value b2 map, adapt_value b3 map))
-  | Symbolic (Byte (v, b)) -> Symbolic (Byte (adapt_value v map, b))
+  | Symbolic (Bytes4 (b3, b2, b1, b0)) ->
+    Symbolic (Bytes4 (adapt_byte b3 map, adapt_byte b2 map, adapt_byte b1 map, adapt_byte b0 map))
+and adapt_byte (b : byte) (map : ValueValueMap.t) : byte =
+  match b with
+  | ByteOfValue (v, b) -> ByteOfValue (adapt_value v map, b)
+  | Deref addr -> Deref (adapt_value addr map)
+  | AnyByteOf v -> AnyByteOf (adapt_value v map)
 
 let adapt (v : t) (map : ValueValueMap.t) : t =
   { value = adapt_value v.value map; typ = v.typ }
@@ -488,7 +502,6 @@ let rec add (v1 : t) (v2 : t) : t =
     | (Symbolic (Global i), _) ->
       (* g0 + c becomes g0+c as an op *)
       simplify_value (Symbolic (Op (Plus, Symbolic (Global i), v2.value)))
-    | (Symbolic (Deref _), _) -> Symbolic (Op (Plus, v1.value, v2.value))
     | (Interval (Const a, Const b), Symbolic (Const n)) ->
       (* [a,b] + n becomes [a+n,b+n], where a, b and n are constants *)
       Interval (Const (Prim_value.add a n), Const (Prim_value.add b n))
