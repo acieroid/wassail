@@ -21,6 +21,10 @@ let is_zero (v : t) : bool = match v with
   | I32 0l | I64 0L -> true
   | _ -> false
 
+let is_one (v : t) : bool = match v with
+  | I32 1l | I64 1L -> true
+  | _ -> false
+
 let is_positive (v : t) : bool = match v with
   | I32 n -> Int32.(n > 0l)
   | I64 n -> Int64.(n > 0L)

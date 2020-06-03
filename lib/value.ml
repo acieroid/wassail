@@ -330,6 +330,13 @@ let rec join (v1 : t) (v2 : t) : t =
     when Stdlib.(a = a' && b = b') ->
     (*  [a,b+X] joined with [a,b+Y] where X and Y are constants, becomes [a,b+max(X,Y)] *)
     Interval (a, Op (Plus, Symbolic b, Symbolic (Const (Prim_value.max x y))))
+  | Interval (Const zero, Const one), Symbolic (Op (Lt, _, _))
+  | Interval (Const zero, Const one), Symbolic (Op (LtE, _, _))
+  | Interval (Const zero, Const one), Symbolic (Op (Gt, _, _))
+  | Interval (Const zero, Const one), Symbolic (Op (GtE, _, _))
+    when Prim_value.is_zero zero && Prim_value.is_one one ->
+    (* [0,1] joined with e.g. 0<=p1, results in [0,1] *)
+    v1.value
   | (Symbolic (Const _), LeftOpenInterval (Parameter _))
   | (Symbolic (Const _), LeftOpenInterval (Op (_, Symbolic (Parameter _), _)))
   | (Symbolic (Const _), RightOpenInterval (Op (_, Symbolic (Parameter _), _)))
