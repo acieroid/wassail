@@ -159,6 +159,9 @@ let control_instr_transfer
     (* return only keeps the necessary number of values from the stack *)
     let arity = List.length cfg.return_types in
     Simple { state with vstack = List.take state.vstack arity }
+  | Unreachable ->
+    (* Unreachable, so what we return does not really matter *)
+    Simple { state with vstack = [] }
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i))
 
 let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t IntMap.t) (module_ : Wasm_module.t) (cfg : Cfg.t) : result =

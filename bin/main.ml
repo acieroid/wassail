@@ -2,17 +2,6 @@ open Core
 open Wasm
 open Wasmtaint
 
-(* TODO: multiple targets:
-   - cfg to build the CFGs and output them into dot files:
-     ./main.exe cfg 1 1.dot # creates CFG for function 1 in 1.dot
-     ./main.exe cfg all out/ # creates all CFGs in out/1.dot, etc.
-   - intra to run an intra analysis on a given function. Can also be used to run multiple analyses
-     ./main.exe intra 1 # runs intra of function 1
-     ./main.exe intra 1,2,1 # runs intra of 1, followed by 2, followed by 1 again
-   - inter to run the full analysis
-     ./main.exe inter
-*)
-
 let apply_to_textual (filename : string) (f : Ast.module_ -> unit) =
   let extract (l : (Script.var option * Script.definition) list) =
     List.iter l ~f:(fun (_var_opt, def) ->
@@ -107,7 +96,6 @@ let inter =
             IntMap.iteri !(Inter_fixpoint.summaries)
               ~f:(fun ~key:fid ~data:summary ->
                   Printf.printf "Summary of function %d:\n%s" fid (Summary.to_string summary))))
-
 
 let () =
   Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);

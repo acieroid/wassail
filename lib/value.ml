@@ -87,6 +87,14 @@ let parameter (typ : Type.t) (idx : int) : t = { value = Symbolic (Parameter idx
     @param idx the index of the global *)
 let global (typ : Type.t) (i : int) : t = { value = Symbolic (Global i); typ = typ }
 
+(** Creates an i32 value from four bytes *)
+let bytes4 (b3 : value) (b2 : value) (b1 : value) (b0 : value) : t =
+  { value = begin match (b3, b2, b1, b0) with
+        | OpenInterval, OpenInterval, OpenInterval, OpenInterval -> OpenInterval
+        | _ -> Symbolic (Bytes4 (b3, b2, b1, b0) )
+      end;
+    typ = I32 }
+
 let deref (addr : value) : t = { value = Symbolic (Deref addr); typ = I32 } (* TODO: typ *)
 
 (** Creates the top value
