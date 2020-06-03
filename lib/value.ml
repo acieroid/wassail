@@ -527,7 +527,8 @@ let rem_s (v1 : t) (v2 : t) : t =
 let shl (v1 : t) (v2 : t) : t =
   assert Stdlib.(v1.typ = v2.typ);
   match (v1.value, v2.value) with
-   (Symbolic (Const n1), Symbolic (Const n2)) -> { value = Symbolic (Const (Prim_value.shl n1 n2)); typ = v1.typ }
+  | (Symbolic (Const n1), Symbolic (Const n2)) -> { value = Symbolic (Const (Prim_value.shl n1 n2)); typ = v1.typ }
+  | (Interval (Const a, Const b), Symbolic (Const n)) -> { value = Interval (Const (Prim_value.shl a n), Const (Prim_value.shl b n)); typ = v1.typ }
   (* | (Interval (Const a, Const b), Symbolic (Const 2l)) -> Interval (Const (Int32.( * ) a 4l), Const (Int32.( * ) b 4l)) *) (* TODO *)
   (* | (Symbolic _, Symbolic (Const 2l)) -> symbolic (Op (Times, v1, Symbolic (Const 4l))) *) (* TODO *)
   (* | (RightOpenInterval (Const 0l), Symbolic (Const 2l)) -> v1 *) (* TODO *)
