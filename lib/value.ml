@@ -118,15 +118,6 @@ let bytes4 (b3 : byte) (b2 : byte) (b1 : byte) (b0 : byte) : t =
       end;
     typ = I32 }
 
-let op (t : Type.t) (op : operator) (v1 : value) (v2 : value) : t =
-  { typ = t;
-    value = match (op, v1, v2) with
-      | Plus, Symbolic (Const n), Symbolic (Const zero) when Prim_value.is_zero zero -> Symbolic (Const n)
-      | Plus, Symbolic (Const n1), Symbolic (Const n2) -> Symbolic (Const (Prim_value.add n1 n2))
-      | Minus, Symbolic (Const n1), Symbolic (Const n2) -> Symbolic (Const (Prim_value.sub n1 n2))
-      | Times, Symbolic (Const n1), Symbolic (Const n2) -> Symbolic (Const (Prim_value.mul n1 n2))
-      | _ -> (Symbolic (Op (op, v1, v2))) }
-
 let byte (v : value) (b : int) : byte =
   assert (b >= 0 && b <= 3);
   match (v, b) with
@@ -197,24 +188,32 @@ let list_to_string (l : t list) : string =
 
 let rec simplify_symbolic (sym : symbolic) : symbolic =
   match sym with
-  | (Op (Plus, a, Symbolic (Const z))) when Prim_value.is_zero z->
+  | Op (Plus, Symbolic (Const x), Symbolic (Const y)) ->
+    (* x+y where x and y are constants, can directly be computed *)
+    Const (Prim_value.add x y)
+  | Op (Plus, Symbolic (Const z), a) when Prim_value.is_zero z ->
+    (* 0+a becomes a+0 *)
+    (Op (Plus, a, Symbolic (Const z)))
+  | Op (Plus, a, Symbolic (Const z)) when Prim_value.is_zero z ->
     (* a+0 is handled in simplify *)
     (Op (Plus, a, Symbolic (Const z)))
-  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when Prim_value.eq x y ->
+  | Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y)) when Prim_value.eq x y ->
     (* (a-x)+x = a *)
     (Op (Plus, a, Symbolic (Const (Prim_value.zero_of_same_t x))))
-  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when Prim_value.gt_s x y ->
+  | Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y)) when Prim_value.gt_s x y ->
     (* (a-x)+y when x > y = a-(x-y) *)
     simplify_symbolic (Op (Minus, simplify_value a, Symbolic (Const (Prim_value.sub x y))))
-  | (Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) when Prim_value.lt_s x y ->
+  | Op (Plus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y)) when Prim_value.lt_s x y ->
     (* (a-x)+y when y > x = a+(y-x)*)
     simplify_symbolic (Op (Plus, simplify_value a, Symbolic (Const (Prim_value.sub y x))))
-  | (Op (Plus, (Symbolic (Op (Plus, a, Symbolic (Const x)))), Symbolic (Const y))) ->
+  | Op (Plus, (Symbolic (Op (Plus, a, Symbolic (Const x)))), Symbolic (Const y)) ->
     (* (a+x)+y = a + (x+y) *)
     simplify_symbolic (Op (Plus, simplify_value a, Symbolic (Const (Prim_value.add x y))))
-  | (Op (Minus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y))) ->
+  | Op (Minus, (Symbolic (Op (Minus, a, Symbolic (Const x)))), Symbolic (Const y)) ->
     (* (a-x)-y = a-(x+y) *)
     simplify_symbolic (Op (Minus, simplify_value a, Symbolic (Const (Prim_value.add x y))))
+  | Op (Times, Symbolic (Const x), Symbolic (Const y)) ->
+    (Const (Prim_value.mul x y))
   | Op (Eq, Symbolic (Op (Lt, a, b)), Symbolic (Const (I32 0l))) ->
     (* a<b=0 = a>b *)
     Op (GtE, a, b)
@@ -225,7 +224,7 @@ let rec simplify_symbolic (sym : symbolic) : symbolic =
     (* These cases cannot be simplified *)
     sym
   | _ ->
-    Logging.warn "cannot simplify" (Printf.sprintf "value %s" (symbolic_to_string sym));
+    (* Logging.warn "cannot simplify" (Printf.sprintf "value %s" (symbolic_to_string sym)); *)
     sym
 and simplify_value (v : value) : value =
   match (match v with
@@ -237,13 +236,24 @@ and simplify_value (v : value) : value =
       | OpenInterval -> OpenInterval
       | Symbolic sym -> Symbolic (simplify_symbolic sym))
   with
-  | Symbolic (Op (Plus, a, Symbolic (Const z))) when Prim_value.is_zero z -> a
+  | Symbolic (Op (Plus, a, Symbolic (Const z))) when Prim_value.is_zero z ->
+    (* a+0 becomes a *)
+    a
+  | Symbolic (Op (Plus, Interval (a, b), Symbolic (Const x))) when Prim_value.is_positive x ->
+    (* [a,b]+x becomes [a+x,b+x] if x is positive *)
+    simplify_value (Interval (Op (Plus, Symbolic a, Symbolic (Const x)), Op (Plus, Symbolic b, Symbolic (Const x))))
+  | Symbolic (Op (Times, Interval (a, b), Symbolic (Const x))) when Prim_value.is_positive x ->
+    (* [a,b]*x becomes [a*x,b*x] if x is positive *)
+    simplify_value (Interval (Op (Times, Symbolic a, Symbolic (Const x)), Op (Times, Symbolic b, Symbolic (Const x))))
   | Symbolic (Op (Minus, a, Symbolic (Const z))) when Prim_value.is_zero z -> a
   | res -> res
 
-let simplify (v : t) : t = { value = simplify_value v.value; typ = v.typ }
+let simplify (v : t) : t =
+  let simplified = simplify_value v.value in
+  Printf.printf "simplified: %s into %s\n" (to_string v) (value_to_string simplified);
+  { value = simplified; typ = v.typ }
 
-let symbolic (t : Type.t) (sym : symbolic) : t = { value = Symbolic (simplify_symbolic sym); typ = t }
+let symbolic (t : Type.t) (sym : symbolic) : t = simplify { value = Symbolic (simplify_symbolic sym); typ = t }
 
 (************************ Subsumption *********************)
 

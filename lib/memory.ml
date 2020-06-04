@@ -45,7 +45,7 @@ let rec resolve_value (m : t) (v : Value.value) : Value.value =
   | Value.LeftOpenInterval a -> Value.LeftOpenInterval (resolve_symbolic m a)
   | Value.RightOpenInterval b -> Value.RightOpenInterval (resolve_symbolic m b)
   | Value.Symbolic (Value.Bytes4 (b3, b2, b1, b0)) -> (Value.bytes4 (resolve_byte m b3) (resolve_byte m b2) (resolve_byte m b1) (resolve_byte m b0)).value
-  | Value.Symbolic (Value.Op (op, left, right)) -> (Value.op I32 op (resolve_value m left) (resolve_value m right)).value
+  | Value.Symbolic (Value.Op (op, left, right)) -> (Value.symbolic I32 (Op (op, (resolve_value m left), (resolve_value m right)))).value
   | Value.Symbolic sym -> Symbolic (resolve_symbolic m sym)
   | Value.Bottom | Value.OpenInterval -> v
 and resolve_symbolic (m : t) (sym : Value.symbolic) : Value.symbolic =
@@ -80,11 +80,9 @@ let update (m : t) (vs: (Value.value * Value.byte) list) : t =
       Map.update acc resolved_ea ~f:(function
           | None ->
             (* Unbound address in the memory, bind it *)
-            Printf.printf "unbound";
             resolved_b
           | Some b' ->
             (* Value already bound, join the bytes *)
-            Printf.printf "bound to %s\n" (Value.byte_to_string b');
             Value.join_byte resolved_b b'))
 
 (** Load a byte from memory, at effective address ea *)
