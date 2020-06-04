@@ -168,7 +168,7 @@ let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t I
   match b.content with
   | Data instrs ->
     Simple (List.fold_left instrs ~init:state ~f:(fun prestate i ->
-        (* Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string prestate) (Instr.data_to_string i); *)
+        Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string prestate) (Instr.data_to_string i);
         let poststate = data_instr_transfer i prestate in
         poststate))
   | Control instr ->

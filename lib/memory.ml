@@ -67,28 +67,25 @@ let resolve (m : t) (v : Value.t) : Value.t =
   Printf.printf "resolved %s into %s\n" (Value.to_string v) (Value.value_to_string v');
   { value = v'; typ = v.typ }
 
-(** Update an address in the memory, joining it with the previous byte if there was already one stored at the same address *)
-let update (m : t) (ea : Value.value) (b : Value.byte) : t =
-  (* TODO: what about overlapping values? e.g., M[0: 0][[0,1]: 1].
-     Possible solution: find the most general key, join the values
-     Hence, M[0: 0][[0,1]: 1] becomes M[[0,1]: [0,1]]
-     Other: split when possible:
-     M[[[0,3]: 1][[1,5]: 2] becomes M[[0,0]: 1][[1,3]: [1,2]][[4,5]: 2]
-  *)
-  (* First resolve the value, we don't want derefs in the memory *)
-  let resolved_ea = resolve_value m ea in
-  let resolved_b = resolve_byte m b in
-(*  begin if Stdlib.(resolved_b <> b) then
-    Printf.printf "Memory.update using %s instead of %s [ea: %s]\n" (Value.value_to_string resolved_v) (Value.value_to_string v) (Value.value_to_string ea)
-  end;*)
-  Map.update m resolved_ea ~f:(function
-      | None ->
-        (* Unbound address in the memory, bind it *)
-        resolved_b
-      | Some b' ->
-        (* Value already bound, join the bytes *)
-        Value.join_byte resolved_b b')
-
+(** Update the memory. Joins locations that are already present in the memory.
+    @param m the memory to update
+    @param vs a list of (effective address, byte) to add to the memory
+ *)
+let update (m : t) (vs: (Value.value * Value.byte) list) : t =
+  List.fold_left vs ~init:m ~f:(fun acc (ea, b) ->
+      let resolved_ea = resolve_value m ea in
+      let resolved_b = resolve_byte m b in
+      Printf.printf "ea: %s, resolved is: %s\n" (Value.value_to_string ea) (Value.value_to_string resolved_ea);
+      Printf.printf "byte: %s, resolved is: %s\n" (Value.byte_to_string b) (Value.byte_to_string resolved_b);
+      Map.update acc resolved_ea ~f:(function
+          | None ->
+            (* Unbound address in the memory, bind it *)
+            Printf.printf "unbound";
+            resolved_b
+          | Some b' ->
+            (* Value already bound, join the bytes *)
+            Printf.printf "bound to %s\n" (Value.byte_to_string b');
+            Value.join_byte resolved_b b'))
 
 (** Load a byte from memory, at effective address ea *)
 let load_byte (m : t) (ea : Value.value) : Value.byte =
@@ -142,38 +139,28 @@ let store (m : t) (addr : Value.value) (value : Value.t) (op : Memoryop.t) : t =
   | None -> (* store instruction *)
     begin match op.typ with
       | I32 ->
-        update
-          (update
-            (update
-               (update m ea (Value.byte value.value 0) )
-               (Value.add_offset ea 1) (Value.byte value.value 1))
-            (Value.add_offset ea 2) (Value.byte value.value 2))
-          (Value.add_offset ea 3) (Value.byte value.value 3)
+        update m [(ea, (Value.byte value.value 0));
+                  (Value.add_offset ea 1, Value.byte value.value 1);
+                  (Value.add_offset ea 2, Value.byte value.value 2);
+                  (Value.add_offset ea 3, Value.byte value.value 3)]
       | I64 ->
-        update
-          (update
-             (update
-                (update
-                   (update
-                      (update
-                         (update
-                            (update m ea (Value.byte value.value 0))
-                            (Value.add_offset ea 1) (Value.byte value.value 1))
-                         (Value.add_offset ea 2) (Value.byte value.value 2))
-                      (Value.add_offset ea 3) (Value.byte value.value 3))
-                   (Value.add_offset ea 4) (Value.byte value.value 4))
-                (Value.add_offset ea 5) (Value.byte value.value 5))
-             (Value.add_offset ea 6) (Value.byte value.value 6))
-          (Value.add_offset ea 7) (Value.byte value.value 7)
+        update m [(ea, Value.byte value.value 0);
+                  (Value.add_offset ea 1, Value.byte value.value 1);
+                  (Value.add_offset ea 2, Value.byte value.value 2);
+                  (Value.add_offset ea 3, Value.byte value.value 3);
+                  (Value.add_offset ea 4, Value.byte value.value 4);
+                  (Value.add_offset ea 5, Value.byte value.value 5);
+                  (Value.add_offset ea 6, Value.byte value.value 6);
+                  (Value.add_offset ea 7, Value.byte value.value 7)]
       | _ -> failwith "unsupported: store with floats"
     end
   | Some Memoryop.(Pack8, _) -> (* store8 *)
-    update m ea (Value.byte value.value 0)
+    update m [(ea, Value.byte value.value 0)]
   | _ -> failwith (Printf.sprintf "NYI: store with op as %s" (Memoryop.to_string op))
 
 let join (m1 : t) (m2 : t) : t =
   (* M[a: b] joined with M[c: d] should be just like doing M[a: b][c: d] *)
-  let m = Map.fold m2 ~init:m1 ~f:(fun ~key:addr ~data:value m -> update m addr value) in
+  let m = Map.fold m2 ~init:m1 ~f:(fun ~key:addr ~data:value m -> update m [addr, value]) in
   (*  Logging.warn "Join" (Printf.sprintf "join %s with %s gives %s" (to_string m1) (to_string m2) (to_string m)); *)
   m
 

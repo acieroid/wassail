@@ -121,6 +121,7 @@ let bytes4 (b3 : byte) (b2 : byte) (b1 : byte) (b0 : byte) : t =
 let op (t : Type.t) (op : operator) (v1 : value) (v2 : value) : t =
   { typ = t;
     value = match (op, v1, v2) with
+      | Plus, Symbolic (Const n), Symbolic (Const zero) when Prim_value.is_zero zero -> Symbolic (Const n)
       | Plus, Symbolic (Const n1), Symbolic (Const n2) -> Symbolic (Const (Prim_value.add n1 n2))
       | Minus, Symbolic (Const n1), Symbolic (Const n2) -> Symbolic (Const (Prim_value.sub n1 n2))
       | Times, Symbolic (Const n1), Symbolic (Const n2) -> Symbolic (Const (Prim_value.mul n1 n2))
@@ -285,6 +286,13 @@ let value_subsumes (v1 : value) (v2 : value) : bool = match (v1, v2) with
     (* TODO: that does depend on the interpretation of g0 and p0, if we consider that they are top values, then they subsume each other.
        But here we don't treat them as top. The question is what is the concretization of g0 or p0? *)
     false
+  | Symbolic (Parameter i), Symbolic (Parameter i') when i <> i' ->
+    (* p1 does not subsume p0 *)
+    false
+  | Symbolic (Op (_, Symbolic (Parameter i), _)),
+    Symbolic (Op (_, Symbolic (Parameter i'), _)) when i <> i' ->
+    (* p1+x does not subsume p0+y *)
+    false
   | Symbolic (Op (Plus, Symbolic v, Interval (Const negzero, Const pos))),
     Symbolic v' when Stdlib.(v' = v) && (Prim_value.is_negative negzero || Prim_value.is_zero negzero) && Prim_value.is_positive pos ->
     (* x+[0,5] DOES subsume x *)
@@ -370,7 +378,7 @@ let rec join (v1 : t) (v2 : t) : t =
     Logging.warn "UnsoundAssumption" (Printf.sprintf "%s contains %s" (to_string v2) (to_string v1));
     v2.value
   | _ -> (top v1.typ (Printf.sprintf "Value.join %s %s" (to_string v1) (to_string v2))).value in
-  (* Logging.info (Printf.sprintf "join %s with %s gives %s" (to_string v1) (to_string v2) (value_to_string vres)); *)
+  Logging.info (Printf.sprintf "join %s with %s gives %s" (to_string v1) (to_string v2) (value_to_string vres)); 
   { typ = v1.typ;
     value = vres }
 
