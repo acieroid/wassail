@@ -118,6 +118,14 @@ let bytes4 (b3 : byte) (b2 : byte) (b1 : byte) (b0 : byte) : t =
       end;
     typ = I32 }
 
+let op (t : Type.t) (op : operator) (v1 : value) (v2 : value) : t =
+  { typ = t;
+    value = match (op, v1, v2) with
+      | Plus, Symbolic (Const n1), Symbolic (Const n2) -> Symbolic (Const (Prim_value.add n1 n2))
+      | Minus, Symbolic (Const n1), Symbolic (Const n2) -> Symbolic (Const (Prim_value.sub n1 n2))
+      | Times, Symbolic (Const n1), Symbolic (Const n2) -> Symbolic (Const (Prim_value.mul n1 n2))
+      | _ -> (Symbolic (Op (op, v1, v2))) }
+
 let byte (v : value) (b : int) : byte =
   assert (b >= 0 && b <= 3);
   match (v, b) with
@@ -129,6 +137,18 @@ let byte (v : value) (b : int) : byte =
 
 let deref (addr : value) : byte =
   Deref addr
+
+let byte_is_const (b : byte) = match b with
+  | ByteOfValue (Symbolic (Const _), _) -> true
+  | _ -> false
+
+let is_const (v : t) = match v.value with
+  | Symbolic (Const _) -> true
+  | _ -> false
+
+let is_imprecise (v : t) = match v.value with
+  | LeftOpenInterval _ | RightOpenInterval _ | OpenInterval -> true
+  | _ -> false
 
 (** Creates the top value
     @param typ the type for this value
@@ -291,6 +311,8 @@ let rec join (v1 : t) (v2 : t) : t =
   | (Symbolic (Const n1), Symbolic (Const n2)) ->
     Interval (Const Prim_value.(min n1 n2), Const Prim_value.(max n1 n2))
   | (Symbolic (Const n), Interval (Const a, Const b)) -> Interval (Const Prim_value.(min a n), Const Prim_value.(max b n))
+  | (Symbolic (Const a), RightOpenInterval (Const a')) -> RightOpenInterval (Const Prim_value.(min a a'))
+  | (Symbolic (Const a), LeftOpenInterval (Const a')) -> LeftOpenInterval (Const Prim_value.(max a a'))
   | (Interval (Const a, Const b), Symbolic (Const n)) -> Interval (Const Prim_value.(min a n), Const Prim_value.(max b n))
   | (Interval (Const z, Const b), Interval (Const z', Const b')) when Prim_value.(is_zero z && is_zero z' && not (eq b b')) ->
     (* TODO: this is a very simple widening when the right bound is unstable *)
@@ -301,6 +323,7 @@ let rec join (v1 : t) (v2 : t) : t =
   | (RightOpenInterval (Const a), RightOpenInterval (Const a')) -> RightOpenInterval (Const Prim_value.(min a a'))
   | (LeftOpenInterval (Const b), LeftOpenInterval (Const b')) -> LeftOpenInterval (Const Prim_value.(max b b'))
   | (Interval (Const a, _), RightOpenInterval (Const a')) -> RightOpenInterval (Const Prim_value.(min a a'))
+  | (RightOpenInterval (Const a), Interval (Const a', _)) -> RightOpenInterval (Const Prim_value.(min a a'))
   | (RightOpenInterval (Const a), Symbolic (Const c)) -> RightOpenInterval (Const Prim_value.(min a c))
   | (LeftOpenInterval (Const b), Symbolic (Const c)) -> LeftOpenInterval (Const Prim_value.(max b c))
   | (RightOpenInterval (Op (Plus, Symbolic x, Symbolic (Const _))), RightOpenInterval x') when (Stdlib.(=) x x') ->
@@ -520,6 +543,9 @@ let rec add (v1 : t) (v2 : t) : t =
     | (Symbolic (Global i), _) ->
       (* g0 + c becomes g0+c as an op *)
       simplify_value (Symbolic (Op (Plus, Symbolic (Global i), v2.value)))
+    | (Symbolic _, Symbolic _) ->
+      (* generic addition for symbolic *)
+      simplify_value (Symbolic (Op (Plus, v1.value, v2.value)))
     | (Interval (Const a, Const b), Symbolic (Const n)) ->
       (* [a,b] + n becomes [a+n,b+n], where a, b and n are constants *)
       Interval (Const (Prim_value.add a n), Const (Prim_value.add b n))
@@ -567,8 +593,7 @@ let shl (v1 : t) (v2 : t) : t =
   match (v1.value, v2.value) with
   | (Symbolic (Const n1), Symbolic (Const n2)) -> { value = Symbolic (Const (Prim_value.shl n1 n2)); typ = v1.typ }
   | (Interval (Const a, Const b), Symbolic (Const n)) -> { value = Interval (Const (Prim_value.shl a n), Const (Prim_value.shl b n)); typ = v1.typ }
-  (* | (Interval (Const a, Const b), Symbolic (Const 2l)) -> Interval (Const (Int32.( * ) a 4l), Const (Int32.( * ) b 4l)) *) (* TODO *)
-  (* | (Symbolic _, Symbolic (Const 2l)) -> symbolic (Op (Times, v1, Symbolic (Const 4l))) *) (* TODO *)
+  | (Symbolic _, Symbolic (Const two)) when Prim_value.is two 2 -> symbolic v1.typ (Op (Times, v1.value, Symbolic (Const (Prim_value.of_int_t v1.typ 4))))
   (* | (RightOpenInterval (Const 0l), Symbolic (Const 2l)) -> v1 *) (* TODO *)
   | _ -> top v1.typ (Printf.sprintf "shl %s %s" (to_string v1) (to_string v2))
 

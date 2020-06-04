@@ -57,14 +57,30 @@ let to_string (b : t) : string =
 
 (** Evaluates a binary operation on two values *)
 let eval (m : Memory.t) (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
-  match b.op with
-  | Add -> Value.add (Memory.resolve m v1) (Memory.resolve m v2)
-  | Sub -> Value.sub (Memory.resolve m v1 ) (Memory.resolve m v2)
-  | Mul -> Value.mul (Memory.resolve m v1) (Memory.resolve m v2)
-  | RemS -> Value.rem_s (Memory.resolve m v1) (Memory.resolve m v2)
-  (* Don't resolve for operations that are mostly used for conditions *)
-  | Shl -> Value.shl v1 v2
-  | And -> Value.and_ v1 v2
-  | Or -> Value.or_ v1 v2
-  | Xor -> Value.xor v1 v2
-  | _ -> raise (UnsupportedBinOp b)
+  let v1' =
+    (* TODO: the problem is the following.
+       we have *x << 2, where *x is 0.
+       if we resolve, that means we have 0, which is later used in a condition
+       if we don't resolve, we have *x << 2 resulting in Top.
+       solution: keep *x and use Op? instead of returning top*)
+    (* Try to resolve the value, only if it results in a fully precise constant *)
+    let resolved = Memory.resolve m v1 in
+    Printf.printf "resolved v1: %s\n" (Value.to_string resolved);
+    if true (* Value.is_imprecise resolved *) then v1 else resolved in
+  let v2' =
+    let resolved = Memory.resolve m v2 in
+    Printf.printf "resolved v2: %s\n" (Value.to_string resolved);
+    if true (* Value.is_imprecise resolved *) then v2 else resolved in
+  let res = match b.op with
+  | Add -> Value.add v1' v2'
+  | Sub -> Value.sub v1' v2'
+  | Mul -> Value.mul v1' v2'
+  | RemS -> Value.rem_s v1' v2'
+  | Shl -> Value.shl v1' v2'
+  | And -> Value.and_ v1' v2'
+  | Or -> Value.or_ v1' v2'
+  | Xor -> Value.xor v1' v2'
+  | _ -> raise (UnsupportedBinOp b) in
+  Printf.printf "op %s is called with %s and %s, resulting in %s\n" (to_string b) (Value.to_string v1') (Value.to_string v2') (Value.to_string res);
+  res
+

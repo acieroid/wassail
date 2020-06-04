@@ -39,22 +39,33 @@ let find (m : t) (ea : Value.value) : Value.byte option =
     None
 
 (* TODO: properly redefine *)
-    (*
 let rec resolve_value (m : t) (v : Value.value) : Value.value =
   match v with
-  | Interval (a, b) -> Value.Interval (resolve_symbolic m a, resolve_symbolic m b)
-  | LeftOpenInterval a -> Value.LeftOpenInterval (resolve_symbolic m a)
-  | RightOpenInterval b -> Value.RightOpenInterval (resolve_symbolic m b)
-  | Symbolic sym -> Symbolic (resolve_symbolic m sym)
-  | _ -> v
+  | Value.Interval (a, b) -> Value.Interval (resolve_symbolic m a, resolve_symbolic m b)
+  | Value.LeftOpenInterval a -> Value.LeftOpenInterval (resolve_symbolic m a)
+  | Value.RightOpenInterval b -> Value.RightOpenInterval (resolve_symbolic m b)
+  | Value.Symbolic (Value.Bytes4 (b3, b2, b1, b0)) -> (Value.bytes4 (resolve_byte m b3) (resolve_byte m b2) (resolve_byte m b1) (resolve_byte m b0)).value
+  | Value.Symbolic (Value.Op (op, left, right)) -> (Value.op I32 op (resolve_value m left) (resolve_value m right)).value
+  | Value.Symbolic sym -> Symbolic (resolve_symbolic m sym)
+  | Value.Bottom | Value.OpenInterval -> v
 and resolve_symbolic (m : t) (sym : Value.symbolic) : Value.symbolic =
   match sym with
-  | Op (op, left, right) -> Op (op, resolve_value m left, resolve_value m right)
-  | _ -> sym*)
+  | Value.Op (op, left, right) -> Value.Op (op, resolve_value m left, resolve_value m right)
+  | Value.Parameter _ | Value.Global _ | Value.Const _ -> sym
+  | Value.Bytes4 _ -> failwith "should not happen"
+and resolve_byte (m : t) (b : Value.byte) : Value.byte = match b with
+  | Value.ByteOfValue (v, pos) -> Value.ByteOfValue (resolve_value m v, pos)
+  | Value.Deref a -> begin match find m a with
+      | Some v' -> v'
+      | None -> Value.Deref (resolve_value m a)
+    end
+  | Value.AnyByteOf _ -> b
 
 (** Resolves the pointers that are seen in v, if possible (if they are valid addresses in the memory) *)
-let resolve (_m : t) (v : Value.t) : Value.t = v
-(*  { value = resolve_value m v.value; typ = v.typ } *)
+let resolve (m : t) (v : Value.t) : Value.t =
+  let v' = resolve_value m v.value in
+  Printf.printf "resolved %s into %s\n" (Value.to_string v) (Value.value_to_string v');
+  { value = v'; typ = v.typ }
 
 (** Update an address in the memory, joining it with the previous byte if there was already one stored at the same address *)
 let update (m : t) (ea : Value.value) (b : Value.byte) : t =
@@ -64,25 +75,27 @@ let update (m : t) (ea : Value.value) (b : Value.byte) : t =
      Other: split when possible:
      M[[[0,3]: 1][[1,5]: 2] becomes M[[0,0]: 1][[1,3]: [1,2]][[4,5]: 2]
   *)
-  (* 
-  let (v, bytepos) = b in (* the value of which we are taking a byte *)
-  let resolved_v = resolve_value m v in
-  begin if Stdlib.(resolved_v <> v) then
+  (* First resolve the value, we don't want derefs in the memory *)
+  let resolved_ea = resolve_value m ea in
+  let resolved_b = resolve_byte m b in
+(*  begin if Stdlib.(resolved_b <> b) then
     Printf.printf "Memory.update using %s instead of %s [ea: %s]\n" (Value.value_to_string resolved_v) (Value.value_to_string v) (Value.value_to_string ea)
   end;*)
-  Map.update m ea ~f:(function
+  Map.update m resolved_ea ~f:(function
       | None ->
         (* Unbound address in the memory, bind it *)
-        b
+        resolved_b
       | Some b' ->
         (* Value already bound, join the bytes *)
-        Value.join_byte b b')
+        Value.join_byte resolved_b b')
 
 
 (** Load a byte from memory, at effective address ea *)
 let load_byte (m : t) (ea : Value.value) : Value.byte =
+  let precise = true in (* TODO: this could be disabled by default in case it blows up the state space, see notes *)
   match find m ea with
-  | Some v -> v
+  (*  | Some b when Value.byte_is_const b -> b *)
+  | Some b -> if precise then Value.deref ea else b
   | None -> Value.deref ea (* value not found, use a deref to denote it *)
 
 (** Load a value from the memory m, stored at address addr. Argument op
@@ -161,7 +174,7 @@ let store (m : t) (addr : Value.value) (value : Value.t) (op : Memoryop.t) : t =
 let join (m1 : t) (m2 : t) : t =
   (* M[a: b] joined with M[c: d] should be just like doing M[a: b][c: d] *)
   let m = Map.fold m2 ~init:m1 ~f:(fun ~key:addr ~data:value m -> update m addr value) in
-  Logging.warn "Join" (Printf.sprintf "join %s with %s gives %s" (to_string m1) (to_string m2) (to_string m));
+  (*  Logging.warn "Join" (Printf.sprintf "join %s with %s gives %s" (to_string m1) (to_string m2) (to_string m)); *)
   m
 
 (** Adapt (both in the addresses and in the values), using the map given as argument
@@ -184,6 +197,15 @@ let refine_value_at (m : t) (ea : Value.value) (v : Value.byte) =
 (** Refine the memory based on a condition cond (represented as a value), that either holds or not, according to holds *)
 let refine (m : t) (cond : Value.t) (holds : bool) : t =
   match (cond.value, holds) with
+  (* Refine based on bytes[*g0-13,*g0-14,*g0-15,*g0-16]>=bytes[*g0-9,*g0-10,*g0-11,*g0-12]
+     - only works if values at g0-16 to g0-13 logically follow each other, i.e.:
+     [g0-13: X@3][g0-14: X@2][g0-15: X@1][g0-16: X@0]
+     - same goes for g0-12 to g0-9:
+     [g0-9: Y@3][g0-10: Y@2][g0-11: Y@1][g0-12: Y@0]
+     - we now that if the condition holds, then X >= p0
+       - that means that we can refine X by meeting it with [Y,+inf]
+       - and we can refine Y by meeting it with [X,+inf]
+     - in practice, we have: X = some interval, Y = some parameter, hence we only refine the intervals *)
   (* TODO: reestablish some refinement *)
 (*  | Symbolic (Op (GtE, Symbolic (Deref ea), Symbolic b)), true ->
     (* M[*ea: X] with cond *ea >= b refines X with [b,+inf] *)

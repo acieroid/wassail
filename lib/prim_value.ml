@@ -59,9 +59,10 @@ let zero_of_same_t (v : t) : t = match v with
   | I32 _ -> I32 0l
   | I64 _ -> I64 0L
 
-let of_int_t (v : t) (n : int) : t = match v with
-  | I32 _ -> I32 (Int32.of_int_exn n)
-  | I64 _ -> I64 (Int64.of_int_exn n)
+let of_int_t (t : Type.t) (n : int) : t = match t with
+  | I32 -> I32 (Int32.of_int_exn n)
+  | I64 -> I64 (Int64.of_int_exn n)
+  | _ -> failwith "unsupported type"
 
 let of_int (n : int) : t = I32 (Int32.of_int_exn n)
 
