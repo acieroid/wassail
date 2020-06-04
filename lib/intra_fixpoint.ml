@@ -20,12 +20,8 @@ let analyze
   let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
                                          ~f:(fun idx ->
                                              (idx, (bottom, bottom))))) in
-  let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =
-    if IntSet.is_empty worklist then
-      () (* No more elements to consider. We can stop here *)
-    else
-      let block_idx = IntSet.min_elt_exn worklist in
 
+  let analyze_block (block_idx : int) =
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
       let predecessors = Cfg.predecessors cfg block_idx in
@@ -44,9 +40,14 @@ let analyze
         | Uninitialized -> init
         | _ -> failwith "should not happen" in
       (* We analyze it *)
-      (* Printf.printf "Block %d\npre: %s\n" block.idx (Domain.to_string in_state); *)
-      let out_state = Transfer.transfer block in_state summaries module_ cfg in
-      (* Printf.printf "post:%s\n" (Transfer.result_to_string out_state); *)
+      (in_state, Transfer.transfer block in_state summaries module_ cfg)
+  in
+  let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =
+    if IntSet.is_empty worklist then
+      () (* No more elements to consider. We can stop here *)
+    else
+      let block_idx = IntSet.min_elt_exn worklist in
+      let (in_state, out_state) = analyze_block block_idx in
       (* Has out state changed? *)
       let previous_out_state = snd (IntMap.find_exn !data block_idx) in
       match previous_out_state with
@@ -55,14 +56,25 @@ let analyze
         (* TODO: make sure that this is true. If not, maybe we just have to put all blocks on the worklist for the first iteration(s) *)
         fixpoint (IntSet.remove worklist block_idx) (iteration+1)
       | _ ->
-        (* Update the out state in the analysis results, joining it with the previous one *)
+        (* Update the out state in the analysis results.
+           We join with the previous results *)
         let new_out_state = Transfer.join_result out_state previous_out_state in
         data := IntMap.set !data ~key:block_idx ~data:(Simple in_state, new_out_state);
         (* And recurse by adding all successors *)
         let successors = Cfg.successors cfg block_idx in
         fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors)) (iteration+1)
   in
+  (* Performs narrowing by re-analyzing once each block *)
+  let rec narrow (blocks : int list) : unit = match blocks with
+    | [] -> ()
+    | block_idx :: blocks ->
+      Printf.printf "narrowing block %d\n" block_idx;
+      let (in_state, out_state) = analyze_block block_idx in
+      data := IntMap.set !data ~key:block_idx ~data:(Simple in_state, out_state);
+      narrow blocks
+  in
   fixpoint (IntSet.singleton cfg.entry_block) 1;
+  narrow (IntMap.keys cfg.basic_blocks);
   !data
 
 (* Extract the out state from intra-procedural results *)

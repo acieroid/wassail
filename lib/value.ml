@@ -151,6 +151,18 @@ let top (typ : Type.t) (source : string) : t =
 
 (********************** String conversion ******************)
 
+let operator_to_string (op : operator) : string = match op with
+  | Plus -> "+"
+  | Minus -> "-"
+  | Times -> "*"
+  | Lt -> "<"
+  | LtE -> "<="
+  | Gt -> ">"
+  | GtE -> ">="
+  | Eq -> "="
+  | And -> "&"
+  | Or -> "or"
+  | Xor -> "xor"
 let rec value_to_string (v : value) : string = match v with
   | Bottom -> "bottom"
   | Interval (a, b) -> Printf.sprintf "[%s,%s]" (symbolic_to_string a) (symbolic_to_string b)
@@ -162,19 +174,7 @@ and symbolic_to_string (v : symbolic) : string = match v with
   | Const n -> Prim_value.to_string n
   | Parameter i -> Printf.sprintf "p%d" i
   | Global i -> Printf.sprintf "g%d" i
-  | Op (op, left, right) -> Printf.sprintf "%s%s%s" (value_to_string left) (begin match op with
-      | Plus -> "+"
-      | Minus -> "-"
-      | Times -> "*"
-      | Lt -> "<"
-      | LtE -> "<="
-      | Gt -> ">"
-      | GtE -> ">="
-      | Eq -> "="
-      | And -> "&"
-      | Or -> "or"
-      | Xor -> "xor"
-    end) (value_to_string right)
+  | Op (op, left, right) -> Printf.sprintf "%s%s%s" (value_to_string left) (operator_to_string op) (value_to_string right)
   | Bytes4 (b0, b1, b2, b3) -> Printf.sprintf "bytes[%s,%s,%s,%s]" (byte_to_string b0) (byte_to_string b1) (byte_to_string b2) (byte_to_string b3)
 and byte_to_string (b : byte) : string = match b with
   | ByteOfValue (v, pos) -> Printf.sprintf "%s@%d" (value_to_string v) pos
@@ -191,6 +191,9 @@ let rec simplify_symbolic (sym : symbolic) : symbolic =
   | Op (Plus, Symbolic (Const x), Symbolic (Const y)) ->
     (* x+y where x and y are constants, can directly be computed *)
     Const (Prim_value.add x y)
+  | Op (Plus, Symbolic (Const z), Symbolic a)
+  | Op (Plus, Symbolic a, Symbolic (Const z)) when Prim_value.is_zero z ->
+    a
   | Op (Plus, Symbolic (Const z), a) when Prim_value.is_zero z ->
     (* 0+a becomes a+0 *)
     (Op (Plus, a, Symbolic (Const z)))
@@ -239,9 +242,11 @@ and simplify_value (v : value) : value =
   | Symbolic (Op (Plus, a, Symbolic (Const z))) when Prim_value.is_zero z ->
     (* a+0 becomes a *)
     a
-  | Symbolic (Op (Plus, Interval (a, b), Symbolic (Const x))) when Prim_value.is_positive x ->
-    (* [a,b]+x becomes [a+x,b+x] if x is positive *)
-    simplify_value (Interval (Op (Plus, Symbolic a, Symbolic (Const x)), Op (Plus, Symbolic b, Symbolic (Const x))))
+  | Symbolic (Op (Plus, Interval (a, b), Symbolic (Const x))) ->
+    (* [a,b]+x becomes [a+x,b+x] *)
+    simplify_value (Interval (simplify_symbolic (Op (Plus, Symbolic a, Symbolic (Const x))), simplify_symbolic (Op (Plus, Symbolic b, Symbolic (Const x)))))
+  | Symbolic (Op (Plus, RightOpenInterval a, Symbolic (Const x)))  ->
+    simplify_value (RightOpenInterval (Op (Plus, Symbolic a, Symbolic (Const x))))
   | Symbolic (Op (Times, Interval (a, b), Symbolic (Const x))) when Prim_value.is_positive x ->
     (* [a,b]*x becomes [a*x,b*x] if x is positive *)
     simplify_value (Interval (Op (Times, Symbolic a, Symbolic (Const x)), Op (Times, Symbolic b, Symbolic (Const x))))
@@ -316,6 +321,46 @@ let subsumes (v1 : t) (v2 : t) : bool = value_subsumes v1.value v2.value
 
 
 (************************ Joining *****************)
+
+(** Checks if two values can be compared, i.e., if a total order can be established among them *)
+let comparable (x : symbolic) (y : symbolic) : bool = match (x, y) with
+  | Const _, Const _ -> true
+  | Op (Plus, Symbolic (Parameter i), Symbolic (Const _)),
+    Op (Plus, Symbolic (Parameter i'), Symbolic (Const _)) when i = i' ->
+    true
+  | Parameter i,
+    Op (Minus, Symbolic (Parameter i'), Symbolic (Const _)) when i = i' ->
+    true
+  | _ -> false
+
+(** Return the min of two comparable values *)
+let comparable_min (x : symbolic) (y : symbolic) : symbolic = match (x, y) with
+  | Const a, Const b -> Const (Prim_value.min a b)
+  | Op (Plus, Symbolic (Parameter i), Symbolic (Const a)),
+    Op (Plus, Symbolic (Parameter i'), Symbolic (Const b)) when i = i' ->
+    if Prim_value.lt_s a b then
+      x
+    else
+      y
+  | Parameter i,
+    Op (Minus, Symbolic (Parameter i'), Symbolic (Const _)) when i = i' ->
+    y
+  | _ -> failwith "comparable_min called with non-comparables"
+
+(** Return the max of two comparable values *)
+let comparable_max (x : symbolic) (y : symbolic) : symbolic = match (x, y) with
+  | Const a, Const b -> Const (Prim_value.max a b)
+  | Op (Plus, Symbolic (Parameter i), Symbolic (Const a)),
+    Op (Plus, Symbolic (Parameter i'), Symbolic (Const b)) when i = i' ->
+    if Prim_value.gt_s a b then
+      x
+    else
+      y
+  | Parameter i,
+    Op (Minus, Symbolic (Parameter i'), Symbolic (Const _)) when i = i' ->
+    x
+  | _ -> failwith "comparable_max called with non-comparables"
+
 (** Joins two values together *)
 let rec join (v1 : t) (v2 : t) : t =
   assert Stdlib.(v1.typ = v2.typ);
@@ -381,12 +426,18 @@ let rec join (v1 : t) (v2 : t) : t =
     when Prim_value.is_zero zero && Prim_value.is_one one ->
     (* [0,1] joined with e.g. 0<=p1, results in [0,1] *)
     v1.value
+  | Interval (a, _), Interval (a', _)
+    when Stdlib.(a = a') ->
+    (* [a, b] joined with [a, c] is approximated by [a, +inf[ if no other case has applied *)
+    RightOpenInterval a
   | (Symbolic (Const _), LeftOpenInterval (Parameter _))
   | (Symbolic (Const _), LeftOpenInterval (Op (_, Symbolic (Parameter _), _)))
   | (Symbolic (Const _), RightOpenInterval (Op (_, Symbolic (Parameter _), _)))
   | (Symbolic (Const _), RightOpenInterval (Parameter _)) ->
     Logging.warn "UnsoundAssumption" (Printf.sprintf "%s contains %s" (to_string v2) (to_string v1));
     v2.value
+  | (Interval (a, b), Interval (a', b')) when comparable a a' && comparable b b' ->
+    Interval (comparable_min a a', comparable_max b b')
   | _ -> (top v1.typ (Printf.sprintf "Value.join %s %s" (to_string v1) (to_string v2))).value in
   Logging.info (Printf.sprintf "join %s with %s gives %s" (to_string v1) (to_string v2) (value_to_string vres)); 
   { typ = v1.typ;
@@ -415,35 +466,35 @@ let join_vlist_exn (v1 : t list) (v2 : t list) : t list =
 (********************* Meeting **********************)
 
 (** Meet two values together *)
-let meet (v1 : t) (v2 : t) : t =
-  assert Stdlib.(v1.typ = v2.typ);
-  let v = match (v1.value, v2.value) with
-    | (Bottom, _)
-    | (_, Bottom) -> Bottom
-    | (_, _) when Stdlib.(v1 = v2) -> v1.value
-    | (_, OpenInterval) -> v1.value
-    | (OpenInterval, _) -> v2.value
-  (* TODO:
-     a) meet ]-inf,p2-1[ with [a,b].
-        IF we know that p2-1>=a, then definitely we can say that the result is at least [a,p2-1]
-     b) meet [p2,+inf] with [0,1] -> probably [0,1] is better here...
-        But then we'll loop, and we'll have to meet [p2,+inf] with [0,2], then [0,3], then finally [0,+inf], hence [p2,+inf] is probably fine. Although just p2 is correct IN OUR EXAMPLE
- *)
+let meet_value (v1 : value) (v2 : value) : value = match (v1, v2) with
+    | (Bottom, _) | (_, Bottom) -> Bottom
+    | (_, _) when Stdlib.(v1 = v2) -> v1
+    | (_, OpenInterval) -> v1
+    | (OpenInterval, _) -> v2
+    | (LeftOpenInterval x, RightOpenInterval y)
+    | (RightOpenInterval x, LeftOpenInterval y) ->
+      (* ]-inf,x] and [y,+inf] *)
+      Logging.warn "UnsoundAssumption" (Printf.sprintf "assuming %s <= %s" (symbolic_to_string x) (symbolic_to_string y));
+      Interval (x, y)
+    | (RightOpenInterval x, Interval (x', y))
+    | (Interval (x, y), RightOpenInterval x') when Stdlib.(x = x') ->
+      (* [x,+inf[ and [x',y] -> [x,y] *)
+      Interval (x, y)
   | _ ->
-    Logging.warn "ImpreciseOperation" (Printf.sprintf "meet %s with %s" (to_string v1) (to_string v2));
+    Logging.warn "ImpreciseOperation" (Printf.sprintf "meet %s with %s" (value_to_string v1) (value_to_string v2));
     (* There are multiple "valid" choices here. We pick v1.
        There could be more precise choices however, examples:
        meet [0,1] [2,3] returns [0,1], but should return Bottom (not seen in practice)
        meet ]-inf,p0] [0,1] has no best result, as we don't know if p0<0... (seen in practice)
          -> we decide to keep the first value here, as we prefer abstract values with parameters in them
     *)
-    v1.value
-  in {
-    value = v;
-    typ = v1.typ
-  }
+    v1
 
-let meet_value (v1 : value) (_v2 : value) : value = v1
+let meet (v1 : t) (v2 : t) : t =
+  assert Stdlib.(v1.typ = v2.typ);
+  let res = meet_value v1.value v2.value in
+  Printf.printf "meet %s with %s results in %s\n" (value_to_string v1.value) (value_to_string v2.value) (value_to_string res);
+  { value = res; typ = v1.typ }
 
 let meet_byte (b1 : byte) (b2 : byte) : byte = match (b1, b2) with
   | ByteOfValue (b, pos), ByteOfValue (b', pos') when pos = pos' -> ByteOfValue ((meet_value b b'), pos)

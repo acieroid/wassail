@@ -75,8 +75,6 @@ let update (m : t) (vs: (Value.value * Value.byte) list) : t =
   List.fold_left vs ~init:m ~f:(fun acc (ea, b) ->
       let resolved_ea = resolve_value m ea in
       let resolved_b = resolve_byte m b in
-      Printf.printf "ea: %s, resolved is: %s\n" (Value.value_to_string ea) (Value.value_to_string resolved_ea);
-      Printf.printf "byte: %s, resolved is: %s\n" (Value.byte_to_string b) (Value.byte_to_string resolved_b);
       Map.update acc resolved_ea ~f:(function
           | None ->
             (* Unbound address in the memory, bind it *)
@@ -172,30 +170,56 @@ let adapt (m : t) (map : Value.ValueValueMap.t) : t =
                   ~f:(fun (a, v) -> (Value.adapt_value a map, Value.adapt_byte v map)))
 
 (** Refines the value at M[ea], by meeting it with v *)
-let refine_value_at (m : t) (ea : Value.value) (v : Value.byte) =
+let refine_value_at (m : t) (ea : Value.value) (v : Value.byte) : t =
   Map.update m ea ~f:(function
       | None ->
         Logging.warn "NotFoundInMemory" (Printf.sprintf "refine_value_at should have found a value at address %s, none found instead, in memory %s" (Value.value_to_string ea) (to_string m));
         v
-      | Some v' -> Value.meet_byte v v')
+      | Some v' ->
+        Printf.printf "refine value at %s, was %s, is now %s\n" (Value.value_to_string ea) (Value.byte_to_string v) (Value.byte_to_string (Value.meet_byte v v'));
+        Value.meet_byte v v')
 
 (** Refine the memory based on a condition cond (represented as a value), that either holds or not, according to holds *)
 let refine (m : t) (cond : Value.t) (holds : bool) : t =
-  match (cond.value, holds) with
-  (* Refine based on bytes[*g0-13,*g0-14,*g0-15,*g0-16]>=bytes[*g0-9,*g0-10,*g0-11,*g0-12]
-     - only works if values at g0-16 to g0-13 logically follow each other, i.e.:
-     [g0-13: X@3][g0-14: X@2][g0-15: X@1][g0-16: X@0]
-     - same goes for g0-12 to g0-9:
-     [g0-9: Y@3][g0-10: Y@2][g0-11: Y@1][g0-12: Y@0]
-     - we now that if the condition holds, then X >= p0
-       - that means that we can refine X by meeting it with [Y,+inf]
-       - and we can refine Y by meeting it with [X,+inf]
-     - in practice, we have: X = some interval, Y = some parameter, hence we only refine the intervals *)
-  (* TODO: reestablish some refinement *)
-(*  | Symbolic (Op (GtE, Symbolic (Deref ea), Symbolic b)), true ->
+  Printf.printf "refine based on cond: %s (resolved: %s), holds: %b\n" (Value.to_string cond) (Value.to_string (resolve m cond)) holds;
+  match cond.value with
+  | Value.Symbolic (Op (op, (Symbolic (Bytes4 (Deref w, Deref x, Deref y, Deref z)) as a), b)) ->
+    (* Condition is e.g. a>=b, it holds, and a is bytes[*w,*x,*y,*z] *)
+    begin match ((resolve m { value = a; typ = I32 }).value, (resolve m { value = b; typ = I32 }).value) with
+      | (RightOpenInterval (Const _) as v1), Symbolic (Parameter i)
+      | (LeftOpenInterval (Const _) as v1), Symbolic (Parameter i)
+      | (OpenInterval as v1), Symbolic (Parameter i) ->
+        (* a is [x,+inf[, b is p0 *)
+        (*  We can refine a to be e.g., meet([x,+inf[,[p2,+inf[), in case op is >=
+                                        meet([x,+inf[,]-inf,p2-1]), in case op is <
+                                        meet([x,+inf[,p2) in case op is = *)
+        let refined = Option.map (match (op, holds) with
+            | GtE, true | Lt, false ->
+              (* a>=b is true, or a<b is false, meet with [b,+inf[ *)
+              Some (Value.RightOpenInterval (Parameter i))
+            | GtE, false | Lt, true ->
+              (* a>=b is false, or a<b is true, meet with ]-inf,b-1[ *)
+              Some (Value.LeftOpenInterval (Op (Minus, Symbolic (Parameter i), Symbolic (Const (I32 1l))))) (* TODO: typ *)
+            | _ -> failwith (Printf.sprintf "TODO: cannot refine for op: %s" (Value.operator_to_string op)))
+            ~f:(Value.meet_value v1) in
+        begin match Option.map refined ~f:(fun refined ->
+            List.fold_left [(w, Value.byte refined 3);
+                            (x, Value.byte refined 2);
+                            (y, Value.byte refined 1);
+                            (z, Value.byte refined 0)]
+              ~init:m ~f:(fun acc (ea, b) -> refine_value_at acc ea b)) with
+        | Some m' ->
+          Printf.printf "refined:\n%s\ninto\n%s\n" (to_string m) (to_string m');
+          m'
+        | None -> Logging.warn "ImpreciseOperation" (Printf.sprintf "cannot refine memory based on condition %s" (Value.to_string cond));
+          m
+        end
+      | v1, v2 -> Logging.warn "ImpreciseOperation" (Printf.sprintf "cannot refine memory based on condition %s, which is resolved as %s and %s" (Value.to_string cond) (Value.value_to_string v1) (Value.value_to_string v2));
+        m
+    end
     (* M[*ea: X] with cond *ea >= b refines X with [b,+inf] *)
-    refine_value_at m ea Value.{ value = (RightOpenInterval b); typ = I32 } (* TODO: typ *)
-  | Symbolic (Op (GtE, Symbolic (Deref ea), Symbolic b)), false ->
+  (* refine_value_at m ea Value.{ value = (RightOpenInterval b); typ = I32 } (* TODO: typ *) *)
+(*  | Symbolic (Op (GtE, Symbolic (Deref ea), Symbolic b)), false ->
     (* M[*ea: X] with cond *ea >= b (false -> *ea < b) refines X with ]-inf,b-1] *)
     refine_value_at m ea Value.{ value = LeftOpenInterval (Value.simplify_symbolic (Op (Minus, Symbolic b, (i32_const 1l).value))); typ = I32 } (* TODO: typ *) *)
   | _ ->
