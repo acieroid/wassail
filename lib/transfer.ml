@@ -170,11 +170,11 @@ let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t I
   Printf.printf "analyzing block %d\n" b.idx;
   match b.content with
   | Data instrs ->
-    Simple (List.fold_left instrs ~init:state ~f:(fun prestate i ->
-        Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string prestate) (Instr.data_to_string i);
-        let poststate = data_instr_transfer i prestate in
+    Simple (List.fold_left instrs ~init:state ~f:(fun prestate (instr, _vstack) ->
+        Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string prestate) (Instr.data_to_string instr);
+        let poststate = data_instr_transfer instr prestate in
         poststate))
-  | Control instr ->
+  | Control (instr, _vstack) ->
     (* Printf.printf "pre: %s\ncontrol: %s\n" (Domain.to_string state) (Instr.control_to_string instr); *)
     control_instr_transfer instr state summaries module_ cfg
   | Nothing -> Simple state

@@ -11,9 +11,9 @@ type t = {
 }
 [@@deriving sexp, compare]
 
-let of_wasm (e : Ast.var list Ast.segment) : t = {
+let of_wasm (m : Ast.module_) (e : Ast.var list Ast.segment) : t = {
   index = Var.of_wasm e.it.index;
-  offset = List.map e.it.offset.it ~f:Instr.of_wasm;
+  offset = fst (Instr.seq_of_wasm m e.it.offset.it []);
   init = List.map e.it.init ~f:Var.of_wasm
 }
 

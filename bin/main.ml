@@ -22,10 +22,14 @@ let cfg =
       fun () ->
         apply_to_textual file_in (fun m ->
             let wasm_mod = Wasm_module.of_wasm m in
-            let cfg = Cfg_builder.build fid wasm_mod in
-            Out_channel.with_file file_out
-              ~f:(fun ch ->
-                  Out_channel.output_string ch (Cfg.to_dot cfg))))
+            let nimports = List.length wasm_mod.imported_funcs in
+            if fid < nimports then
+              Printf.printf "Can't build CFG for function %d: it is an imported function" fid
+            else
+              let cfg = Cfg_builder.build fid wasm_mod in
+              Out_channel.with_file file_out
+                ~f:(fun ch ->
+                    Out_channel.output_string ch (Cfg.to_dot cfg))))
 
 let cfgs =
   Command.basic

@@ -45,7 +45,7 @@ type t = {
 
 let dependencies (cfg : t) : int list =
   List.filter_map (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_idx, block) -> match block.content with
-      | Control (Call n) -> Some n
+      | Control (Call n, _) -> Some n
       | _ -> None)
 [@@deriving sexp, compare, yojson]
 let to_string (cfg : t) : string = Printf.sprintf "CFG of function %d" cfg.idx
@@ -74,7 +74,7 @@ let callees (cfg : t) : IntSet.t =
   IntMap.fold cfg.basic_blocks
     ~init:IntSet.empty
     ~f:(fun ~key:_ ~data:block callees -> match block.content with
-        | Control (Call n) -> IntSet.union (IntSet.singleton n) callees
+        | Control (Call n, _) -> IntSet.union (IntSet.singleton n) callees
         | _ -> callees)
 
 let callers (cfgs : t IntMap.t) (cfg : t) : IntSet.t =

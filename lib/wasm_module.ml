@@ -29,22 +29,23 @@ let join (s1 : t) (s2 : t) : t =
   }
 let of_wasm (m : Wasm.Ast.module_) : t =
   let minst = Module_inst.of_wasm m in
-  let nimports = 2 in (* TODO *)
-  ({
-    imported_funcs = List.filter_mapi m.it.imports ~f:(fun idx import -> match import.it.idesc.it with
+  let imported_funcs = List.filter_mapi m.it.imports ~f:(fun idx import -> match import.it.idesc.it with
         | FuncImport v ->
           Some (idx, Wasm.Ast.string_of_name import.it.item_name,
                 match (List.nth_exn m.it.types (Var.of_wasm v)).it with
                 | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
                                                  List.map b ~f:Type.of_wasm))
-        | _ -> None);
-    funcs = List.mapi m.it.funcs ~f:(fun i -> Func_inst.of_wasm m minst (i+nimports));
+        | _ -> None) in
+  Printf.printf "%d imported funcs" (List.length imported_funcs);
+  ({
+    imported_funcs = imported_funcs;
+    funcs = List.mapi m.it.funcs ~f:(fun i -> Func_inst.of_wasm m minst (i+List.length imported_funcs));
     globals = List.map m.it.globals ~f:Global_inst.of_wasm;
     mems = List.map m.it.memories ~f:Memory_inst.of_wasm;
     tables = List.map m.it.tables ~f:(fun t ->
         Table_inst.init
           (Table.of_wasm t)
-          (List.map m.it.elems ~f:Elem.of_wasm));
+          (List.map m.it.elems ~f:(Elem.of_wasm m)));
     types = List.map m.it.types ~f:(fun t -> match t.it with
         | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
                                          List.map b ~f:Type.of_wasm))

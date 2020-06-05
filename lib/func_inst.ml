@@ -24,7 +24,7 @@ let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (index : int) (f : Wa
       name = name;
       typ = (List.map input ~f:Type.of_wasm, List.map output ~f:Type.of_wasm);
       module_ = minst;
-      code = Func.of_wasm f
+      code = Func.of_wasm m f
     }
 let to_string (f : t) : string =
   Printf.sprintf "Function %s (%s -> %s):\nCode: %s"
