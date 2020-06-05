@@ -65,16 +65,16 @@ let analyze
         fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors)) (iteration+1)
   in
   (* Performs narrowing by re-analyzing once each block *)
-  let rec narrow (blocks : int list) : unit = match blocks with
+  let rec _narrow (blocks : int list) : unit = match blocks with
     | [] -> ()
     | block_idx :: blocks ->
       Printf.printf "narrowing block %d\n" block_idx;
       let (in_state, out_state) = analyze_block block_idx in
       data := IntMap.set !data ~key:block_idx ~data:(Simple in_state, out_state);
-      narrow blocks
+      _narrow blocks
   in
   fixpoint (IntSet.singleton cfg.entry_block) 1;
-  narrow (IntMap.keys cfg.basic_blocks);
+  (* _narrow (IntMap.keys cfg.basic_blocks); *)
   !data
 
 (* Extract the out state from intra-procedural results *)

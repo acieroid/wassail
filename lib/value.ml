@@ -331,7 +331,15 @@ let comparable (x : symbolic) (y : symbolic) : bool = match (x, y) with
   | Parameter i,
     Op (Minus, Symbolic (Parameter i'), Symbolic (Const _)) when i = i' ->
     true
-  | _ -> false
+  | Parameter i,
+    Op (Plus, Symbolic (Parameter i'), Symbolic (Const _))
+  | Op (Plus, Symbolic (Parameter i'), Symbolic (Const _)),
+    Parameter i
+    when i = i' ->
+    true
+  | _ ->
+    Printf.printf "not comparable %s and %s\n" (symbolic_to_string x) (symbolic_to_string y);
+    false
 
 (** Return the min of two comparable values *)
 let comparable_min (x : symbolic) (y : symbolic) : symbolic = match (x, y) with
@@ -344,6 +352,13 @@ let comparable_min (x : symbolic) (y : symbolic) : symbolic = match (x, y) with
       y
   | Parameter i,
     Op (Minus, Symbolic (Parameter i'), Symbolic (Const _)) when i = i' ->
+    y
+  | Parameter i,
+    Op (Plus, Symbolic (Parameter i'), Symbolic (Const _)) when i = i' ->
+    x
+  | Op (Plus, Symbolic (Parameter i'), Symbolic (Const _)),
+    Parameter i
+    when i = i' ->
     y
   | _ -> failwith "comparable_min called with non-comparables"
 
@@ -359,6 +374,13 @@ let comparable_max (x : symbolic) (y : symbolic) : symbolic = match (x, y) with
   | Parameter i,
     Op (Minus, Symbolic (Parameter i'), Symbolic (Const _)) when i = i' ->
     x
+  | Parameter i,
+    Op (Plus, Symbolic (Parameter i'), Symbolic (Const _)) when i = i' ->
+    y
+  | Op (Plus, Symbolic (Parameter i'), Symbolic (Const _)),
+    Parameter i
+    when i = i' ->
+    x
   | _ -> failwith "comparable_max called with non-comparables"
 
 (** Joins two values together *)
@@ -369,6 +391,8 @@ let rec join (v1 : t) (v2 : t) : t =
   | (_, Bottom) -> v1.value
   | (OpenInterval, _) | (_, OpenInterval) -> OpenInterval
   | (_, _) when Stdlib.(v1 = v2) -> v1.value
+  | (Interval (Const z, Const one), Interval (Const z', Parameter i)) when Prim_value.is_zero z && Prim_value.is_zero z' && Prim_value.is one 1 ->
+    Interval (Const z, Parameter i) (* Totally unsound *)
   | (Symbolic (Const n1), Symbolic (Const n2)) when Prim_value.eq n1 n2 ->
     Symbolic (Const n1)
   | (Symbolic (Const n1), Symbolic (Const n2)) ->
@@ -476,6 +500,10 @@ let meet_value (v1 : value) (v2 : value) : value = match (v1, v2) with
       (* ]-inf,x] and [y,+inf] *)
       Logging.warn "UnsoundAssumption" (Printf.sprintf "assuming %s <= %s" (symbolic_to_string x) (symbolic_to_string y));
       Interval (x, y)
+    | (RightOpenInterval (Const z), RightOpenInterval (Parameter i)) when Prim_value.is_zero z ->
+      (* [0,+inf[ and [p0,+inf[ are met as [0,p0], assuming p0>=0 *)
+      Logging.warn "UnsoundAssumption" (Printf.sprintf "assuming %s <= %s" (symbolic_to_string (Const z)) (symbolic_to_string (Parameter i)));
+      Interval (Const z, Parameter i)
     | (RightOpenInterval x, Interval (x', y))
     | (Interval (x, y), RightOpenInterval x') when Stdlib.(x = x') ->
       (* [x,+inf[ and [x',y] -> [x,y] *)
