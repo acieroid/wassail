@@ -7,6 +7,7 @@ module T = struct
     | Nop
     | Drop
     | Select
+    | MemorySize
     | Const of Value.t
     | Binary of Binop.t
     | Compare of Relop.t
@@ -44,6 +45,7 @@ let data_to_string (instr : data) : string =
      | Nop -> "nop"
      | Drop -> "drop"
      | Select -> "select"
+     | MemorySize -> "memory_size"
      | Const v -> Printf.sprintf "const %s" (Value.to_string v)
      | Binary b -> Printf.sprintf "binary %s" (Binop.to_string b)
      | Compare r -> Printf.sprintf "compare %s" (Relop.to_string r)
@@ -114,7 +116,7 @@ let rec of_wasm (i : Ast.instr) : t =
   | Ast.GlobalSet v -> Data (GlobalSet (Var.of_wasm v))
   | Ast.Load op -> Data (Load (Memoryop.of_wasm_load op))
   | Ast.Store op -> Data (Store (Memoryop.of_wasm_store op))
-  | Ast.MemorySize -> failwith "memory_size unsupported"
+  | Ast.MemorySize -> Data MemorySize
   | Ast.MemoryGrow -> failwith "memory_grow unsupported"
   | Ast.Test op -> Data (Test (Testop.of_wasm op))
   | Ast.Convert _op -> failwith "convert unsupported"

@@ -28,6 +28,8 @@ let join_result (r1 : result) (r2 : result) =
 let rec data_instr_transfer (i : Instr.data) (state : Domain.state) : Domain.state =
   match i with
   | Nop -> state
+  | MemorySize ->
+    { state with vstack = Value.top I32 "memory.size" :: state.vstack }
   | Drop ->
     let (_, vstack') = Vstack.pop state.vstack in
     assert (List.length vstack' = List.length state.vstack - 1);
