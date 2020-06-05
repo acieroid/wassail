@@ -124,25 +124,28 @@ let arity_of_fun (m : Ast.module_) (f : Ast.var) : int * int =
     (* defined function, get arity from function list *)
     arity_of_fun_type m (Lib.List32.nth m.it.funcs Int32.(f.it - n)).it.ftype
 
-let rec of_wasm (m : Ast.module_) (i : Ast.instr) (vstack : string list) : t =
+let vars : string list ref = ref [] (* TODO mutable state... *)
+let alloc_var (i : Ast.instr) : string =
   let v = Source.string_of_region i.at in
+  vars := v :: !vars;
+  v
+
+let rec of_wasm (m : Ast.module_) (i : Ast.instr) (vstack : string list) : t =
   match i.it with
   | Ast.Nop -> { instr = Data Nop; vstack = vstack }
   | Ast.Drop -> { instr = Data Drop; vstack = List.drop vstack 1  }
-  | Ast.Block (st, instrs) ->
-    let (arity_in, arity_out) = arity_of_block st in
-    Printf.printf "block arity: %d, %d\n" arity_in arity_out;
+  | Ast.Block (_st, instrs) ->
     (* TODO: maybe we should pop arity_out and push again, or do that in br? *)
     let (body, vstack) = seq_of_wasm m instrs vstack in
     { instr = Control (Block body); vstack = vstack }
   | Ast.Const lit ->
-    { instr = Data (Const (Value.of_wasm lit.it)); vstack = v :: vstack }
+    { instr = Data (Const (Value.of_wasm lit.it)); vstack = (alloc_var i) :: vstack }
   | Ast.Binary bin ->
-    { instr = Data (Binary (Binop.of_wasm bin)); vstack = v :: (List.drop vstack 2) }
+    { instr = Data (Binary (Binop.of_wasm bin)); vstack = (alloc_var i) :: (List.drop vstack 2) }
   | Ast.Compare rel ->
-    { instr = Data (Compare (Relop.of_wasm rel)); vstack = v :: (List.drop vstack 2) }
+    { instr = Data (Compare (Relop.of_wasm rel)); vstack = (alloc_var i) :: (List.drop vstack 2) }
   | Ast.LocalGet l ->
-    { instr = Data (LocalGet (Var.of_wasm l)); vstack = v :: vstack }
+    { instr = Data (LocalGet (Var.of_wasm l)); vstack = (alloc_var i) :: vstack }
   | Ast.LocalSet l ->
     { instr = Data (LocalSet (Var.of_wasm l)); vstack = List.drop vstack 1 }
   | Ast.LocalTee l ->
@@ -155,43 +158,43 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) (vstack : string list) : t =
     let (arity_in, arity_out) = arity_of_fun m f in
     Printf.printf "call %s, arity: (%d, %d)" (Int32.to_string f.it) arity_in arity_out;
     assert (arity_out <= 1);
-    { instr = Control (Call (Var.of_wasm f)); vstack = (if arity_out = 0 then [] else [v]) @ List.drop vstack arity_in }
+    { instr = Control (Call (Var.of_wasm f)); vstack = (if arity_out = 0 then [] else [alloc_var i]) @ List.drop vstack arity_in }
   | Ast.Return ->
     { instr = Control Return; vstack = vstack } (* TODO: in practice, return only keeps the necessary number of values on the vstack *)
   | Ast.Unreachable ->
     { instr = Control Unreachable; vstack = vstack }
   | Ast.Select ->
-    { instr = Data Select; vstack = v :: (List.drop vstack 3) }
+    { instr = Data Select; vstack = (alloc_var i) :: (List.drop vstack 3) }
   | Ast.Loop (st, instrs) ->
     let (arity_in, arity_out) = arity_of_block st in
     Printf.printf "loop arity: %d, %d\n" arity_in arity_out;
     assert (arity_out <= 1); (* TODO: support any arity out? *)
     let (body, _) = seq_of_wasm m instrs vstack in
-    { instr = Control (Loop body); vstack = (if arity_out = 0 then [] else [v]) @ List.drop vstack arity_in }
+    { instr = Control (Loop body); vstack = (if arity_out = 0 then [] else [alloc_var i]) @ List.drop vstack arity_in }
   | Ast.If (st, instrs1, instrs2) ->
     let (arity_in, arity_out) = arity_of_block st in
     assert (arity_out <= 1);
     let (body1, _) = seq_of_wasm m instrs1 vstack in
     let (body2, _) = seq_of_wasm m instrs2 vstack in
-    { instr = Control (If (body1, body2)); vstack = (if arity_out = 0 then [] else [v]) @ List.drop vstack arity_in }
+    { instr = Control (If (body1, body2)); vstack = (if arity_out = 0 then [] else [alloc_var i]) @ List.drop vstack arity_in }
   | Ast.BrTable (_vs, _v) -> failwith "br_table unsupported"
   | Ast.CallIndirect f ->
     let (arity_in, arity_out) = arity_of_fun_type m f in
     assert (arity_out <= 1);
-    { instr = Control (CallIndirect (Var.of_wasm f)); vstack = (if arity_out = 0 then [] else [v]) @ List.drop vstack arity_in }
+    { instr = Control (CallIndirect (Var.of_wasm f)); vstack = (if arity_out = 0 then [] else [alloc_var i]) @ List.drop vstack arity_in }
   | Ast.GlobalGet g ->
-    { instr = Data (GlobalGet (Var.of_wasm g)); vstack = v :: vstack }
+    { instr = Data (GlobalGet (Var.of_wasm g)); vstack = (alloc_var i) :: vstack }
   | Ast.GlobalSet g ->
     { instr = Data (GlobalSet (Var.of_wasm g)); vstack = List.drop vstack 1 }
   | Ast.Load op ->
-    { instr = Data (Load (Memoryop.of_wasm_load op)); vstack = v :: (List.drop vstack 1) }
+    { instr = Data (Load (Memoryop.of_wasm_load op)); vstack = (alloc_var i) :: (List.drop vstack 1) }
   | Ast.Store op ->
     { instr = Data (Store (Memoryop.of_wasm_store op)); vstack = List.drop vstack 2 }
   | Ast.MemorySize ->
-    { instr = Data MemorySize; vstack = v :: vstack }
+    { instr = Data MemorySize; vstack = (alloc_var i) :: vstack }
   | Ast.MemoryGrow -> failwith "memory_grow unsupported"
   | Ast.Test op ->
-    { instr = Data (Test (Testop.of_wasm op)); vstack = v :: (List.drop vstack 1) }
+    { instr = Data (Test (Testop.of_wasm op)); vstack = (alloc_var i) :: (List.drop vstack 1) }
   | Ast.Convert _op -> failwith "convert unsupported"
   | Ast.Unary _op -> failwith "unary unsupported"
 and seq_of_wasm (m : Ast.module_) (is : Ast.instr list) (vstack : string list) : t list * string list =
