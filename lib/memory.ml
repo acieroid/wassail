@@ -1,6 +1,6 @@
 open Core_kernel
 
-module Map = Map.Make(Value.ValueT)
+module Map = Map.Make(Value)
 
 (** The memory is a map from values to bytes *)
 type t = Value.byte Map.t
@@ -8,14 +8,15 @@ type t = Value.byte Map.t
 
 let to_string (m : t) : string =
   Printf.sprintf "M%s" (String.concat ~sep:"" (List.map (Map.to_alist m) ~f:(fun (a, b) ->
-      Printf.sprintf "[%s: %s]" (Value.value_to_string a) (Value.byte_to_string b))))
+      Printf.sprintf "[%s: %s]" (Value.to_string a) (Value.byte_to_string b))))
 
 (** The initial memory is empty *)
-let initial = Map.empty
+let empty = Map.empty
 
 (** Look up a byte in the memory at effective address ea.
     Returns either the byte (Some b), or None if the byte is not directly found in the memory (meaning it could be any byte) *)
-let find (m : t) (ea : Value.value) : Value.byte option =
+let find (_m : t) (_ea : Value.t) : Value.byte option = failwith "NYI: Memory.find"
+    (*
   (* Step 1. Find all values that subsume ea, or are subsumed by ea
      Example: find M[[[0,5]: 3][[1,3]: 0] 4 returns M[[0,5]: 3]
               find M[1: 2] [0,5] returns M[1: 2]
@@ -37,9 +38,9 @@ let find (m : t) (ea : Value.value) : Value.byte option =
   | None ->
     Logging.warn "ValueNotFoundInMemory" (Printf.sprintf "value %s at address %s" (to_string m) (Value.value_to_string ea));
     None
-
+    *)
 (* TODO: properly redefine *)
-let rec resolve_value (m : t) (v : Value.value) : Value.value =
+(*let rec resolve_value (m : t) (v : Value.value) : Value.value =
   match v with
   | Value.Interval (a, b) -> Value.Interval (resolve_symbolic m a, resolve_symbolic m b)
   | Value.LeftOpenInterval a -> Value.LeftOpenInterval (resolve_symbolic m a)
@@ -225,3 +226,6 @@ let refine (m : t) (cond : Value.t) (holds : bool) : t =
   | _ ->
     Logging.warn "ImpreciseOperation" (Printf.sprintf "cannot refine memory %s based on condition %s" (to_string m) (Value.to_string cond));
     m
+*)
+
+let join (_m1 : t) (_m2 : t) : t = failwith "NYI: Memory.join"

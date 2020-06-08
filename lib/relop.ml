@@ -45,7 +45,7 @@ let to_string (r : t) : string =
      | LeU -> "le_u"
      | GeS -> "ge_s"
      | GeU -> "ge_u")
-
+(*
 let eq (v1 : Value.t) (v2 : Value.t) : Value.t = match (v1.value, v2.value) with
   | (Symbolic (Const n1), Symbolic (Const n2)) when Prim_value.eq n1 n2 -> Value.true_
   | _ -> Value.bool
@@ -101,3 +101,4 @@ let eval (r : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
   | LeU -> le_u v1 v2
   | GeS -> ge_s v1 v2
   | GeU -> ge_u v1 v2
+*)

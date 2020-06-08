@@ -1,7 +1,6 @@
 open Core_kernel
 open Helpers
 
-
 let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
   (* true to simplify the CFG, false to disable simplification *)
   let simplify = true in
@@ -9,14 +8,14 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
   let funcinst = Wasm_module.get_funcinst m faddr in
   let cur_idx : int ref = ref 0 in
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
-  let mk_data_block (reverse_instrs : (Instr.data * string list) list) : Basic_block.t =
+  let mk_data_block (reverse_instrs : (Instr.data * string list * string list) list) : Basic_block.t =
     let instrs = List.rev reverse_instrs in
     Basic_block.{ idx = new_idx (); content = Data instrs } in
-  let mk_control_block (instr : Instr.control) (vstack : string list) : Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Control (instr, vstack) } in
+  let mk_control_block (instr : Instr.control) (vstack : string list) (new_vars : string list) : Basic_block.t =
+    Basic_block.{ idx = new_idx () ; content = Control (instr, vstack, new_vars) } in
   let mk_empty_block () : Basic_block.t =
     Basic_block.{ idx = new_idx () ; content = Nothing } in
-  let rec helper (instrs : (Instr.data * string list) list) (remaining : Instr.t list) : (
+  let rec helper (instrs : (Instr.data * string list * string list) list) (remaining : Instr.t list) : (
     (* The blocks created *)
     Basic_block.t list *
     (* The edges within the blocks created *)
@@ -34,16 +33,16 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
       ([block] (* only this block *), [] (* no edge *),
        [] (* no break point *), [] (* not connected to return *),
        block.idx, block.idx)
-    | { instr = Data instr; vstack = vstack } :: rest ->
+    | { instr = Data instr; vstack = vstack; new_vars = new_vars } :: rest ->
       (* Instruction instr is part of the block, but not the end of it so we continue *)
-      helper ((instr, vstack) :: instrs) rest
-    | { instr = Control instr; vstack = vstack } :: rest -> begin match instr with
+      helper ((instr, vstack, new_vars) :: instrs) rest
+    | { instr = Control instr; vstack = vstack; new_vars = new_vars } :: rest -> begin match instr with
         | BrIf level ->
           (* This is a break up to level `level` *)
           (* First, construct the current block *)
           let block = mk_data_block instrs in
           (* Then construct the brif block *)
-          let brif_block = mk_control_block instr vstack in
+          let brif_block = mk_control_block instr vstack new_vars in
           (* Finally, construct the rest of the CFG *)
           let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
           (
@@ -59,7 +58,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
         | If (instrs1, instrs2) ->
           (* Construct the current block *)
           let block = mk_data_block instrs in
-          let if_block = mk_control_block instr vstack in
+          let if_block = mk_control_block instr vstack new_vars in
           (* Visit the then and else branches *)
           let (blocks, edges, breaks, returns, then_entry, then_exit) = helper [] instrs1 in
           let (blocks', edges', breaks', returns', else_entry, else_exit) = helper [] instrs2 in
@@ -89,7 +88,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
              empty here *)
           assert (List.is_empty rest);
           let block = mk_data_block instrs in
-          let br_block = mk_control_block instr vstack in
+          let br_block = mk_control_block instr vstack new_vars in
           let (blocks, edges, breaks, returns, _entry', exit') = helper [] rest in
           (block :: br_block :: blocks (* add the current block *),
            (block.idx, br_block.idx, None) :: edges (* only sequential edge *),
@@ -101,7 +100,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
              we don't include the call in this block because it has to be
              treated differently. *)
           let block = mk_data_block instrs in
-          let call_block = mk_control_block instr vstack in
+          let call_block = mk_control_block instr vstack new_vars in
           let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
           ((* add the current block and the function block *)
             block :: call_block :: blocks,
@@ -170,7 +169,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
           (* We create a new block with all instructions collected *)
           let block = mk_data_block instrs in
           (* We create a control block for this return *)
-          let return_block = mk_control_block instr vstack in
+          let return_block = mk_control_block instr vstack new_vars in
           ([return_block; block],
            (* The previous block is connected to the return *)
            [(block.idx, return_block.idx, None)],
@@ -185,7 +184,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
         | Unreachable ->
           (* Simply construct a block containig the unreachable instruction *)
           let block = mk_data_block instrs in
-          let unreachable_block = mk_control_block instr vstack in
+          let unreachable_block = mk_control_block instr vstack new_vars in
           let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
           (block :: unreachable_block :: blocks,
            (block.idx, unreachable_block.idx, None) :: (unreachable_block.idx, entry', None) :: edges,
@@ -193,7 +192,9 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
 
       end
   in
+  Instr.clear_vars ();
   let (blocks, edges, breaks, returns, _entry_idx, exit_idx) = helper [] funcinst.code.body in
+  let new_vars = !Instr.vars in
   (* Create the return block *)
   let return_block = mk_empty_block () in
   let blocks' = return_block :: blocks in
@@ -242,4 +243,6 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
     (* TODO: probably not fully correct so we have to pay close attention to that: there should be a single entry block *)
     entry_block = Option.value_exn (List.min_elt (List.map actual_blocks ~f:(fun b -> b.idx)) ~compare:Stdlib.compare);
     (* The exit block is the return block *)
-    exit_block = return_block.idx }
+    exit_block = return_block.idx;
+    vars = new_vars;
+  }

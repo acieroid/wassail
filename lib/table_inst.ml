@@ -18,7 +18,7 @@ let init (t : Table.t) (elems : Elem.t list) : t =
   List.iter elems ~f:(fun e ->
       assert (e.index = 0);
       match e.offset with
-      | { instr = Data (Const ({ value = Symbolic (Const (I32 offset)); _ })); _ } :: [] ->
+      | { instr = Data (Const (I32 offset)); _ } :: [] ->
         List.iteri e.init ~f:(fun idx addr ->
             Wasm.Lib.Array32.set table.elems Int32.((of_int_exn idx) + offset) (Some addr))
       | _ -> failwith "Unsupported elems for table initialization"
@@ -28,6 +28,7 @@ let init (t : Table.t) (elems : Elem.t list) : t =
 let get (t : t) (idx : Int32.t) : funcelem =
   Wasm.Lib.Array32.get t.elems idx
 
+(*
 let get_subsumed_by_index (t : t) (idx : Value.t) : funcelem list =
   let rec loop (i : Int32.t) (acc : Int32.t list) : Int32.t list =
     Printf.printf "index: %d\n" (Int32.to_int_exn i);
@@ -40,7 +41,7 @@ let get_subsumed_by_index (t : t) (idx : Value.t) : funcelem list =
   in
   let indices = loop 0l [] in
   List.map indices ~f:(get t)
-
+*)
 let to_string (t : t) : string =
   Printf.sprintf "elems: %s\n" (String.concat ~sep:","
                                   (List.map (Array.to_list t.elems)

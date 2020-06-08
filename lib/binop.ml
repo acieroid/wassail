@@ -55,6 +55,7 @@ let to_string (b : t) : string =
      | Rotl -> "rotl"
      | Rotr -> "rotr")
 
+(*
 (** Evaluates a binary operation on two values *)
 let eval (m : Memory.t) (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
   let v1' =
@@ -84,3 +85,4 @@ let eval (m : Memory.t) (b : t) (v1 : Value.t) (v2 : Value.t) : Value.t =
   Printf.printf "op %s is called with %s and %s, resulting in %s\n" (to_string b) (Value.to_string v1') (Value.to_string v2') (Value.to_string res);
   res
 
+  *)

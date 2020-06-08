@@ -1,4 +1,5 @@
 EXCLUDE_QUERY_DIR
+B /home/quentin/.opam/ocaml-system.4.10.0/lib/apron
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/base
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/base/base_internalhash_types
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/base/caml
@@ -11,6 +12,7 @@ B /home/quentin/.opam/ocaml-system.4.10.0/lib/bin_prot/shape
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/core_kernel
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/core_kernel/base_for_tests
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/fieldslib
+B /home/quentin/.opam/ocaml-system.4.10.0/lib/gmp
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/jane-street-headers
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/parsexp
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_assert/runtime-lib
@@ -36,6 +38,7 @@ B /home/quentin/.opam/ocaml-system.4.10.0/lib/variantslib
 B /home/quentin/.opam/ocaml-system.4.10.0/lib/wasm
 B /usr/lib/ocaml
 B ../_build/default/lib/.wasmtaint.objs/byte
+S /home/quentin/.opam/ocaml-system.4.10.0/lib/apron
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/base
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/base/base_internalhash_types
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/base/caml
@@ -48,6 +51,7 @@ S /home/quentin/.opam/ocaml-system.4.10.0/lib/bin_prot/shape
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/core_kernel
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/core_kernel/base_for_tests
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/fieldslib
+S /home/quentin/.opam/ocaml-system.4.10.0/lib/gmp
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/jane-street-headers
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/parsexp
 S /home/quentin/.opam/ocaml-system.4.10.0/lib/ppx_assert/runtime-lib

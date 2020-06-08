@@ -3,9 +3,9 @@ open Core_kernel
 type block_sort = BlockEntry | BlockExit | LoopEntry | LoopExit | Normal | Function | Return
 [@@deriving sexp, compare]
 
-type block_content = 
-  | Control of Instr.control * string list
-  | Data of (Instr.data * string list) list
+type block_content =
+  | Control of Instr.control * string list * string list
+  | Data of (Instr.data * string list * string list) list 
   | Nothing
 [@@deriving sexp, compare]
 
@@ -15,10 +15,10 @@ type t = {
 } [@@deriving sexp, compare]
 
 let to_string (b : t) : string = Printf.sprintf "block %d, %s" b.idx (match b.content with
-    | Control (instr, vstack) -> Printf.sprintf "control block: %s\\l\\l%s" (Instr.control_to_string instr) (String.concat ~sep:"," vstack)
+    | Control (instr, vstack, _) -> Printf.sprintf "control block: %s\\l\\l%s" (Instr.control_to_string instr) (String.concat ~sep:"," vstack)
     | Data instrs -> Printf.sprintf "data block: %s" (String.concat ~sep:"\\l"
          (List.map instrs
-            ~f:(fun (instr, vstack) ->
+            ~f:(fun (instr, vstack, _) ->
                 Printf.sprintf "%s -- %s" (Instr.data_to_string instr) (String.concat ~sep:"," vstack))))
     | Nothing -> "empty")
 
@@ -29,9 +29,9 @@ let to_dot (b : t) : string =
       b.idx b.idx
       (String.concat ~sep:"\\l"
          (List.map instrs
-            ~f:(fun (instr, vstack) ->
+            ~f:(fun (instr, vstack, _) ->
                 Printf.sprintf "%s -- %s" (Instr.data_to_string instr) (string_of_int (List.length vstack)))))
-  | Control (instr, vstack) ->
+  | Control (instr, vstack, _) ->
     Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d: %s -- %s\"];" b.idx b.idx (Instr.control_to_short_string instr) (string_of_int (List.length vstack))
   | Nothing ->
     Printf.sprintf "block%d [shape=point, label=\"%d\"]" b.idx b.idx

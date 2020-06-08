@@ -11,12 +11,8 @@ let analyze
     (module_ : Wasm_module.t) : (* The overall module, needed to access types, tables, etc. *)
   intra_results
   =
-  let args = List.mapi cfg.arg_types ~f:(fun i t -> Value.parameter t i) in
-  let memory = Memory.initial in
-  let globals = List.mapi module_.globals ~f:(fun i g -> Value.global g.typ i) in
   let bottom = Transfer.Uninitialized in
-  assert (List.length args = List.length cfg.arg_types); (* Given number of arguments should match the in arity of the function *)
-  let init = Domain.init args cfg.local_types globals memory in
+  let init = Domain.init cfg module_.nglobals in
   let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
                                          ~f:(fun idx ->
                                              (idx, (bottom, bottom))))) in

@@ -13,6 +13,16 @@ end
 include T
 include Comparator.Make(T)
 
+
+(** Constructs a value from a wasm value.
+    @param v the wasm value *)
+let of_wasm (v : Wasm.Values.value) : t =
+  match v with
+  | I32 x -> I32 x
+  | I64 x -> I64 x
+  | F32 _ -> failwith "unsupported type: F32"
+  | F64 _ -> failwith "unsupported type: F64"
+
 let to_string (v : t) : string = match v with
   | I32 n -> Int32.to_string n
   | I64 n -> Int64.to_string n

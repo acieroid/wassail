@@ -19,6 +19,7 @@ end
 module T = struct
   type t = {
     data: ByteAbstr.t; (* Abstraction: everything merged into the same value *)
+    min_size: int;
     max_size: int option;
   }
   [@@deriving sexp, compare]
@@ -30,5 +31,6 @@ let of_wasm (m : Ast.memory) : t =
   | MemoryType t ->
     {
       data = ByteAbstr.zero;
+      min_size = Int32.to_int_exn t.min;
       max_size = Option.map t.max ~f:Int32.to_int_exn
     }

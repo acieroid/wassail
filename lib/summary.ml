@@ -2,41 +2,25 @@
 open Core_kernel
 open Helpers
 
-(* For now it just models the number of arguments taken by the function, and the result on the vstack (in practice, either 0 or 1 value) *)
-type t = {
-  nargs : int;
-  typ: Type.t list * Type.t list;
-  result : Value.t list;
-  globals: Globals.t;
-  memory: Memory.t;
-}
-let to_string (s : t) : string =
-  Printf.sprintf "Summary(params: %d, vstack: %s, mem: %s, globals: %s)"
+(** A summary is the final state of the function *)
+type t = Domain.state
+
+let to_string (s : t) : string = Domain.to_string s
+(*  Printf.sprintf "Summary(params: %d, vstack: %s, mem: %s, globals: %s)"
     s.nargs
     (String.concat ~sep:", " (List.map s.result ~f:Value.to_string))
     (Memory.to_string s.memory)
-    (Globals.to_string s.globals)
+    (Globals.to_string s.globals) *)
 
 (** Constructs a summary given a CFG and a domain state resulting from that CFG *)
-let make (cfg : Cfg.t) (state : Domain.state) : t = {
-  nargs = List.length cfg.arg_types;
-  typ = (cfg.arg_types, cfg.return_types);
-  result = List.take state.vstack (List.length cfg.return_types);
-  globals = state.globals;
-  memory = state.memory;
-}
+let make (_cfg : Cfg.t) (state : Domain.state) : t = state
 
 (** Constructs an empty bottom summary given a CFG *)
-let bottom (cfg : Cfg.t) (module_ : Wasm_module.t) : t = {
-  nargs = List.length cfg.arg_types;
-  typ = [], [];
-  result = List.map cfg.return_types ~f:Value.bottom;
-  globals = List.mapi module_.globals ~f:(fun i g -> Value.global g.typ i);
-  memory = Memory.initial
-}
+let bottom (cfg : Cfg.t) (module_ : Wasm_module.t) : t = Domain.bottom cfg (module_.nglobals) cfg.vars
 
 (** Constructs a summary from an imported function *)
-let of_import (name : string) (args : Type.t list) (ret : Type.t list) (module_ : Wasm_module.t) : t = {
+let of_import (_name : string) (_args : Type.t list) (_ret : Type.t list) (_module_ : Wasm_module.t) : t = failwith "TODO"
+    (* {
   nargs = List.length args;
   typ = args, ret;
   result = begin match name with
@@ -54,6 +38,7 @@ let of_import (name : string) (args : Type.t list) (ret : Type.t list) (module_ 
   globals = List.mapi module_.globals ~f:(fun i g -> Value.global g.typ i);
   memory = Memory.initial
 }
+    *)
 
 (** Constructs all summaries for a given module, including imported functions *)
 let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntMap.t =
@@ -65,7 +50,8 @@ let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntM
 
 (* Apply the summary to a state, updating the vstack as if the function was
    called, AND updating the set of called functions *)
-let apply (sum : t) (fidx : Var.t) (st : Domain.state) (module_ : Wasm_module.t) : Domain.state =
+let apply (_sum : t) (_fidx : Var.t) (_st : Domain.state) (_module_ : Wasm_module.t) : Domain.state = failwith "TODO: use Abstract1.substitute?"
+    (*
   Printf.printf "[fidx: %d] Applying summary %s to state %s!" fidx (to_string sum) (Domain.to_string st);
   let map = List.foldi st.globals ~init:(List.foldi (List.rev st.vstack) ~init:Value.ValueValueMap.ValueMap.empty
                                            ~f:(fun i acc v -> Value.ValueValueMap.ValueMap.add_exn acc
@@ -79,3 +65,4 @@ let apply (sum : t) (fidx : Var.t) (st : Domain.state) (module_ : Wasm_module.t)
     memory = Memory.join st.memory (Memory.adapt sum.memory map);
     globals = Globals.adapt sum.globals map;
   }
+*)

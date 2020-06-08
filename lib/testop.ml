@@ -16,6 +16,7 @@ let to_string (t : t) : string =
   match t with
   | I32Eqz -> "i32.eqz"
 
+(*
 let eqz (v : Value.t) : Value.t = match (Value.is_zero v, Value.is_not_zero v) with
   | (true, false) ->
     (* defiitely zero *)
@@ -46,3 +47,4 @@ let eval (t : t) (v1 : Value.t) : Value.t =
   | (_, Bottom) -> v1
   | (I32Eqz, _) -> eqz v1
 
+*)

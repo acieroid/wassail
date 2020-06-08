@@ -63,7 +63,7 @@ let initialize (program : string) : unit =
         | Script.Textual m ->
           let wasm_mod = Wasm_module.of_wasm m in
           module_ := Some wasm_mod;
-          nglobals := List.length wasm_mod.globals;
+          nglobals := wasm_mod.nglobals;
           cfgs := IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun faddr _ -> (faddr, Cfg_builder.build faddr wasm_mod)));
           cfg_deps := IntMap.mapi !cfgs ~f:(fun ~key:_ ~data:cfg -> Cfg.dependencies cfg)
         | Script.Encoded _ -> failwith "unsupported"

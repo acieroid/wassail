@@ -1,4 +1,4 @@
-open Core_kernel
+(*open Core_kernel
 open Wasm
 
 module T = struct
@@ -28,3 +28,4 @@ let of_wasm (g : Ast.global) : t =
 let join (g1 : t) (g2 : t) : t =
   assert Stdlib.(g1.mut = g2.mut && g1.typ = g2.typ);
   { value = Value.join g1.value g2.value; mut = g1.mut; typ = g1.typ }
+*)
