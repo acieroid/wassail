@@ -21,7 +21,7 @@ let join_result (r1 : result) (r2 : result) =
   | Branch (st1, st2), Branch (st1', st2') -> Branch (Domain.join st1 st1', Domain.join st2 st2')
   | _ -> failwith "Cannot join results"
 
-(* Transfer function for data instructions.
+(** Transfer function for data instructions.
    @param i the instruction for which to compute the transfer function
    @param state the state before the instruction (prestate).
    @param vstack_spec: the specification of what the vstack looks like after execution
@@ -40,7 +40,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
             mem.min_size
             (match mem.max_size with
              | Some max -> max
-             | None -> failwith "unsupported infinte max size" (* can easily supported, the constraint just becomes ret >= min *))))
+             | None -> failwith "unsupported infinite max size" (* can easily supported, the constraint just becomes ret >= min *))))
       with vstack = ret :: state.vstack }
   | Drop ->
     let (_, vstack') = Vstack.pop state.vstack in
@@ -84,10 +84,12 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
       with vstack = ret :: state.vstack }
   | GlobalSet g ->
     let (v, vstack') = Vstack.pop state.vstack in
-    let global = failwith "TODO: variables have to be allocated for globals " in
-    (* add gn' = v *)
-    { (Domain.add_constraint state global v)
-      with vstack = vstack'; globals = Globals.set_global state.globals g global }
+    begin match new_vars with
+      | global :: [] ->
+        { (Domain.add_constraint state global v)
+          with vstack = vstack'; globals = Globals.set_global state.globals g global }
+      | _ -> failwith "global.set: invalid new vars"
+    end
   | Const n ->
     let ret, _ = Vstack.pop vstack_spec in
     (* add ret = n *)
@@ -116,21 +118,34 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
     (* add ret = [0;1] *)
     { (Domain.add_constraint state ret "[0;1]")
       with vstack = ret :: vstack' }
-  | Load _op -> failwith "NYI: load" (*
+  | Load { typ = I32; align = _; offset = _; sz = None } ->
+    failwith "NYI: load" (*
     let (i, vstack') = Vstack.pop state.vstack in
     let c = Memory.load state.memory i.value op in
     let state' = { state with vstack = c :: vstack' } in
     assert (List.length state'.vstack = List.length state.vstack);
     state' *)
-  | Store _op -> failwith "NYI: store" (*
-    (* Pop the value t.const c from the stack *)
-    let (c, vstack') = Vstack.pop state.vstack in
-    (* Pop the value i32.const i from the stack *)
-    let (i, vstack'') = Vstack.pop vstack' in
-    (* let b be the byte sequence of c *)
-    let memory' = Memory.store state.memory i.value c op in
-    assert (List.length vstack'' = List.length state.vstack - 2);
-    { state with vstack = vstack''; memory = memory' } *)
+  | Load _ -> failwith "load not supported with such op argument"
+  | Store { typ = I32; align = _; offset; sz = None } ->
+    begin match new_vars with
+      | [addr0; addr1; addr2; addr3] ->
+        let vval, vstack' = Vstack.pop state.vstack in
+        let vaddr, vstack'' = Vstack.pop vstack' in
+        { (Domain.add_constraint
+            (Domain.add_constraint
+               (Domain.add_constraint
+                  (Domain.add_constraint state addr3 (Printf.sprintf "%s+%d" vaddr (offset+3)))
+                  addr2 (Printf.sprintf "%s+%d" vaddr (offset+2)))
+               addr1 (Printf.sprintf "%s+%d" vaddr (offset+1)))
+            addr0 (Printf.sprintf "%s+%d" vaddr offset))
+          with vstack = vstack''; memory = Memory.store state.memory [(addr3, (vval, 3));
+                                                                      (addr2, (vval, 2));
+                                                                      (addr1, (vval, 1));
+                                                                      (addr0, (vval, 0))]
+        }
+      | _ -> failwith "TODO"
+    end
+  | Store _ -> failwith "store not supported with such op argument"
 
 let control_instr_transfer
     (i : Instr.control) (* The instruction *)

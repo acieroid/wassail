@@ -13,6 +13,20 @@ let to_string (m : t) : string =
 (** The initial memory is empty *)
 let empty = Map.empty
 
+(** Stores one byte in memory, at address ea *)
+let store8 (m : t) (ea : Value.t) (b : Value.byte) : t =
+  Map.update m ea ~f:(function
+      | None -> b
+      | Some _b' -> (* strong update. TODO: is it safe? *) b)
+
+(** Stores multiple bytes in memory
+    @param vs is the list of (address, byte) to store *)
+let store (m : t) (vs : (Value.t * Value.byte) list) : t =
+  List.fold_left vs ~init:m ~f:(fun m (ea, b) -> store8 m ea b)
+
+let load8 (m : t) (ea : Value.t) : Value.byte option =
+  Map.find m ea
+
 (** Look up a byte in the memory at effective address ea.
     Returns either the byte (Some b), or None if the byte is not directly found in the memory (meaning it could be any byte) *)
 let find (_m : t) (_ea : Value.t) : Value.byte option = failwith "NYI: Memory.find"

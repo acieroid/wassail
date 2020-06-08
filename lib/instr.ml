@@ -153,7 +153,9 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) (vstack : string list) : t =
     let var = alloc_var i "local.get" in
     { instr = Data (LocalGet (Var.of_wasm l)); vstack = var :: vstack; new_vars = [var] }
   | Ast.LocalSet l ->
-    { instr = Data (LocalSet (Var.of_wasm l)); vstack = List.drop vstack 1; new_vars = [] }
+    (* The new variable will be used for the new value of the local *)
+    let var = alloc_var i "local" in
+    { instr = Data (LocalSet (Var.of_wasm l)); vstack = List.drop vstack 1; new_vars = [var] }
   | Ast.LocalTee l ->
     { instr = Data (LocalTee (Var.of_wasm l)); vstack = vstack; new_vars = [] }
   | Ast.BrIf label ->
@@ -207,12 +209,17 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) (vstack : string list) : t =
     let var = alloc_var i "global_get" in
     { instr = Data (GlobalGet (Var.of_wasm g)); vstack = var :: vstack; new_vars = [var] }
   | Ast.GlobalSet g ->
-    { instr = Data (GlobalSet (Var.of_wasm g)); vstack = List.drop vstack 1; new_vars = [] }
+    (* The new variable will be used for the new value of the global *)
+    let var = alloc_var i "global" in
+    { instr = Data (GlobalSet (Var.of_wasm g)); vstack = List.drop vstack 1; new_vars = [var] }
   | Ast.Load op ->
     let var = alloc_var i "load" in
     { instr = Data (Load (Memoryop.of_wasm_load op)); vstack = var :: (List.drop vstack 1); new_vars = [var] }
   | Ast.Store op ->
-    { instr = Data (Store (Memoryop.of_wasm_store op)); vstack = List.drop vstack 2; new_vars = [] }
+    (* Allocate 4 variables to represent 4 addresses where the i32 value is stored *)
+    (* TODO: also support i64, and support load8 which only requires one value *)
+    let vars = [alloc_var i "store1"; alloc_var i "store2"; alloc_var i "store3"; alloc_var i "store4"] in
+    { instr = Data (Store (Memoryop.of_wasm_store op)); vstack = List.drop vstack 2; new_vars = vars }
   | Ast.MemorySize ->
     let var = alloc_var i "memory.size" in
     { instr = Data MemorySize; vstack = var :: vstack; new_vars = [var] }
