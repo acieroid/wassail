@@ -138,14 +138,18 @@ let control_instr_transfer
     (summaries : Summary.t IntMap.t) (* Summaries to apply function calls *)
     (module_ : Wasm_module.t) (* The wasm module (read-only) *)
     (cfg : Cfg.t) (* The CFG analyzed *)
-    (_new_vars : string list)
+    (new_vars : string list)
   : result =
   match i with
   | Call f ->
       (* We encounter a function call, retrieve its summary and apply it *)
       (* We assume all summaries are defined *)
-      let summary = IntMap.find_exn summaries f in
-      Simple (Summary.apply summary f state module_)
+    let summary = IntMap.find_exn summaries f in
+    (* We get the return name from the new_vars *)
+    let ret = match new_vars with
+      | v :: [] -> Some v (* we expect the summary to return a variable *)
+      | _ -> None in
+      Simple (Summary.apply summary f state ret module_)
   | CallIndirect _typ -> failwith "NYI: call_indirect" (*
     let (v, vstack') = Vstack.pop state.vstack in
     let state' = { state with vstack = vstack' } in

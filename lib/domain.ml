@@ -101,6 +101,7 @@ let join (s1 : state) (s2 : state) : state = {
   env = (assert Stdlib.(s1.env = s2.env); s1.env);
 }
 
+(** Add one constrait of the form v = linexpr to the state constraints, returns the updated state *)
 let add_constraint (s : state) (v : string) (linexpr : string) : state =
   Printf.printf "add constraint %s = %s\n" v linexpr;
   try
@@ -108,3 +109,11 @@ let add_constraint (s : state) (v : string) (linexpr : string) : state =
   with
   | Apron.Manager.Error { exn; funid; msg } ->
     failwith (Printf.sprintf "Apron error in add_constraint: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
+
+(** Only keep the given variables in the constraints, returns the updated state *)
+let keep_only (s : state) (vars : string list) : state =
+  { s with constraints = Apron.Abstract1.forget_array manager s.constraints
+               (Array.filter (fst (Apron.Environment.vars s.env)) (* fst because we only have int variables for now *)
+                  ~f:(fun v -> not (List.mem vars (Apron.Var.to_string v) ~equal:Stdlib.(=))))
+               false (* not sure what this means *)
+  }
