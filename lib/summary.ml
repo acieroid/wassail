@@ -4,7 +4,7 @@ open Helpers
 
 (** A summary is the final state of the function, with some extra informations *)
 type t = {
-  in_arity : int;
+  in_arity : int; (** The input arity for the function of this summary *)
   params_and_return : string list; (** The name of the parameters and (optional) return value *)
   state : Domain.state; (** The final state *)
 }
@@ -28,28 +28,41 @@ let bottom (cfg : Cfg.t) (module_ : Wasm_module.t) : t =
   make cfg (Domain.bottom cfg module_.nglobals cfg.vars)
 
 (** Constructs a summary from an imported function *)
-let of_import (_idx : int) (_name : string) (_args : Type.t list) (_ret : Type.t list) (_module_ : Wasm_module.t) : t =
+let of_import (idx : int) (name : string) (args : Type.t list) (ret : Type.t list) (_module_ : Wasm_module.t) : t =
   (* These should be fairly easy to encode: we just list constraints between input and output, no constraint if we don't know anything about that name *)
-  failwith "TODO: import summaries"
-    (* {
-  nargs = List.length args;
-  typ = args, ret;
-  result = begin match name with
+  assert (List.length ret <= 1); (* wasm spec does not allow for more than one return type (currently) *)
+  let params = List.mapi args ~f:(fun argi _ -> Domain.arg_name idx argi) in
+  let return = List.mapi ret ~f:(fun reti _ -> Domain.return_name reti) in
+  let params_and_return = params @ return in
+  let apron_vars = Array.of_list (List.map params_and_return ~f:Apron.Var.of_string) in
+  let apron_env = Apron.Environment.make apron_vars [| |] in (* only int variables *)
+  (* Everything is set to top *)
+  let constraints = Apron.Abstract1.of_box Domain.manager apron_env apron_vars
+      (Array.of_list (List.map params_and_return ~f:(fun _ -> Apron.Interval.top))) in
+  let topstate = Domain.{
+      env = apron_env;
+      locals = [];
+      globals = []; (* TODO: they should be in the env + bound to top *)
+      memory = Memory.empty;
+      vstack = return; (* vstack is the return value *)
+      constraints = constraints
+    } in
+  let state = match name with
     | "fd_write" ->
-      (* fd_write always returns 0 *)
-      [Value.zero Type.I32]
+      (* returns 0 *)
+      Domain.add_constraint topstate (Domain.return_name idx) "0"
     | "proc_exit" ->
-      (* proc_exit does not return anything *)
-      []
+      (* does not return anything, hence no constraint *)
+      topstate
     | _ ->
-      (* We have not model this imported function, so we return top *)
-      List.map ret ~f:(fun t -> Value.top t (Printf.sprintf "import %s" name))
-  end;
-  (* We assume (probably unsoundly) that imports don't change memory nor globals *)
-  globals = List.mapi module_.globals ~f:(fun i g -> Value.global g.typ i);
-  memory = Memory.initial
-}
-    *)
+      (* We have not modelled this imported function, so we don't have any constraints *)
+      Logging.info (Printf.sprintf "Imported function is not modelled: %s" name);
+      topstate
+  in
+  { params_and_return = params_and_return;
+    in_arity = List.length args;
+    state = state
+  }
 
 (** Constructs all summaries for a given module, including imported functions *)
 let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntMap.t =
@@ -62,33 +75,28 @@ let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntM
 (* Apply the summary to a state, updating the vstack as if the function was
    called, AND updating the set of called functions *)
 let apply (summary : t) (_fidx : Var.t) (state : Domain.state) (ret : string option) (_module_ : Wasm_module.t) : Domain.state =
-  let retl = (match ret with
-      | Some v -> Printf.printf "ret: %s\n" v; [v]
-      | None -> []) in
-  (* A summary encodes the relation between the arguments and return value.
-     To apply it, we do the following: *)
-  Printf.printf "state.vstack: %s" (String.concat state.vstack ~sep:",");
-  let args_and_ret = List.take state.vstack summary.in_arity @ retl in
-  (* 1. Rename the parameters and return value in the summary to match the actual arguments and return value *)
-  (* TODO: move that code to domain.ml in  a nice function *)
-  (* TODO: error when applying empty summary! *)
   try
-    Printf.printf "rename from: %s (n = %d), to: %s\n" (String.concat summary.params_and_return ~sep:",") (List.length summary.params_and_return) (String.concat args_and_ret ~sep:",");
+    let retl = (match ret with
+        | Some v -> [v]
+        | None -> []) in
+    (* A summary encodes the relation between the arguments and return value.
+       To apply it, we do the following: *)
+    let args_and_ret = List.take state.vstack summary.in_arity @ retl in
+    (* 1. Rename the parameters and return value in the summary to match the actual arguments and return value *)
     let rename_from = List.map summary.params_and_return ~f:Apron.Var.of_string in
     let rename_to = List.map args_and_ret ~f:Apron.Var.of_string in
-    Printf.printf "constraints: %s\n" (Domain.constraints_to_string summary.state.constraints);
-  let renamed = Apron.Abstract1.rename_array Domain.manager summary.state.constraints
-      (Array.of_list rename_from)
-      (Array.of_list rename_to) in
-  (* 2. Change the environment of the constraints to match the current environment in which we apply the summary.
+    let renamed = Apron.Abstract1.rename_array Domain.manager summary.state.constraints
+        (Array.of_list rename_from)
+        (Array.of_list rename_to) in
+    (* 2. Change the environment of the constraints to match the current environment in which we apply the summary.
         Apron's doc says: "variables that are introduced are unconstrained"*)
-  let changed = Apron.Abstract1.change_environment Domain.manager renamed state.env false in
-  (* 3. Finally, meet the summary with the current state *)
-  let final = Apron.Abstract1.meet Domain.manager state.constraints changed in
-  { state with vstack = retl @ (List.drop state.vstack summary.in_arity);
-               (* TODO: memory *)
-               (* TODO: globals CAN change (but not often). At least make sure to fail when they do *)
-               constraints = final }
+    let changed = Apron.Abstract1.change_environment Domain.manager renamed state.env false in
+    (* 3. Finally, meet the summary with the current state *)
+    let final = Apron.Abstract1.meet Domain.manager state.constraints changed in
+    { state with vstack = retl @ (List.drop state.vstack summary.in_arity);
+                 (* TODO: memory *)
+                 (* TODO: globals CAN change (but not often). At least make sure to fail when they do *)
+                 constraints = final }
   with
   | Apron.Manager.Error { exn; funid; msg } ->
-       failwith (Printf.sprintf "Apron error in add_constraint: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
+    failwith (Printf.sprintf "Apron error in Summary.apply: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
