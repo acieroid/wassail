@@ -192,9 +192,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
 
       end
   in
-  Instr.clear_vars ();
   let (blocks, edges, breaks, returns, _entry_idx, exit_idx) = helper [] funcinst.code.body in
-  let new_vars = !Instr.vars in
   (* Create the return block *)
   let return_block = mk_empty_block () in
   let blocks' = return_block :: blocks in
@@ -244,5 +242,8 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
     entry_block = Option.value_exn (List.min_elt (List.map actual_blocks ~f:(fun b -> b.idx)) ~compare:Stdlib.compare);
     (* The exit block is the return block *)
     exit_block = return_block.idx;
-    vars = new_vars;
+    vars = List.concat (List.map actual_blocks ~f:(fun b -> match b.content with
+        | Nothing -> []
+        | Control (_, _, new_vars) -> new_vars
+        | Data instrs -> List.concat (List.map instrs ~f:(fun (_, _, new_vars) -> new_vars))))
   }

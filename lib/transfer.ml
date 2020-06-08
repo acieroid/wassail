@@ -36,11 +36,11 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
     let mem = List.nth_exn module_.mems 0 in
     (* add ret = [min,max] where min and max are the memory size bounds *)
     { (Domain.add_constraint state ret
-         (Printf.sprintf "[%d,%s]"
+         (Printf.sprintf "[%d;%d]"
             mem.min_size
             (match mem.max_size with
-             | Some max -> string_of_int max
-             | None -> "+oo")))
+             | Some max -> max
+             | None -> failwith "unsupported infinte max size" (* can easily supported, the constraint just becomes ret >= min *))))
       with vstack = ret :: state.vstack }
   | Drop ->
     let (_, vstack') = Vstack.pop state.vstack in
@@ -98,23 +98,23 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
     let (_v2, vstack') = Vstack.pop state.vstack in
     let (_v1, vstack'') = Vstack.pop vstack' in
     (* TODO: reflect "rel v1 v2" in the constraints, when possible *)
-    (* add ret = [0,1] *)
-    { (Domain.add_constraint state ret "[0,1]")
+    (* add ret = [0;1] *)
+    { (Domain.add_constraint state ret "[0;1]")
       with vstack = ret :: vstack'' }
   | Binary _bin ->
     let ret, _ = Vstack.pop vstack_spec in
     let (_v2, vstack') = Vstack.pop state.vstack in
     let (_v1, vstack'') = Vstack.pop vstack' in
     (* TODO: reflect "bin v1 v2" the operation in the constraints, when possible *)
-    (* add ret = top *)
-    { (Domain.add_constraint state ret "]-oo,+oo[")
+    (* don't add any constraint (for now)  *)
+    { state
       with vstack = ret :: vstack'' }
   | Test _test ->
     let ret, _ = Vstack.pop vstack_spec in
     let (_v, vstack') = Vstack.pop state.vstack in
     (* TODO: reflect "test v" in the constraints, when possible *)
-    (* add ret = [0,1] *)
-    { (Domain.add_constraint state ret "[0,1]")
+    (* add ret = [0;1] *)
+    { (Domain.add_constraint state ret "[0;1]")
       with vstack = ret :: vstack' }
   | Load _op -> failwith "NYI: load" (*
     let (i, vstack') = Vstack.pop state.vstack in

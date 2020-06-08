@@ -1,16 +1,13 @@
 (module
   (type (;0;) (func (param i32)))
   (type (;1;) (func (param i32) (result i32)))
-  (func (;0;) (type 0) (param i32)
+  (func (;0;) (type 1) (param i32) (result i32)
     ;; Summary:
     ;; vstack: [p0] -> []
     ;; globals: [g0] -> [g0]
     ;; heap: {g0-16: _} -> {g0-16: p0}
-    global.get 0 ;; [g0]
-    i32.const 16 ;; [16, g0]
-    i32.sub ;; [g0-16]
-    local.get 0 ;; [p0, g0-16]
-    i32.store offset=12) ;; [] + {g0-16: _} -> {g0-16: p0}
+    local.get 0
+    )
   (func (;1;) (type 0) (param i32)
     global.get 0
     i32.const 16

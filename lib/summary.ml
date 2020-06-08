@@ -5,12 +5,23 @@ open Helpers
 (** A summary is the final state of the function *)
 type t = Domain.state
 
-let to_string (s : t) : string = Domain.to_string s
-(*  Printf.sprintf "Summary(params: %d, vstack: %s, mem: %s, globals: %s)"
-    s.nargs
-    (String.concat ~sep:", " (List.map s.result ~f:Value.to_string))
-    (Memory.to_string s.memory)
-    (Globals.to_string s.globals) *)
+let to_string (s : t) : string =
+  Printf.sprintf "state: %s\nenv: %s\n more: %s\n"
+    (Domain.to_string s)
+    (String.concat ~sep:"," (List.map (Array.to_list (fst (Apron.Environment.vars s.env))) ~f:Apron.Var.to_string))
+    (try
+       (Domain.constraints_to_string
+          (Apron.Abstract1.rename_array Domain.manager
+             ((* Only keeps the return values and parameters *)
+               (Apron.Abstract1.forget_array Domain.manager s.constraints
+                  (Array.filter (fst (Apron.Environment.vars s.env))
+                     (* TODO: don't use fixed names *)
+                     ~f:(fun v -> Stdlib.(Apron.Var.to_string v <> "f0_ret" && Apron.Var.to_string v <> "f0_p0" ))) false))
+             [| Apron.Var.of_string "f0_ret" ; Apron.Var.of_string "f0_p0" |] [| Apron.Var.of_string "ret" ; Apron.Var.of_string "arg" |]))
+     with
+     | Apron.Manager.Error { exn; funid; msg } ->
+       failwith (Printf.sprintf "Apron error in add_constraint: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg))
+
 
 (** Constructs a summary given a CFG and a domain state resulting from that CFG *)
 let make (_cfg : Cfg.t) (state : Domain.state) : t = state

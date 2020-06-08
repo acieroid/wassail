@@ -27,7 +27,7 @@ type t = {
   arg_types: Type.t list;
   (* Types of locals *)
   local_types: Type.t list;
-  (* Typpes of return values *)
+  (* Types of return values *)
   return_types: Type.t list;
   (* All basic blocks contained in this CFG, indexed in a map by their index *)
   basic_blocks: BasicBlocks.t;

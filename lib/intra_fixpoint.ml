@@ -17,7 +17,7 @@ let analyze
                                          ~f:(fun idx ->
                                              (idx, (bottom, bottom))))) in
 
-  let analyze_block (block_idx : int) =
+  let analyze_block (block_idx : int) : Domain.state * Transfer.result =
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
       let predecessors = Cfg.predecessors cfg block_idx in
@@ -36,7 +36,18 @@ let analyze
         | Uninitialized -> init
         | _ -> failwith "should not happen" in
       (* We analyze it *)
-      (in_state, Transfer.transfer block in_state summaries module_ cfg)
+      let result = Transfer.transfer block in_state summaries module_ cfg in
+      if block_idx = cfg.exit_block && (List.length cfg.return_types = 1) then
+          (* If it is the exit block and there is a return value, we add the extra constraint that ret = the top of the stack *)
+        (in_state, match result with
+          | Simple s ->
+            let (v, vstack) = Vstack.pop s.vstack in
+            let ret = Domain.return_name cfg.idx in
+            Simple (Domain.add_constraint { s with vstack = ret :: vstack } ret v)
+          | Uninitialized -> failwith "should not happen"
+          | Branch _ -> failwith "should not happen")
+      else
+        (in_state, result)
   in
   let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =
     if IntSet.is_empty worklist then
