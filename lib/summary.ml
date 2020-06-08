@@ -17,7 +17,7 @@ let to_string (s : t) : string =
 let make (cfg : Cfg.t) (state : Domain.state) : t =
   (* Filter the state to only keep relevant variables, i.e., the parameters and return value (if there is one) *)
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Domain.arg_name cfg.idx argi) in
-  let params_and_ret = (if List.length cfg.return_types = 1 then [Domain.return_name cfg.idx] else []) @ params in
+  let params_and_ret = params @ (if List.length cfg.return_types = 1 then [Domain.return_name cfg.idx] else []) in
   { params_and_return = params_and_ret;
     in_arity = List.length cfg.arg_types;
     state = Domain.keep_only state params_and_ret;
@@ -63,16 +63,23 @@ let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntM
    called, AND updating the set of called functions *)
 let apply (summary : t) (_fidx : Var.t) (state : Domain.state) (ret : string option) (_module_ : Wasm_module.t) : Domain.state =
   let retl = (match ret with
-      | Some v -> [v]
+      | Some v -> Printf.printf "ret: %s\n" v; [v]
       | None -> []) in
   (* A summary encodes the relation between the arguments and return value.
      To apply it, we do the following: *)
+  Printf.printf "state.vstack: %s" (String.concat state.vstack ~sep:",");
   let args_and_ret = List.take state.vstack summary.in_arity @ retl in
   (* 1. Rename the parameters and return value in the summary to match the actual arguments and return value *)
   (* TODO: move that code to domain.ml in  a nice function *)
+  (* TODO: error when applying empty summary! *)
+  try
+    Printf.printf "rename from: %s (n = %d), to: %s\n" (String.concat summary.params_and_return ~sep:",") (List.length summary.params_and_return) (String.concat args_and_ret ~sep:",");
+    let rename_from = List.map summary.params_and_return ~f:Apron.Var.of_string in
+    let rename_to = List.map args_and_ret ~f:Apron.Var.of_string in
+    Printf.printf "constraints: %s\n" (Domain.constraints_to_string summary.state.constraints);
   let renamed = Apron.Abstract1.rename_array Domain.manager summary.state.constraints
-      (Array.of_list (List.map summary.params_and_return ~f:Apron.Var.of_string))
-      (Array.of_list (List.map args_and_ret ~f:Apron.Var.of_string)) in
+      (Array.of_list rename_from)
+      (Array.of_list rename_to) in
   (* 2. Change the environment of the constraints to match the current environment in which we apply the summary.
         Apron's doc says: "variables that are introduced are unconstrained"*)
   let changed = Apron.Abstract1.change_environment Domain.manager renamed state.env false in
@@ -82,4 +89,6 @@ let apply (summary : t) (_fidx : Var.t) (state : Domain.state) (ret : string opt
                (* TODO: memory *)
                (* TODO: globals CAN change (but not often). At least make sure to fail when they do *)
                constraints = final }
-
+  with
+  | Apron.Manager.Error { exn; funid; msg } ->
+       failwith (Printf.sprintf "Apron error in add_constraint: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
