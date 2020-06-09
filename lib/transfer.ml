@@ -46,20 +46,21 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
     let (_, vstack') = Vstack.pop state.vstack in
     assert (List.length vstack' = List.length state.vstack - 1);
     { state with vstack = vstack' }
-  | Select -> failwith "NYI: select" (*
-    let (c, vstack') = Vstack.pop state.vstack in
-    let (v2, vstack'') = Vstack.pop vstack' in
-    let (v1, vstack''') = Vstack.pop vstack'' in
-    begin match (Value.is_zero c, Value.is_not_zero c) with
-      | (true, false) -> (* definitely 0, keep v2 *)
-        { state with vstack = v2 :: vstack''' }
-      | (false, true) -> (* definitely not 0, keep v1 *)
-        { state with vstack = v1 :: vstack''' }
-      | (true, true) -> (* could be 0 or not 0, join v1 and v2 *)
-        { state with vstack = (Value.join v1 v2) :: vstack''' }
-      | (false, false) -> (* none, push bottom *)
-        { state with vstack = Value.bottom v1.typ :: vstack''' }
-    end *)
+  | Select ->
+    let ret, _ = Vstack.pop vstack_spec in
+    let c, vstack' = Vstack.pop state.vstack in
+    let v2, vstack'' = Vstack.pop vstack' in
+    let v1, vstack''' = Vstack.pop vstack'' in
+    { (match Domain.is_zero state c with
+          | (true, false) -> (* definitely 0, add ret = v2 *)
+            Domain.add_constraint state ret v2
+          | (false, true) -> (* definitely not 0, add ret = v2 *)
+            Domain.add_constraint state ret v1
+          | (true, true) -> (* could be 0 or not 0, don't add any constraint *)
+            state (* TODO: with the right domain, we could encode ret = v1 join v2? *)
+          | (false, false) -> (* none, add bottom constraint *)
+            Domain.add_constraint state ret "[-1;1]"
+        ) with vstack = ret :: vstack''' }
   | LocalGet l ->
     let ret, _ = Vstack.pop vstack_spec in
     (* add ret = ln where ln is the local accessed *)

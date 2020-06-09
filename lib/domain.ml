@@ -118,3 +118,17 @@ let keep_only (s : state) (vars : string list) : state =
                   ~f:(fun v -> not (List.mem vars (Apron.Var.to_string v) ~equal:Stdlib.(=))))
                false (* not sure what this means *)
   }
+
+(** Checks if the value of variable v may be zero.
+    Returns two boolean: the first one indicates if v can be zero, and the second if it can be non-zero *)
+let is_zero (s : state) (v : string) : bool * bool =
+  let box = Apron.Abstract1.to_box manager s.constraints in
+  let dim = Apron.Environment.dim_of_var box.box1_env (Apron.Var.of_string v) in
+  let interval = Array.get box.interval_array dim in
+  (* Apron doc: cmp is: "0: equality -1: i1 included in i2 +1: i2 included in i1 -2: i1.inf less than or equal to i2.inf +2: i1.inf greater than i2.inf" *)
+  match Apron.Interval.cmp interval (Apron.Interval.of_int 0 0) with
+  | 0 -> (true, false) (* definitely 0, and only 0 *)
+  | -1 -> (true, false) (* should not happen, because that's caught by the previous case *)
+  | +1 -> (true, true) (* [0,0] is contained in v: can be 0 or not *)
+  | -2 | +2 -> (false, false) (* definitely not 0 *)
+  | _ -> failwith "should not happen"
