@@ -4,8 +4,9 @@ type block_sort = BlockEntry | BlockExit | LoopEntry | LoopExit | Normal | Funct
 [@@deriving sexp, compare]
 
 type block_content =
-  | Control of Instr.control * string list * string list
-  | Data of (Instr.data * string list * string list) list 
+  | Control of Instr.control
+  | Data of (Instr.data) list
+  | ControlMerge of string list * string list
   | Nothing
 [@@deriving sexp, compare]
 
@@ -15,11 +16,12 @@ type t = {
 } [@@deriving sexp, compare]
 
 let to_string (b : t) : string = Printf.sprintf "block %d, %s" b.idx (match b.content with
-    | Control (instr, vstack, _) -> Printf.sprintf "control block: %s\\l\\l%s" (Instr.control_to_string instr) (String.concat ~sep:"," vstack)
+    | Control instr -> Printf.sprintf "control block: %s" (Instr.control_to_string instr)
     | Data instrs -> Printf.sprintf "data block: %s" (String.concat ~sep:"\\l"
          (List.map instrs
-            ~f:(fun (instr, vstack, _) ->
-                Printf.sprintf "%s -- %s" (Instr.data_to_string instr) (String.concat ~sep:"," vstack))))
+            ~f:(fun instr ->
+                Printf.sprintf "%s" (Instr.data_to_string instr))))
+    | ControlMerge _ -> Printf.sprintf "control merge"
     | Nothing -> "empty")
 
 let to_dot (b : t) : string =
@@ -29,9 +31,11 @@ let to_dot (b : t) : string =
       b.idx b.idx
       (String.concat ~sep:"\\l"
          (List.map instrs
-            ~f:(fun (instr, vstack, _) ->
-                Printf.sprintf "%s -- %s" (Instr.data_to_string instr) (string_of_int (List.length vstack)))))
-  | Control (instr, vstack, _) ->
-    Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d: %s -- %s\"];" b.idx b.idx (Instr.control_to_short_string instr) (string_of_int (List.length vstack))
+            ~f:(fun instr ->
+                Printf.sprintf "%s" (Instr.data_to_string instr))))
+  | Control instr ->
+    Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d: %s\"];" b.idx b.idx (Instr.control_to_short_string instr)
+  | ControlMerge _ ->
+    Printf.sprintf "block%d [shape=point, label=\"%d\"]" b.idx b.idx
   | Nothing ->
     Printf.sprintf "block%d [shape=point, label=\"%d\"]" b.idx b.idx

@@ -11,7 +11,7 @@ module T = struct
   [@@deriving sexp, compare]
 end
 include T
-let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (fid : int) (f : Wasm.Ast.func) : t =
+let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (fid : int) (f : Wasm.Ast.func) (nglobals : int) : t =
   let name = (List.find_map m.it.exports ~f:(fun x ->
       match x.it.edesc.it with
       | FuncExport v when (Int32.to_int_exn v.it) = fid -> Some (Wasm.Ast.string_of_name x.it.name)
@@ -24,7 +24,7 @@ let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (fid : int) (f : Wasm
       name = name;
       typ = (List.map input ~f:Type.of_wasm, List.map output ~f:Type.of_wasm);
       module_ = minst;
-      code = Func.of_wasm m fid f
+      code = Func.of_wasm m fid f nglobals
     }
 let to_string (f : t) : string =
   Printf.sprintf "Function %s (%s -> %s):\nCode: %s"

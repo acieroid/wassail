@@ -36,10 +36,11 @@ let of_wasm (m : Wasm.Ast.module_) : t =
                 | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
                                                  List.map b ~f:Type.of_wasm))
         | _ -> None) in
+  let nglobals = List.length m.it.globals in
   ({
     imported_funcs = imported_funcs;
-    funcs = List.mapi m.it.funcs ~f:(fun i -> Func_inst.of_wasm m minst (i+List.length imported_funcs));
-    nglobals = List.length m.it.globals;
+    funcs = List.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m minst (i+List.length imported_funcs) f nglobals);
+    nglobals = nglobals;
     (*globals = List.map m.it.globals ~f:Global_inst.of_wasm; *)
     mems = List.map m.it.memories ~f:Memory_inst.of_wasm;
     tables = List.map m.it.tables ~f:(fun t ->

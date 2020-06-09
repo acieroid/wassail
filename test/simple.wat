@@ -1,6 +1,7 @@
 (module
   (type (;0;) (func (param i32)))
   (type (;1;) (func (param i32) (result i32)))
+  (type (;2;) (func (result i32)))
   (func (;test-select;) (type 1) (param i32) (result i32)
     i32.const 256
     i32.const 512
@@ -51,6 +52,41 @@
     i32.const -1 ;; here we have memory M[1200: p0], vstack: [-1]
     ;; We expect the final summary to be: M, vstack[[-1,1]]
     )
+  (func (;test-merge-after-if;) (type 1) (param i32) (result i32)
+    local.get 0
+    i32.const 0
+    i32.ge_s
+    if (result i32)  ;; label = @1
+      i32.const 1
+    else
+      i32.const 0
+    end
+    drop
+    i32.const 0)
+  (func (;test-merge-locals-after-if;) (type 1) (param i32) (result i32)
+    (local i32 i32 i32)
+    local.get 0
+    i32.eqz
+    if
+      i32.const 1
+      local.set 0
+    else
+      i32.const 2
+      local.set 0
+    end
+    local.get 0)
+  (func (;test-merge-globals-after-if;) (type 1) (param i32) (result i32)
+    (local i32 i32 i32)
+    local.get 0
+    i32.eqz
+    if
+      i32.const 1
+      global.set 0
+    else
+      i32.const 2
+      global.set 0
+    end
+    local.get 0)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))
