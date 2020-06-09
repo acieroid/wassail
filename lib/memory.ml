@@ -22,10 +22,16 @@ let store8 (m : t) (ea : Value.t) (b : Value.byte) : t =
 (** Stores multiple bytes in memory
     @param vs is the list of (address, byte) to store *)
 let store (m : t) (vs : (Value.t * Value.byte) list) : t =
+  (* TODO: should check for precise equality: what happens if we store twice at the same location? *)
   List.fold_left vs ~init:m ~f:(fun m (ea, b) -> store8 m ea b)
 
-let load8 (m : t) (ea : Value.t) : Value.byte option =
-  Map.find m ea
+let load8 (m : t) (ea : Value.t) (precisely_eq : Value.t -> Value.t -> bool) : Value.byte option =
+  Map.fold m ~init:None ~f:(fun ~key:addr ~data:v res ->
+      if precisely_eq addr ea then begin
+        assert Stdlib.(res = None);
+        Some v
+      end else
+        res)
 
 (** Look up a byte in the memory at effective address ea.
     Returns either the byte (Some b), or None if the byte is not directly found in the memory (meaning it could be any byte) *)

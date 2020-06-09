@@ -1,10 +1,11 @@
 open Core_kernel
 
-let manager = Oct.manager_alloc ()
+type apron_domain = Polka.equalities Polka.t
+let manager = Polka.manager_alloc_equalities ()
 
 (** A state of the wasm VM *)
 type state = {
-  constraints : Oct.t Apron.Abstract1.t; (** The relational constraints *)
+  constraints : apron_domain Apron.Abstract1.t; (** The relational constraints *)
   env : Apron.Environment.t; (** The relational environment *)
   vstack : Vstack.t; (** The value stack *)
   locals : Locals.t; (** The locals *)
@@ -29,17 +30,16 @@ let compare_state (s1 : state) (s2 : state) : int =
        else if Apron.Abstract1.is_leq manager c1 c2 then -1
        else 1) s1.constraints s2.constraints
 
-let constraints_to_string (c : Oct.t Apron.Abstract1.t) : string =
+let constraints_to_string (c : apron_domain Apron.Abstract1.t) : string =
   (Apron.Abstract1.print Stdlib.Format.str_formatter c; Stdlib.Format.flush_str_formatter ())
 
 let to_string (s : state) : string =
-  Printf.sprintf "{vstack: [%s],\n locals: [%s],\n globals: [%s],\n heap: %s, constraints: %s\n}"
+  Printf.sprintf "{\n vstack: [%s],\n locals: [%s],\n globals: [%s],\n memory: %s\n constraints: %s\n}"
     (Vstack.to_string s.vstack)
     (Locals.to_string s.locals)
     (Globals.to_string s.globals)
     (Memory.to_string s.memory)
     (constraints_to_string s.constraints)
-
 
 (** Returns the name of the variable for a function's argument *)
 let arg_name (fid : int) (argi : int) : string =
@@ -93,7 +93,9 @@ let bottom (cfg : Cfg.t) (nglobals : int) (vars : string list) : state =
     env = apron_env;
   }
 
-let join (s1 : state) (s2 : state) : state = {
+let join (s1 : state) (s2 : state) : state =
+  Printf.printf "join %s\n and %s\n" (to_string s1) (to_string s2);
+  {
   constraints = Apron.Abstract1.join manager s1.constraints s2.constraints;
   vstack = Vstack.join s1.vstack s2.vstack;
   locals = List.map2_exn s1.locals s2.locals ~f:Value.join;
@@ -120,7 +122,7 @@ let keep_only (s : state) (vars : string list) : state =
   }
 
 (** Checks if the value of variable v may be zero.
-    Returns two boolean: the first one indicates if v can be zero, and the second if it can be non-zero *)
+    Returns two booleans: the first one indicates if v can be zero, and the second if it can be non-zero *)
 let is_zero (s : state) (v : string) : bool * bool =
   let box = Apron.Abstract1.to_box manager s.constraints in
   let dim = Apron.Environment.dim_of_var box.box1_env (Apron.Var.of_string v) in
@@ -132,3 +134,19 @@ let is_zero (s : state) (v : string) : bool * bool =
   | +1 -> (true, true) (* [0,0] is contained in v: can be 0 or not *)
   | -2 | +2 -> (false, true) (* definitely not 0 *)
   | _ -> failwith "should not happen"
+
+(** Checks if two variables may be equal.
+    Returns two booleans: the first one indicates if they may be equal, the second one if they may be different *)
+let are_equal (s : state) (v1 : string) (v2 : string) : bool * bool =
+  let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "%s-%s" v1 v2)) in
+  match Apron.Interval.cmp interval (Apron.Interval.of_int 0 0) with
+  | 0 -> (true, false)
+  | -1 -> (true, false)
+  | +1 -> (true, true)
+  | -2 | +2 -> (false, true)
+  | _ -> failwith "should not happen"
+
+let are_precisely_equal (s : state) (v1 : string) (v2 : string) =
+  match are_equal s v1 v2 with
+  | true, false -> true
+  | _ -> false

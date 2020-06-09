@@ -214,12 +214,13 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) (vstack : string list) : t =
     let var = alloc_var i "global.set" in
     { instr = Data (GlobalSet (Var.of_wasm g)); vstack = List.drop vstack 1; new_vars = [var] }
   | Ast.Load op ->
-    let var = alloc_var i "load" in
-    { instr = Data (Load (Memoryop.of_wasm_load op)); vstack = var :: (List.drop vstack 1); new_vars = [var] }
+    let var_ret = alloc_var i "load" in
+    let vars = [alloc_var i "load0"; alloc_var i "load1"; alloc_var i "load2"; alloc_var i "load3"] in
+    { instr = Data (Load (Memoryop.of_wasm_load op)); vstack = var_ret :: (List.drop vstack 1); new_vars = var_ret :: vars }
   | Ast.Store op ->
     (* Allocate 4 variables to represent 4 addresses where the i32 value is stored *)
     (* TODO: also support i64, and support load8 which only requires one value *)
-    let vars = [alloc_var i "store1"; alloc_var i "store2"; alloc_var i "store3"; alloc_var i "store4"] in
+    let vars = [alloc_var i "store0"; alloc_var i "store1"; alloc_var i "store2"; alloc_var i "store3"] in
     { instr = Data (Store (Memoryop.of_wasm_store op)); vstack = List.drop vstack 2; new_vars = vars }
   | Ast.MemorySize ->
     let var = alloc_var i "memory.size" in
