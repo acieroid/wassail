@@ -74,9 +74,18 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
           with vstack = vstack'; locals = Locals.set_local state.locals l local }
       | _ -> failwith "local.set: invalid new vars"
     end
-  | LocalTee _l ->
+  | LocalTee l ->
     (* same as local.set x followed by local.get x *)
-    failwith "TODO: local.tee"
+    let ret, _ = Vstack.pop vstack_spec in
+    let v, vstack' = Vstack.pop state.vstack in
+    begin match new_vars with
+      | local :: [] ->
+        { (Domain.add_constraint
+             (Domain.add_constraint state ret v)
+             local v)
+          with vstack = vstack'; locals = Locals.set_local state.locals l local }
+      | _ -> failwith "local.tee: invalid new vasr"
+    end
   | GlobalGet g ->
     let ret, _ = Vstack.pop vstack_spec in
     (* add v = gn where gn is the local accessed *)

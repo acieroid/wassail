@@ -154,10 +154,11 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) (vstack : string list) : t =
     { instr = Data (LocalGet (Var.of_wasm l)); vstack = var :: vstack; new_vars = [var] }
   | Ast.LocalSet l ->
     (* The new variable will be used for the new value of the local *)
-    let var = alloc_var i "local" in
+    let var = alloc_var i "local.set" in
     { instr = Data (LocalSet (Var.of_wasm l)); vstack = List.drop vstack 1; new_vars = [var] }
   | Ast.LocalTee l ->
-    { instr = Data (LocalTee (Var.of_wasm l)); vstack = vstack; new_vars = [] }
+    let var = alloc_var i "local.tee" in
+    { instr = Data (LocalTee (Var.of_wasm l)); vstack = vstack; new_vars = [var] }
   | Ast.BrIf label ->
     { instr = Control (BrIf (Var.of_wasm label)); vstack = List.drop vstack 1; new_vars = [] }
   | Ast.Br label ->
@@ -206,11 +207,11 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) (vstack : string list) : t =
       let var = alloc_var i "call_indirect" in
       { instr = Control (CallIndirect (Var.of_wasm f)); vstack = var :: List.drop vstack arity_in; new_vars = [var] }
   | Ast.GlobalGet g ->
-    let var = alloc_var i "global_get" in
+    let var = alloc_var i "global.get" in
     { instr = Data (GlobalGet (Var.of_wasm g)); vstack = var :: vstack; new_vars = [var] }
   | Ast.GlobalSet g ->
     (* The new variable will be used for the new value of the global *)
-    let var = alloc_var i "global" in
+    let var = alloc_var i "global.set" in
     { instr = Data (GlobalSet (Var.of_wasm g)); vstack = List.drop vstack 1; new_vars = [var] }
   | Ast.Load op ->
     let var = alloc_var i "load" in
