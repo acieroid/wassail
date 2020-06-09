@@ -84,7 +84,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
         { (Domain.add_constraint
              (Domain.add_constraint state ret v)
              local v)
-          with vstack = vstack'; locals = Locals.set_local state.locals l local }
+          with vstack = ret :: vstack'; locals = Locals.set_local state.locals l local }
       | _ -> failwith "local.tee: invalid new vasr"
     end
   | GlobalGet g ->
@@ -240,15 +240,28 @@ let control_instr_transfer
     Simple { state with vstack = [] }
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i))
 
+let check_vstack (state : Domain.state) (spec : Vstack.t) : unit =
+  if Stdlib.((List.length state.vstack) = (List.length spec)) then
+    ()
+  else
+    failwith (Printf.sprintf "invalid vstack (expected [%s]) in state %s" (String.concat spec ~sep:",") (Domain.to_string state))
+
 let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t IntMap.t) (module_ : Wasm_module.t) (cfg : Cfg.t) : result =
   Printf.printf "analyzing block %d\n" b.idx;
   match b.content with
   | Data instrs ->
-    Simple (List.fold_left instrs ~init:state ~f:(fun prestate (instr, vstack, new_vars) ->
+    Simple (List.fold_left instrs ~init:state ~f:(fun prestate (instr, vstack_spec, new_vars) ->
         Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string prestate) (Instr.data_to_string instr);
-        let poststate = data_instr_transfer module_ instr prestate vstack new_vars in
+        let poststate = data_instr_transfer module_ instr prestate vstack_spec new_vars in
+        check_vstack poststate vstack_spec;
         poststate))
-  | Control (instr, _vstack, new_vars) ->
-    (* Printf.printf "pre: %s\ncontrol: %s\n" (Domain.to_string state) (Instr.control_to_string instr); *)
-    control_instr_transfer instr state summaries module_ cfg new_vars
+  | Control (instr, vstack_spec, new_vars) ->
+    Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string state) (Instr.control_to_short_string instr);
+    let poststate = control_instr_transfer instr state summaries module_ cfg new_vars in
+    begin match poststate with
+      | Uninitialized -> ()
+      | Simple s -> check_vstack s vstack_spec
+      | Branch (s1, s2) -> check_vstack s1 vstack_spec; check_vstack s2 vstack_spec
+    end;
+    poststate
   | Nothing -> Simple state

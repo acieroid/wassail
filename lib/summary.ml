@@ -15,7 +15,11 @@ let to_string (s : t) : string =
 
 (** Constructs a summary given a CFG and a domain state resulting from that CFG *)
 let make (cfg : Cfg.t) (state : Domain.state) : t =
-  (* Filter the state to only keep relevant variables, i.e., the parameters and return value (if there is one) *)
+  (* Filter the state to only keep relevant variables:
+      - the parameters
+      - the return value if there is one
+      - any variable bound in the store (TODO)
+      - any variable used by a global (TODO) *)
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Domain.arg_name cfg.idx argi) in
   let params_and_ret = params @ (if List.length cfg.return_types = 1 then [Domain.return_name cfg.idx] else []) in
   { params_and_return = params_and_ret;
