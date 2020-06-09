@@ -132,13 +132,15 @@ let alloc_var (_i : Ast.instr) (name : string) : string =
   counter := !counter + 1;
   v
 
-let rec of_wasm (m : Ast.module_) (i : Ast.instr) (vstack : string list) : t =
+let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string list) : t =
   match i.it with
   | Ast.Nop -> { instr = Data Nop; vstack = vstack; new_vars = [] }
   | Ast.Drop -> { instr = Data Drop; vstack = List.drop vstack 1; new_vars = []  }
-  | Ast.Block (_st, instrs) ->
+  | Ast.Block (st, instrs) ->
     (* TODO: maybe we should pop arity_out and push again, or do that in br? *)
-    let (body, vstack) = seq_of_wasm m instrs vstack in
+    let (arity_in, arity_out) = arity_of_block st in
+    Printf.printf "block arity: %d, %d\n" arity_in arity_out;
+    let (body, vstack) = seq_of_wasm m fid instrs vstack in
     { instr = Control (Block body); vstack = vstack; new_vars = [] }
   | Ast.Const lit ->
     let var = alloc_var i "const" in
@@ -172,7 +174,7 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) (vstack : string list) : t =
       let var = alloc_var i "call" in
       { instr = Control (Call (Var.of_wasm f)); vstack = var :: List.drop vstack arity_in; new_vars = [var] }
   | Ast.Return ->
-    { instr = Control Return; vstack = vstack; new_vars = [] } (* TODO: in practice, return only keeps the necessary number of values on the vstack *)
+    { instr = Control Return; vstack = []; new_vars = [] } (* TODO: in practice, return only keeps the necessary number of values on the vstack *)
   | Ast.Unreachable ->
     { instr = Control Unreachable; vstack = vstack; new_vars = [] }
   | Ast.Select ->
@@ -180,17 +182,22 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) (vstack : string list) : t =
     { instr = Data Select; vstack = var :: (List.drop vstack 3); new_vars = [var] }
   | Ast.Loop (st, instrs) ->
     let (arity_in, arity_out) = arity_of_block st in
+    Printf.printf "[%d] loop arity: %d, %d\n" fid arity_in arity_out;
     assert (arity_out <= 1); (* TODO: support any arity out? *)
-    let (body, _) = seq_of_wasm m instrs vstack in
+    let (body, _) = seq_of_wasm m fid instrs vstack in
     if arity_out = 0 then
       { instr = Control (Loop body); vstack = List.drop vstack arity_in; new_vars = []}
     else
       let var = alloc_var i "loop" in
       { instr = Control (Loop body); vstack = var :: List.drop vstack arity_in; new_vars = [var] }
-  | Ast.If (_st, instrs1, instrs2) ->
+  | Ast.If (st, instrs1, instrs2) ->
     let _, vstack' = Vstack.pop vstack in
-    let (body1, _) = seq_of_wasm m instrs1 vstack' in
-    let (body2, _) = seq_of_wasm m instrs2 vstack' in
+    let (arity_in, arity_out) = arity_of_block st in
+    assert (arity_out <= 1);
+    Printf.printf "[%d] if arity: %d, %d\n" fid arity_in arity_out;
+    let (body1, vstack1) = seq_of_wasm m fid instrs1 vstack' in
+    let (body2, vstack2) = seq_of_wasm m fid instrs2 vstack' in
+    Printf.printf "[%d] if vstack1: %s, vstack2: %s\n" fid (String.concat vstack1 ~sep:",") (String.concat vstack2 ~sep:",");
     (* drop the condition *)
     { instr = Control (If (body1, body2)); vstack = vstack'; new_vars = [] }
     (* let (arity_in, arity_out) = arity_of_block st in
@@ -234,10 +241,10 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) (vstack : string list) : t =
     { instr = Data (Test (Testop.of_wasm op)); vstack = var :: (List.drop vstack 1); new_vars = [var] }
   | Ast.Convert _op -> failwith "convert unsupported"
   | Ast.Unary _op -> failwith "unary unsupported"
-and seq_of_wasm (m : Ast.module_) (is : Ast.instr list) (vstack : string list) : t list * string list =
+and seq_of_wasm (m : Ast.module_) (fid : int) (is : Ast.instr list) (vstack : string list) : t list * string list =
   let (instrs, vstack) = List.fold_left is
     ~init:([], vstack)
     ~f:(fun (instrs, vstack) instr ->
-        let i = of_wasm m instr vstack in
+        let i = of_wasm m fid instr vstack in
         (i :: instrs, i.vstack)) in
     List.rev instrs, vstack

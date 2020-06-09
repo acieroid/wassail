@@ -6,8 +6,8 @@ type t = {
 }
 [@@deriving sexp, compare]
 
-let of_wasm (m : Ast.module_) (f : Ast.func) : t = {
-  body = fst (Instr.seq_of_wasm m f.it.body []);
+let of_wasm (m : Ast.module_) (fid : int) (f : Ast.func) : t = {
+  body = fst (Instr.seq_of_wasm m fid f.it.body []);
   locals = List.map f.it.locals ~f:Type.of_wasm;
 }
 let to_string (f : t) : string =

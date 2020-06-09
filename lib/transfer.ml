@@ -232,9 +232,13 @@ let control_instr_transfer
     Branch (Domain.add_constraint state' cond "1",
             Domain.add_constraint state' cond "0")
   | Return ->
-    (* return only keeps the necessary number of values from the stack *)
-    let arity = List.length cfg.return_types in
-    Simple { state with vstack = List.take state.vstack arity }
+    (* return drops everything from the stack, but adds constraints for the return value if necessary *)
+    Simple
+      (if List.length cfg.return_types = 1 then
+         let v, _ = Vstack.pop state.vstack in
+         Domain.add_constraint { state with vstack = [] } (Domain.return_name cfg.idx) v
+       else
+         { state with vstack = [] })
   | Unreachable ->
     (* Unreachable, so what we return does not really matter *)
     Simple { state with vstack = [] }

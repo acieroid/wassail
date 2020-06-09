@@ -16,7 +16,24 @@ let analyze
   let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
                                          ~f:(fun idx ->
                                              (idx, (bottom, bottom))))) in
-
+  (* Handles exit block properly: if we reach the exit block, we need to model a "return" instruction on paths that have not done so explicitly *)
+  let handle_exit (block_idx : int) (s : Domain.state) : Domain.state =
+    if block_idx = cfg.exit_block && (List.length cfg.return_types = 1) then
+      (* It is the exit block, and it has a return value *)
+      if List.is_empty s.vstack then
+        (* The vstack is already empty, we don't need to do anything (there was a return instr already) *)
+        s
+      else
+        (* The vstack is not empty, its top value should be returned *)
+        let v, vstack = Vstack.pop s.vstack in
+        assert Stdlib.(vstack = []); (* make sure there are no other values on the stack *)
+        (* Now we add the constraint ret = v *)
+        let ret = Domain.return_name cfg.idx in
+        Domain.add_constraint { s with vstack = [] } ret v
+    else
+      (* not the exit block, nothing to do *)
+      s
+  in
   let analyze_block (block_idx : int) : Domain.state * Transfer.result =
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
@@ -27,9 +44,10 @@ let analyze
       let pred_states = (List.map predecessors ~f:(fun (idx, d) -> (snd (IntMap.find_exn !data idx)), d)) in
       let in_state = match (List.fold_left pred_states ~init:bottom ~f:(fun acc res ->
           Transfer.join_result acc (match res with
-              | (Branch (t, _), Some true) -> Simple t
-              | (Branch (_, f), Some false) -> Simple f
+              | (Branch (t, _), Some true) -> Simple (handle_exit block_idx t)
+              | (Branch (_, f), Some false) -> Simple (handle_exit block_idx f)
               | (Branch _, None) -> failwith "should not happen"
+              | (Simple s, _) -> Simple (handle_exit block_idx s)
               | (s, _) -> s)))
         with
         | Simple r -> r
@@ -37,16 +55,18 @@ let analyze
         | _ -> failwith "should not happen" in
       (* We analyze it *)
       let result = Transfer.transfer block in_state summaries module_ cfg in
+(* moved up top
       if block_idx = cfg.exit_block && (List.length cfg.return_types = 1) then
-          (* If it is the exit block and there is a return value, we add the extra constraint that ret = the top of the stack *)
+          (* If it is the exit block and there is a return value, we add the extra constraint that ret = the top of the stack, and we clear the stack *)
         (in_state, match result with
           | Simple s ->
             let (v, vstack) = Vstack.pop s.vstack in
+            assert Stdlib.(vstack = []);
             let ret = Domain.return_name cfg.idx in
-            Simple (Domain.add_constraint { s with vstack = ret :: vstack } ret v)
+            Simple (Domain.add_constraint { s with vstack = [] } ret v)
           | Uninitialized -> failwith "should not happen"
           | Branch _ -> failwith "should not happen")
-      else
+      else *)
         (in_state, result)
   in
   let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =

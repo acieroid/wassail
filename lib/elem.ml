@@ -13,7 +13,7 @@ type t = {
 
 let of_wasm (m : Ast.module_) (e : Ast.var list Ast.segment) : t = {
   index = Var.of_wasm e.it.index;
-  offset = fst (Instr.seq_of_wasm m e.it.offset.it []);
+  offset = fst (Instr.seq_of_wasm m (-1) e.it.offset.it []);
   init = List.map e.it.init ~f:Var.of_wasm
 }
 

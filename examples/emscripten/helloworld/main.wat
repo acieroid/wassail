@@ -320,10 +320,10 @@
       end
     end
     local.get 0)
-  (func $main (type 3) (param i32 i32) (result i32)
+  (func $main (type 3) (param i32 i32) (result i32) ;; 4
     call $puts
     i32.const 0)
-  (func $__wasi_syscall_ret (type 2) (param i32) (result i32)
+  (func $__wasi_syscall_ret (type 2) (param i32) (result i32) ;; 5
     local.get 0
     i32.eqz
     if  ;; label = @1
@@ -334,7 +334,7 @@
     local.get 0
     i32.store
     i32.const -1)
-  (func $__towrite (type 2) (param i32) (result i32)
+  (func $__towrite (type 2) (param i32) (result i32) ;; 6
     (local i32)
     local.get 0
     local.get 0
@@ -377,7 +377,7 @@
     i32.add
     i32.store offset=16
     i32.const 0)
-  (func $__fwritex (type 3) (param i32 i32) (result i32)
+  (func $__fwritex (type 3) (param i32 i32) (result i32) ;; 7
     (local i32 i32 i32 i32 i32)
     i32.const 1024
     local.set 4
@@ -474,7 +474,7 @@
       local.set 3
     end
     local.get 3)
-  (func $strlen (type 6) (result i32)
+  (func $strlen (type 6) (result i32) ;; 8
     (local i32 i32 i32)
     i32.const 1024
     local.set 1
@@ -523,7 +523,7 @@
     local.get 1
     i32.const 1024
     i32.sub)
-  (func $fwrite (type 3) (param i32 i32) (result i32)
+  (func $fwrite (type 3) (param i32 i32) (result i32) ;; 9
     block (result i32)  ;; label = @1
       local.get 1
       i32.load offset=76
@@ -547,7 +547,7 @@
       return
     end
     local.get 1)
-  (func $emscripten_memcpy_big (type 5) (param i32 i32 i32)
+  (func $emscripten_memcpy_big (type 5) (param i32 i32 i32) ;; 10
     (local i32)
     local.get 2
     if  ;; label = @1
@@ -590,7 +590,7 @@
     end)
   (func $__wasm_call_ctors (type 1)
     nop)
-  (func $__stdio_write (type 0) (param i32 i32 i32) (result i32)
+  (func $__stdio_write (type 0) (param i32 i32 i32) (result i32) ;; 13
     (local i32 i32 i32 i32 i32 i32)
     global.get 0
     i32.const 32
