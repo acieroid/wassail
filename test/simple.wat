@@ -18,7 +18,16 @@
     global.get 0
     i32.load offset=12
     ;; Expected summary: return value is first argument
-    ) 
+    )
+  (func (;test-if;) (type 1) (param i32) (result i32)
+    local.get 0
+    i32.const 0
+    i32.eq
+    if (result i32)
+      i32.const 1
+    else
+      i32.const 0
+    end)
   (func (;test-join;) (type 1) (param i32) (result i32)
     local.get 0
     i32.eqz

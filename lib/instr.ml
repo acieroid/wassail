@@ -187,16 +187,19 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) (vstack : string list) : t =
     else
       let var = alloc_var i "loop" in
       { instr = Control (Loop body); vstack = var :: List.drop vstack arity_in; new_vars = [var] }
-  | Ast.If (st, instrs1, instrs2) ->
-    let (arity_in, arity_out) = arity_of_block st in
-    assert (arity_out <= 1);
-    let (body1, _) = seq_of_wasm m instrs1 vstack in
-    let (body2, _) = seq_of_wasm m instrs2 vstack in
+  | Ast.If (_st, instrs1, instrs2) ->
+    let _, vstack' = Vstack.pop vstack in
+    let (body1, _) = seq_of_wasm m instrs1 vstack' in
+    let (body2, _) = seq_of_wasm m instrs2 vstack' in
+    (* drop the condition *)
+    { instr = Control (If (body1, body2)); vstack = vstack'; new_vars = [] }
+    (* let (arity_in, arity_out) = arity_of_block st in
+       assert (arity_out <= 1); 
     if arity_out = 0 then
       { instr = Control (If (body1, body2)); vstack = List.drop vstack arity_in; new_vars = [] }
     else
       let var = alloc_var i "if" in
-      { instr = Control (If (body1, body2)); vstack = var :: List.drop vstack arity_in; new_vars = [] }
+       { instr = Control (If (body1, body2)); vstack = var :: List.drop vstack arity_in; new_vars = [] } *)
   | Ast.BrTable (_vs, _v) -> failwith "br_table unsupported"
   | Ast.CallIndirect f ->
     let (arity_in, arity_out) = arity_of_fun_type m f in
