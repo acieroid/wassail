@@ -1,7 +1,7 @@
 open Core_kernel
 
-type apron_domain = Polka.equalities Polka.t
-let manager = Polka.manager_alloc_equalities ()
+type apron_domain = Polka.loose Polka.t
+let manager = Polka.manager_alloc_loose ()
 
 (** A state of the wasm VM *)
 type state = {
