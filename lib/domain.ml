@@ -130,5 +130,5 @@ let is_zero (s : state) (v : string) : bool * bool =
   | 0 -> (true, false) (* definitely 0, and only 0 *)
   | -1 -> (true, false) (* should not happen, because that's caught by the previous case *)
   | +1 -> (true, true) (* [0,0] is contained in v: can be 0 or not *)
-  | -2 | +2 -> (false, false) (* definitely not 0 *)
+  | -2 | +2 -> (false, true) (* definitely not 0 *)
   | _ -> failwith "should not happen"
