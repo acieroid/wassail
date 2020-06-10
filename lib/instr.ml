@@ -81,6 +81,15 @@ let vstack_spec (instr : t) : vstack_spec = match instr with
       | Return | Unreachable -> []
     end
 
+let vstack_block_spec (instr : t) : vstack_spec = match instr with
+  | Data d -> vstack_spec (Data d)
+  | Control c -> begin match c with
+      | Block (_, _, v, _)
+      | Loop (_, _, v, _)
+      | If (_, _, _, v, _) -> v
+      | _ -> vstack_spec (Control c)
+    end
+
 let vars (instr : t) : vars = match instr with
   | Data d -> begin match d with
       | Nop _ | Drop _ -> []
@@ -308,6 +317,6 @@ and seq_of_wasm (m : Ast.module_) (fid : int) (is : Ast.instr list) (vstack : st
     ~init:([], vstack)
     ~f:(fun (instrs, vstack) instr ->
         let i = of_wasm m fid instr vstack nlocals nglobals in
-        let vstack' = vstack_spec i in
+        let vstack' = vstack_block_spec i in
         (i :: instrs, vstack')) in
     List.rev instrs, vstack

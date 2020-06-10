@@ -96,6 +96,17 @@
       br_if 0 (;@1;)
     end
     i32.const 0)
+  (func (;test-if-result;) (type 1) (param i32) (result i32)
+    (local i32 i32 i32 i32 i32)
+    i32.const 0
+    if (result i32)  ;; label = @2
+      local.get 2
+    else
+      local.get 1
+    end
+    local.get 1
+    i32.sub
+    )
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))
