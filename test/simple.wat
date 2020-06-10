@@ -87,6 +87,15 @@
       global.set 0
     end
     local.get 0) ;; ret = p0
+  (func (;test-loop;) (type 1) (param i32) (result i32)
+    (local i32 i32 i32)
+    nop
+    loop  ;; label = @1
+      i32.const 4
+      i32.eqz
+      br_if 0 (;@1;)
+    end
+    i32.const 0)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))

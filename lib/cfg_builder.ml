@@ -124,11 +124,11 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
             | Loop _ -> true
             | _ -> false in
           (* The block entry *)
-          let block_entry = mk_empty_block () in (* TODO: should be a merge block for loops *)
+          let block_entry = if is_loop then mk_merge_block vstack' block_vars else mk_empty_block () in
           (* Recurse inside the block *)
           let (blocks, edges, breaks, returns, entry', exit') = helper [] instrs' in
           (* Create a node for the exit of the block *)
-          let block_exit = mk_merge_block vstack' block_vars in
+          let block_exit = if is_loop then mk_empty_block () else mk_merge_block vstack' block_vars in
           (* Recurse after the block *)
           let (blocks', edges', breaks', returns', entry'', exit'') = helper [] rest in
           (* Compute the new break levels:

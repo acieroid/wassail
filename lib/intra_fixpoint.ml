@@ -81,37 +81,12 @@ let analyze
           | Simple s, _ -> s
           | Branch (t, _), Some true -> t
           | Branch (_, f), Some false -> f
-          | _ -> failwith "should not happen")) in
+          | Branch _, None -> failwith "invalid branch state"
+          | Uninitialized, _ -> init)) in
       let in_state = merge_flows block pred_states in
-      Printf.printf "pred states: %d" (List.length pred_states);
-(*      match pred_states with
-      | [] -> init
-      let in_state = match (List.fold_left pred_states ~init:bottom ~f:(fun acc res ->
-          Transfer.join_result acc (match res with
-              | (Branch (t, _), Some true) -> Simple (handle_exit block_idx t)
-              | (Branch (_, f), Some false) -> Simple (handle_exit block_idx f)
-              | (Branch _, None) -> failwith "should not happen"
-              | (Simple s, _) -> Simple (handle_exit block_idx s)
-              | (s, _) -> s)))
-        with
-        | Simple r -> r
-        | Uninitialized -> init
-        | _ -> failwith "should not happen" in *)
       (* We analyze it *)
       let result = Transfer.transfer block in_state summaries module_ cfg in
-(* moved up top
-      if block_idx = cfg.exit_block && (List.length cfg.return_types = 1) then
-          (* If it is the exit block and there is a return value, we add the extra constraint that ret = the top of the stack, and we clear the stack *)
-        (in_state, match result with
-          | Simple s ->
-            let (v, vstack) = Vstack.pop s.vstack in
-            assert Stdlib.(vstack = []);
-            let ret = Domain.return_name cfg.idx in
-            Simple (Domain.add_constraint { s with vstack = [] } ret v)
-          | Uninitialized -> failwith "should not happen"
-          | Branch _ -> failwith "should not happen")
-      else *)
-        (in_state, result)
+      (in_state, result)
   in
   let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =
     if IntSet.is_empty worklist then
