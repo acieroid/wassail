@@ -11,14 +11,14 @@
     global.get 0
     local.get 0
     i32.store offset=12
-    local.get 0)
+    local.get 0) ;; ret = p0
   (func (;test-load;) (type 1) (param i32) (result i32)
     global.get 0
     local.get 0
     i32.store offset=12
     global.get 0
     i32.load offset=12
-    ;; Expected summary: return value is first argument
+    ;; ret = p0
     )
   (func (;test-if;) (type 1) (param i32) (result i32)
     local.get 0
@@ -74,7 +74,7 @@
       i32.const 2
       local.set 0
     end
-    local.get 0)
+    local.get 0) ;; ret = [1,2]
   (func (;test-merge-globals-after-if;) (type 1) (param i32) (result i32)
     (local i32 i32 i32)
     local.get 0
@@ -86,7 +86,7 @@
       i32.const 2
       global.set 0
     end
-    local.get 0)
+    local.get 0) ;; ret = p0
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))

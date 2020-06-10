@@ -53,7 +53,8 @@ let analyze
                 | None -> s.vstack in
               (* add constraints for locals and globals *)
               let constraints = List.mapi locals ~f:(fun i l -> (l, List.nth_exn s.locals i)) @
-                                List.mapi globals ~f:(fun i g -> (g, List.nth_exn s.globals i)) in
+                                List.mapi globals ~f:(fun i g -> (g, List.nth_exn s.globals i)) @
+                                List.map (Option.to_list ret) ~f:(fun r -> (r, List.hd_exn s.vstack)) in
               Domain.add_constraints
                   { s with locals = locals; globals = globals; vstack = vstack }
                   constraints) in
