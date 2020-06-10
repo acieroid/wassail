@@ -218,7 +218,7 @@ let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string l
     assert (arity_out <= 1);
     Printf.printf "[%d] block arity: %d, %d\n" fid arity_in arity_out;
     (* Create one var per local and global, and one extra var if arity_out is 1 *)
-    let (body, vstack) = seq_of_wasm m fid instrs vstack nlocals nglobals in
+    let (body, _) = seq_of_wasm m fid instrs vstack nlocals nglobals in
     let (_, _, ret) as vars = block_new_vars "block" arity_out in
     Control (Block (body, vstack, (Option.to_list ret) @ vstack, vars))
   | Ast.Const lit ->

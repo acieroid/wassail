@@ -34,8 +34,8 @@ let to_dot (b : t) : string =
             ~f:(fun instr ->
                 Printf.sprintf "%s -- %s" (Instr.data_to_string instr) (String.concat (Instr.vstack_spec (Data instr)) ~sep:","))))
   | Control instr ->
-    Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d: %s\"];" b.idx b.idx (Instr.control_to_short_string instr)
+    Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d: %s -- %s\"];" b.idx b.idx (Instr.control_to_short_string instr) (String.concat (Instr.vstack_spec (Control instr)) ~sep:",")
   | ControlMerge (vstack, _) ->
-    Printf.sprintf "block%d [shape=ellipse, label=\"%d %s\"]" b.idx b.idx (String.concat vstack ~sep:",") 
+    Printf.sprintf "block%d [shape=point, label=\"%d %s\"]" b.idx b.idx (String.concat vstack ~sep:",") 
   | Nothing ->
     Printf.sprintf "block%d [shape=point, label=\"%d\"]" b.idx b.idx

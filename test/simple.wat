@@ -107,6 +107,18 @@
     local.get 1
     i32.sub
     )
+  (func (;test-if-in-block;) (type 1) (param i32) (result i32)
+    (local i32)
+    block (result i32)  ;; label = @1 ;; vstack: []
+      local.get 1 ;; vstack [l1]
+      if  ;; label = @2
+        local.get 0 ;; vstack: [l0]
+        br 1 (;@1;)
+      end
+      local.get 0 ;; vstack: [l0]
+    end
+    ;; vstack: [l0]
+    nop)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))
