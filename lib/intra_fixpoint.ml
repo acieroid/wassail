@@ -34,6 +34,41 @@ let analyze
       (* not the exit block, nothing to do *)
       s
   in
+  (* Merges the entry states before analyzing the given block *)
+  let merge_flows (block : Basic_block.t) (states : Domain.state list) : Domain.state =
+    match states with
+    | [] -> (* no in state, use init *)
+      init
+    | s :: [] -> (* single state *)
+      handle_exit block.idx s
+    | _ ->
+      (* multiple states, block should be a control-flow merge *)
+      begin match block.content with
+        | ControlMerge (_vstack', (locals, globals, ret)) ->
+          (* for each state in states *)
+          let states' = List.map states ~f:(fun s ->
+              (* replace the top of the stack if necessary *)
+              let vstack = match ret with
+                | Some v -> v :: (List.drop s.vstack 1)
+                | None -> s.vstack in
+              (* add constraints for locals and globals *)
+              let constraints = List.mapi locals ~f:(fun i l -> (l, List.nth_exn s.locals i)) @
+                                List.mapi globals ~f:(fun i g -> (g, List.nth_exn s.globals i)) in
+              Domain.add_constraints
+                  { s with locals = locals; globals = globals; vstack = vstack }
+                  constraints) in
+          (* now join all the states: their vstack, locals and globals should be
+             the same, only their memory might differ, but joining memory is
+             handled in memory.ml by computing the most general memory *)
+          List.reduce_exn states' ~f:Domain.join
+        | _ when block.idx = cfg.exit_block ->
+          (* The exit block can have multiple input states, they just need to be joined *)
+          (* TODO: ideally, we should handle this as a control merge block *)
+          List.reduce_exn (List.map states ~f:(handle_exit block.idx)) ~f:Domain.join
+        | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
+      end
+  in
+  (* Analyzes one block, returning the pre and post states *)
   let analyze_block (block_idx : int) : Domain.state * Transfer.result =
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
@@ -41,7 +76,15 @@ let analyze
       (* in_state is the join of all the the out_state of the predecessors.
          Special case: if the out_state of a predecessor is not a simple one, that means we are the target of a break.
          If this is the case, we pick the right branch, according to the edge data *)
-      let pred_states = (List.map predecessors ~f:(fun (idx, d) -> (snd (IntMap.find_exn !data idx)), d)) in
+      let pred_states = (List.map predecessors ~f:(fun (idx, d) -> match (snd (IntMap.find_exn !data idx), d) with
+          | Simple s, _ -> s
+          | Branch (t, _), Some true -> t
+          | Branch (_, f), Some false -> f
+          | _ -> failwith "should not happen")) in
+      let in_state = merge_flows block pred_states in
+      Printf.printf "pred states: %d" (List.length pred_states);
+(*      match pred_states with
+      | [] -> init
       let in_state = match (List.fold_left pred_states ~init:bottom ~f:(fun acc res ->
           Transfer.join_result acc (match res with
               | (Branch (t, _), Some true) -> Simple (handle_exit block_idx t)
@@ -52,7 +95,7 @@ let analyze
         with
         | Simple r -> r
         | Uninitialized -> init
-        | _ -> failwith "should not happen" in
+        | _ -> failwith "should not happen" in *)
       (* We analyze it *)
       let result = Transfer.transfer block in_state summaries module_ cfg in
 (* moved up top

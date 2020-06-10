@@ -27,12 +27,11 @@ let join_result (r1 : result) (r2 : result) =
    @param vstack_spec: the specification of what the vstack looks like after execution
    @return the resulting state (poststate).
 *)
-let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Domain.state) (vstack_spec : Vstack.t) (new_vars : string list) : Domain.state =
+let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Domain.state) : Domain.state =
   match i with
-  | Nop -> state
-  | MemorySize ->
+  | Nop _ -> state
+  | MemorySize (_, ret) ->
     (* memory size is bounded by the initial memory size and the maximum memory size *)
-    let ret, _ = Vstack.pop vstack_spec in
     let mem = List.nth_exn module_.mems 0 in
     (* add ret = [min,max] where min and max are the memory size bounds *)
     { (Domain.add_constraint state ret
@@ -42,12 +41,10 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
              | Some max -> max
              | None -> failwith "unsupported infinite max size" (* can easily supported, the constraint just becomes ret >= min *))))
       with vstack = ret :: state.vstack }
-  | Drop ->
-    let (_, vstack') = Vstack.pop state.vstack in
-    assert (List.length vstack' = List.length state.vstack - 1);
+  | Drop _ ->
+    let _, vstack' = Vstack.pop state.vstack in
     { state with vstack = vstack' }
-  | Select ->
-    let ret, _ = Vstack.pop vstack_spec in
+  | Select (_, ret)->
     let c, vstack' = Vstack.pop state.vstack in
     let v2, vstack'' = Vstack.pop vstack' in
     let v1, vstack''' = Vstack.pop vstack'' in
@@ -61,76 +58,58 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
           | (false, false) -> (* none, add bottom constraint *)
             Domain.add_constraint state ret "[-1;1]"
         ) with vstack = ret :: vstack''' }
-  | LocalGet l ->
-    let ret, _ = Vstack.pop vstack_spec in
+  | LocalGet (l, _, ret) ->
     (* add ret = ln where ln is the local accessed *)
     { (Domain.add_constraint state ret (Locals.get_local state.locals l))
       with vstack = ret :: state.vstack }
-  | LocalSet l ->
+  | LocalSet (l, _, local) ->
     (* add ln' = v where ln' is the variable for the local set and v is the top of the vstack *)
-    let (v, vstack') = Vstack.pop state.vstack in
-    begin match new_vars with
-      | local :: [] ->
-        { (Domain.add_constraint state local v)
-          with vstack = vstack'; locals = Locals.set_local state.locals l local }
-      | _ -> failwith "local.set: invalid new vars"
-    end
-  | LocalTee l ->
+    let v, vstack' = Vstack.pop state.vstack in
+    { (Domain.add_constraint state local v)
+      with vstack = vstack'; locals = Locals.set_local state.locals l local }
+  | LocalTee (l, vstack_spec, local) ->
     (* same as local.set x followed by local.get x *)
     let ret, _ = Vstack.pop vstack_spec in
     let v, vstack' = Vstack.pop state.vstack in
-    begin match new_vars with
-      | local :: [] ->
-        { (Domain.add_constraint
-             (Domain.add_constraint state ret v)
-             local v)
-          with vstack = ret :: vstack'; locals = Locals.set_local state.locals l local }
-      | _ -> failwith "local.tee: invalid new vasr"
-    end
-  | GlobalGet g ->
-    let ret, _ = Vstack.pop vstack_spec in
+    { (Domain.add_constraint
+         (Domain.add_constraint state ret v)
+         local v)
+      with vstack = ret :: vstack'; locals = Locals.set_local state.locals l local }
+  | GlobalGet (g, _, ret) ->
     (* add v = gn where gn is the local accessed *)
     { (Domain.add_constraint state ret (Globals.get_global state.globals g))
       with vstack = ret :: state.vstack }
-  | GlobalSet g ->
-    let (v, vstack') = Vstack.pop state.vstack in
-    begin match new_vars with
-      | global :: [] ->
-        { (Domain.add_constraint state global v)
-          with vstack = vstack'; globals = Globals.set_global state.globals g global }
-      | _ -> failwith "global.set: invalid new vars"
-    end
-  | Const n ->
-    let ret, _ = Vstack.pop vstack_spec in
+  | GlobalSet (g, _, global) ->
+     let v, vstack' = Vstack.pop state.vstack in
+     { (Domain.add_constraint state global v)
+       with vstack = vstack'; globals = Globals.set_global state.globals g global }
+  | Const (n, _, ret) ->
     (* add ret = n *)
     { (Domain.add_constraint state ret (Prim_value.to_string n))
       with vstack = ret :: state.vstack }
-  | Compare _rel ->
-    let ret, _ = Vstack.pop vstack_spec in
-    let (_v2, vstack') = Vstack.pop state.vstack in
-    let (_v1, vstack'') = Vstack.pop vstack' in
+  | Compare (_rel, _, ret) ->
+    let _v2, vstack' = Vstack.pop state.vstack in
+    let _v1, vstack'' = Vstack.pop vstack' in
     (* TODO: reflect "rel v1 v2" in the constraints, when possible *)
     (* add ret = [0;1] *)
     { (Domain.add_constraint state ret "[0;1]")
       with vstack = ret :: vstack'' }
-  | Binary _bin ->
-    let ret, _ = Vstack.pop vstack_spec in
-    let (_v2, vstack') = Vstack.pop state.vstack in
-    let (_v1, vstack'') = Vstack.pop vstack' in
+  | Binary (_bin, _, ret) ->
+    let _v2, vstack' = Vstack.pop state.vstack in
+    let _v1, vstack'' = Vstack.pop vstack' in
     (* TODO: reflect "bin v1 v2" the operation in the constraints, when possible *)
     (* don't add any constraint (for now)  *)
     { state
       with vstack = ret :: vstack'' }
-  | Test _test ->
-    let ret, _ = Vstack.pop vstack_spec in
-    let (_v, vstack') = Vstack.pop state.vstack in
+  | Test (_test, _, ret) ->
+    let _v, vstack' = Vstack.pop state.vstack in
     (* TODO: reflect "test v" in the constraints, when possible *)
     (* add ret = [0;1] *)
     { (Domain.add_constraint state ret "[0;1]")
       with vstack = ret :: vstack' }
-  | Load { typ = I32; align = _; offset; sz = None } ->
+  | Load ({ typ = I32; align = _; offset; sz = None }, _, vars) ->
     let vaddr, vstack' = Vstack.pop state.vstack in
-    begin match new_vars with
+    begin match vars with
       | [ret; addr0; addr1; addr2; addr3] ->
         (* add the constraints on addresses, i.e., addri = vaddr+offset+i where vaddr is the variable from the stack, addri is the address from which we will load *)
         let state' =
@@ -156,8 +135,8 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
       | _ -> failwith "TODO: load"
     end
   | Load _ -> failwith "load not supported with such op argument"
-  | Store { typ = I32; align = _; offset; sz = None } ->
-    begin match new_vars with
+  | Store ({ typ = I32; align = _; offset; sz = None }, _, vars) ->
+    begin match vars with
       | [addr0; addr1; addr2; addr3] ->
         let vval, vstack' = Vstack.pop state.vstack in
         let vaddr, vstack'' = Vstack.pop vstack' in
@@ -183,19 +162,15 @@ let control_instr_transfer
     (summaries : Summary.t IntMap.t) (* Summaries to apply function calls *)
     (module_ : Wasm_module.t) (* The wasm module (read-only) *)
     (cfg : Cfg.t) (* The CFG analyzed *)
-    (new_vars : string list)
   : result =
   match i with
-  | Call f ->
+  | Call (f, _, ret) ->
       (* We encounter a function call, retrieve its summary and apply it *)
       (* We assume all summaries are defined *)
     let summary = IntMap.find_exn summaries f in
     (* We get the return name from the new_vars *)
-    let ret = match new_vars with
-      | v :: [] -> Some v (* we expect the summary to return a variable *)
-      | _ -> None in
-      Simple (Summary.apply summary f state ret module_)
-  | CallIndirect _typ -> failwith "NYI: call_indirect" (*
+    Simple (Summary.apply summary f state ret module_)
+  | CallIndirect (_typ, _, _ret) -> failwith "NYI: call_indirect" (*
     let (v, vstack') = Vstack.pop state.vstack in
     let state' = { state with vstack = vstack' } in
     let table = List.nth_exn module_.tables 0 in
@@ -254,14 +229,15 @@ let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t I
   Printf.printf "analyzing block %d\n" b.idx;
   match b.content with
   | Data instrs ->
-    Simple (List.fold_left instrs ~init:state ~f:(fun prestate (instr, vstack_spec, new_vars) ->
+    Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
         Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string prestate) (Instr.data_to_string instr);
-        let poststate = data_instr_transfer module_ instr prestate vstack_spec new_vars in
-        check_vstack poststate vstack_spec;
+        let poststate = data_instr_transfer module_ instr prestate in
+        check_vstack poststate (Instr.vstack_spec (Data instr));
         poststate))
-  | Control (instr, vstack_spec, new_vars) ->
+  | Control instr ->
     Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string state) (Instr.control_to_short_string instr);
-    let poststate = control_instr_transfer instr state summaries module_ cfg new_vars in
+    let poststate = control_instr_transfer instr state summaries module_ cfg in
+    let vstack_spec = Instr.vstack_spec (Control instr) in
     begin match poststate with
       | Uninitialized -> ()
       | Simple s -> check_vstack s vstack_spec
@@ -269,3 +245,4 @@ let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t I
     end;
     poststate
   | Nothing -> Simple state
+  | ControlMerge _ -> Simple state

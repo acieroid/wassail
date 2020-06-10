@@ -6,7 +6,7 @@ type block_sort = BlockEntry | BlockExit | LoopEntry | LoopExit | Normal | Funct
 type block_content =
   | Control of Instr.control
   | Data of (Instr.data) list
-  | ControlMerge of string list * string list
+  | ControlMerge of Instr.vstack_spec * Instr.block_vars
   | Nothing
 [@@deriving sexp, compare]
 

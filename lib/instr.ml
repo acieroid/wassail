@@ -34,9 +34,9 @@ module T = struct
     | Store of Memoryop.t * vstack_spec * vars
   (** Control instructions *)
   and control =
-    | Block of t list * vstack_spec * block_vars
-    | Loop of t list * vstack_spec * block_vars
-    | If of t list * t list * vstack_spec * block_vars
+    | Block of t list * vstack_spec * vstack_spec * block_vars
+    | Loop of t list * vstack_spec * vstack_spec * block_vars
+    | If of t list * t list * vstack_spec * vstack_spec * block_vars
     | Call of Var.t * vstack_spec * var option
     | CallIndirect of Var.t * vstack_spec * var option
     | Br of Var.t * vstack_spec
@@ -71,9 +71,9 @@ let vstack_spec (instr : t) : vstack_spec = match instr with
       | Store (_, v, _) -> v
     end
   | Control c -> begin match c with
-      | Block (_, v, _)
-      | Loop (_, v, _)
-      | If (_, _, v, _)
+      | Block (_, v, _, _)
+      | Loop (_, v, _, _)
+      | If (_, _, v, _, _)
       | Call (_, v, _)
       | CallIndirect (_, v, _)
       | Br (_, v)
@@ -99,10 +99,9 @@ let vars (instr : t) : vars = match instr with
       | Store (_, _, vs) -> vs
     end
   | Control c -> begin match c with
-      | Block (_, _, (vs1, vs2, vsopt))
-      | Loop (_, _, (vs1, vs2, vsopt))
-      | If (_, _, _, (vs1, vs2, vsopt)) ->
-        Option.to_list vsopt @ vs1 @ vs2
+      | Block (_, _, _, _)
+      | Loop (_, _, _, _)
+      | If (_, _, _, _, _) -> []
       | Call (_, _, v) -> Option.to_list v
       | CallIndirect (_, _, _)
       | Br (_, _) | BrIf (_, _)
@@ -134,9 +133,9 @@ let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (inst
   | BrIf (b, _) -> Printf.sprintf "brif %d" b
   | Return -> "return"
   | Unreachable -> "unreachable"
-  | Block (instrs, _, _) -> Printf.sprintf "block%s%s" sep (list_to_string instrs ~indent:(i+2) ~sep:sep)
-  | Loop (instrs, _, _) -> Printf.sprintf "loop%s%s" sep (list_to_string instrs ~indent:(i+2) ~sep:sep)
-  | If (instrs1, instrs2, _, _) -> Printf.sprintf "if%s%s%selse%s%s" sep
+  | Block (instrs, _, _, _) -> Printf.sprintf "block%s%s" sep (list_to_string instrs ~indent:(i+2) ~sep:sep)
+  | Loop (instrs, _, _, _) -> Printf.sprintf "loop%s%s" sep (list_to_string instrs ~indent:(i+2) ~sep:sep)
+  | If (instrs1, instrs2, _, _, _) -> Printf.sprintf "if%s%s%selse%s%s" sep
                                (list_to_string instrs1 ~indent:(i+2) ~sep:sep) sep sep
                                (list_to_string instrs2 ~indent:(i+2) ~sep:sep)
 and to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : t) : string =
@@ -211,7 +210,8 @@ let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string l
     Printf.printf "[%d] block arity: %d, %d\n" fid arity_in arity_out;
     (* Create one var per local and global, and one extra var if arity_out is 1 *)
     let (body, vstack) = seq_of_wasm m fid instrs vstack nlocals nglobals in
-    Control (Block (body, vstack, block_new_vars "block" arity_out))
+    let (_, _, ret) as vars = block_new_vars "block" arity_out in
+    Control (Block (body, vstack, (Option.to_list ret) @ vstack, vars))
   | Ast.Const lit ->
     let var = alloc_var i "const" in
     Data (Const (Prim_value.of_wasm lit.it, var :: vstack, var))
@@ -237,13 +237,12 @@ let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string l
     Control (Br (Var.of_wasm label, vstack))
   | Ast.Call f ->
     let (arity_in, arity_out) = arity_of_fun m f in
-    assert (arity_in = 0); (* what does it mean to have arity_in > 0? *)
     assert (arity_out <= 1);
     if arity_out = 0 then
-      Control (Call (Var.of_wasm f, vstack, None))
+      Control (Call (Var.of_wasm f, List.drop vstack arity_in, None))
     else
       let var = alloc_var i "call" in
-      Control (Call (Var.of_wasm f, var :: vstack, Some var))
+      Control (Call (Var.of_wasm f, var :: (List.drop vstack arity_in), Some var))
   | Ast.Return ->
     Control Return (* TODO: in practice, return only keeps the necessary number of values on the vstack *)
   | Ast.Unreachable ->
@@ -257,16 +256,19 @@ let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string l
     assert (arity_in = 0); (* TODO *)
     assert (arity_out <= 1); (* TODO: support any arity out? *)
     let (body, _) = seq_of_wasm m fid instrs vstack nlocals nglobals in
-    Control (Loop (body, vstack, block_new_vars "loop" arity_out))
+    let (_, _, ret) as vars = block_new_vars "loop" arity_out in
+    Control (Loop (body, vstack, (Option.to_list ret) @ vstack, vars))
   | Ast.If (st, instrs1, instrs2) ->
     (* drop the condition *)
     let _, vstack' = Vstack.pop vstack in
     let (arity_in, arity_out) = arity_of_block st in
+    assert (arity_in = 0);
     assert (arity_out <= 1);
     Printf.printf "[%d] if arity: %d, %d\n" fid arity_in arity_out;
     let (body1, _vstack1) = seq_of_wasm m fid instrs1 vstack' nlocals nglobals in
     let (body2, _vstack2) = seq_of_wasm m fid instrs2 vstack' nlocals nglobals in
-    Control (If (body1, body2, vstack', block_new_vars "if" arity_out))
+    let (_, _, ret) as vars = block_new_vars "if" arity_out in
+    Control (If (body1, body2, vstack', (Option.to_list ret) @ vstack', vars))
   | Ast.BrTable (_vs, _v) -> failwith "br_table unsupported"
   | Ast.CallIndirect f ->
     let (arity_in, arity_out) = arity_of_fun_type m f in

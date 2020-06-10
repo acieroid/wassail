@@ -13,6 +13,8 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
     Basic_block.{ idx = new_idx (); content = Data instrs } in
   let mk_control_block (instr : Instr.control) : Basic_block.t =
     Basic_block.{ idx = new_idx () ; content = Control instr } in
+  let mk_merge_block (vstack_spec : Instr.vstack_spec) (block_vars : Instr.block_vars) =
+    Basic_block.{ idx = new_idx () ; content = ControlMerge (vstack_spec, block_vars) } in
   let mk_empty_block () : Basic_block.t =
     Basic_block.{ idx = new_idx () ; content = Nothing } in
   let rec helper (instrs : Instr.data list) (remaining : Instr.t list) : (
@@ -55,7 +57,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
             (* no return *)
             returns,
             block.idx, exit')
-        |  If (instrs1, instrs2, _, _) ->
+        |  If (instrs1, instrs2, _, vstack', vars) ->
           (* Construct the current block *)
           let block = mk_data_block instrs in
           (* Construct the if block *)
@@ -64,7 +66,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
           let (blocks, edges, breaks, returns, then_entry, then_exit) = helper [] instrs1 in
           let (blocks', edges', breaks', returns', else_entry, else_exit) = helper [] instrs2 in
           (* Construct the merge block *)
-          failwith "let merge_block = mk_merge_block vstack2 new_vars in";
+          let merge_block = mk_merge_block vstack' vars in
           (* Construct the rest of the CFG *)
           let (blocks'', edges'', breaks'', returns'', entry, exit') = helper [] rest in
           (* Compute the new break levels (just like for Block and Loop)
@@ -76,11 +78,11 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
               ~f:(fun (idx, level, branch) -> (idx, level - 1, branch)) in
           let break_edges = List.map (List.filter all_breaks
                                         ~f:(fun (_, level, _) -> level = 0))
-              ~f:(fun (idx, _, branch) -> (idx, entry, branch)) in
-          (block :: if_block :: (blocks @ blocks' @ blocks''),
+              ~f:(fun (idx, _, branch) -> (idx, merge_block.idx, branch)) in
+          (block :: if_block :: merge_block :: (blocks @ blocks' @ blocks''),
            (* Edges *)
            (block.idx, if_block.idx, None) :: (if_block.idx, then_entry, Some true) :: (if_block.idx, else_entry, Some false) ::
-           (then_exit, entry, None) :: (else_exit, entry, None) :: (break_edges @ edges @ edges' @ edges''),
+           (then_exit, merge_block.idx, None) :: (else_exit, merge_block.idx, None) :: (merge_block.idx, entry, None) :: (break_edges @ edges @ edges' @ edges''),
            (* no breaks and returns *)
            new_breaks @ breaks'',
            returns @ returns' @ returns'',
@@ -113,40 +115,27 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
             breaks,
             returns,
             block.idx, exit')
-        | ((Block (instrs', _, _)) as b)
-        | ((Loop (instrs', _, _)) as b) ->
-          (* Create a new block with all instructions collected, without the
-             last one *)
-          (*
-          /--[ instrs ] <- block the current block, before the loop
-          \--[] <- block_entry
-             |
-             [ ... ] <- entry'
-             [ [ instrs' ] ] <- blocks (the loop body), starting at entry', finishing at exit'
-             [ ... ] <- exit'
-             
-             [ ... ] <- entry''
-             [ [ rest ] ... ] <- blocks', starting at entry'', finishing at exit''
-             [ ... ] <- exit''
-
-             [ ] <- block_exit
-          *)
+        | ((Block (instrs', _, vstack', block_vars)) as b)
+        | ((Loop (instrs', _, vstack', block_vars)) as b) ->
+          (* Create a new block with all instructions collected, without the current instruction *)
           let block = mk_data_block instrs in
+          (* Is the current instruction a loop? *)
           let is_loop = match b with
             | Loop _ -> true
             | _ -> false in
-          let block_entry = mk_empty_block () in
+          (* The block entry *)
+          let block_entry = mk_empty_block () in (* TODO: should be a merge block for loops *)
           (* Recurse inside the block *)
           let (blocks, edges, breaks, returns, entry', exit') = helper [] instrs' in
           (* Create a node for the exit of the block *)
-          let block_exit = mk_empty_block () in
+          let block_exit = mk_merge_block vstack' block_vars in
           (* Recurse after the block *)
           let (blocks', edges', breaks', returns', entry'', exit'') = helper [] rest in
           (* Compute the new break levels:
              All breaks with level 0 break the current block
              All other breaks see their level decreased by one.
              Important: break are handled differently within loop: a break goes back to the loop entry*)
-          let all_breaks = breaks in (* TODO: shouldn't it be without breaks'? *)
+          let all_breaks = breaks in
           let new_breaks = breaks' @ (List.map (List.filter all_breaks
                                                   ~f:(fun (_, level, _) -> level > 0)))
               ~f:(fun (idx, level, branch) -> (idx, level - 1, branch)) in
@@ -247,7 +236,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
     exit_block = return_block.idx;
     vars = List.concat (List.map actual_blocks ~f:(fun b -> match b.content with
         | Nothing -> []
-        | Control c -> Instr.vars b.content
-        | Data instrs -> List.concat (List.map instrs ~f:(fun i -> Intstr.vars (Data i)))
-        | ControlMerge _ -> failwith "TODO"))
+        | Control c -> Instr.vars (Control c)
+        | Data instrs -> List.concat (List.map instrs ~f:(fun i -> Instr.vars (Data i)))
+        | ControlMerge (_, (vs1, vs2, vsopt)) -> vs1 @ vs2 @ (Option.to_list vsopt)))
   }
