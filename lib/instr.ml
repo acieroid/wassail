@@ -200,13 +200,12 @@ let arity_of_fun (m : Ast.module_) (f : Ast.var) : int * int =
 let counter : int ref = ref 0
 let alloc_var (_i : Ast.instr) (name : string) : string =
   let v = Printf.sprintf "%s_%d" name !counter in
-  Printf.printf "alloc var %s\n" name;
   counter := !counter + 1;
   v
 
-let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string list) (nlocals : int) (nglobals : int) : t =
+let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string list) (nargs : int) (nlocals : int) (nglobals : int) : t =
   let block_new_vars (name : string) (arity_out : int) : block_vars =
-    (List.init nlocals ~f:(fun n -> alloc_var i (Printf.sprintf "%s_l%d" name n)),
+    (List.init (nargs+nlocals) ~f:(fun n -> alloc_var i (Printf.sprintf "%s_l%d" name n)),
      List.init nglobals ~f:(fun n -> alloc_var i (Printf.sprintf "%s_g%d" name n)),
      (if arity_out = 0 then None else Some (alloc_var i (Printf.sprintf "%s_ret" name)))) in
   match i.it with
@@ -216,9 +215,8 @@ let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string l
     let (arity_in, arity_out) = arity_of_block st in
     assert (arity_in = 0); (* what does it mean to have arity_in > 0? *)
     assert (arity_out <= 1);
-    Printf.printf "[%d] block arity: %d, %d\n" fid arity_in arity_out;
     (* Create one var per local and global, and one extra var if arity_out is 1 *)
-    let (body, _) = seq_of_wasm m fid instrs vstack nlocals nglobals in
+    let (body, _) = seq_of_wasm m fid instrs vstack nargs nlocals nglobals in
     let (_, _, ret) as vars = block_new_vars "block" arity_out in
     Control (Block (body, vstack, (Option.to_list ret) @ vstack, vars))
   | Ast.Const lit ->
@@ -261,10 +259,9 @@ let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string l
     Data (Select (var :: (List.drop vstack 3), var))
   | Ast.Loop (st, instrs) ->
     let (arity_in, arity_out) = arity_of_block st in
-    Printf.printf "[%d] loop arity: %d, %d\n" fid arity_in arity_out;
-    assert (arity_in = 0); (* TODO *)
+    assert (arity_in = 0); (* what does it mean to have arity_in > 0 for a loop? *)
     assert (arity_out <= 1); (* TODO: support any arity out? *)
-    let (body, _) = seq_of_wasm m fid instrs vstack nlocals nglobals in
+    let (body, _) = seq_of_wasm m fid instrs vstack nargs nlocals nglobals in
     let (_, _, ret) as vars = block_new_vars "loop" arity_out in
     Control (Loop (body, vstack, (Option.to_list ret) @ vstack, vars))
   | Ast.If (st, instrs1, instrs2) ->
@@ -273,9 +270,8 @@ let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string l
     let (arity_in, arity_out) = arity_of_block st in
     assert (arity_in = 0);
     assert (arity_out <= 1);
-    Printf.printf "[%d] if arity: %d, %d\n" fid arity_in arity_out;
-    let (body1, _vstack1) = seq_of_wasm m fid instrs1 vstack' nlocals nglobals in
-    let (body2, _vstack2) = seq_of_wasm m fid instrs2 vstack' nlocals nglobals in
+    let (body1, _vstack1) = seq_of_wasm m fid instrs1 vstack' nargs nlocals nglobals in
+    let (body2, _vstack2) = seq_of_wasm m fid instrs2 vstack' nargs nlocals nglobals in
     let (_, _, ret) as vars = block_new_vars "if" arity_out in
     Control (If (body1, body2, vstack', (Option.to_list ret) @ vstack', vars))
   | Ast.BrTable (_vs, _v) -> failwith "br_table unsupported"
@@ -312,11 +308,11 @@ let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string l
     Data (Test (Testop.of_wasm op, var :: (List.drop vstack 1), var))
   | Ast.Convert _op -> failwith "convert unsupported"
   | Ast.Unary _op -> failwith "unary unsupported"
-and seq_of_wasm (m : Ast.module_) (fid : int) (is : Ast.instr list) (vstack : string list) (nlocals : int) (nglobals : int) : t list * string list =
+and seq_of_wasm (m : Ast.module_) (fid : int) (is : Ast.instr list) (vstack : string list) (nargs : int) (nlocals : int) (nglobals : int) : t list * string list =
   let (instrs, vstack) = List.fold_left is
     ~init:([], vstack)
     ~f:(fun (instrs, vstack) instr ->
-        let i = of_wasm m fid instr vstack nlocals nglobals in
+        let i = of_wasm m fid instr vstack nargs nlocals nglobals in
         let vstack' = vstack_block_spec i in
         (i :: instrs, vstack')) in
     List.rev instrs, vstack
