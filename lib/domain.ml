@@ -34,10 +34,10 @@ let constraints_to_string (c : apron_domain Apron.Abstract1.t) : string =
   (Apron.Abstract1.print Stdlib.Format.str_formatter c; Stdlib.Format.flush_str_formatter ())
 
 let to_string (s : state) : string =
-  Printf.sprintf "{\n vstack: [%s],\n locals: [%s],\n globals: [%s],\n memory: %s\n constraints: %s\n}"
+  Printf.sprintf "{\n vstack: [%s],\n memory: %s\n constraints: %s\n}"
     (Vstack.to_string s.vstack)
-    (Locals.to_string s.locals)
-    (Globals.to_string s.globals)
+    (* (Locals.to_string s.locals)
+       (Globals.to_string s.globals) *)
     (Memory.to_string s.memory)
     (constraints_to_string s.constraints)
 
