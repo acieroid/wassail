@@ -119,6 +119,18 @@
     end
     ;; vstack: [l0]
     nop)
+  (func (;test-if-return-loop;) (type 2) (result i32) ;; 8
+    (local i32 i32 i32)
+    local.get 2
+    if  ;; label = @1
+      local.get 0
+      return
+    end
+    loop  ;; label = @1
+      local.get 2
+      br_if 0 (;@1;)
+    end
+    local.get 1)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))

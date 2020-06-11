@@ -59,8 +59,7 @@ let init (cfg : Cfg.t) (nglobals : int) : state =
                List.mapi cfg.local_types ~f:(fun locali _typ -> (Printf.sprintf "f%d_l%d" cfg.idx locali, Apron.Interval.of_int 0 0)) in
   let globals = List.init nglobals ~f:(fun globali -> (Printf.sprintf "f%d_g%d" cfg.idx globali, Apron.Interval.top)) in
   assert (List.length cfg.return_types <= 1); (* wasm spec does not allow for more than one return type (currently) *)
-  let ret = if List.length cfg.return_types = 0 then [] else [(return_name cfg.idx, Apron.Interval.top)] in
-  let vars_and_vals = ret @ locals @ globals @ (List.map cfg.vars ~f:(fun v -> (v, Apron.Interval.top))) in
+  let vars_and_vals = locals @ globals @ (List.map cfg.vars ~f:(fun v -> (v, Apron.Interval.top))) in
   let apron_vars = Array.of_list (List.map vars_and_vals  ~f:(fun (var, _) -> Apron.Var.of_string var)) in
   Printf.printf "make env with %s\n" (String.concat ~sep:"," (List.map vars_and_vals ~f:fst)) ;
   let apron_env = Apron.Environment.make apron_vars [| |] in
@@ -79,9 +78,9 @@ let bottom (cfg : Cfg.t) (nglobals : int) (vars : string list) : state =
   let locals = List.mapi cfg.arg_types ~f:(fun argi _typ -> (arg_name cfg.idx argi, Apron.Interval.bottom)) @
                List.mapi cfg.local_types ~f:(fun locali _typ -> (Printf.sprintf "f%d_l%d" cfg.idx locali, Apron.Interval.bottom)) in
   let globals = List.init nglobals ~f:(fun globali -> (Printf.sprintf "f%d_g%d" cfg.idx globali, Apron.Interval.bottom)) in
-  let ret = if List.length cfg.return_types = 0 then [] else [(return_name cfg.idx, Apron.Interval.top)] in
-  let vars_and_vals = ret @ locals @ globals @ (List.map vars ~f:(fun v -> (v, Apron.Interval.bottom))) in
+  let vars_and_vals = locals @ globals @ (List.map vars ~f:(fun v -> (v, Apron.Interval.bottom))) in
   let apron_vars = Array.of_list (List.map vars_and_vals  ~f:(fun (var, _) -> Apron.Var.of_string var)) in
+  Printf.printf "vars: %s\n" (String.concat ~sep:"," (List.map ~f:fst vars_and_vals));
   let apron_env = Apron.Environment.make apron_vars [| |] in
   let apron_abs = Apron.Abstract1.of_box manager apron_env apron_vars (Array.of_list (List.map vars_and_vals ~f:(fun (_, v) -> v))) in
   {

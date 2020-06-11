@@ -16,31 +16,13 @@ let analyze
   let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
                                          ~f:(fun idx ->
                                              (idx, (bottom, bottom))))) in
-  (* Handles exit block properly: if we reach the exit block, we need to model a "return" instruction on paths that have not done so explicitly *)
-  let handle_exit (block_idx : int) (s : Domain.state) : Domain.state =
-    if block_idx = cfg.exit_block && (List.length cfg.return_types = 1) then
-      (* It is the exit block, and it has a return value *)
-      if List.is_empty s.vstack then
-        (* The vstack is already empty, we don't need to do anything (there was a return instr already) *)
-        s
-      else
-        (* The vstack is not empty, its top value should be returned *)
-        let v, vstack = Vstack.pop s.vstack in
-        assert Stdlib.(vstack = []); (* make sure there are no other values on the stack *)
-        (* Now we add the constraint ret = v *)
-        let ret = Domain.return_name cfg.idx in
-        Domain.add_constraint { s with vstack = [] } ret v
-    else
-      (* not the exit block, nothing to do *)
-      s
-  in
   (* Merges the entry states before analyzing the given block *)
   let merge_flows (block : Basic_block.t) (states : Domain.state list) : Domain.state =
     match states with
     | [] -> (* no in state, use init *)
       init
     | s :: [] -> (* single state *)
-      handle_exit block.idx s
+      s
     | _ ->
       (* multiple states, block should be a control-flow merge *)
       begin match block.content with
@@ -62,10 +44,6 @@ let analyze
              the same, only their memory might differ, but joining memory is
              handled in memory.ml by computing the most general memory *)
           List.reduce_exn states' ~f:Domain.join
-        | _ when block.idx = cfg.exit_block ->
-          (* The exit block can have multiple input states, they just need to be joined *)
-          (* TODO: ideally, we should handle this as a control merge block *)
-          List.reduce_exn (List.map states ~f:(handle_exit block.idx)) ~f:Domain.join
         | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
       end
   in

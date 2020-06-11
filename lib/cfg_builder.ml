@@ -1,11 +1,11 @@
 open Core_kernel
 open Helpers
 
-let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
+let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
   (* true to simplify the CFG, false to disable simplification *)
   let simplify = true in
-  Printf.printf "building %d\n" faddr;
-  let funcinst = Wasm_module.get_funcinst m faddr in
+  Printf.printf "building %d\n" fid;
+  let funcinst = Wasm_module.get_funcinst module_ fid in
   let cur_idx : int ref = ref 0 in
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
   let mk_data_block (reverse_instrs : Instr.data list) : Basic_block.t =
@@ -154,7 +154,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
            new_breaks (* filtered breaks *),
            returns @ returns' (* returns are propagated as is *),
            block.idx, exit'')
-        | Return ->
+        | Return _ ->
           (* Return block. The rest of the instructions does not matter (it
              should be empty) *)
           assert (List.is_empty rest);
@@ -185,8 +185,13 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
       end
   in
   let (blocks, edges, breaks, returns, _entry_idx, exit_idx) = helper [] funcinst.code.body in
+  (* Creates the final vars *)
+  let vars = (List.init (Func_inst.nargs funcinst) ~f:(fun n -> Printf.sprintf "f%d_ret_p%d" fid n) @
+              List.init (Func_inst.nlocals funcinst) ~f:(fun n -> Printf.sprintf "f%d_ret_l%d" fid n),
+              List.init module_.nglobals ~f:(fun n -> Printf.sprintf "f%d_ret_g%d" fid n),
+              (if (Func_inst.nreturns funcinst) = 0 then None else Some (Printf.sprintf "f%d_ret" fid))) in
   (* Create the return block *)
-  let return_block = mk_empty_block () in
+  let return_block = mk_merge_block [] vars in
   let blocks' = return_block :: blocks in
   (* Connect the return block, and remove all edges that start from a return block (as they are unreachable) *)
   let edges' = (exit_idx, return_block.idx, None) :: List.map returns ~f:(fun from -> (from, return_block.idx, None)) @ (List.filter edges ~f:(fun (src, _, _) -> not (List.mem returns src ~equal:Stdlib.(=)))) in
@@ -216,7 +221,7 @@ let build (faddr : Address.t) (m : Wasm_module.t) : Cfg.t =
     (* The name itself *)
     name = Option.value funcinst.name ~default:"<unexported>";
     (* The index of this block is the integer that represent the address of this function *)
-    idx = faddr;
+    idx = fid;
     (* Argument types *)
     arg_types = fst funcinst.typ;
     (* Return types *)

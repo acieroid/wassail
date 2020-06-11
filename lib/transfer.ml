@@ -134,8 +134,8 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
         end
       | _ -> failwith "load: invalid variables"
     end
-  | Load ({ typ = I32; offset; sz = Some (Pack8, ZX) }, _, vars) ->
-    Logging.warn "ImpreciseOperation" "load8 returns top";
+  | Load ({ typ = I32; offset; sz = Some (Pack8, _) }, _, vars) ->
+    Logging.warn "ImpreciseOperation" "load8 returns top, and ignores sx/zx";
     let vaddr, vstack' = Vstack.pop state.vstack in
     begin match vars with
       | [ret; addr0; _addr1; _addr2; _addr3] ->
@@ -143,8 +143,9 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
                        with vstack = ret :: vstack' } in
         begin match Memory.load8 state'.memory addr0 (Domain.are_precisely_equal state') with
           | Some (v, b) ->
-            Logging.info (Printf.sprintf "load8: got byte %d of %s" b v);
+            Logging.warn "ImpreciseOperation" (Printf.sprintf "load8: got byte %d of %s" b v);
             (* There's no way of encoding this constraint with apron *)
+            (* TODO: add ret = v if b = -1 *)
             state'
           | None -> state'
         end
@@ -158,19 +159,29 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
       | [addr0; addr1; addr2; addr3] ->
         let vval, vstack' = Vstack.pop state.vstack in
         let vaddr, vstack'' = Vstack.pop vstack' in
-        { (Domain.add_constraint
-            (Domain.add_constraint
-               (Domain.add_constraint
-                  (Domain.add_constraint state addr3 (Printf.sprintf "%s+%d" vaddr (offset+3)))
-                  addr2 (Printf.sprintf "%s+%d" vaddr (offset+2)))
-               addr1 (Printf.sprintf "%s+%d" vaddr (offset+1)))
-            addr0 (Printf.sprintf "%s+%d" vaddr offset))
+        { (Domain.add_constraints state
+             [(addr3, (Printf.sprintf "%s+%d" vaddr (offset+3)));
+              (addr2, (Printf.sprintf "%s+%d" vaddr (offset+2)));
+              (addr1, (Printf.sprintf "%s+%d" vaddr (offset+1)));
+              (addr0, (Printf.sprintf "%s+%d" vaddr offset))])
           with vstack = vstack''; memory = Memory.store state.memory [(addr3, (vval, 3));
                                                                       (addr2, (vval, 2));
                                                                       (addr1, (vval, 1));
                                                                       (addr0, (vval, 0))]
         }
-      | _ -> failwith "TODO"
+      | _ -> failwith "store: invalid vars"
+    end
+  | Store ({ typ = I32; offset; sz = Some (Pack8, SX)}, _, vars) ->
+    Logging.warn "ImpreciseOperation" "store8 ignores sx/zx";
+    begin match vars with
+      | [addr0; _addr1; _addr2; _addr3] ->
+        let vval, vstack' = Vstack.pop state.vstack in
+        let vaddr, vstack'' = Vstack.pop vstack' in
+        { (Domain.add_constraint state addr0 (Printf.sprintf "%s+%d" vaddr offset))
+          with vstack = vstack'';
+               (* -1 means we store the entire value? *)
+               memory = Memory.store state.memory [(addr0, (vval, -1))] }
+      | _ -> failwith "store: invalid vars"
     end
   | Store (op, _, _) ->
     (* TODO: store with i64? *)
@@ -226,12 +237,13 @@ let control_instr_transfer
     let state' = { state with vstack = vstack' } in
     Branch (Domain.add_constraint state' cond "1",
             Domain.add_constraint state' cond "0")
-  | Return ->
+  | Return _ ->
     (* return drops everything from the stack, but adds constraints for the return value if necessary *)
     Simple
       (if List.length cfg.return_types = 1 then
+         let ret = Domain.return_name cfg.idx in
          let v, _ = Vstack.pop state.vstack in
-         Domain.add_constraint { state with vstack = [] } (Domain.return_name cfg.idx) v
+         Domain.add_constraint { state with vstack = [ret] } ret v
        else
          { state with vstack = [] })
   | Unreachable ->

@@ -24,7 +24,7 @@ let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (fid : int) (f : Wasm
       name = name;
       typ = (List.map input ~f:Type.of_wasm, List.map output ~f:Type.of_wasm);
       module_ = minst;
-      code = Func.of_wasm m fid f (List.length input) nglobals
+      code = Func.of_wasm m fid f (List.length input) nglobals (List.length output)
     }
 let to_string (f : t) : string =
   Printf.sprintf "Function %s (%s -> %s):\nCode: %s"
@@ -34,3 +34,12 @@ let to_string (f : t) : string =
     (String.concat ~sep:", " (List.map (fst f.typ) ~f:Type.to_string))
     (String.concat ~sep:", " (List.map (snd f.typ) ~f:Type.to_string))
     (Func.to_string f.code)
+
+let nargs (f : t) : int =
+  List.length (fst f.typ)
+
+let nlocals (f : t) : int =
+  List.length f.code.locals
+
+let nreturns (f : t) : int =
+  List.length (snd f.typ)

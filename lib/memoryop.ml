@@ -17,7 +17,8 @@ module T = struct
 end
 include T
 let to_string (op : t) : string =
-  Printf.sprintf "offset=%d, sz=%s"
+  Printf.sprintf "typ=%s offset=%d, sz=%s"
+    (Type.to_string op.typ)
     op.offset
     (match op.sz with
      | Some (pack, ext) ->
