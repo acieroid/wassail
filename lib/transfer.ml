@@ -211,12 +211,17 @@ let control_instr_transfer
     let funids = List.filter (Table_inst.indices table) ~f:(fun idx ->
         fst (Domain.is_equal state' v idx)) in
     let funs = List.map funids ~f:(fun idx -> Table_inst.get table idx) in
-    (* Applies the summaries *)
+    (* The type of the function that should be applied *)
+    let ftype = Wasm_module.get_type module_ typ in
+    let arity_in = List.length (fst ftype) in
+    let arity_out = List.length (snd ftype) in
+    assert (arity_out <= 1);
+    (* Apply the summaries *)
     let resulting_state = List.fold_left funs ~init:None ~f:(fun acc f ->
         match f with
         | Some fa ->
-          if Stdlib.((Wasm_module.get_type module_ typ) = (Wasm_module.get_func_type module_ fa)) then begin
-            Logging.info (Printf.sprintf "call_indirect applies function %d (type: %s)" fa (Type.funtype_to_string (Wasm_module.get_type module_ typ)));
+          if Stdlib.(ftype = (Wasm_module.get_func_type module_ fa)) then begin
+            Logging.info (Printf.sprintf "call_indirect applies function %d (type: %s)" fa (Type.funtype_to_string ftype));
 
             (* Types match, apply the summary *)
             let summary = IntMap.find_exn summaries fa in
@@ -228,8 +233,8 @@ let control_instr_transfer
     begin match resulting_state with
       | Some st -> Simple st
       | None ->
-        (* If the call can't be resolved, apply the top summary for the corresponding type *)
-        failwith "call_indirect cannot resolve call"
+        (* If the call can't be resolved, pop the right number of arguments, and push ret if necessary *)
+        Simple { state with vstack = Option.to_list ret @ List.drop vstack' arity_in }
     end
   | Br _ ->
     Simple state
