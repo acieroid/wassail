@@ -128,6 +128,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
                     Memory.load8 state'.memory addr1 (Domain.are_precisely_equal state'),
                     Memory.load8 state'.memory addr0 (Domain.are_precisely_equal state') with
         | Some (v, 3), Some (v', 2), Some (v'', 1), Some (v''', 0) when Stdlib.(v = v' && v' = v'' && v'' = v''') ->
+          (* TODO: this may not be correct: v could be an i64 value of which we only take 4 bytes *)
           Domain.add_constraint state' ret v
         | _ ->
           state'
@@ -165,6 +166,30 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
               (addr1, (Printf.sprintf "%s+%d" vaddr (offset+1)));
               (addr0, (Printf.sprintf "%s+%d" vaddr offset))])
           with vstack = vstack''; memory = Memory.store state.memory [(addr3, (vval, 3));
+                                                                      (addr2, (vval, 2));
+                                                                      (addr1, (vval, 1));
+                                                                      (addr0, (vval, 0))]
+        }
+      | _ -> failwith "store: invalid vars"
+    end
+  | Store ({ typ = I64; offset; sz = None }, _, vars) ->
+    begin match vars with
+      | [addr0; addr1; addr2; addr3; addr4; addr5; addr6; addr7] ->
+        let vval, vstack' = Vstack.pop state.vstack in
+        let vaddr, vstack'' = Vstack.pop vstack' in
+        { (Domain.add_constraints state
+             [(addr7, (Printf.sprintf "%s+%d" vaddr (offset+7)));
+              (addr6, (Printf.sprintf "%s+%d" vaddr (offset+6)));
+              (addr5, (Printf.sprintf "%s+%d" vaddr (offset+5)));
+              (addr4, (Printf.sprintf "%s+%d" vaddr (offset+4)));
+              (addr3, (Printf.sprintf "%s+%d" vaddr (offset+3)));
+              (addr2, (Printf.sprintf "%s+%d" vaddr (offset+2)));
+              (addr1, (Printf.sprintf "%s+%d" vaddr (offset+1)));
+              (addr0, (Printf.sprintf "%s+%d" vaddr offset))])
+          with vstack = vstack''; memory = Memory.store state.memory [(addr6, (vval, 7));
+                                                                      (addr5, (vval, 6));
+                                                                      (addr4, (vval, 4));
+                                                                      (addr3, (vval, 3));
                                                                       (addr2, (vval, 2));
                                                                       (addr1, (vval, 1));
                                                                       (addr0, (vval, 0))]
@@ -272,16 +297,16 @@ let check_vstack (state : Domain.state) (spec : Vstack.t) : unit =
     failwith (Printf.sprintf "invalid vstack (expected [%s]) in state %s" (String.concat spec ~sep:",") (Domain.to_string state))
 
 let transfer (b : Basic_block.t) (state : Domain.state) (summaries : Summary.t IntMap.t) (module_ : Wasm_module.t) (cfg : Cfg.t) : result =
-  Printf.printf "analyzing block %d\n" b.idx;
+  (* Printf.printf "analyzing block %d\n" b.idx; *)
   match b.content with
   | Data instrs ->
     Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
-        Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string prestate) (Instr.data_to_string instr);
+        (* Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string prestate) (Instr.data_to_string instr); *)
         let poststate = data_instr_transfer module_ instr prestate in
         check_vstack poststate (Instr.vstack_spec (Data instr));
         poststate))
   | Control instr ->
-    Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string state) (Instr.control_to_short_string instr);
+    (* Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string state) (Instr.control_to_short_string instr); *)
     let poststate = control_instr_transfer instr state summaries module_ cfg in
     let vstack_spec = Instr.vstack_spec (Control instr) in
     begin match poststate with

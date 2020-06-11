@@ -297,9 +297,18 @@ let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string l
     let vars = [alloc_var i "load0"; alloc_var i "load1"; alloc_var i "load2"; alloc_var i "load3"] in
     Data (Load (Memoryop.of_wasm_load op, var_ret :: (List.drop vstack 1), var_ret :: vars))
   | Ast.Store op ->
-    (* Allocate 4 variables to represent 4 addresses where the i32 value is stored *)
-    (* TODO: also support i64, and support load8 which only requires one value *)
-    let vars = [alloc_var i "store0"; alloc_var i "store1"; alloc_var i "store2"; alloc_var i "store3"] in
+    (* Allocate variables to represent addresses where the value is stored *)
+    let vars = match op with
+      | { ty = Types.I32Type; sz = _sz; _ } ->
+      (* I32, 4 variables for 4 bytes *)
+        [alloc_var i "store0"; alloc_var i "store1"; alloc_var i "store2"; alloc_var i "store3"]
+      | { ty = Types.I64Type; sz = _sz; _ } ->
+        (* I64, 8 variables for 8 bytes *)
+        [alloc_var i "store0"; alloc_var i "store1"; alloc_var i "store2"; alloc_var i "store3"; alloc_var i "store4"; alloc_var i "store5"; alloc_var i "store6"; alloc_var i "store7"]
+      | { ty = Types.F32Type; _ }
+      | { ty = Types.F64Type; _ } ->
+        (* unsupported, don't allocate anything (yet) *)
+        [] in
     Data (Store (Memoryop.of_wasm_store op, List.drop vstack 2, vars))
   | Ast.MemorySize ->
     let var = alloc_var i "memory.size" in
