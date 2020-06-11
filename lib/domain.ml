@@ -103,6 +103,11 @@ let join (s1 : state) (s2 : state) : state =
   env = (assert Stdlib.(s1.env = s2.env); s1.env);
 }
 
+let join_opt (s1 : state) (s2 : state option) : state =
+  match s2 with
+  | Some s -> join s1 s
+  | None -> s1
+
 (** Add multiple constraints *)
 let add_constraints (s : state) (constraints : (string * string) list) : state =
   try
@@ -129,19 +134,21 @@ let keep_only (s : state) (vars : string list) : state =
                false (* not sure what this means *)
   }
 
-(** Checks if the value of variable v may be zero.
-    Returns two booleans: the first one indicates if v can be zero, and the second if it can be non-zero *)
-let is_zero (s : state) (v : string) : bool * bool =
+(** Checks if the value of variable v may be equal to a given number.
+    Returns two booleans: the first one indicates if v can be equal to n, and the second if it can be different than n *)
+let is_equal (s : state) (v : string) (n : int) : bool * bool =
   let box = Apron.Abstract1.to_box manager s.constraints in
   let dim = Apron.Environment.dim_of_var box.box1_env (Apron.Var.of_string v) in
   let interval = Array.get box.interval_array dim in
   (* Apron doc: cmp is: "0: equality -1: i1 included in i2 +1: i2 included in i1 -2: i1.inf less than or equal to i2.inf +2: i1.inf greater than i2.inf" *)
-  match Apron.Interval.cmp interval (Apron.Interval.of_int 0 0) with
-  | 0 -> (true, false) (* definitely 0, and only 0 *)
+  match Apron.Interval.cmp interval (Apron.Interval.of_int n n) with
+  | 0 -> (true, false) (* definitely n, and only n *)
   | -1 -> (true, false) (* should not happen, because that's caught by the previous case *)
-  | +1 -> (true, true) (* [0,0] is contained in v: can be 0 or not *)
-  | -2 | +2 -> (false, true) (* definitely not 0 *)
+  | +1 -> (true, true) (* [n,n] is contained in v: can be n or not *)
+  | -2 | +2 -> (false, true) (* definitely not n *)
   | _ -> failwith "should not happen"
+
+let is_zero (s : state) (v : string) : bool * bool = is_equal s v 0
 
 (** Checks if two variables may be equal.
     Returns two booleans: the first one indicates if they may be equal, the second one if they may be different *)

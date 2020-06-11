@@ -25,8 +25,11 @@ let init (t : Table.t) (elems : Elem.t list) : t =
     );
   table
 
-let get (t : t) (idx : Int32.t) : funcelem =
-  Wasm.Lib.Array32.get t.elems idx
+let indices (t : t) : int list =
+  List.init (Array.length t.elems) ~f:(fun i -> i)
+
+let get (t : t) (idx : int) : funcelem =
+  Array.get t.elems idx
 
 (*
 let get_subsumed_by_index (t : t) (idx : Value.t) : funcelem list =

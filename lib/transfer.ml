@@ -201,27 +201,36 @@ let control_instr_transfer
     let summary = IntMap.find_exn summaries f in
     (* We get the return name from the new_vars *)
     Simple (Summary.apply summary f state ret module_)
-  | CallIndirect (_typ, _, _ret) -> failwith "NYI: call_indirect" (*
+  | CallIndirect (typ, _, ret) ->
+    (* v is the index in the table that points to the called functiion *)
     let (v, vstack') = Vstack.pop state.vstack in
     let state' = { state with vstack = vstack' } in
+    (* Get table 0 *)
     let table = List.nth_exn module_.tables 0 in
-    let funs = Table_inst.get_subsumed_by_index table v in
+    (* Get all indices that v could be equal to *)
+    let funids = List.filter (Table_inst.indices table) ~f:(fun idx ->
+        fst (Domain.is_equal state' v idx)) in
+    let funs = List.map funids ~f:(fun idx -> Table_inst.get table idx) in
+    (* Applies the summaries *)
     let resulting_state = List.fold_left funs ~init:None ~f:(fun acc f ->
         match f with
         | Some fa ->
-          Printf.printf "fa:%d\n" fa;
-          if Stdlib.(List.nth module_.types typ = (List.nth module_.funcs fa).typ) then
+          if Stdlib.((Wasm_module.get_type module_ typ) = (Wasm_module.get_func_type module_ fa)) then begin
+            Logging.info (Printf.sprintf "call_indirect applies function %d (type: %s)" fa (Type.funtype_to_string (Wasm_module.get_type module_ typ)));
+
             (* Types match, apply the summary *)
             let summary = IntMap.find_exn summaries fa in
-            Domain.join_opt (Summary.apply summary fa state' module_) acc
-          else
+            Some (Domain.join_opt (Summary.apply summary fa state' ret module_) acc)
+          end else
             (* Types don't match, can't apply this function so we ignore it *)
             acc
         | None -> acc) in
     begin match resulting_state with
       | Some st -> Simple st
-      | None -> failwith "call_indirect cannot resolve call"
-    end *)
+      | None ->
+        (* If the call can't be resolved, apply the top summary for the corresponding type *)
+        failwith "call_indirect cannot resolve call"
+    end
   | Br _ ->
     Simple state
   | BrIf _ ->

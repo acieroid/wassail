@@ -112,8 +112,8 @@ let vars (instr : t) : vars = match instr with
       | Block (_, _, _, _)
       | Loop (_, _, _, _)
       | If (_, _, _, _, _) -> []
-      | Call (_, _, v) -> Option.to_list v
-      | CallIndirect (_, _, _)
+      | Call (_, _, v)
+      | CallIndirect (_, _, v) -> Option.to_list v
       | Br (_, _) | BrIf (_, _)
       | Return _ | Unreachable -> []
     end
@@ -277,13 +277,14 @@ let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string l
     Control (If (body1, body2, vstack', (Option.to_list ret) @ vstack', vars))
   | Ast.BrTable (_vs, _v) -> failwith "br_table unsupported"
   | Ast.CallIndirect f ->
+    let _, vstack' = Vstack.pop vstack in (* pop the function pointer *)
     let (arity_in, arity_out) = arity_of_fun_type m f in
     assert (arity_out <= 1);
     if arity_out = 0 then
-      Control (CallIndirect (Var.of_wasm f, List.drop vstack arity_in, None))
+      Control (CallIndirect (Var.of_wasm f, List.drop vstack' arity_in, None))
     else
       let var = alloc_var i "call_indirect" in
-      Control (CallIndirect (Var.of_wasm f, var :: List.drop vstack arity_in, Some var))
+      Control (CallIndirect (Var.of_wasm f, var :: List.drop vstack' arity_in, Some var))
   | Ast.GlobalGet g ->
     let var = alloc_var i "global.get" in
     Data (GlobalGet (Var.of_wasm g, var :: vstack, var))

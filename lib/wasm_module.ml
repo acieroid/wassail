@@ -54,3 +54,9 @@ let of_wasm (m : Wasm.Ast.module_) : t =
         | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
                                          List.map b ~f:Type.of_wasm))
   })
+
+let get_type (m : t) (tid : int) : Type.t list * Type.t list =
+  List.nth_exn m.types tid
+
+let get_func_type (m : t) (fid : int) : Type.t list * Type.t list =
+  (List.nth_exn m.funcs (fid-m.nimports)).typ
