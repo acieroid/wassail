@@ -107,7 +107,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
     (* add ret = [0;1] *)
     { (Domain.add_constraint state ret "[0;1]")
       with vstack = ret :: vstack' }
-  | Load ({ typ = I32; align = _; offset; sz = None }, _, vars) ->
+  | Load ({ typ = I32; offset; sz = None }, _, vars) ->
     let vaddr, vstack' = Vstack.pop state.vstack in
     begin match vars with
       | [ret; addr0; addr1; addr2; addr3] ->
@@ -123,19 +123,37 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
             with vstack = ret :: vstack' } in
         (* Now loads all addris (which check for each addri whether it is precisely equal to one of the store address and returns the corresponding value).
            If this is the case for all addri, and if their respective values are compatible (i.e., 4 bytes of the same variable), then we can precisely add a constraint, otherwise we don't restrict the return value *)
-        begin match Memory.load8 state.memory addr3 (Domain.are_precisely_equal state'),
-                    Memory.load8 state.memory addr2 (Domain.are_precisely_equal state'),
-                    Memory.load8 state.memory addr1 (Domain.are_precisely_equal state'),
-                    Memory.load8 state.memory addr0 (Domain.are_precisely_equal state') with
+        begin match Memory.load8 state'.memory addr3 (Domain.are_precisely_equal state'),
+                    Memory.load8 state'.memory addr2 (Domain.are_precisely_equal state'),
+                    Memory.load8 state'.memory addr1 (Domain.are_precisely_equal state'),
+                    Memory.load8 state'.memory addr0 (Domain.are_precisely_equal state') with
         | Some (v, 3), Some (v', 2), Some (v'', 1), Some (v''', 0) when Stdlib.(v = v' && v' = v'' && v'' = v''') ->
           Domain.add_constraint state' ret v
         | _ ->
           state'
         end
-      | _ -> failwith "TODO: load"
+      | _ -> failwith "load: invalid variables"
     end
-  | Load _ -> failwith "load not supported with such op argument"
-  | Store ({ typ = I32; align = _; offset; sz = None }, _, vars) ->
+  | Load ({ typ = I32; offset; sz = Some (Pack8, ZX) }, _, vars) ->
+    Logging.warn "ImpreciseOperation" "load8 returns top";
+    let vaddr, vstack' = Vstack.pop state.vstack in
+    begin match vars with
+      | [ret; addr0; _addr1; _addr2; _addr3] ->
+        let state' = { (Domain.add_constraint state addr0 (Printf.sprintf "%s+%d" vaddr offset))
+                       with vstack = ret :: vstack' } in
+        begin match Memory.load8 state'.memory addr0 (Domain.are_precisely_equal state') with
+          | Some (v, b) ->
+            Logging.info (Printf.sprintf "load8: got byte %d of %s" b v);
+            (* There's no way of encoding this constraint with apron *)
+            state'
+          | None -> state'
+        end
+      | _ -> failwith "load: invalid variables"
+    end
+  | Load (op, _, _) ->
+    (* TODO: load with sz=8,zx (and others, but this is the most important now *)
+    failwith (Printf.sprintf "load not supported with such op argument: %s" (Memoryop.to_string op))
+  | Store ({ typ = I32; offset; sz = None }, _, vars) ->
     begin match vars with
       | [addr0; addr1; addr2; addr3] ->
         let vval, vstack' = Vstack.pop state.vstack in
@@ -154,7 +172,9 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
         }
       | _ -> failwith "TODO"
     end
-  | Store _ -> failwith "store not supported with such op argument"
+  | Store (op, _, _) ->
+    (* TODO: store with i64? *)
+    failwith (Printf.sprintf "store not supported with such op argument: %s" (Memoryop.to_string op))
 
 let control_instr_transfer
     (i : Instr.control) (* The instruction *)

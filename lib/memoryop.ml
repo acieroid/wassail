@@ -9,7 +9,6 @@ module T = struct
   [@@deriving sexp, compare]
   type t = {
     typ: Type.t;
-    align: int;
     offset: int;
     (* The extension part is only use for load operation and should be ignored for store operations *)
     sz: (pack_size * extension) option;
@@ -18,8 +17,8 @@ module T = struct
 end
 include T
 let to_string (op : t) : string =
-  Printf.sprintf "align=%d, offset=%d, sz=%s"
-    op.align op.offset
+  Printf.sprintf "offset=%d, sz=%s"
+    op.offset
     (match op.sz with
      | Some (pack, ext) ->
        Printf.sprintf "%s,%s"
@@ -33,7 +32,11 @@ let to_string (op : t) : string =
      | None -> "none")
 let of_wasm_load (op : Ast.loadop) : t = {
   typ = Type.of_wasm op.ty;
-  align = op.align;
+  (* We don't keep information about alignment. Wasm spec says: "The alignment
+     memarg.align in load and store instructions does not affect the
+     semantics. It is an indication that the offset ea at which the memory is
+     accessed is intended to satisfy the property eamod2memarg.align=0. " *)
+  (* align = op.align; *)
   offset = Int32.to_int_exn op.offset;
   sz = Option.map op.sz ~f:(fun (pack, ext) ->
       (match pack with
@@ -46,7 +49,8 @@ let of_wasm_load (op : Ast.loadop) : t = {
 }
 let of_wasm_store (op : Ast.storeop) : t = {
   typ = Type.of_wasm op.ty;
-  align = op.align;
+  (* See of_wasm_load: we don't keep the alignment *)
+  (* align = op.align; *)
   offset = Int32.to_int_exn op.offset;
   sz = Option.map op.sz ~f:(function
       | Wasm.Types.Pack8 -> (Pack8, SX)
