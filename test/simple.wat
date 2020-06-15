@@ -2,6 +2,7 @@
   (type (;0;) (func (param i32)))
   (type (;1;) (func (param i32) (result i32)))
   (type (;2;) (func (result i32)))
+  (type (;3;) (func (param i32 i32) (result i32)))
   (func (;test-select;) (type 1) (param i32) (result i32)
     i32.const 256
     i32.const 512
@@ -131,6 +132,14 @@
       br_if 0 (;@1;)
     end
     local.get 1)
+  (func (;test-join-vstack;) (type 3) (param i32 i32) (result i32)
+    local.get 0
+    if (result i32)
+      local.get 0
+    else
+       local.get 1
+    end
+    )
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))

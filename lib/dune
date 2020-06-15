@@ -1,6 +1,6 @@
 (library
    (name wasmtaint)
-   (modules Wasmtaint Helpers Type Address Binop Memoryop Testop Relop Value Var Instr Basic_block Memory_inst Module_inst Global_inst Func Func_inst Wasm_module Cfg Cfg_builder Domain Summary Transfer Intra_fixpoint Inter_fixpoint Vstack Locals Globals Memory Logging Elem Table Table_inst Prim_value)
-   (libraries core_kernel wasm  apron apron.polkaMPQ)
+   (modules Wasmtaint Helpers Type Address Binop Memoryop Testop Relop Value Var Instr Basic_block Memory_inst Module_inst Global_inst Func Func_inst Wasm_module Cfg Cfg_builder Domain Summary Transfer Intra_fixpoint Inter_fixpoint Vstack Locals Globals Memory Logging Elem Table Table_inst Prim_value Convertop)
+   (libraries core_kernel wasm  apron apron.polkaMPQ apron.octD)
    (inline_tests)
    (preprocess (pps ppx_jane ppx_compare ppx_inline_test)))

@@ -40,27 +40,31 @@ let js_of_block (block : Basic_block.t) = object%js (self)
     | Nothing -> Js.string "Empty"
     | Control _ -> Js.string "Control"
     | Data _ -> Js.string "Data"
+    | ControlMerge _ -> Js.string "Control"
   val name = match block.content with
     | Nothing -> Js.string ""
     | Control i -> Js.string (Instr.control_to_short_string i)
     | Data _ -> Js.string ""
+    | ControlMerge _ -> Js.string "merge"
   val shape = match block.content with
     | Data _ -> "rect"
     | Control (Call _)
     | Control (CallIndirect _) -> "circle"
-    | Control Return -> "diamond"
     | Control _ -> "ellipse"
+    | ControlMerge _ -> "diamond"
     | Nothing -> "circle"
   val instrs = Js.array (array_of_list (match block.content with
       | Nothing -> []
-      | Control (Call i) -> [Instr.control_to_string (Call i)]
+      | Control (Call _ as i) -> [Instr.control_to_string i]
       | Control _ -> []
-      | Data is -> List.map Instr.data_to_string is)
+      | Data is -> List.map Instr.data_to_string is
+      | ControlMerge _ -> [])
       Js.string)
   val label = Js.string (match block.content with
     | Nothing -> ""
     | Data is -> Printf.sprintf "%s" (String.concat "\n" (List.map Instr.data_to_string is))
-    | Control i -> Printf.sprintf "%s" (Instr.control_to_short_string i))
+    | Control i -> Printf.sprintf "%s" (Instr.control_to_short_string i)
+    | ControlMerge _ -> Printf.sprintf "merge")
 end
 
 let js_of_cfg (cfg : Cfg.t) = object%js (self)

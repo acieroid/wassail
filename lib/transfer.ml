@@ -107,6 +107,10 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data) (state : Doma
     (* add ret = [0;1] *)
     { (Domain.add_constraint state ret "[0;1]")
       with vstack = ret :: vstack' }
+  | Convert (_cvt, _, ret) ->
+    let _v, vstack' = Vstack.pop state.vstack in
+    (* Don't add any constraint *)
+    { state with vstack = ret :: vstack' }
   | Load ({ typ = I32; offset; sz = None }, _, vars) ->
     let vaddr, vstack' = Vstack.pop state.vstack in
     begin match vars with

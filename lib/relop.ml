@@ -29,7 +29,7 @@ let of_wasm (r : Ast.relop) : t =
   match r with
   | I32 op -> { typ = I32; op = of_op op }
   | I64 op -> { typ = I64; op = of_op op }
-  | _ -> failwith "unsupported type"
+  | _ -> failwith "unsupported type: float in relop"
 
 let to_string (r : t) : string =
   Printf.sprintf "%s.%s"

@@ -1,7 +1,7 @@
 open Core_kernel
 
-type apron_domain = Polka.loose Polka.t
-let manager = Polka.manager_alloc_loose ()
+type apron_domain = Polka.strict Polka.t
+let manager = Polka.manager_alloc_strict ()
 
 (** A state of the wasm VM *)
 type state = {
@@ -93,15 +93,16 @@ let bottom (cfg : Cfg.t) (nglobals : int) (vars : string list) : state =
   }
 
 let join (s1 : state) (s2 : state) : state =
-  Printf.printf "join %s\n and %s\n" (to_string s1) (to_string s2);
-  {
+  let res = {
   constraints = Apron.Abstract1.join manager s1.constraints s2.constraints;
   vstack = Vstack.join s1.vstack s2.vstack;
   locals = List.map2_exn s1.locals s2.locals ~f:Value.join;
   globals = Globals.join s1.globals s2.globals;
   memory = Memory.join s1.memory s2.memory;
   env = (assert Stdlib.(s1.env = s2.env); s1.env);
-}
+} in
+  Printf.printf "join %s\n and %s\ngives %s" (to_string s1) (to_string s2) (to_string res);
+  res
 
 let join_opt (s1 : state) (s2 : state option) : state =
   match s2 with
@@ -111,6 +112,7 @@ let join_opt (s1 : state) (s2 : state option) : state =
 (** Add multiple constraints *)
 let add_constraints (s : state) (constraints : (string * string) list) : state =
   try
+    List.iter constraints ~f:(fun (x, y) -> Printf.printf "add constraint: %s = %s\n" x y);
     { s
       with constraints =
              Apron.Abstract1.assign_linexpr_array manager s.constraints

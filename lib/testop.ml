@@ -5,16 +5,19 @@ open Wasm
 module T = struct
   type t =
     | I32Eqz
+    | I64Eqz
   [@@deriving sexp, compare]
 end
 include T
 let of_wasm (t : Ast.testop) : t =
   match t with
   | I32 Eqz -> I32Eqz
-  | _ -> failwith "unsupported type"
+  | I64 Eqz -> I64Eqz
+  | _ -> failwith "unsupported type: float in testop"
 let to_string (t : t) : string =
   match t with
   | I32Eqz -> "i32.eqz"
+  | I64Eqz -> "i64.eqz"
 
 (*
 let eqz (v : Value.t) : Value.t = match (Value.is_zero v, Value.is_not_zero v) with

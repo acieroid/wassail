@@ -25,6 +25,7 @@ module T = struct
     | Binary of Binop.t * vstack_spec * var
     | Compare of Relop.t * vstack_spec * var
     | Test of Testop.t * vstack_spec * var
+    | Convert of Convertop.t * vstack_spec * var
     | LocalGet of Var.t * vstack_spec * var
     | LocalSet of Var.t * vstack_spec * var
     | LocalTee of Var.t * vstack_spec * var
@@ -62,6 +63,7 @@ let vstack_spec (instr : t) : vstack_spec = match instr with
       | Binary (_, v, _)
       | Compare (_, v, _)
       | Test (_, v, _)
+      | Convert (_, v, _)
       | LocalGet (_, v, _)
       | LocalSet (_, v, _)
       | LocalTee (_, v, _)
@@ -100,6 +102,7 @@ let vars (instr : t) : vars = match instr with
       | Binary (_, _, v)
       | Compare (_, _, v)
       | Test (_, _, v)
+      | Convert (_, _, v)
       | LocalGet (_, _, v)
       | LocalSet (_, _, v)
       | LocalTee (_, _, v)
@@ -128,6 +131,7 @@ let data_to_string (instr : data) : string =
      | Binary (b, _, _) -> Printf.sprintf "binary %s" (Binop.to_string b)
      | Compare (r, _, _) -> Printf.sprintf "compare %s" (Relop.to_string r)
      | Test (t, _, _) -> Printf.sprintf "test %s" (Testop.to_string t)
+     | Convert (t, _, _) -> Printf.sprintf "cvt %s" (Convertop.to_string t)
      | LocalGet (v, _, _) -> Printf.sprintf "local.get %d" v
      | LocalSet (v, _, _) -> Printf.sprintf "local.set %d" v
      | LocalTee (v, _, _) -> Printf.sprintf "local.tee %d" v
@@ -275,7 +279,7 @@ let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string l
     let (body2, _vstack2) = seq_of_wasm m fid instrs2 vstack' nargs nlocals nglobals returns in
     let (_, _, ret) as vars = block_new_vars "if" arity_out in
     Control (If (body1, body2, vstack', (Option.to_list ret) @ vstack', vars))
-  | Ast.BrTable (_vs, _v) -> failwith "br_table unsupported"
+  | Ast.BrTable (_vs, _v) -> Control (Br (0, vstack)) (* TODO!!! *)
   | Ast.CallIndirect f ->
     let _, vstack' = Vstack.pop vstack in (* pop the function pointer *)
     let (arity_in, arity_out) = arity_of_fun_type m f in
@@ -317,7 +321,9 @@ let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string l
   | Ast.Test op ->
     let var = alloc_var i "test" in
     Data (Test (Testop.of_wasm op, var :: (List.drop vstack 1), var))
-  | Ast.Convert _op -> failwith "convert unsupported"
+  | Ast.Convert op ->
+    let var = alloc_var i "convert" in
+    Data (Convert (Convertop.of_wasm op, var :: (List.drop vstack 1), var))
   | Ast.Unary _op -> failwith "unary unsupported"
 and seq_of_wasm (m : Ast.module_) (fid : int) (is : Ast.instr list) (vstack : string list) (nargs : int) (nlocals : int) (nglobals : int) (returns : int) : t list * string list =
   let (instrs, vstack) = List.fold_left is

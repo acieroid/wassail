@@ -5,7 +5,7 @@ open Helpers
 (** A summary is the final state of the function, with some extra informations *)
 type t = {
   in_arity : int; (** The input arity for the function of this summary *)
-  params_and_return : string list; (** The name of the parameters and (optional) return value *)
+  params_and_return : string list; (** The name of the parameters and (optional) return value *) (* TODO: also contains the globals *)
   state : Domain.state; (** The final state *)
 }
 
@@ -17,14 +17,18 @@ let to_string (s : t) : string =
 let make (cfg : Cfg.t) (state : Domain.state) : t =
   (* Filter the state to only keep relevant variables:
       - the parameters
-      - the return value if there is one
+      - the return value if there is one (i.e., the top of the stack)
       - any variable bound in the store (TODO)
-      - any variable used by a global (TODO) *)
+     - any variable used by a global (TODO) *)
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Domain.arg_name cfg.idx argi) in
-  let params_and_ret = params @ (if List.length cfg.return_types = 1 then [Domain.return_name cfg.idx] else []) in
-  { params_and_return = params_and_ret;
+  let ret = List.take state.vstack 1 in
+  let globals = state.globals in
+  (* let memories = Memory.variables state.memory in TODO *)
+  let to_keep = params @ globals @ ret in
+  Printf.printf "keeping only: %s\n" (String.concat ~sep:"," to_keep);
+  { params_and_return = to_keep;
     in_arity = List.length cfg.arg_types;
-    state = Domain.keep_only state params_and_ret;
+    state = Domain.keep_only state to_keep;
   }
 
 (** Constructs an empty bottom summary given a CFG *)
@@ -85,7 +89,7 @@ let apply (summary : t) (_fidx : Var.t) (state : Domain.state) (ret : string opt
         | None -> []) in
     (* A summary encodes the relation between the arguments and return value.
        To apply it, we do the following: *)
-    let args_and_ret = List.take state.vstack summary.in_arity @ retl in
+    let args_and_ret = List.take state.vstack summary.in_arity @ state.globals @ retl in
     (* 1. Rename the parameters and return value in the summary to match the actual arguments and return value *)
     let rename_from = List.map summary.params_and_return ~f:Apron.Var.of_string in
     let rename_to = List.map args_and_ret ~f:Apron.Var.of_string in
