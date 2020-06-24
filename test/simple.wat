@@ -122,16 +122,16 @@
     nop)
   (func (;test-if-return-loop;) (type 2) (result i32) ;; 8
     (local i32 i32 i32)
-    local.get 2
+    local.get 2 ;; vstack: [0]
     if  ;; label = @1
-      local.get 0
+      local.get 0 ;; vstack: [l0]
       return
     end
     loop  ;; label = @1
       local.get 2
       br_if 0 (;@1;)
     end
-    local.get 1)
+    local.get 1) ;; expected result: 0
   (func (;test-join-vstack;) (type 3) (param i32 i32) (result i32)
     local.get 0
     if (result i32)

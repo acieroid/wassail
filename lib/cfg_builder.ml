@@ -4,7 +4,6 @@ open Helpers
 let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
   (* true to simplify the CFG, false to disable simplification *)
   let simplify = true in
-  Printf.printf "building %d\n" fid;
   let funcinst = Wasm_module.get_funcinst module_ fid in
   let cur_idx : int ref = ref 0 in
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in

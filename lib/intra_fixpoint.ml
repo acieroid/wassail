@@ -64,6 +64,7 @@ let analyze
       let in_state = merge_flows block pred_states in
       (* We analyze it *)
       let result = Transfer.transfer block in_state summaries module_ cfg in
+      Printf.printf "block %d results: %s\n" block_idx (Transfer.result_to_string result);
       (in_state, result)
   in
   let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =
