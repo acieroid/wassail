@@ -1,0 +1,65 @@
+AssemblyScript is a TypeScript-inspired language that compiles to WebAssembly.
+
+* Hello World
+This example comes from [[https://wasmbyexample.dev/examples/hello-world/hello-world.assemblyscript.en-us.html][here]].
+#+BEGIN_SRC typescript
+export function add(a: i32, b: i32): i32 {
+  return a + b
+}
+#+END_SRC
+
+We should be able to compile it with =asc foo.ts -b foo.wasm=, but in practice
+we have to do the following:
+#+BEGIN_SRC shell
+npm install --save-dev assemblyscript
+npx asinit .
+npm run asbuild
+#+END_SRC
+
+* Why AS instead of C
+Because AS provides a standard library that will be pretty useful, e.g., UTF-8
+strings encoded as i32: [[https://docs.assemblyscript.org/standard-library/string][string]].
+
+However, there's a huge disadvantage: the code is MASSIVE.
+Hence, it is probably an interesting target for later.
+
+* Importing function from JS
+From [[https://wasmbyexample.dev/examples/importing-javascript-functions-into-webassembly/importing-javascript-functions-into-webassembly.assemblyscript.en-us.html][here]].
+
+On the AS side:
+#+BEGIN_SRC typescript
+declare function consoleLog(arg0: i32): void;
+
+consoleLog(24);
+#+END_SRC
+
+On the JS side:
+#+BEGIN_SRC javascript
+const runWasm = async () => {
+  const wasmModule = await wasmBrowserInstantiate("./foo.wasm", {
+    index: {
+      consoleLog: value => console.log(value)
+    }
+  });
+};
+runWasm();
+#+END_SRC
+
+** With strings
+Can we do the same with strings?
+#+BEGIN_SRC typescript
+declare function consoleLog(arg0: string): void;
+
+consoleLog(24);
+#+END_SRC
+
+#+BEGIN_SRC javascript
+const runWasm = async () => {
+  const wasmModule = await wasmBrowserInstantiate("./foo.wasm", {
+    index: {
+      consoleLog: value => console.log(value)
+    }
+  });
+};
+runWasm();
+#+END_SRC

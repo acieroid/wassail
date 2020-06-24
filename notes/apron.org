@@ -1,0 +1,557 @@
+# The Analysis
+## Assign variables to instructions (DONE)
+We can in a first pass assign a number of "new" variables for each instruction.
+This can be done during parsing.
+```wasm
+    local.get 0
+    i32.const 16
+    i32.add
+    local.set 1
+    i32.store offset=12
+    i32.load offset=12
+```
+is parsed as:
+```
+    LocalGet 0 i1
+    Const 16 i2
+    Add i3
+    LocalSet 1 l1'
+    Store off=12 m1
+    Load off=12 i4
+```
+
+We could increase the number of variables to have more sensitivity, but probably a fixed set per location is good.
+
+Idea: in this phase, the vstack can already be constructed!
+We could parse the previous example as:
+
+```
+    LocalGet 0 [i1] {i1}
+    Const 16 [i2,i1] {i2}
+    Add [i3] {i3}
+    LocalSet 1 [] {l1'}
+    i32.const X [i4]
+    i32.const Y [i5, i4]
+    Store off=12 m1 []
+    i32.const X [i6]
+    Load off=12 i4 [i7]
+```
+
+### Variable names
+Variable names are generated from the location of the instruction in the source file.
+This allows for easily tracking where they come from.
+
+## Analysis domain
+The domain of the analysis is as follows: (P, Vs, M, G, L), where:
+  - P are the constraints (octa/poly/etc.)
+  - Vs is the vstack (list of variables)
+  - M is the memory (map from variables to variables)
+  - G is the globals (list of variables)
+  - L is the locals (list of variables)
+
+Initial state:
+   P = (p0 = Top, g0 = Top, ln = 0)
+   Vs = []
+   M = []
+   G = [g0, g1, ...]
+   L = [p0, ..., ln, ...]
+   
+   
+## Summaries
+Summaries contain type information, as well as the post-state, corresponding to the final analysis domain according to the previous discussion point.
+The initial summary could return either top or bottom: top will be less precise, bottom will be unsound.
+Both should be fine upon termination of the inter analysis.
+
+## Bytes vs. values, and the store
+WebAssembly's memory is made up of bytes.
+An important design decision is how to properly support this: we often need to change from bytes to values.
+Consider `i32.store`.
+It does the following: pop the address from the vstack, pop an i32 value from the vstack.
+The store is then updated as follows:
+`M[addr+offset: first byte of value][addr+1: second byte of value][...]`
+
+### Representing addresses
+Addresses are computed with an offset.
+Hence, any load and store operation needs to create 4 address values for storing an i32 (resp. 8 for i64):
+`i32.store` creates `addr0`, `addr1`, `addr2`, `addr3`, and adds the constraints (where v is the address given in the vstack):
+`addr0 = v+offset`
+`addr1 = v+offset+1`
+...
+
+### Representing bytes
+Bytes are represented as an index of a variable.
+For example, storing variable `v` at addresses `addr0`, `addr1`, etc. is represented as:
+
+`M[addr0: m@0][addr1: m@1][...]`
+constraint: `m = v`
+
+### Loading values
+Consider loading from `addr0`, `addr1`, etc.
+We can only soundly encode that with apron when all addresses index the same variable:
+`M[addr0: m@0][addr1: m@1][...]`
+then we can return `i` with `i=m`.
+Otherwise, we return `i` with no constraint (i.e., `i` is top)
+
+## Operations on the domain
+apron supports:
+  - unop: negation, cast, sqrt
+  - binop: add, sub, mul, div, mod, pow
+
+We need more operations, but we may soundly model them as returning top.
+This is especially the case for bitwise operations (and, or, xor, shl, etc.)
+
+## Constraints
+The analysis is composed of two separate procedures:
+  1. one that deals with variables in the abstract domain: it fills Vs, M, G, and L
+  2. one that deals with the constraints: it encodes the relations between variables
+
+Examples follow.
+
+### local.get i
+  1. vstack' = [output-var(instr) :: vstack]
+  2. constraints: [output-var(instr) = L(i)]
+
+### local.set i
+  1. v, vstack' = pop(vstack)
+     L(i) := v
+  2. constraints: none
+
+### local.tee i
+  1. L(i) := v
+  2. constraints: none
+
+### i32.const N
+  1. vstack = [output-var(instr) :: vstack]
+  2. constraints: [output-var(instr) = N]
+
+### i32.sub
+  1. vstack = [
+
+
+ 4. We can generate constraints for each instructions during analysis, e.g.:
+  i32.const 15: add (output-var(instr) = 16) to P. Vs becomes output-var(instr) :: Vs
+  global.get 0: add (output-var(instr) = global) to P. Vs becomes output-var(instr) :: Vs
+  local.tee 0: nothing changes, but update L to hold top-of-stack-var in pos 0
+  global.set 2: similar*)
+  (* (func (;0;) (type 0) (param i32) (result i32)
+    (local i32)
+    global.get 0 ; [] -> [i1]            ; [g0]                        ; vars: r1
+    i32.const 16 ; [] -> [i2]            ; [16, g0]                    ; vars: r2
+    i32.sub      ; [i2, i1] -> [i3]      ; [g0-16]                     ; vars: r3
+    local.tee 1  ; [] -> []              ; [g0-16], local: [p0, g0-16] ; vars: l1'
+    local.get 0  ; [] -> [i4]            ; [p0, g0-16]                 ; vars: r4
+    i32.store offset=12 ; [i4, i3] -> [] ; [], M[g0-16: p0]            ; vars: a1, v1
+    local.get 1
+    i32.const 0
+    i32.store offset=8
+    block  ;; label = @1
+      loop  ;; label = @2
+        local.get 1
+        i32.load offset=12
+        local.get 1
+        i32.load offset=8
+        i32.const 2
+        i32.shl
+        i32.add
+        i32.load
+        i32.eqz
+        br_if 1 (;@1;)
+        local.get 1
+        local.get 1
+        i32.load offset=8
+        i32.const 1
+        i32.add
+        i32.store offset=8
+        br 0 (;@2;)
+      end
+    end
+    local.get 1
+     i32.load offset=8 *)
+
+# Code
+## Dune
+Add dependencies: apron apron.octD
+## Old code
+(*
+let ex1 =
+  let open Format in
+  let open Apron in
+  let man = Oct.manager_alloc () in
+  printf "Using Library: %s, version %s@." (Manager.get_library man) (Manager.get_version man);
+
+let var_x = Var.of_string "x" in
+let var_y = Var.of_string "y" in
+let var_z = Var.of_string "z" in
+let var_w = Var.of_string "w" in
+let var_u = Var.of_string "u" in
+let var_v = Var.of_string "v" in
+let var_a = Var.of_string "a" in
+let var_b = Var.of_string "b" in
+
+let print_array = Abstract0.print_array in
+let lincons1_array_print fmt x = Lincons1.array_print fmt x in
+let generator1_array_print fmt x = Generator1.array_print fmt x in
+
+(* env=[|0> w:int; 1> x:int; 2> y:int; 3> z:int; 4> a:real; 5> b:real;
+      6> u:real; 7> v:real|] *)
+let env = Environment.make
+    [|var_x; var_y; var_z; var_w|]
+    [|var_u; var_v; var_a; var_b|]
+in
+  (* env2=[|0> w:int; 1> x:int; 2> y:int; 3> z:int|] *)
+  let env2 = Environment.make [|var_x; var_y; var_z; var_w|] [||]
+  in
+  printf "env=%a@.env2=%a@."
+    (fun x -> Environment.print x) env
+    (fun x -> Environment.print x) env2
+  ;
+  
+  (* Creation of abstract value
+     1/2x+2/3y=1, [1,2]<=z+2w<=4, 0<=u<=5 *)
+  (* tab = [|1/2x+2/3y+1=0; -2.w-z+4.>=0; 2.w+z+[-2.; -1.]>=0; u>=0; -u+5>=0|] *)
+  let tab = Lincons1.array_make env 5 in
+
+  (* expr : 1/2 x + 2/3 y + 1 *)
+  let expr = Linexpr1.make env in
+  Linexpr1.set_array expr
+    [|
+      (Coeff.Scalar (Scalar.Mpqf (Mpqf.of_frac 1 2)), var_x); (* 1/2 x *)
+      (Coeff.Scalar (Scalar.Mpqf (Mpqf.of_frac 2 3)), var_y) (* 2/3 y *)
+    |]
+    (Some (Coeff.Scalar (Scalar.Mpqf (Mpqf.of_int (1))))) (* 1 *)
+  ;
+  (* cons : 1/2 x + 2/3 y + 1 = 0 (why 0? because that's always 0 on the rhs)*)
+  let cons = Lincons1.make expr Lincons1.EQ in
+  Lincons1.array_set tab 0 cons;
+
+  (* -2.w-z+4.>=0 *)
+  let expr = Linexpr1.make env in
+  Linexpr1.set_array expr
+    [|
+      (Coeff.Scalar (Scalar.Float (-1.0)), var_z); (* -z *)
+      (Coeff.Scalar (Scalar.Float (-2.0)), var_w) (* -2 w *)
+    |]
+    (Some (Coeff.Scalar (Scalar.Float (4.0)))) (* + 4 *)
+  ;
+  (* -2w - z + 4 >= 0 because SUPEQ *)
+  Lincons1.array_set tab 1 (Lincons1.make expr Lincons1.SUPEQ);
+
+  (* 2.w+z+[-2.; -1.]>=0 *)
+  let expr = Linexpr1.make env2 in
+  Linexpr1.set_array expr
+    [|
+      (Coeff.Scalar (Scalar.Float 1.0), var_z); (* z *)
+      (Coeff.Scalar (Scalar.Float 2.0), var_w) (* 2 w *)
+    |]
+    (Some (* [-2, -1] *)
+      (Coeff.Interval
+	(Interval.of_infsup
+	  (Scalar.Float (-2.0))
+	  (Scalar.Float (-1.0)))))
+    ;
+    Linexpr1.extend_environment_with expr env;
+    (* 2w+z+[-2,1] >= 0 *)
+  Lincons1.array_set tab 2 (Lincons1.make expr Lincons1.SUPEQ);
+
+    (* u>=0 *)
+  let cons = Lincons1.make (Linexpr1.make env) Lincons1.SUPEQ in
+  Lincons1.set_array cons
+    [|
+      (Coeff.Scalar (Scalar.Mpqf (Mpqf.of_int 1)), var_u) (* u *)
+    |]
+    None
+  ;
+  Lincons1.array_set tab 3 cons;
+  (* -u+5>=0|] *)
+  let cons = Lincons1.make (Linexpr1.make env) Lincons1.SUPEQ in
+  Lincons1.set_array cons
+    [|
+      (Coeff.Scalar (Scalar.Mpqf (Mpqf.of_int (-1))), var_u) (* -u *)
+    |]
+    (Some (Coeff.Scalar (Scalar.Mpqf (Mpqf.of_int 5)))) (* +5 *)
+  ;
+  Lincons1.array_set tab 4 cons;
+
+  printf "tab = %a@." lincons1_array_print tab;
+
+  (* abs=[|u>=0; -u+5.>=0|] *)
+  let abs = Abstract1.of_lincons_array man env tab in
+  printf "abs=%a@." Abstract1.print abs;
+  (* gen=[|VTX:0; LIN:w; LIN:x; LIN:y; LIN:z; LIN:a; LIN:b; LIN:u; LIN:v|] *)
+  let array = Abstract1.to_generator_array man abs in
+  printf "gen=%a@." generator1_array_print array;
+  let array = Abstract1.to_generator_array man abs in
+  printf "gen=%a@." generator1_array_print array;
+
+  (* Extraction (we first extract values for existing constraints, then for
+     dimensions) *)
+  let box = Abstract1.to_box man abs in
+  (* box=[|[-inf; inf]; [-inf; inf]; [-inf; inf]; [-inf; inf]; [-inf; inf];
+      [-inf; inf]; [-0.; 5.]; [-inf; inf]|] *)
+  printf "box=%a@." (print_array Interval.print) box.Abstract1.interval_array;
+  for i=0 to 4 do
+    (* Bound of 1/2x+2/3y+1 = [-inf; inf]
+Bound of -2.w-z+4. = [-inf; inf]
+Bound of 2.w+z+[-2.; -1.] = [-inf; inf]
+Bound of u = [-0.; 5.]
+Bound of -u+5 = [-0.; 5.]
+                *)
+    let expr = Lincons1.get_linexpr1 (Lincons1.array_get tab i) in
+    let box = Abstract1.bound_linexpr man abs expr in
+    printf "Bound of %a = %a@."
+      Linexpr1.print expr
+      Interval.print box;
+  done;
+  (* 2. dimensions *)
+  (* 3. of box *)
+  let abs2 = Abstract1.of_box man env [|var_x; var_y; var_z; var_w; var_u; var_v; var_a; var_b|]
+    box.Abstract1.interval_array
+  in
+  (* abs2=[|a>=0; -a+5.>=0|] *)
+  printf "abs2=%a@." Abstract1.print abs2;
+  (* 4. Tests top and bottom *)
+  let abs3 = Abstract1.bottom man env in
+  printf "abs3=%a@.is_bottom(abs3)=%b@."
+    Abstract1.print abs3
+    (Abstract1.is_bottom man abs3);
+
+  printf "abs=%a@."
+    Abstract1.print abs;
+  let p2 = Abstract1.expand man abs (var_y) [|Var.of_string "y1"; Var.of_string "y2"|] in
+  printf "p2=expand(abs,y,[y1,y2]))=%a@."
+    Abstract1.print p2;
+  let p2 = Abstract1.expand man abs (var_u) [|Var.of_string "u1"; Var.of_string "u2"|] in
+  printf "p2=expand(abs,u,[u1,u2]))=%a@."
+    Abstract1.print p2;
+  abs
+  *)
+let ex3 =
+    let open Format in
+  let open Apron in
+  let man = Oct.manager_alloc () in
+  printf "Using Library: %s, version %s@." (Manager.get_library man) (Manager.get_version man);
+
+let var_x = Var.of_string "x" in
+let var_y = Var.of_string "y" in
+
+  let env = Environment.make
+      [|var_x; var_y|]
+      [||]
+  in
+  (* Creation of abstract value: x in [0,1], y in [0,0] *)
+  let abs = Abstract1.of_box man env [|var_x;var_y|]
+    [|
+      Interval.of_int 0 1;
+      Interval.of_int 0 0;
+    |]
+  in
+  (* Creation of linear expressions *)
+  let linexpr1 = Parser.linexpr1_of_string env "x" in
+  let linexpr2 = Parser.linexpr1_of_string env "2x" in
+
+  let print_array = Abstract0.print_array in
+  let abs1 = Abstract1.assign_linexpr man abs var_y linexpr1 None in
+  let box1 = Abstract1.to_box man abs1 in
+  printf "box1=%a@." (print_array Interval.print) box1.Abstract1.interval_array;
+  let abs2 = Abstract1.assign_linexpr man abs var_y linexpr2 None in
+  let box2 = Abstract1.to_box man abs2 in
+  printf "box2=%a@." (print_array Interval.print) box2.Abstract1.interval_array;
+  let res1 = Abstract1.join man abs1 abs2 in
+  printf "abs =%a@.abs1=%a@.abs2=%a@.res1=%a@."
+    Abstract1.print abs
+    Abstract1.print abs1
+    Abstract1.print abs2
+    Abstract1.print res1;
+(*  (* Creation of linear expression [1,2]y and [1,2]z *)
+  let linexpr = Parser.linexpr1_of_string env "z + [1;2]x + [1;2]y" in
+  let res2 = Abstract1.assign_linexpr man abs var_z linexpr None in
+  printf "res2=%a@."
+    Abstract1.print res2
+  ;
+  let abs1 = Abstract1.substitute_linexpr man res1 var_z linexpr1 None in
+  let abs2 = Abstract1.substitute_linexpr man res1 var_z linexpr2 None in
+  let res1 = Abstract1.join man abs1 abs2 in
+  printf "abs1=%a@.abs2=%a@.res1=%a@."
+    Abstract1.print abs1
+    Abstract1.print abs2
+    Abstract1.print res1
+  ;
+  let res2 = Abstract1.substitute_linexpr man res2 var_z linexpr None in
+  printf "res2=%a@."
+    Abstract1.print res2
+    ;*)
+  res1
+
+
+let () =
+  let open Apron in
+  let man = Oct.manager_alloc () in
+    let print_array = Abstract0.print_array in
+
+  (* vars: g0, p0, i1 ... i4 *)
+  let g0 = Var.of_string "g0" in
+  let p0 = Var.of_string "p0" in
+  let l1 = Var.of_string "l1" in
+  let i1 = Var.of_string "i1" in
+  let i2 = Var.of_string "i2" in
+  let i3 = Var.of_string "i3" in
+  let i4 = Var.of_string "i4" in
+  let env = Environment.make [| g0; p0; l1; i1; i2; i3; i4 |] [| |] in
+  let abs0 = Abstract1.of_box man env [| g0; p0; l1; i1; i2; i3; i4 |]
+      [| Interval.top; Interval.top; Interval.of_int 1 1;
+         Interval.top; Interval.top; Interval.top; Interval.top; (* although they are assigned to nothing, they have to be "top", otherwise constraining them will not result in anything interesting *)
+      |] in
+  let box0 = Abstract1.to_box man abs0 in
+  Format.printf "box1=%a@." (print_array Interval.print) box0.Abstract1.interval_array;
+  (* global.get 0 means i1 = g0
+     vstack: [i1] *)
+  let abs1 = Abstract1.assign_linexpr man abs0 i1 (Parser.linexpr1_of_string env "12") None in
+  (* i32.const 16 means i2 = 16
+     vstack: [i2, i1] *)
+  let abs2 = Abstract1.assign_linexpr man abs1 i2 (Parser.linexpr1_of_string env "16") None in
+  (* i32.sub means i3 = i2 - i1
+     vstack: [i3] *)
+  let abs3 = Abstract1.assign_linexpr man abs2 i3 (Parser.linexpr1_of_string env "i2-i1") None in
+  (* local.tee 1 means l1 = i3
+     vstack: [i3]
+     locals: [p0, l1] *)
+  let abs4 = Abstract1.assign_linexpr man abs3 l1 (Parser.linexpr1_of_string env "i3") None in
+  (* local.get 0 means i4 = p0
+     vstack: [p0, i3]*)
+  let abs5 = Abstract1.assign_linexpr man abs4 i4 (Parser.linexpr1_of_string env "i3") None in
+  Format.printf "abs5=%a@." Abstract1.print abs5;
+  (* i32.store offset=12 means a1 = i3, v1 = p0 *)
+  let box = Abstract1.to_box man abs5 in
+  Format.printf "box=%a@." (print_array Interval.print) box.Abstract1.interval_array
+
+(*
+ 1. We can in a first pass assign a number of "new" variables for each instruction
+    This can be done during parsing:
+    local.get 0
+    i32.const 16
+    i32.add
+    local.set 1
+    i32.store offset=12
+    i32.load offset=12
+    is parsed as:
+    LocalGet 0 i1
+    Const 16 i2
+    Add i3
+    LocalSet 1 l1'
+    Store off=12 m1
+    Load off=12 i4
+ 2. The domain of the analysis is as follows: (P, Vs, M, G, L)
+    Initial state:
+   P = (p0 = Top, g0 = Top, ln = 0)
+   Vs = []
+   M = []
+   G = [g0, g1, ...]
+   L = [p0, ..., ln, ...]
+ 3. Operations on the domain:
+   apron supports: 
+    - unop: negation, cast, sqrt
+    - binop: add, sub, mul, div, mod, pow
+   we need:
+     - add: OK
+     - sub: OK
+     - mul: OK
+     - div_s and div_u: ?
+     - rem_s and rem_u: ?
+     - and: ?
+     - or
+     - xor
+     - shl
+     - shr_s
+     - shr_u
+     - rotl
+     - rotr
+     - comparison
+ 4. We can generate constraints for each instructions during analysis, e.g.:
+  i32.const 15: add (output-var(instr) = 16) to P. Vs becomes output-var(instr) :: Vs
+  global.get 0: add (output-var(instr) = global) to P. Vs becomes output-var(instr) :: Vs
+  local.tee 0: nothing changes, but update L to hold top-of-stack-var in pos 0
+  global.set 2: similar*)
+  (* (func (;0;) (type 0) (param i32) (result i32)
+    (local i32)
+    global.get 0 ; [] -> [i1]            ; [g0]                        ; vars: r1
+    i32.const 16 ; [] -> [i2]            ; [16, g0]                    ; vars: r2
+    i32.sub      ; [i2, i1] -> [i3]      ; [g0-16]                     ; vars: r3
+    local.tee 1  ; [] -> []              ; [g0-16], local: [p0, g0-16] ; vars: l1'
+    local.get 0  ; [] -> [i4]            ; [p0, g0-16]                 ; vars: r4
+    i32.store offset=12 ; [i4, i3] -> [] ; [], M[g0-16: p0]            ; vars: a1, v1
+    local.get 1
+    i32.const 0
+    i32.store offset=8
+    block  ;; label = @1
+      loop  ;; label = @2
+        local.get 1
+        i32.load offset=12
+        local.get 1
+        i32.load offset=8
+        i32.const 2
+        i32.shl
+        i32.add
+        i32.load
+        i32.eqz
+        br_if 1 (;@1;)
+        local.get 1
+        local.get 1
+        i32.load offset=8
+        i32.const 1
+        i32.add
+        i32.store offset=8
+        br 0 (;@2;)
+      end
+    end
+    local.get 1
+     i32.load offset=8 *)
+
+let () =
+(*  let manoct = Oct.manager_alloc () in
+
+  (* Consider the following program:
+     x = rand(100);
+     y = rand(100);
+     z = 0;
+     z = x + y;
+  *)
+  (* We first declare the variables x, y, and z *)
+  let var_x = Apron.Var.of_string "x" in
+  let var_y = Apron.Var.of_string "y" in
+  let var_z = Apron.Var.of_string "z" in
+  (* We create an environment containing these variables *)
+  let env = Apron.Environment.make [|var_x; var_y; var_z|] [| |] in
+  (* We can print it *)
+  Format.printf "%a@.\n" (fun x -> Apron.Environment.print x) env;
+  (* We can define them *)
+  let abs1 = Apron.Abstract1.of_box manoct env [|var_x; var_y; var_z|]
+      [| Apron.Interval.of_int 0 100; (* x \in [0,100] *)
+         Apron.Interval.of_int 0 100; (* y \in [0,100] *)
+         Apron.Interval.of_int 0 0; (* z is initially 0 *)
+      |] in
+  Format.printf "%a@.\n" Apron.Abstract1.print abs1;
+  (* Now we execute z = x + y *)
+  let tab = Apron.Lincons1.array_make env 1 in (* the constraint *)
+  let expr = Apron.Linexpr1.make env in (* the expression *)
+  (* encode z-(x+y), i.e., z = x + y *)
+  Apron.Linexpr1.set_array expr
+    [|
+      (Apron.Coeff.s_of_int 1, var_x); (* x *)
+      (Apron.Coeff.s_of_int 1, var_y); (* y *)
+      (Apron.Coeff.s_of_int (-1), var_z); (* -z *)
+    |]
+    (Some (Apron.Coeff.s_of_int 0)); (* = 0 *)
+  let cons = Apron.Lincons1.make expr Apron.Lincons1.EQ in
+  Apron.Lincons1.array_set tab 0 cons;
+  Format.printf "tab = %a@." (fun fmt x -> Apron.Lincons1.array_print fmt x) tab;
+
+  (* Construct a new abstract value *)
+    let _ = ex3 in*)
+
+  Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
+  Command.run ~version:"0.0"
+    (Command.group ~summary:"Static analysis of WebAssembly"
+       ["cfg", cfg
+       ; "cfgs", cfgs
+       ; "inter", inter
+       ; "intra", intra])

@@ -1,0 +1,159 @@
+The problem
+------------
+Consider the following code (within a loop)
+
+```wasm
+;; vstack: []
+;; locals: [p0,p1,p2,g0-16]
+;; M[...][g0-16: [0,+inf]]
+local.get 3
+;; vstack: [g0-16]
+i32.load
+;; vstack: [[0,+inf]]
+local.get 3
+i32.load offset=4
+;; vstack: [p2, [0,+inf[]
+i32.lt_s
+;; vstack: [[0,1]]
+i32.const 1
+i32.and
+;; vstack: [[0,1]]
+i32.eqz
+;; vstack: [[0,1]]
+br_if 1 (;@1;)
+```
+
+At this point, we have to branch if [0,1] is true, which can be the case.
+But it clearly would be possible to refine the memory so that we know that [0,+inf] is actually [0,p2-1] in the branch, and precisely p2 out of the branch.
+The problem is that our domain does not track that.
+
+Solution a: keep track of dereferences by delaying their evaluation
+-----------------------------------------------
+```wasm
+;; vstack: []
+;; locals: [p0,p1,p2,g0-16]
+;; M[...][g0-16: [0,+inf]]
+local.get 3
+;; vstack: [g0-16]
+i32.load
+;; vstack: [*(g0-16)]
+local.get 3
+i32.load offset=4
+;; vstack: [p2, *(g0-16)]
+i32.lt_s
+;; vstack: [*(g0-16)<p2]
+i32.const 1
+i32.and
+;; vstack: [*(g0-16)<p2 & 1]
+;; & 1 is ignored because we already have a test:
+;; vstack: [*(g0-16)<p2]
+i32.eqz
+;; vstack: [(*(g0-16)<p2) = 0]
+;; which is just reversing the test:
+;; vstack: [*(g0-16)>=p2]
+br_if 1 (;@1;)
+```
+
+So we have the condition:
+  *(g0-16)>=p2
+
+In the true branch (which jumps out of the loop), this condition holds.
+Hence, we can meet the value residing at g0-16 with [p2,+inf].
+In the false branch, we can meet this value residing at g0-16 with [0,p2-1]
+
+One potential problem here is that this blows up the state space: if the value would not have been used for a test, then it would have been unnecessary to preserve that much information about it.
+
+Solution a in practice: bytes and values
+---------------------------------------------------
+In practice, this should be more like:
+
+```wasm
+;; vstack: []
+;; locals: [p0,p1,p2,g0-16]
+;; M[...][g0-13: [0,+inf[@3][g0-14: [0,+inf[@2][g0-15: [0,+inf[@1][g0-16: [0,+inf[@0]
+local.get 3
+;; vstack: [g0-16]
+i32.load
+;; vstack: [bytes[*(g0-13), *(g0-14), *(g0-15), *(g0-16)]]
+local.get 3
+i32.load offset=4
+;; vstack: [p2, bytes[*(g0-13), *(g0-14), *(g0-15), *(g0-16)]]
+i32.lt_s
+;; vstack: [bytes[*(g0-13), *(g0-14), *(g0-15), *(g0-16)]]<p2]
+i32.const 1
+i32.and
+;; vstack: [bytes[*(g0-13), *(g0-14), *(g0-15), *(g0-16)]]<p2] ;; a test & 1 is always the test itself
+i32.eqz
+;; vstack: [bytes[*(g0-13), *(g0-14), *(g0-15), *(g0-16)]]>=p2] ;; eqz reverses the test
+br_if 1 (;@1;)
+```
+
+We can then refine in both branches.
+This can only (for now) be done in case g0-13 to g0-16 contain the same value, accessed at bytes 3, 2, 1, and 0.
+This is the case here.
+
+So the memory is refined as follows:
+```
+M[...][g0-13: v@3][g0-14: v@2][g0-15: v@1][g0-16: v@0]
+```
+where `v = [0,p2-1]`
+
+
+Solution b: refining by on-demand backwards abstract interpretation
+------------------------------------------------------------------------------------
+
+Consider the point where we reach br_if 1, we know the branch condition is imprecise: it is [0,1].
+Then, we can go backwards to find where this value originates from.
+
+Any imprecision on the condition can be tracked to either:
+ - an access to the memory
+ - an access to a local or global
+ - a merge in the control-flow
+The last case we will ignore: when going backwards, if we go out of the current block, we will simply abort.
+For the other case, the idea is the following: go backward until you have gone over enough instructions (according to their arity) to produce enough values to reproduce solution a. Then, simply go forward again.
+
+The following code has to be read bottom to top.
+
+Let's first look at a very simple example
+
+```wasm
+;; local.get has arity 0 -> 1, hence stack size is 1 + 0 - 1 = 0. We have enough values to go forward again.
+local.get 0
+;; eqz has arity 1 -> 1, meaning it takes one from the stack and pushes one, hence, stack size is still 1 (1 (current) + 1 (in arity) - 1 (out arity))
+i32.eqz
+;; We have seen [0,1], so the condition is imprecise.
+;; Our stack size is 1 (it may be bigger, but in practice we are only interested at the top value. Maybe it is never bigger actually, because the stack may always be empty when branching)
+br_if
+```
+
+Now we now we can go forward from local.get:
+```wasm
+local.get 0
+;; vstack: [l0]
+i32.eqz
+;; vstack: [l0=0]
+br_if -> refine l0 (set it to 0 in the true branch, leave it as is on the false branch)
+```
+
+Now let's consider our previous example again (read bottom to top):
+```
+;; vstack: []
+;; locals: [p0,p1,p2,g0-16]
+;; M[...][g0-16: [0,+inf]]
+local.get 3 ;; stack size = 1 + 0 - 1 = 0
+;; vstack: [g0-16]
+i32.load ;; stack size = 1 + 1 - 1 = 1
+;; vstack: [[0,+inf]]
+local.get 3 ;; stack size = 2 + 0 - 1 = 1
+i32.load offset=4 ;; stack size = 2 + 1 - 1 = 2
+;; vstack: [p2, [0,+inf[]
+i32.lt_s ;; stack size = 1 + 2 - 1 = 2
+;; vstack: [[0,1]]
+i32.const 1 ;; stack size = 2 + 0 - 1 = 1
+i32.and ;; stack size: 1 + 2 - 1 = 2
+;; vstack: [[0,1]]
+i32.eqz ;; stack size 1 + 1 - 1 = 1
+;; vstack: [[0,1]]
+br_if 1 (;@1;) ;; stack size: 1
+```
+
