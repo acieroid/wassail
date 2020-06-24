@@ -6,7 +6,7 @@ type block_sort = BlockEntry | BlockExit | LoopEntry | LoopExit | Normal | Funct
 type block_content =
   | Control of Instr.control
   | Data of (Instr.data) list
-  | ControlMerge of Instr.vstack_spec * Instr.block_vars
+  | ControlMerge
   | Nothing
 [@@deriving sexp, compare]
 
@@ -21,7 +21,7 @@ let to_string (b : t) : string = Printf.sprintf "block %d, %s" b.idx (match b.co
          (List.map instrs
             ~f:(fun instr ->
                 Printf.sprintf "%s" (Instr.data_to_string instr))))
-    | ControlMerge _ -> Printf.sprintf "control merge"
+    | ControlMerge -> Printf.sprintf "control merge"
     | Nothing -> "empty")
 
 let to_dot (b : t) : string =
@@ -32,10 +32,10 @@ let to_dot (b : t) : string =
       (String.concat ~sep:"\\l"
          (List.map instrs
             ~f:(fun instr ->
-                Printf.sprintf "%s ;; [%s]" (Instr.data_to_string instr) (String.concat (Instr.vstack_spec (Data instr)) ~sep:","))))
+                Printf.sprintf "%s" (Instr.data_to_string instr))))
   | Control instr ->
-    Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d:\\l\\l%s ;; [%s]\"];" b.idx b.idx (Instr.control_to_short_string instr) (String.concat (Instr.vstack_spec (Control instr)) ~sep:",")
-  | ControlMerge (vstack, _) ->
-    Printf.sprintf "block%d [shape=point, label=\"%d %s\"]" b.idx b.idx (String.concat vstack ~sep:",") 
+    Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d:\\l\\l%s\"];" b.idx b.idx (Instr.control_to_short_string instr)
+  | ControlMerge ->
+    Printf.sprintf "block%d [shape=point, label=\"%d\"]" b.idx b.idx 
   | Nothing ->
     Printf.sprintf "block%d [shape=point, label=\"%d\"]" b.idx b.idx

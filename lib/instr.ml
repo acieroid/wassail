@@ -2,47 +2,37 @@ open Core_kernel
 open Wasm
 
 module T = struct
-  (** Vstack specification, it is attached to all instructions and corresponds
-     to the expected vstack after executing the instruction *)
-  type vstack_spec = string list
-  [@@deriving sexp, compare]
-
-  (** A variable that will be used by the abstract domain *)
-  type var = string
-  [@@deriving sexp, compare]
-  type vars = var list
-  [@@deriving sexp, compare]
-  type block_vars = var list * var list * var option
+  type arity = int * int
   [@@deriving sexp, compare]
 
   (** Data instructions *)
   type data =
-    | Nop of vstack_spec
-    | Drop of vstack_spec
-    | Select of vstack_spec * var
-    | MemorySize of vstack_spec * var
-    | Const of Prim_value.t * vstack_spec * var
-    | Binary of Binop.t * vstack_spec * var
-    | Compare of Relop.t * vstack_spec * var
-    | Test of Testop.t * vstack_spec * var
-    | Convert of Convertop.t * vstack_spec * var
-    | LocalGet of Var.t * vstack_spec * var
-    | LocalSet of Var.t * vstack_spec * var
-    | LocalTee of Var.t * vstack_spec * var
-    | GlobalGet of Var.t * vstack_spec * var
-    | GlobalSet of Var.t * vstack_spec * var
-    | Load of Memoryop.t * vstack_spec * vars
-    | Store of Memoryop.t * vstack_spec * vars
+    | Nop
+    | Drop
+    | Select
+    | MemorySize
+    | Const of Prim_value.t
+    | Binary of Binop.t
+    | Compare of Relop.t
+    | Test of Testop.t
+    | Convert of Convertop.t
+    | LocalGet of Var.t
+    | LocalSet of Var.t
+    | LocalTee of Var.t
+    | GlobalGet of Var.t
+    | GlobalSet of Var.t
+    | Load of Memoryop.t
+    | Store of Memoryop.t
   (** Control instructions *)
   and control =
-    | Block of t list * vstack_spec * vstack_spec * block_vars
-    | Loop of t list * vstack_spec * vstack_spec * block_vars
-    | If of t list * t list * vstack_spec * vstack_spec * block_vars
-    | Call of Var.t * vstack_spec * var option
-    | CallIndirect of Var.t * vstack_spec * var option
-    | Br of Var.t * vstack_spec
-    | BrIf of Var.t * vstack_spec
-    | Return of vstack_spec
+    | Block of arity * t list
+    | Loop of arity * t list
+    | If of arity * t list * t list
+    | Call of arity * Var.t
+    | CallIndirect of arity * Var.t
+    | Br of Var.t
+    | BrIf of Var.t
+    | Return
     | Unreachable
   (** All instructions *)
   and t =
@@ -53,103 +43,36 @@ end
 include T
 
 exception UnsupportedInstruction of t
-let vstack_spec (instr : t) : vstack_spec = match instr with
-  | Data d -> begin match d with
-      | Nop v
-      | Drop v
-      | Select (v, _)
-      | MemorySize (v, _)
-      | Const (_, v, _)
-      | Binary (_, v, _)
-      | Compare (_, v, _)
-      | Test (_, v, _)
-      | Convert (_, v, _)
-      | LocalGet (_, v, _)
-      | LocalSet (_, v, _)
-      | LocalTee (_, v, _)
-      | GlobalGet (_, v, _)
-      | GlobalSet (_, v, _)
-      | Load (_, v, _)
-      | Store (_, v, _) -> v
-    end
-  | Control c -> begin match c with
-      | Block (_, v, _, _)
-      | Loop (_, v, _, _)
-      | If (_, _, v, _, _)
-      | Call (_, v, _)
-      | CallIndirect (_, v, _)
-      | Br (_, v)
-      | BrIf (_, v)
-      | Return v -> v
-      | Unreachable -> []
-    end
-
-let vstack_block_spec (instr : t) : vstack_spec = match instr with
-  | Data d -> vstack_spec (Data d)
-  | Control c -> begin match c with
-      | Block (_, _, v, _)
-      | Loop (_, _, v, _)
-      | If (_, _, _, v, _) -> v
-      | _ -> vstack_spec (Control c)
-    end
-
-let vars (instr : t) : vars = match instr with
-  | Data d -> begin match d with
-      | Nop _ | Drop _ -> []
-      | Select (_, v)
-      | MemorySize (_, v)
-      | Const (_, _, v)
-      | Binary (_, _, v)
-      | Compare (_, _, v)
-      | Test (_, _, v)
-      | Convert (_, _, v)
-      | LocalGet (_, _, v)
-      | LocalSet (_, _, v)
-      | LocalTee (_, _, v)
-      | GlobalGet (_, _, v)
-      | GlobalSet (_, _, v) -> [v]
-      | Load (_, _, vs)
-      | Store (_, _, vs) -> vs
-    end
-  | Control c -> begin match c with
-      | Block (_, _, _, _)
-      | Loop (_, _, _, _)
-      | If (_, _, _, _, _) -> []
-      | Call (_, _, v)
-      | CallIndirect (_, _, v) -> Option.to_list v
-      | Br (_, _) | BrIf (_, _)
-      | Return _ | Unreachable -> []
-    end
 
 let data_to_string (instr : data) : string =
   match instr with
-     | Nop _ -> "nop"
-     | Drop _ -> "drop"
-     | Select _ -> "select"
-     | MemorySize _ -> "memory_size"
-     | Const (v, _, _) -> Printf.sprintf "const %s" (Prim_value.to_string v)
-     | Binary (b, _, _) -> Printf.sprintf "binary %s" (Binop.to_string b)
-     | Compare (r, _, _) -> Printf.sprintf "compare %s" (Relop.to_string r)
-     | Test (t, _, _) -> Printf.sprintf "test %s" (Testop.to_string t)
-     | Convert (t, _, _) -> Printf.sprintf "cvt %s" (Convertop.to_string t)
-     | LocalGet (v, _, _) -> Printf.sprintf "local.get %d" v
-     | LocalSet (v, _, _) -> Printf.sprintf "local.set %d" v
-     | LocalTee (v, _, _) -> Printf.sprintf "local.tee %d" v
-     | GlobalGet (v, _, _) -> Printf.sprintf "global.get %d" v
-     | GlobalSet (v, _, _) -> Printf.sprintf "global.set %d" v
-     | Load (op, _, _) -> Printf.sprintf "load %s" (Memoryop.to_string op)
-     | Store (op, _, _) -> Printf.sprintf "store %s" (Memoryop.to_string op)
+     | Nop -> "nop"
+     | Drop -> "drop"
+     | Select -> "select"
+     | MemorySize -> "memory_size"
+     | Const v -> Printf.sprintf "const %s" (Prim_value.to_string v)
+     | Binary b -> Printf.sprintf "binary %s" (Binop.to_string b)
+     | Compare r -> Printf.sprintf "compare %s" (Relop.to_string r)
+     | Test t -> Printf.sprintf "test %s" (Testop.to_string t)
+     | Convert t -> Printf.sprintf "cvt %s" (Convertop.to_string t)
+     | LocalGet v -> Printf.sprintf "local.get %d" v
+     | LocalSet v -> Printf.sprintf "local.set %d" v
+     | LocalTee v -> Printf.sprintf "local.tee %d" v
+     | GlobalGet v -> Printf.sprintf "global.get %d" v
+     | GlobalSet v -> Printf.sprintf "global.set %d" v
+     | Load op -> Printf.sprintf "load %s" (Memoryop.to_string op)
+     | Store op -> Printf.sprintf "store %s" (Memoryop.to_string op)
 let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : control) : string =
   match instr with
-  | Call (v, _, _) -> Printf.sprintf "call %d" v
-  | CallIndirect (v, _, _) -> Printf.sprintf "call_indirect %d" v
-  | Br (b, _) -> Printf.sprintf "br %d" b
-  | BrIf (b, _) -> Printf.sprintf "brif %d" b
-  | Return _ -> "return"
+  | Call (_, v) -> Printf.sprintf "call %d" v
+  | CallIndirect (_, v) -> Printf.sprintf "call_indirect %d" v
+  | Br b -> Printf.sprintf "br %d" b
+  | BrIf b -> Printf.sprintf "brif %d" b
+  | Return -> "return"
   | Unreachable -> "unreachable"
-  | Block (instrs, _, _, _) -> Printf.sprintf "block%s%s" sep (list_to_string instrs ~indent:(i+2) ~sep:sep)
-  | Loop (instrs, _, _, _) -> Printf.sprintf "loop%s%s" sep (list_to_string instrs ~indent:(i+2) ~sep:sep)
-  | If (instrs1, instrs2, _, _, _) -> Printf.sprintf "if%s%s%selse%s%s" sep
+  | Block (_, instrs) -> Printf.sprintf "block%s%s" sep (list_to_string instrs ~indent:(i+2) ~sep:sep)
+  | Loop (_, instrs) -> Printf.sprintf "loop%s%s" sep (list_to_string instrs ~indent:(i+2) ~sep:sep)
+  | If (_, instrs1, instrs2) -> Printf.sprintf "if%s%s%selse%s%s" sep
                                (list_to_string instrs1 ~indent:(i+2) ~sep:sep) sep sep
                                (list_to_string instrs2 ~indent:(i+2) ~sep:sep)
 and to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : t) : string =
@@ -162,11 +85,11 @@ and list_to_string ?indent:(i : int = 0) ?sep:(sep : string = ", ") (l : t list)
 
 let control_to_short_string (instr : control) : string =
   match instr with
-  | Call (v, _, _) -> Printf.sprintf "call %d" v
-  | CallIndirect (v, _, _) -> Printf.sprintf "call_indirect %d" v
-  | Br (b, _) -> Printf.sprintf "br %d" b
-  | BrIf (b, _) -> Printf.sprintf "brif %d" b
-  | Return _ -> "return"
+  | Call (_, v) -> Printf.sprintf "call %d" v
+  | CallIndirect (_, v) -> Printf.sprintf "call_indirect %d" v
+  | Br b -> Printf.sprintf "br %d" b
+  | BrIf b -> Printf.sprintf "brif %d" b
+  | Return -> "return"
   | Unreachable -> "unreachable"
   | Block _ -> "block"
   | Loop _ -> "loop"
@@ -208,128 +131,74 @@ let alloc_var (_i : Ast.instr) (name : string) : string =
   counter := !counter + 1;
   v
 
-let rec of_wasm (m : Ast.module_) (fid : int) (i : Ast.instr) (vstack : string list) (nargs : int) (nlocals : int) (nglobals : int) (returns : int) : t =
-  let block_new_vars (name : string) (arity_out : int) : block_vars =
-    (List.init (nargs+nlocals) ~f:(fun n -> alloc_var i (Printf.sprintf "%s_l%d" name n)),
-     List.init nglobals ~f:(fun n -> alloc_var i (Printf.sprintf "%s_g%d" name n)),
-     (if arity_out = 0 then None else Some (alloc_var i (Printf.sprintf "%s_ret" name)))) in
+(** Create an instruction from a WebAssembly instruction *)
+let rec of_wasm (m : Ast.module_) (i : Ast.instr) : t =
   match i.it with
-  | Ast.Nop -> Data (Nop vstack)
-  | Ast.Drop -> Data (Drop (List.drop vstack 1))
+  | Ast.Nop -> Data Nop
+  | Ast.Drop -> Data Drop
   | Ast.Block (st, instrs) ->
     let (arity_in, arity_out) = arity_of_block st in
     assert (arity_in = 0); (* what does it mean to have arity_in > 0? *)
     assert (arity_out <= 1);
-    (* Create one var per local and global, and one extra var if arity_out is 1 *)
-    let (body, _) = seq_of_wasm m fid instrs vstack nargs nlocals nglobals returns in
-    let (_, _, ret) as vars = block_new_vars "block" arity_out in
-    Control (Block (body, vstack, (Option.to_list ret) @ vstack, vars))
+    let body = seq_of_wasm m instrs in
+    Control (Block ((arity_in, arity_out), body))
   | Ast.Const lit ->
-    let var = alloc_var i "const" in
-    Data (Const (Prim_value.of_wasm lit.it, var :: vstack, var))
+    Data (Const (Prim_value.of_wasm lit.it))
   | Ast.Binary bin ->
-    let var = alloc_var i "bin" in
-    Data (Binary (Binop.of_wasm bin, var :: (List.drop vstack 2), var))
+    Data (Binary (Binop.of_wasm bin))
   | Ast.Compare rel ->
-    let var = alloc_var i "cmp" in
-    Data (Compare (Relop.of_wasm rel, var :: (List.drop vstack 2), var))
+    Data (Compare (Relop.of_wasm rel))
   | Ast.LocalGet l ->
-    let var = alloc_var i "local.get" in
-    Data (LocalGet (Var.of_wasm l, var :: vstack, var))
+    Data (LocalGet (Var.of_wasm l))
   | Ast.LocalSet l ->
-    (* The new variable will be used for the new value of the local *)
-    let var = alloc_var i "local.set" in
-    Data (LocalSet (Var.of_wasm l, List.drop vstack 1, var))
+    Data (LocalSet (Var.of_wasm l))
   | Ast.LocalTee l ->
-    let var = alloc_var i "local.tee" in
-    Data (LocalTee (Var.of_wasm l, vstack, var))
+    Data (LocalTee (Var.of_wasm l))
   | Ast.BrIf label ->
-    Control (BrIf (Var.of_wasm label, List.drop vstack 1))
+    Control (BrIf (Var.of_wasm label))
   | Ast.Br label ->
-    Control (Br (Var.of_wasm label, vstack))
+    Control (Br (Var.of_wasm label))
   | Ast.Call f ->
     let (arity_in, arity_out) = arity_of_fun m f in
     assert (arity_out <= 1);
-    if arity_out = 0 then
-      Control (Call (Var.of_wasm f, List.drop vstack arity_in, None))
-    else
-      let var = alloc_var i "call" in
-      Control (Call (Var.of_wasm f, var :: (List.drop vstack arity_in), Some var))
+    Control (Call ((arity_in, arity_out), Var.of_wasm f))
   | Ast.Return ->
-    Control (Return (List.take vstack returns))  (* TODO: in practice, return only keeps the necessary number of values on the vstack *)
+    Control Return
   | Ast.Unreachable ->
     Control Unreachable
   | Ast.Select ->
-    let var = alloc_var i "select" in
-    Data (Select (var :: (List.drop vstack 3), var))
+    Data Select
   | Ast.Loop (st, instrs) ->
     let (arity_in, arity_out) = arity_of_block st in
     assert (arity_in = 0); (* what does it mean to have arity_in > 0 for a loop? *)
     assert (arity_out <= 1); (* TODO: support any arity out? *)
-    let (body, _) = seq_of_wasm m fid instrs vstack nargs nlocals nglobals returns in
-    let (_, _, ret) as vars = block_new_vars "loop" arity_out in
-    Control (Loop (body, vstack, (Option.to_list ret) @ vstack, vars))
+    let body = seq_of_wasm m instrs in
+    Control (Loop ((arity_in, arity_out), body))
   | Ast.If (st, instrs1, instrs2) ->
-    (* drop the condition *)
-    let _, vstack' = Vstack.pop vstack in
     let (arity_in, arity_out) = arity_of_block st in
-    assert (arity_in = 0);
-    assert (arity_out <= 1);
-    let (body1, _vstack1) = seq_of_wasm m fid instrs1 vstack' nargs nlocals nglobals returns in
-    let (body2, _vstack2) = seq_of_wasm m fid instrs2 vstack' nargs nlocals nglobals returns in
-    let (_, _, ret) as vars = block_new_vars "if" arity_out in
-    Control (If (body1, body2, vstack', (Option.to_list ret) @ vstack', vars))
-  | Ast.BrTable (_vs, _v) -> Control (Br (0, vstack)) (* TODO!!! *)
+    let body1 = seq_of_wasm m instrs1 in
+    let body2 = seq_of_wasm m instrs2 in
+    Control (If ((arity_in, arity_out), body1, body2))
+  | Ast.BrTable (_vs, _v) -> failwith "unsupported: br_table"
   | Ast.CallIndirect f ->
-    let _, vstack' = Vstack.pop vstack in (* pop the function pointer *)
     let (arity_in, arity_out) = arity_of_fun_type m f in
     assert (arity_out <= 1);
-    if arity_out = 0 then
-      Control (CallIndirect (Var.of_wasm f, List.drop vstack' arity_in, None))
-    else
-      let var = alloc_var i "call_indirect" in
-      Control (CallIndirect (Var.of_wasm f, var :: List.drop vstack' arity_in, Some var))
+    Control (CallIndirect ((arity_in, arity_out), Var.of_wasm f))
   | Ast.GlobalGet g ->
-    let var = alloc_var i "global.get" in
-    Data (GlobalGet (Var.of_wasm g, var :: vstack, var))
+    Data (GlobalGet (Var.of_wasm g))
   | Ast.GlobalSet g ->
-    (* The new variable will be used for the new value of the global *)
-    let var = alloc_var i "global.set" in
-    Data (GlobalSet (Var.of_wasm g, List.drop vstack 1, var))
+    Data (GlobalSet (Var.of_wasm g))
   | Ast.Load op ->
-    let var_ret = alloc_var i "load" in
-    let vars = [alloc_var i "load0"; alloc_var i "load1"; alloc_var i "load2"; alloc_var i "load3"] in
-    Data (Load (Memoryop.of_wasm_load op, var_ret :: (List.drop vstack 1), var_ret :: vars))
+    Data (Load (Memoryop.of_wasm_load op))
   | Ast.Store op ->
-    (* Allocate variables to represent addresses where the value is stored *)
-    let vars = match op with
-      | { ty = Types.I32Type; sz = _sz; _ } ->
-      (* I32, 4 variables for 4 bytes *)
-        [alloc_var i "store0"; alloc_var i "store1"; alloc_var i "store2"; alloc_var i "store3"]
-      | { ty = Types.I64Type; sz = _sz; _ } ->
-        (* I64, 8 variables for 8 bytes *)
-        [alloc_var i "store0"; alloc_var i "store1"; alloc_var i "store2"; alloc_var i "store3"; alloc_var i "store4"; alloc_var i "store5"; alloc_var i "store6"; alloc_var i "store7"]
-      | { ty = Types.F32Type; _ }
-      | { ty = Types.F64Type; _ } ->
-        (* unsupported, don't allocate anything (yet) *)
-        [] in
-    Data (Store (Memoryop.of_wasm_store op, List.drop vstack 2, vars))
+    Data (Store (Memoryop.of_wasm_store op))
   | Ast.MemorySize ->
-    let var = alloc_var i "memory.size" in
-    Data (MemorySize (var :: vstack, var))
+    Data MemorySize
   | Ast.MemoryGrow -> failwith "memory_grow unsupported"
   | Ast.Test op ->
-    let var = alloc_var i "test" in
-    Data (Test (Testop.of_wasm op, var :: (List.drop vstack 1), var))
+    Data (Test (Testop.of_wasm op))
   | Ast.Convert op ->
-    let var = alloc_var i "convert" in
-    Data (Convert (Convertop.of_wasm op, var :: (List.drop vstack 1), var))
+    Data (Convert (Convertop.of_wasm op))
   | Ast.Unary _op -> failwith "unary unsupported"
-and seq_of_wasm (m : Ast.module_) (fid : int) (is : Ast.instr list) (vstack : string list) (nargs : int) (nlocals : int) (nglobals : int) (returns : int) : t list * string list =
-  let (instrs, vstack) = List.fold_left is
-    ~init:([], vstack)
-    ~f:(fun (instrs, vstack) instr ->
-        let i = of_wasm m fid instr vstack nargs nlocals nglobals returns in
-        let vstack' = vstack_block_spec i in
-        (i :: instrs, vstack')) in
-    List.rev instrs, vstack
+and seq_of_wasm (m : Ast.module_) (is : Ast.instr list) : t list =
+  List.map is ~f:(of_wasm m)

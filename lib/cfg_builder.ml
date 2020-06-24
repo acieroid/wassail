@@ -12,8 +12,8 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
     Basic_block.{ idx = new_idx (); content = Data instrs } in
   let mk_control_block (instr : Instr.control) : Basic_block.t =
     Basic_block.{ idx = new_idx () ; content = Control instr } in
-  let mk_merge_block (vstack_spec : Instr.vstack_spec) (block_vars : Instr.block_vars) =
-    Basic_block.{ idx = new_idx () ; content = ControlMerge (vstack_spec, block_vars) } in
+  let mk_merge_block () =
+    Basic_block.{ idx = new_idx () ; content = ControlMerge } in
   let mk_empty_block () : Basic_block.t =
     Basic_block.{ idx = new_idx () ; content = Nothing } in
   let rec helper (instrs : Instr.data list) (remaining : Instr.t list) : (
@@ -38,7 +38,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
       (* Instruction instr is part of the block, but not the end of it so we continue *)
       helper (instr :: instrs) rest
     | Control instr :: rest -> begin match instr with
-        | BrIf (level, _) ->
+        | BrIf level ->
           (* This is a break up to level `level` *)
           (* First, construct the current block *)
           let block = mk_data_block instrs in
@@ -56,7 +56,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
             (* no return *)
             returns,
             block.idx, exit')
-        |  If (instrs1, instrs2, _, vstack', vars) ->
+        |  If (_arity, instrs1, instrs2) ->
           (* Construct the current block *)
           let block = mk_data_block instrs in
           (* Construct the if block *)
@@ -65,7 +65,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
           let (blocks, edges, breaks, returns, then_entry, then_exit) = helper [] instrs1 in
           let (blocks', edges', breaks', returns', else_entry, else_exit) = helper [] instrs2 in
           (* Construct the merge block *)
-          let merge_block = mk_merge_block vstack' vars in
+          let merge_block = mk_merge_block () in
           (* Construct the rest of the CFG *)
           let (blocks'', edges'', breaks'', returns'', entry, exit') = helper [] rest in
           (* Compute the new break levels (just like for Block and Loop)
@@ -86,7 +86,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
            new_breaks @ breaks'',
            returns @ returns' @ returns'',
            block.idx, exit')
-        | Br (level, _) ->
+        | Br level ->
           (* Similar to break, but because it is inconditional, there is no edge
              from this block to the next. In practice, rest should always be
              empty here *)
@@ -114,8 +114,8 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
             breaks,
             returns,
             block.idx, exit')
-        | ((Block (instrs', _, vstack', block_vars)) as b)
-        | ((Loop (instrs', _, vstack', block_vars)) as b) ->
+        | ((Block (_arity, instrs')) as b)
+        | ((Loop (_arity, instrs')) as b) ->
           (* Create a new block with all instructions collected, without the current instruction *)
           let block = mk_data_block instrs in
           (* Is the current instruction a loop? *)
@@ -123,11 +123,11 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
             | Loop _ -> true
             | _ -> false in
           (* The block entry *)
-          let block_entry = if is_loop then mk_merge_block vstack' block_vars else mk_empty_block () in
+          let block_entry = if is_loop then mk_merge_block () else mk_empty_block () in
           (* Recurse inside the block *)
           let (blocks, edges, breaks, returns, entry', exit') = helper [] instrs' in
           (* Create a node for the exit of the block *)
-          let block_exit = if is_loop then mk_empty_block () else mk_merge_block vstack' block_vars in
+          let block_exit = if is_loop then mk_empty_block () else mk_merge_block () in
           (* Recurse after the block *)
           let (blocks', edges', breaks', returns', entry'', exit'') = helper [] rest in
           (* Compute the new break levels:
@@ -153,7 +153,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
            new_breaks (* filtered breaks *),
            returns @ returns' (* returns are propagated as is *),
            block.idx, exit'')
-        | Return _ ->
+        | Return ->
           (* Return block. The rest of the instructions does not matter (it
              should be empty) *)
           assert (List.is_empty rest);
@@ -184,13 +184,8 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
       end
   in
   let (blocks, edges, breaks, returns, _entry_idx, exit_idx) = helper [] funcinst.code.body in
-  (* Creates the final vars *)
-  let vars = (List.init (Func_inst.nargs funcinst) ~f:(fun n -> Printf.sprintf "f%d_ret_p%d" fid n) @
-              List.init (Func_inst.nlocals funcinst) ~f:(fun n -> Printf.sprintf "f%d_ret_l%d" fid n),
-              List.init module_.nglobals ~f:(fun n -> Printf.sprintf "f%d_ret_g%d" fid n),
-              (if (Func_inst.nreturns funcinst) = 0 then None else Some (Printf.sprintf "f%d_ret" fid))) in
   (* Create the return block *)
-  let return_block = mk_merge_block [] vars in
+  let return_block = mk_merge_block () in
   let blocks' = return_block :: blocks in
   (* Connect the return block, and remove all edges that start from a return block (as they are unreachable) *)
   let edges' = (exit_idx, return_block.idx, None) :: List.map returns ~f:(fun from -> (from, return_block.idx, None)) @ (List.filter edges ~f:(fun (src, _, _) -> not (List.mem returns src ~equal:Stdlib.(=)))) in
@@ -238,9 +233,4 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
     entry_block = Option.value_exn (List.min_elt (List.map actual_blocks ~f:(fun b -> b.idx)) ~compare:Stdlib.compare);
     (* The exit block is the return block *)
     exit_block = return_block.idx;
-    vars = List.concat (List.map actual_blocks ~f:(fun b -> match b.content with
-        | Nothing -> []
-        | Control c -> Instr.vars (Control c)
-        | Data instrs -> List.concat (List.map instrs ~f:(fun i -> Instr.vars (Data i)))
-        | ControlMerge (_, (vs1, vs2, vsopt)) -> vs1 @ vs2 @ (Option.to_list vsopt)))
   }
