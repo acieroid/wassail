@@ -18,7 +18,7 @@ let init (t : Table.t) (elems : Elem.t list) : t =
   List.iter elems ~f:(fun e ->
       assert (e.index = 0);
       match e.offset with
-      | Data (Const (I32 offset)) :: [] ->
+      | Data { instr = Const (I32 offset); _} :: [] ->
         List.iteri e.init ~f:(fun idx addr ->
             Wasm.Lib.Array32.set table.elems Int32.((of_int_exn idx) + offset) (Some addr))
       | _ -> failwith "Unsupported elems for table initialization"

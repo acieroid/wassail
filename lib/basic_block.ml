@@ -4,8 +4,8 @@ type block_sort = BlockEntry | BlockExit | LoopEntry | LoopExit | Normal | Funct
 [@@deriving sexp, compare]
 
 type block_content =
-  | Control of Instr.control
-  | Data of (Instr.data) list
+  | Control of Instr.control Instr.labelled
+  | Data of Instr.data Instr.labelled list
   | ControlMerge
   | Nothing
 [@@deriving sexp, compare]
@@ -16,11 +16,11 @@ type t = {
 } [@@deriving sexp, compare]
 
 let to_string (b : t) : string = Printf.sprintf "block %d, %s" b.idx (match b.content with
-    | Control instr -> Printf.sprintf "control block: %s" (Instr.control_to_string instr)
+    | Control instr -> Printf.sprintf "control block: %s" (Instr.control_to_string instr.instr)
     | Data instrs -> Printf.sprintf "data block: %s" (String.concat ~sep:"\\l"
          (List.map instrs
             ~f:(fun instr ->
-                Printf.sprintf "%s" (Instr.data_to_string instr))))
+                Printf.sprintf "%s" (Instr.data_to_string instr.instr))))
     | ControlMerge -> Printf.sprintf "control merge"
     | Nothing -> "empty")
 
@@ -32,10 +32,10 @@ let to_dot (b : t) : string =
       (String.concat ~sep:"\\l"
          (List.map instrs
             ~f:(fun instr ->
-                Printf.sprintf "%s" (Instr.data_to_string instr))))
+                Printf.sprintf "%s" (Instr.data_to_string instr.instr))))
   | Control instr ->
-    Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d:\\l\\l%s\"];" b.idx b.idx (Instr.control_to_short_string instr)
+    Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d:\\l\\l%s\"];" b.idx b.idx (Instr.control_to_short_string instr.instr)
   | ControlMerge ->
-    Printf.sprintf "block%d [shape=point, label=\"%d\"]" b.idx b.idx 
+    Printf.sprintf "block%d [shape=point, label=\"%d\"]" b.idx b.idx
   | Nothing ->
     Printf.sprintf "block%d [shape=point, label=\"%d\"]" b.idx b.idx

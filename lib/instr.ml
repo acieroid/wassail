@@ -2,6 +2,15 @@ open Core_kernel
 open Wasm
 
 module T = struct
+  type label = int
+  [@@deriving sexp, compare]
+
+  type 'a labelled = {
+    instr : 'a;
+    label : label
+  }
+  [@@deriving sexp, compare]
+
   type arity = int * int
   [@@deriving sexp, compare]
 
@@ -36,8 +45,8 @@ module T = struct
     | Unreachable
   (** All instructions *)
   and t =
-    | Data of data
-    | Control of control
+    | Data of data labelled
+    | Control of control labelled
   [@@deriving sexp, compare]
 end
 include T
@@ -78,8 +87,8 @@ let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (inst
 and to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : t) : string =
   Printf.sprintf "%s%s" (String.make i ' ')
     (match instr with
-     | Data instr -> data_to_string instr
-     | Control instr -> control_to_string instr ~sep:sep ~indent:i)
+     | Data instr -> data_to_string instr.instr
+     | Control instr -> control_to_string instr.instr ~sep:sep ~indent:i)
 and list_to_string ?indent:(i : int = 0) ?sep:(sep : string = ", ") (l : t list) : string =
   String.concat ~sep:sep (List.map l ~f:(to_string ?sep:(Some sep) ?indent:(Some i)))
 
@@ -125,80 +134,85 @@ let arity_of_fun (m : Ast.module_) (f : Ast.var) : int * int =
     (* defined function, get arity from function list *)
     arity_of_fun_type m (Lib.List32.nth m.it.funcs Int32.(f.it - n)).it.ftype
 
-let counter : int ref = ref 0
-let alloc_var (_i : Ast.instr) (name : string) : string =
-  let v = Printf.sprintf "%s_%d" name !counter in
+let counter : label ref = ref 0
+let new_label () : label =
+  let v = !counter in
   counter := !counter + 1;
   v
+
+let data_labelled (d : data) : t =
+  Data { instr = d; label = new_label () }
+let control_labelled (c : control) : t =
+  Control { instr = c; label = new_label () }
 
 (** Create an instruction from a WebAssembly instruction *)
 let rec of_wasm (m : Ast.module_) (i : Ast.instr) : t =
   match i.it with
-  | Ast.Nop -> Data Nop
-  | Ast.Drop -> Data Drop
+  | Ast.Nop -> data_labelled Nop
+  | Ast.Drop -> data_labelled Drop
   | Ast.Block (st, instrs) ->
     let (arity_in, arity_out) = arity_of_block st in
     assert (arity_in = 0); (* what does it mean to have arity_in > 0? *)
     assert (arity_out <= 1);
     let body = seq_of_wasm m instrs in
-    Control (Block ((arity_in, arity_out), body))
+    control_labelled (Block ((arity_in, arity_out), body))
   | Ast.Const lit ->
-    Data (Const (Prim_value.of_wasm lit.it))
+    data_labelled (Const (Prim_value.of_wasm lit.it))
   | Ast.Binary bin ->
-    Data (Binary (Binop.of_wasm bin))
+    data_labelled (Binary (Binop.of_wasm bin))
   | Ast.Compare rel ->
-    Data (Compare (Relop.of_wasm rel))
+    data_labelled (Compare (Relop.of_wasm rel))
   | Ast.LocalGet l ->
-    Data (LocalGet (Var.of_wasm l))
+    data_labelled (LocalGet (Var.of_wasm l))
   | Ast.LocalSet l ->
-    Data (LocalSet (Var.of_wasm l))
+    data_labelled (LocalSet (Var.of_wasm l))
   | Ast.LocalTee l ->
-    Data (LocalTee (Var.of_wasm l))
+    data_labelled (LocalTee (Var.of_wasm l))
   | Ast.BrIf label ->
-    Control (BrIf (Var.of_wasm label))
+    control_labelled (BrIf (Var.of_wasm label))
   | Ast.Br label ->
-    Control (Br (Var.of_wasm label))
+    control_labelled (Br (Var.of_wasm label))
   | Ast.Call f ->
     let (arity_in, arity_out) = arity_of_fun m f in
     assert (arity_out <= 1);
-    Control (Call ((arity_in, arity_out), Var.of_wasm f))
+    control_labelled (Call ((arity_in, arity_out), Var.of_wasm f))
   | Ast.Return ->
-    Control Return
+    control_labelled (Return)
   | Ast.Unreachable ->
-    Control Unreachable
+    control_labelled (Unreachable)
   | Ast.Select ->
-    Data Select
+    data_labelled (Select)
   | Ast.Loop (st, instrs) ->
     let (arity_in, arity_out) = arity_of_block st in
     assert (arity_in = 0); (* what does it mean to have arity_in > 0 for a loop? *)
     assert (arity_out <= 1); (* TODO: support any arity out? *)
     let body = seq_of_wasm m instrs in
-    Control (Loop ((arity_in, arity_out), body))
+    control_labelled (Loop ((arity_in, arity_out), body))
   | Ast.If (st, instrs1, instrs2) ->
     let (arity_in, arity_out) = arity_of_block st in
     let body1 = seq_of_wasm m instrs1 in
     let body2 = seq_of_wasm m instrs2 in
-    Control (If ((arity_in, arity_out), body1, body2))
+    control_labelled (If ((arity_in, arity_out), body1, body2))
   | Ast.BrTable (_vs, _v) -> failwith "unsupported: br_table"
   | Ast.CallIndirect f ->
     let (arity_in, arity_out) = arity_of_fun_type m f in
     assert (arity_out <= 1);
-    Control (CallIndirect ((arity_in, arity_out), Var.of_wasm f))
+    control_labelled (CallIndirect ((arity_in, arity_out), Var.of_wasm f))
   | Ast.GlobalGet g ->
-    Data (GlobalGet (Var.of_wasm g))
+    data_labelled (GlobalGet (Var.of_wasm g))
   | Ast.GlobalSet g ->
-    Data (GlobalSet (Var.of_wasm g))
+    data_labelled (GlobalSet (Var.of_wasm g))
   | Ast.Load op ->
-    Data (Load (Memoryop.of_wasm_load op))
+    data_labelled (Load (Memoryop.of_wasm_load op))
   | Ast.Store op ->
-    Data (Store (Memoryop.of_wasm_store op))
+    data_labelled (Store (Memoryop.of_wasm_store op))
   | Ast.MemorySize ->
-    Data MemorySize
+    data_labelled (MemorySize)
   | Ast.MemoryGrow -> failwith "memory_grow unsupported"
   | Ast.Test op ->
-    Data (Test (Testop.of_wasm op))
+    data_labelled (Test (Testop.of_wasm op))
   | Ast.Convert op ->
-    Data (Convert (Convertop.of_wasm op))
+    data_labelled (Convert (Convertop.of_wasm op))
   | Ast.Unary _op -> failwith "unary unsupported"
 and seq_of_wasm (m : Ast.module_) (is : Ast.instr list) : t list =
   List.map is ~f:(of_wasm m)

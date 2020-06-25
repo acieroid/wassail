@@ -7,16 +7,16 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
   let funcinst = Wasm_module.get_funcinst module_ fid in
   let cur_idx : int ref = ref 0 in
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
-  let mk_data_block (reverse_instrs : Instr.data list) : Basic_block.t =
+  let mk_data_block (reverse_instrs : Instr.data Instr.labelled list) : Basic_block.t =
     let instrs = List.rev reverse_instrs in
     Basic_block.{ idx = new_idx (); content = Data instrs } in
-  let mk_control_block (instr : Instr.control) : Basic_block.t =
+  let mk_control_block (instr : Instr.control Instr.labelled) : Basic_block.t =
     Basic_block.{ idx = new_idx () ; content = Control instr } in
   let mk_merge_block () =
     Basic_block.{ idx = new_idx () ; content = ControlMerge } in
   let mk_empty_block () : Basic_block.t =
     Basic_block.{ idx = new_idx () ; content = Nothing } in
-  let rec helper (instrs : Instr.data list) (remaining : Instr.t list) : (
+  let rec helper (instrs : Instr.data Instr.labelled list) (remaining : Instr.t list) : (
     (* The blocks created *)
     Basic_block.t list *
     (* The edges within the blocks created *)
@@ -37,7 +37,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
     | Data instr :: rest ->
       (* Instruction instr is part of the block, but not the end of it so we continue *)
       helper (instr :: instrs) rest
-    | Control instr :: rest -> begin match instr with
+    | Control instr :: rest -> begin match instr.instr with
         | BrIf level ->
           (* This is a break up to level `level` *)
           (* First, construct the current block *)

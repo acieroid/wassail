@@ -3,17 +3,17 @@
   (type (;1;) (func (param i32) (result i32)))
   (type (;2;) (func (result i32)))
   (type (;3;) (func (param i32 i32) (result i32)))
-  (func (;test-select;) (type 1) (param i32) (result i32)
+  (func (;test-select;) (type 1) (param i32) (result i32) ;; 0
     i32.const 256
     i32.const 512
     i32.const 0
     select) ;; summary: returns 512
-  (func (;test-store;) (type 1) (param i32) (result i32)
+  (func (;test-store;) (type 1) (param i32) (result i32) ;; 1
     global.get 0
     local.get 0
     i32.store offset=12
     local.get 0) ;; ret = p0
-  (func (;test-load;) (type 1) (param i32) (result i32)
+  (func (;test-load;) (type 1) (param i32) (result i32) ;; 2
     global.get 0
     local.get 0
     i32.store offset=12
