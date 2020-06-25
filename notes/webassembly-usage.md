@@ -8,7 +8,7 @@ Browsers
 ---------
 All major browser support WebAssembly: Wikipedia says "As of May 2020, 91.66% of installed browsers (91.65% of desktop browsers and 93.32% of mobile browsers) support WebAssembly"
 
-Benefits of WebAssembly for the browser, according to [Kevin Hoffman](https://www.youtube.com/watch?v=vqBtoPJoQOE): 
+Benefits of WebAssembly for the browser, according to [Kevin Hoffman](https://www.youtube.com/watch?v=vqBtoPJoQOE):
   - speed
   - small footprint
   - security (rigid sandbox, memory isolation)
@@ -33,7 +33,7 @@ Interpreters and runtimes
   - [Wasmer](https://github.com/wasmerio/wasmer) to run standalone applications on the desktop
   - [Lucet](https://github.com/bytecodealliance/lucet) is a runtime designed to execute potentially unsafe code within other apps (focus on sandboxing)
   - [Wasmtime](https://github.com/bytecodealliance/wasmtime), a JIT runtime for WebAssembly
-  
+
 A [list is available](https://github.com/appcypher/awesome-wasm-runtimes)
 
 There exists higher-level runtimes:
@@ -54,9 +54,16 @@ Case studies
 -------------
   - The developers of fastq.bio explain [How We Used WebAssembly To Speed Up Our Web App By 20X (Case Study)](https://www.smashingmagazine.com/2019/04/webassembly-speed-web-app/).
   - JP Morgan uses [Perspective](https://github.com/finos/perspective), a visualization tool developped with WebAssembly.
-  - Ebay has a [use case](https://medium.com/ebaytech/webassembly-at-ebay-a-real-world-use-case-ef888f38b537)
+  - Ebay has a [use case](https://medium.com/ebaytech/webassembly-at-ebay-a-real-world-use-case-ef888f38b537) and uses WebAssembly for [scanning barcodes](https://madewithwebassembly.com/showcase/ebay/)
+  - Ableton uses WebAssembly [for an audio learning tool](https://twitter.com/AbletonDev/status/1143880805317525506)
+  - Autocad has made its [web version](https://www.youtube.com/watch?v=BfkL3WgOPdI&feature=youtu.be) with WebAssembly.
+  - The new version of [Google Earth](https://madewithwebassembly.com/showcase/google-earth/) is on the web thanks to WebAssembly.
+  - Trimble is using WebAssembly for [Sketchup](https://madewithwebassembly.com/showcase/sketchup/)
+  - [Unity3D](https://blogs.unity3d.com/2018/08/15/webassembly-is-here/) can compile to WebAssembly
 
 Moreover, WebAssembly is pushed forward by the *Bytecode Alliance*, formed by Mozilla, fastly, Intel, and Red Hat
+
+A list of applications made with WebAssembly is [available](https://madewithwebassembly.com/)
 
 Porting existing applications
 -----------
@@ -64,7 +71,7 @@ A major use case of WebAssembly to port existing applications (written in C or o
 
 Getting extra speed for existing applications
 -------------------------------
-See [What makes WebAssembly fast](https://hacks.mozilla.org/2017/02/what-makes-webassembly-fast/).
+See [What makes WebAssembly fast](https://hacks.mozilla.org/2017/02/what-makes-webassembly-fast/) and [WebAssembly Will Finally Let You Run High-Performance Applications in Your Browser](https://spectrum.ieee.org/computing/software/webassembly-will-finally-let-you-run-highperformance-applications-in-your-browser).
 
 New web applications
 ----------------------
@@ -87,7 +94,7 @@ From [Manticore](https://blog.trailofbits.com/2020/01/31/symbolically-executing-
 
 They specifically talk about [ewasm](https://github.com/ewasm), the Ethereum VM ported to WebAssembly.
 
-Also: 
+Also:
   - [SSVM](https://github.com/second-state/SSVM), among other applications, is used as a smart contract runtime engine.
   - [EOS](https://eos.io/news/eos-virtual-machine-a-high-performance-blockchain-webassembly-interpreter/) uses WebAssembly.
   - [Wavelet](https://wavelet.perlin.net/)
@@ -95,7 +102,9 @@ Also:
 
 Server-side
 -------------
-Node supports WebAssembly
+Node supports WebAssembly.
+
+Also, see the following article: [WebAssembly on the server-side](https://medium.com/wasm/webassembly-on-the-server-side-c584f874b4a3)
 
 Microcontrollers / embedded devices
 --------------------
@@ -108,16 +117,28 @@ Cloud
 ------
   - [Dfinity](https://medium.com/dfinity/why-webassembly-f21967076e4) is a company that supposedly uses WebAssembly for "cloud computing"
   - [Cloudflare’s Workers enable containerless cloud computing powered by V8 Isolates and WebAssembly](https://hub.packtpub.com/cloudflares-workers-enable-containerless-cloud-computing-powered-by-v8-isolates-and-webassembly/)
+  - WebAssembly can be used for [serverless computing](https://jamesthom.as/2019/08/serverless-functions-with-webassembly-modules/): in that case, improved performance has a big impact on the cost (as serverless computing usually has a pay-per-use model)
+
+Quote from co-founder of Docker:
+> If WASM+WASI existed in 2008, we wouldn’t have needed to created Docker. That’s how important it is. WebAssembly on the server is the future of computing. — Solomon Hykes, Co-founder of Docker
 
 Distributed applications
 ---------------------------
   - [Lumen](https://github.com/lumen/lumen) is a runtime for Elixir applications
   - [waSCC](https://wascc.dev/) is a scalable host runtime with actors
+  - [SSVM](https://medium.com/wasm/striving-towards-utopian-distributed-computing-solutions-using-webassembly-wasm-8408809f2bba) is a WebAssembly VM focused on distributed computing.
+
+Article: [The future of distributed computing; transitioning microservices to WebAssembly(Wasm) via RPC](https://medium.com/wasm/the-future-of-distributed-computing-transitioning-microservices-to-webassembly-wasm-via-rpc-ad6f07cbb497).
+
+This is linked to smart contracts, see for example how [Wavelet is used](https://wavelet.perlin.net/docs/examples/wasm-to-decentralized-program) to run distributed, decentralized computations.
 Books
 =======
 There are already books on WebAssembly
   - [Level Up with WebAssembly](https://levelupwasm.com/) focuses on building "real" apps with WebAssembly.
-  - [Programming WebAssembly with Rust](https://www.amazon.com/Programming-WebAssembly-Rust-Development-Applications/dp/1680506366)
+  - [Programming WebAssembly with Rust](https://www.amazon.com/Programming-WebAssembly-Rust-Development-Applications/dp/1680506366) covers a wide range of applications, from porting games, adding WebAssembly to existing web apps, to embedded devices
+  - [Hands-On Game Development with WebAssembly](https://www.packtpub.com/game-development/hands-game-development-webassembly) focuses on games.
+  - [Learn WebAssembly](https://www.packtpub.com/web-development/learn-webassembly) is a general introduction to WebAssembly
+  - [WebAssembly in Action](https://www.manning.com/books/webassembly-in-action) is also a general intro
 
 
 Presentations
@@ -134,4 +155,4 @@ Consider an app that has access to a critical component, and that has many depen
 
 Multiple kinds of security issues:
   - malicious code (the attacker writes the code)
-  - vulnerable code (the code is 
+  - vulnerable code
