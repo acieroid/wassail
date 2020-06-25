@@ -1,6 +1,20 @@
 This is a structured dump of resources about WebAssembly.
 
-More info could still be integrated, a lot more exists, as can be seen in [this list](https://github.com/mbasso/awesome-wasm).
+Summary
+=========
+WebAssembly is supported by all major browsers, and many programming languages can be compiled to WebAssembly, with multiple frameworks enabling the development of client web applications.
+Moreover, WebAssembly is supported beyond the browsers: there are many interpreters and runtimes with various goals: IoT, running on embedded devices, ...
+Some of these runtimes enable running WebAssembly applications outside of the browser (e.g., as desktop applications, on the server, or on the cloud).
+
+Big companies are using WebAssembly (e.g., eBay, Unity, AutoDesk, JP Morgan, Google) or contributing to the development of WebAssembly as part of the Bytecode Alliance (Mozilla, Fastly, Red Hat, Intel), and there are a number of industrial case studies existing.
+
+There are multiple reasons to use WebAssembly:
+  1. Improve performance of existing web applications
+  2. Porting existing applications to the web, without needing to rewrite them
+  3. Develop web applications that could not be on the web before due to latency or speed constraints: image/video/sound editing, AI, VR, 3D rendering, etc.
+  4. Building microservices for cloud/distributed/smartcontract applications. WebAssembly is seen as a better alternative to Docker, and there is early work on improving the tooling for this aspect.
+
+Seeing what already exists: the number of supported languages, number of runtimes and frameworks, the enthusiasm of big companies, given that WebAssembly is only a few years old, it is very likely that WebAssembly will become a major player in the Web and in distributed computing.
 
 Support of WebAssembly
 ===========================
@@ -131,6 +145,13 @@ Distributed applications
 Article: [The future of distributed computing; transitioning microservices to WebAssembly(Wasm) via RPC](https://medium.com/wasm/the-future-of-distributed-computing-transitioning-microservices-to-webassembly-wasm-via-rpc-ad6f07cbb497).
 
 This is linked to smart contracts, see for example how [Wavelet is used](https://wavelet.perlin.net/docs/examples/wasm-to-decentralized-program) to run distributed, decentralized computations.
+
+According to Kevin Hoffman: "WebAssembly is the future of distributed computing"
+
+Microservices
+-------------
+waSCC can be used to implement microservices easily with some nice guarantees (e.g., zero downtime updates), see demo here: https://www.youtube.com/watch?v=vqBtoPJoQOE.
+This is obviously related to cloud and distributed applications.
 
 Books
 =======
