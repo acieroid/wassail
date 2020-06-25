@@ -8,6 +8,13 @@ Browsers
 ---------
 All major browser support WebAssembly: Wikipedia says "As of May 2020, 91.66% of installed browsers (91.65% of desktop browsers and 93.32% of mobile browsers) support WebAssembly"
 
+Benefits of WebAssembly for the browser, according to [Kevin Hoffman](https://www.youtube.com/watch?v=vqBtoPJoQOE): 
+  - speed
+  - small footprint
+  - security (rigid sandbox, memory isolation)
+  - developer productivity
+  - rapid, continuous deployment
+
 Programming languages
 -----------------------
 Wikipedia: "There have been around 40 programming languages reported to support Wasm as a compilation target"
@@ -26,6 +33,12 @@ Interpreters and runtimes
   - [Wasmer](https://github.com/wasmerio/wasmer) to run standalone applications on the desktop
   - [Lucet](https://github.com/bytecodealliance/lucet) is a runtime designed to execute potentially unsafe code within other apps (focus on sandboxing)
   - [Wasmtime](https://github.com/bytecodealliance/wasmtime), a JIT runtime for WebAssembly
+  
+A [list is available](https://github.com/appcypher/awesome-wasm-runtimes)
+
+There exists higher-level runtimes:
+  - Mid-Level: [waPC](https://github.com/wapc), [wascap](https://github.com/wascc/wascap)
+  - High-level: [waSCC](https://github.com/wascc)
 
 Frameworks
 ------------
@@ -42,6 +55,8 @@ Case studies
   - The developers of fastq.bio explain [How We Used WebAssembly To Speed Up Our Web App By 20X (Case Study)](https://www.smashingmagazine.com/2019/04/webassembly-speed-web-app/).
   - JP Morgan uses [Perspective](https://github.com/finos/perspective), a visualization tool developped with WebAssembly.
   - Ebay has a [use case](https://medium.com/ebaytech/webassembly-at-ebay-a-real-world-use-case-ef888f38b537)
+
+Moreover, WebAssembly is pushed forward by the *Bytecode Alliance*, formed by Mozilla, fastly, Intel, and Red Hat
 
 Porting existing applications
 -----------
@@ -72,17 +87,27 @@ From [Manticore](https://blog.trailofbits.com/2020/01/31/symbolically-executing-
 
 They specifically talk about [ewasm](https://github.com/ewasm), the Ethereum VM ported to WebAssembly.
 
-Also: [SSVM](https://github.com/second-state/SSVM), among other applications, is used as a smart contract runtime engine.
+Also: 
+  - [SSVM](https://github.com/second-state/SSVM), among other applications, is used as a smart contract runtime engine.
+  - [EOS](https://eos.io/news/eos-virtual-machine-a-high-performance-blockchain-webassembly-interpreter/) uses WebAssembly.
+  - [Wavelet](https://wavelet.perlin.net/)
+  - [Truebit](https://github.com/TrueBitFoundation)
 
 Server-side
 -------------
 Node supports WebAssembly
 
-Microcontrollers
+Microcontrollers / embedded devices
 --------------------
   - The [Wasm3](https://github.com/wasm3/wasm3) interpreter is designed to run on microcontrollers
   - [Nebulet](https://github.com/nebulet/nebulet) is a microkernel implemented that implements a WebAssembly usermode (dead project)
   - [Wasmachine](https://github.com/piranna/wasmachine), WebAssembly for FPGAs
+  - [wasm-micro-runtime](https://github.com/bytecodealliance/wasm-micro-runtime) from the ByteCodeAlliance
+
+Cloud
+------
+  - [Dfinity](https://medium.com/dfinity/why-webassembly-f21967076e4) is a company that supposedly uses WebAssembly for "cloud computing"
+  - [Cloudflare’s Workers enable containerless cloud computing powered by V8 Isolates and WebAssembly](https://hub.packtpub.com/cloudflares-workers-enable-containerless-cloud-computing-powered-by-v8-isolates-and-webassembly/)
 
 Distributed applications
 ---------------------------
@@ -92,3 +117,21 @@ Books
 =======
 There are already books on WebAssembly
   - [Level Up with WebAssembly](https://levelupwasm.com/) focuses on building "real" apps with WebAssembly.
+  - [Programming WebAssembly with Rust](https://www.amazon.com/Programming-WebAssembly-Rust-Development-Applications/dp/1680506366)
+
+
+Presentations
+================
+Lin Clark — WebAssembly: Building a new kind of ecosystem
+---------------------------------------------------------
+https://www.youtube.com/watch?v=IBZFJzGnBoU
+« WebAssembly on the web is portable and secure »
+People are starting to use it outside of the web: server-side tasks, IoT devices
+But they're leaving the browser sandbox behind, and lose the security advantage.
+
+Nowadays, 80% of the code was not built by the developers of the applications itself: you have to trust this 80%.
+Consider an app that has access to a critical component, and that has many dependencies. It provides access to that critical components to all its dependencies.
+
+Multiple kinds of security issues:
+  - malicious code (the attacker writes the code)
+  - vulnerable code (the code is 
