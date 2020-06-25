@@ -1,54 +1,56 @@
 open Core_kernel
 open Helpers
 
+module type TRANSFER = sig
+  type state (* Domain.state *)
+  val compare_state : state -> state -> int
+  val init_state : Cfg.t -> state
+  val state_to_string : state -> string
+  val join_state : state -> state -> state
+
+  (** The result of applying the transfer function. *)
+  type result =
+    | Uninitialized (** Meaning it has not been computed yet *)
+    | Simple of state (** A single successor *)
+    | Branch of state * state (** Upon a `brif`, there are two successor states: one where the condition holds, and where where it does not hold. This is used to model that. *)
+  [@@deriving compare]
+  val transfer : Wasm_module.t -> Cfg.t -> Basic_block.t -> state -> result
+  val merge_flows : Wasm_module.t -> Cfg.t -> Basic_block.t -> state list -> state
+end
+
+module Make = functor (Transfer : TRANSFER) -> struct
+
+  let result_to_string (r : Transfer.result) : string = match r with
+  | Uninitialized -> "uninitialized"
+  | Simple st -> Transfer.state_to_string st
+  | Branch (st1, st2) -> Printf.sprintf "branch:\n%s\n%s" (Transfer.state_to_string st1) (Transfer.state_to_string st2)
+
+let join_result (r1 : Transfer.result) (r2 : Transfer.result) =
+  match (r1, r2) with
+  | Uninitialized, _ -> r2
+  | _, Uninitialized -> r1
+  | Simple st1, Simple st2 -> Simple (Transfer.join_state st1 st2)
+  | Branch (st1, st2), Branch (st1', st2') -> Branch (Transfer.join_state st1 st1', Transfer.join_state st2 st2')
+  | _ -> failwith "Cannot join results"
+
+
+
 (** The results of an intra analysis are a mapping from block ids to their in and out values *)
 type intra_results = (Transfer.result * Transfer.result) IntMap.t
 
 (** Analyzes a CFG. Returns the final state after computing the transfer of the entire function *)
 let analyze
     (cfg : Cfg.t) (* The CFG to analyze *)
-    (summaries : Summary.t IntMap.t) (* The current summaries *)
     (module_ : Wasm_module.t) : (* The overall module, needed to access types, tables, etc. *)
   intra_results
   =
   let bottom = Transfer.Uninitialized in
-  let init = Domain.init cfg module_.nglobals in
+  let init = Transfer.init_state cfg in (* Domain.init cfg (failwith "TODO: vars") module_.nglobals in *)
   let data = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
                                          ~f:(fun idx ->
                                              (idx, (bottom, bottom))))) in
-  (* Merges the entry states before analyzing the given block *)
-  let merge_flows (block : Basic_block.t) (states : Domain.state list) : Domain.state =
-    match states with
-    | [] -> (* no in state, use init *)
-      init
-    | s :: [] -> (* single state *)
-      s
-    | _ ->
-      (* multiple states, block should be a control-flow merge *)
-      begin match block.content with
-        | ControlMerge (_vstack', (locals, globals, ret)) ->
-          (* for each state in states *)
-          let states' = List.map states ~f:(fun s ->
-              (* replace the top of the stack if necessary *)
-              let vstack = match ret with
-                | Some v -> v :: (List.drop s.vstack 1)
-                | None -> s.vstack in
-              (* add constraints for locals and globals *)
-              let constraints = List.mapi locals ~f:(fun i l -> (l, List.nth_exn s.locals i)) @
-                                List.mapi globals ~f:(fun i g -> (g, List.nth_exn s.globals i)) @
-                                List.map (Option.to_list ret) ~f:(fun r -> (r, List.hd_exn s.vstack)) in
-              Domain.add_constraints
-                  { s with locals = locals; globals = globals; vstack = vstack }
-                  constraints) in
-          (* now join all the states: their vstack, locals and globals should be
-             the same, only their memory might differ, but joining memory is
-             handled in memory.ml by computing the most general memory *)
-          List.reduce_exn states' ~f:Domain.join
-        | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
-      end
-  in
   (* Analyzes one block, returning the pre and post states *)
-  let analyze_block (block_idx : int) : Domain.state * Transfer.result =
+  let analyze_block (block_idx : int) : Transfer.state * Transfer.result =
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
       let predecessors = Cfg.predecessors cfg block_idx in
@@ -61,10 +63,10 @@ let analyze
           | Branch (_, f), Some false -> f
           | Branch _, None -> failwith "invalid branch state"
           | Uninitialized, _ -> init)) in
-      let in_state = merge_flows block pred_states in
+      let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
-      let result = Transfer.transfer block in_state summaries module_ cfg in
-      Printf.printf "block %d results: %s\n" block_idx (Transfer.result_to_string result);
+      let result = Transfer.transfer module_ cfg block in_state in
+      Printf.printf "block %d results: %s\n" block_idx (result_to_string result);
       (in_state, result)
   in
   let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =
@@ -83,7 +85,7 @@ let analyze
       | _ ->
         (* Update the out state in the analysis results.
            We join with the previous results *)
-        let new_out_state = Transfer.join_result out_state previous_out_state in
+        let new_out_state = join_result out_state previous_out_state in
         data := IntMap.set !data ~key:block_idx ~data:(Simple in_state, new_out_state);
         (* And recurse by adding all successors *)
         let successors = Cfg.successors cfg block_idx in
@@ -103,7 +105,8 @@ let analyze
   !data
 
 (* Extract the out state from intra-procedural results *)
-let out_state (cfg : Cfg.t) (results : (Transfer.result * Transfer.result) IntMap.t) : Domain.state =
+let out_state (cfg : Cfg.t) (results : (Transfer.result * Transfer.result) IntMap.t) : Transfer.state =
     match snd (IntMap.find_exn results cfg.exit_block) with
   | Simple s -> s
   | _ -> failwith "Multiple exits for function?"
+end

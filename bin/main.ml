@@ -72,9 +72,10 @@ let intra =
                     Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
                     summaries
                   end else
+                    let module Intra = Intra_fixpoint.Make(Transfer) in
                     let cfg = IntMap.find_exn cfgs fid in
-                    let results = Intra_fixpoint.analyze cfg summaries wasm_mod in
-                    let out_state = Intra_fixpoint.out_state cfg results in
+                    let results = Intra.analyze cfg wasm_mod in
+                    let out_state = Intra.out_state cfg results in
                     let summary = Summary.make cfg out_state in
                     Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
                     IntMap.set summaries ~key:fid ~data:summary) in

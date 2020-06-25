@@ -2,6 +2,8 @@ open Core_kernel
 open Helpers
 
 
+module Intra = Intra_fixpoint.Make(Transfer)
+
 (** Results of the inter-analysis are stored in the form of a map from function id to (optional) results from the intra-analysis *)
 type inter_results = (((Transfer.result * Transfer.result) IntMap.t) option) IntMap.t
 
@@ -10,6 +12,7 @@ let data : inter_results ref = ref IntMap.empty
 
 (** The summaries computed, stored globally *)
 let summaries : Summary.t IntMap.t ref = ref IntMap.empty
+
 
 (** Analyze multiple CFGS, returns a map from CFG id to out_state for each CFG *)
 let analyze (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : unit =
@@ -32,12 +35,12 @@ let analyze (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : unit =
         Printf.printf "Analyzing cfg %d (name: %s)\n" cfg_idx cfg.name;
         Stdlib.flush_all ();
         (* Perform intra-procedural analysis *)
-        let results = Intra_fixpoint.analyze cfg !summaries module_ in
-        let out_state = Intra_fixpoint.out_state cfg results in
+        let results = Intra.analyze cfg (* !summaries *) module_ in
+        let out_state = Intra.out_state cfg results in
         (* Check difference with previous state, if there was any *)
         let previous_results = IntMap.find_exn !data cfg_idx in
         match previous_results with
-        | Some res when Domain.compare_state out_state (Intra_fixpoint.out_state cfg res) = 0 ->
+        | Some res when Domain.compare_state out_state (Intra.out_state cfg res) = 0 ->
           (* Same results as before, we can just recurse without having to recompute globals nor memory *)
           fixpoint (IntSet.remove worklist cfg_idx)
         | _ ->
