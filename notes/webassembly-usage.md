@@ -131,6 +131,7 @@ Distributed applications
 Article: [The future of distributed computing; transitioning microservices to WebAssembly(Wasm) via RPC](https://medium.com/wasm/the-future-of-distributed-computing-transitioning-microservices-to-webassembly-wasm-via-rpc-ad6f07cbb497).
 
 This is linked to smart contracts, see for example how [Wavelet is used](https://wavelet.perlin.net/docs/examples/wasm-to-decentralized-program) to run distributed, decentralized computations.
+
 Books
 =======
 There are already books on WebAssembly
@@ -143,6 +144,7 @@ There are already books on WebAssembly
 
 Presentations
 ================
+
 Lin Clark — WebAssembly: Building a new kind of ecosystem
 ---------------------------------------------------------
 https://www.youtube.com/watch?v=IBZFJzGnBoU
