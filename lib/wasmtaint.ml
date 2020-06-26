@@ -13,6 +13,7 @@ module Basic_block = Basic_block
 module Logging = Logging
 module Transfer = Transfer
 module Summary = Summary
+module Spec_inference = Spec_inference
 
 let error at category msg =
   failwith (Printf.sprintf "Error: %s" (Source.string_of_region at ^ ": " ^ category ^ ": " ^ msg))

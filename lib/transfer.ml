@@ -17,10 +17,10 @@ let state_to_string = Domain.to_string
 let join_state = Domain.join
 
 (** Merges the entry states before analyzing the given block *)
-let merge_flows (_module_ : Wasm_module.t) (_cfg : Cfg.t) (block : Basic_block.t) (states : state list) : state =
+let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : state list) : state =
     match states with
     | [] -> (* no in state, use init *)
-      failwith "init"
+      init_state cfg
     | s :: [] -> (* single state *)
       s
     | _ ->
@@ -56,7 +56,7 @@ let merge_flows (_module_ : Wasm_module.t) (_cfg : Cfg.t) (block : Basic_block.t
    @param vstack_spec: the specification of what the vstack looks like after execution
    @return the resulting state (poststate).
 *)
-let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data Instr.labelled) (state : Domain.state) : Domain.state =
+let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data Instr.labelled) (state : state) : state =
   match i.instr with
   | Nop -> state
   | MemorySize ->
@@ -264,11 +264,11 @@ let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data Instr.labelled
     failwith (Printf.sprintf "store not supported with such op argument: %s" (Memoryop.to_string op))
 
 let control_instr_transfer
+    (module_ : Wasm_module.t) (* The wasm module (read-only) *)
+    (cfg : Cfg.t) (* The CFG analyzed *)
     (i : Instr.control Instr.labelled) (* The instruction *)
     (state : Domain.state) (* The pre state *)
     (summaries : Summary.t IntMap.t) (* Summaries to apply function calls *)
-    (module_ : Wasm_module.t) (* The wasm module (read-only) *)
-    (cfg : Cfg.t) (* The CFG analyzed *)
   : result =
   match i.instr with
   | Call (_arity, f) ->
@@ -360,7 +360,7 @@ let transfer (module_ : Wasm_module.t) (cfg : Cfg.t) (b : Basic_block.t) (state 
         poststate))
   | Control instr ->
     (* Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string state) (Instr.control_to_short_string instr); *)
-    let poststate = control_instr_transfer instr state (failwith "summaries") module_ cfg in
+    let poststate = control_instr_transfer module_ cfg instr state (failwith "summaries") in
     (* TODO let vstack_spec = Instr.vstack_spec (Control instr) in
     begin match poststate with
       | Uninitialized -> ()

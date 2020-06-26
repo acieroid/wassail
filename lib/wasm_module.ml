@@ -5,7 +5,7 @@ module T = struct
     nimports : int;
     imported_funcs : (int * string * (Type.t list * Type.t list)) list;
     funcs : Func_inst.t list;
-    (*    globals : Global_inst.t list;*)
+    global_types : Type.t list;
     nglobals : int;
     mems : Memory_inst.t list;
     tables : Table_inst.t list;
@@ -43,6 +43,8 @@ let of_wasm (m : Wasm.Ast.module_) : t =
     nimports = nimports;
     imported_funcs = imported_funcs;
     funcs = List.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m minst (i+nimports) f nglobals);
+    global_types = List.map m.it.globals ~f:(fun g -> match g.it.gtype with
+      | Wasm.Types.GlobalType (t, _) -> Type.of_wasm t);
     nglobals = nglobals;
     (*globals = List.map m.it.globals ~f:Global_inst.of_wasm; *)
     mems = List.map m.it.memories ~f:Memory_inst.of_wasm;

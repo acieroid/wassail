@@ -25,7 +25,6 @@ let make (cfg : Cfg.t) (state : Domain.state) : t =
   let globals = state.globals in
   (* let memories = Memory.variables state.memory in TODO *)
   let to_keep = params @ globals @ ret in
-  Printf.printf "keeping only: %s\n" (String.concat ~sep:"," to_keep);
   { params_and_return = to_keep;
     in_arity = List.length cfg.arg_types;
     state = Domain.keep_only state to_keep;
@@ -76,7 +75,7 @@ let of_import (idx : int) (name : string) (args : Type.t list) (ret : Type.t lis
 let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntMap.t =
   List.fold_left module_.imported_funcs
     (* Summaries for defined functions are all initialized to bottom *)
-    ~init:(IntMap.map cfgs ~f:(fun cfg -> bottom cfg module_ (failwith "TODO: vars")))
+    ~init:(IntMap.map cfgs ~f:(fun cfg -> bottom cfg module_ [] (* TODO: vars *)))
     ~f:(fun sum import -> match import with
         | (idx, name, (args, ret)) -> IntMap.set sum ~key:idx ~data:(of_import idx name args ret module_))
 

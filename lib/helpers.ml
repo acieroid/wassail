@@ -5,6 +5,11 @@ module I = struct
   [@@deriving sexp, compare]
 end
 
+module S = struct
+  type t = string
+  [@@deriving sexp, compare]
+end
+
 module IntSet = Set.Make(I)
 
 module ValueListIntMap = struct
@@ -14,6 +19,8 @@ module ValueListIntMap = struct
 end
 
 module IntMap = Map.Make(I)
+
+module StringMap = Map.Make(S)
 
 module IPair = struct
   type t = (int * int)

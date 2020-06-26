@@ -72,13 +72,15 @@ let intra =
                     Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
                     summaries
                   end else
-                    let module Intra = Intra_fixpoint.Make(Transfer) in
+                    let module Intra = Intra_fixpoint.Make(Spec_inference) in
                     let cfg = IntMap.find_exn cfgs fid in
-                    let results = Intra.analyze cfg wasm_mod in
+                    let results = Intra.analyze wasm_mod cfg in
                     let out_state = Intra.out_state cfg results in
-                    let summary = Summary.make cfg out_state in
+                    Printf.printf "%d: %s\n" cfg.idx (Spec_inference.state_to_string out_state);
+                    (* let summary = Summary.make cfg out_state in
                     Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
-                    IntMap.set summaries ~key:fid ~data:summary) in
+                       IntMap.set summaries ~key:fid ~data:summary *)
+                summaries) in
             Printf.printf "---------------\nAnalysis done, resulting summaries are:\n";
             IntMap.iteri summaries ~f:(fun ~key:fid ~data:summary ->
                                         Printf.printf "function %d:\n%s\n" fid (Summary.to_string summary))))

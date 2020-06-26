@@ -23,6 +23,8 @@ type t = {
   name: string;
   (* The index of this CFG *)
   idx: int;
+  (* Types of globals (they are not specific to this CFG, but useful to have here) *)
+  global_types: Type.t list;
   (* Types of arguments *)
   arg_types: Type.t list;
   (* Types of locals *)

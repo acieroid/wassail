@@ -35,7 +35,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : unit =
         Printf.printf "Analyzing cfg %d (name: %s)\n" cfg_idx cfg.name;
         Stdlib.flush_all ();
         (* Perform intra-procedural analysis *)
-        let results = Intra.analyze cfg (* !summaries *) module_ in
+        let results = Intra.analyze module_ cfg (* !summaries *) in
         let out_state = Intra.out_state cfg results in
         (* Check difference with previous state, if there was any *)
         let previous_results = IntMap.find_exn !data cfg_idx in
