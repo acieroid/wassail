@@ -44,7 +44,7 @@ let get (n : int) (l : string list) = List.nth_exn l n
 
 let set (n : int) (l : string list) (v : string) = List.mapi l ~f:(fun i v' -> if i = n then v else v')
 
-let data_instr_transfer (i : Instr.data Instr.labelled) (state : state) : state =
+let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data Instr.labelled) (state : state) : state =
   let ret = Printf.sprintf "i%d" i.label in
   match i.instr with
   | Nop -> state
@@ -64,7 +64,7 @@ let data_instr_transfer (i : Instr.data Instr.labelled) (state : state) : state 
   | Load _ -> { state with vstack = ret :: (drop 1 state.vstack) }
   | Store _ -> { state with vstack = (drop 2 state.vstack) }
 
-let control_instr_transfer (cfg : Cfg.t) (i : Instr.control Instr.labelled) (state : state) : result =
+let control_instr_transfer (_module_ : Wasm_module.t) (cfg : Cfg.t) (i : Instr.control Instr.labelled) (state : state) : result =
   let ret = Printf.sprintf "i%d" i.label in
   match i.instr with
   | Call ((arity_in, arity_out), _)
@@ -81,13 +81,6 @@ let control_instr_transfer (cfg : Cfg.t) (i : Instr.control Instr.labelled) (sta
   | Unreachable -> Simple { state with vstack = [] }
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i.instr))
 
-let transfer (_module_ : Wasm_module.t) (cfg : Cfg.t) (b : Basic_block.t) (state : state) : result =
-  match b.content with
-  | Data instrs ->
-    Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr -> data_instr_transfer instr prestate))
-  | Control instr -> control_instr_transfer cfg instr state
-  | Nothing -> Simple state
-  | ControlMerge -> Simple state
 
 let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : state list) : state =
   let counter = ref 0 in

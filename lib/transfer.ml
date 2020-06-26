@@ -56,7 +56,7 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t)
    @param vstack_spec: the specification of what the vstack looks like after execution
    @return the resulting state (poststate).
 *)
-let data_instr_transfer (module_ : Wasm_module.t) (i : Instr.data Instr.labelled) (state : state) : state =
+let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data Instr.labelled) (state : state) : state =
   match i.instr with
   | Nop -> state
   | MemorySize ->
@@ -268,8 +268,8 @@ let control_instr_transfer
     (cfg : Cfg.t) (* The CFG analyzed *)
     (i : Instr.control Instr.labelled) (* The instruction *)
     (state : Domain.state) (* The pre state *)
-    (summaries : Summary.t IntMap.t) (* Summaries to apply function calls *)
   : result =
+  let summaries : Summary.t IntMap.t = failwith "TODO" in
   match i.instr with
   | Call (_arity, f) ->
     let ret  = failwith "TODO" in
@@ -342,31 +342,3 @@ let control_instr_transfer
     (* Unreachable, so what we return does not really matter *)
     Simple { state with vstack = [] }
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i.instr))
-
-(* let check_vstack (state : Domain.state) (spec : Vstack.t) : unit =
-  if Stdlib.((List.length state.vstack) = (List.length spec)) then
-    ()
-  else
-    failwith (Printf.sprintf "invalid vstack (expected [%s]) in state %s" (String.concat spec ~sep:",") (Domain.to_string state)) *)
-
-let transfer (module_ : Wasm_module.t) (cfg : Cfg.t) (b : Basic_block.t) (state : state) : result =
-  (* Printf.printf "analyzing block %d\n" b.idx; *)
-  match b.content with
-  | Data instrs ->
-    Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
-        (* Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string prestate) (Instr.data_to_string instr); *)
-        let poststate = data_instr_transfer module_ instr prestate in
-        (* check_vstack poststate (Instr.vstack_spec (Data instr)); TODO *)
-        poststate))
-  | Control instr ->
-    (* Printf.printf "pre: %s\ninstr: %s\n" (Domain.to_string state) (Instr.control_to_short_string instr); *)
-    let poststate = control_instr_transfer module_ cfg instr state (failwith "summaries") in
-    (* TODO let vstack_spec = Instr.vstack_spec (Control instr) in
-    begin match poststate with
-      | Uninitialized -> ()
-      | Simple s -> check_vstack s vstack_spec
-      | Branch (s1, s2) -> check_vstack s1 vstack_spec; check_vstack s2 vstack_spec
-       end; *)
-    poststate
-  | Nothing -> Simple state
-  | ControlMerge -> Simple state

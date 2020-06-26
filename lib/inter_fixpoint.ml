@@ -5,7 +5,7 @@ open Helpers
 module Intra = Intra_fixpoint.Make(Transfer)
 
 (** Results of the inter-analysis are stored in the form of a map from function id to (optional) results from the intra-analysis *)
-type inter_results = (((Transfer.result * Transfer.result) IntMap.t) option) IntMap.t
+type inter_results = ((Intra.intra_results * Intra.intra_results) option) IntMap.t
 
 (** The results of the inter analysis, stored globally *)
 let data : inter_results ref = ref IntMap.empty

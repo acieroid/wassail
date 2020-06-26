@@ -75,6 +75,11 @@ let intra =
                     let module Intra = Intra_fixpoint.Make(Spec_inference) in
                     let cfg = IntMap.find_exn cfgs fid in
                     let results = Intra.analyze wasm_mod cfg in
+                    Printf.printf "finished\n--------------\n";
+                    List.iter (IntMap.to_alist (snd results)) ~f:(fun (k, v) ->
+                        match v with
+                        | _, Simple v -> Printf.printf "%d: %s\n" k (Spec_inference.state_to_string v)
+                        | _ -> ());
                     let out_state = Intra.out_state cfg results in
                     Printf.printf "%d: %s\n" cfg.idx (Spec_inference.state_to_string out_state);
                     (* let summary = Summary.make cfg out_state in
