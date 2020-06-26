@@ -3,16 +3,16 @@ open Wasm
 
 module T = struct
   type label = int
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
 
   type 'a labelled = {
     instr : 'a;
     label : label
   }
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
 
   type arity = int * int
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
 
   (** Data instructions *)
   type data =

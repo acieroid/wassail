@@ -3,28 +3,16 @@ open Core_kernel
 type apron_domain = Polka.strict Polka.t
 let manager = Polka.manager_alloc_strict ()
 
-(** A state of the wasm VM *)
+(** A state that contains the constraints *)
 type state = {
   constraints : apron_domain Apron.Abstract1.t; (** The relational constraints *)
   env : Apron.Environment.t; (** The relational environment *)
-  vstack : Vstack.t; (** The value stack *)
-  locals : Locals.t; (** The locals *)
-  globals : Globals.t; (** The globals *)
-  memory : Memory.t; (** The linear memory *)
 }
 
 let bind_compare (res : int) (cmp : 'a -> 'a -> int) (x : 'a) (y : 'a) : int =
   if res = 0 then 0 else cmp x y
 let compare_state (s1 : state) (s2 : state) : int =
-  bind_compare
-    (bind_compare
-       (bind_compare
-          (bind_compare
-             (bind_compare (Vstack.compare s1.vstack s2.vstack)
-                Locals.compare s1.locals s2.locals)
-             Globals.compare s1.globals s2.globals)
-          Memory.compare s1.memory s2.memory)
-       Apron.Environment.compare s1.env s2.env)
+  bind_compare (Apron.Environment.compare s1.env s2.env)
     (fun c1 c2 ->
        if Apron.Abstract1.is_eq manager c1 c2 then 0
        else if Apron.Abstract1.is_leq manager c1 c2 then -1
@@ -34,71 +22,35 @@ let constraints_to_string (c : apron_domain Apron.Abstract1.t) : string =
   (Apron.Abstract1.print Stdlib.Format.str_formatter c; Stdlib.Format.flush_str_formatter ())
 
 let to_string (s : state) : string =
-  Printf.sprintf "{\n vstack: [%s],\n memory: %s\n constraints: %s\n}"
-    (Vstack.to_string s.vstack)
-    (* (Locals.to_string s.locals)
-       (Globals.to_string s.globals) *)
-    (Memory.to_string s.memory)
-    (constraints_to_string s.constraints)
+  Printf.sprintf "constraints: %s" (constraints_to_string s.constraints)
 
-(** Returns the name of the variable for a function's argument *)
-let arg_name (fid : int) (argi : int) : string =
-  Printf.sprintf "f%d_p%d" fid argi
-
-(** Returns the name of the return variable for a function *)
-let return_name (fid : int) : string =
-  Printf.sprintf "f%d_ret" fid
-
-(** Initializes the state for the analysis of CFG cfg.
-    Introduces a few extra variables, e.g., f-1-p0 for the first argument of function
+(** Initializes the state for the analysis of CFG cfg. All variables are unconstrained, except for locals with have 0 as initial value
     @param cfg is the CFG under analysis
-    @param nglobals is the number of globals in the wasm program analyzed
+    @param vars the set of Apron variables to create. It is expected that variables for locals are named l0 to ln, where l0 to li are parameters (there are i params), and li+1 to ln are locals that are initialized to 0.
  *)
-let init (cfg : Cfg.t) (vars : string list) (nglobals : int) : state =
-  let locals = List.mapi cfg.arg_types ~f:(fun argi _typ -> (arg_name cfg.idx argi, Apron.Interval.top)) @
-               List.mapi cfg.local_types ~f:(fun locali _typ -> (Printf.sprintf "f%d_l%d" cfg.idx locali, Apron.Interval.of_int 0 0)) in
-  let globals = List.init nglobals ~f:(fun globali -> (Printf.sprintf "f%d_g%d" cfg.idx globali, Apron.Interval.top)) in
+let init (cfg : Cfg.t) (vars : Spec_inference.var list) : state =
   assert (List.length cfg.return_types <= 1); (* wasm spec does not allow for more than one return type (currently) *)
-  let vars_and_vals = locals @ globals @ (List.map vars ~f:(fun v -> (v, Apron.Interval.top))) in
-  let apron_vars = Array.of_list (List.map vars_and_vals  ~f:(fun (var, _) -> Apron.Var.of_string var)) in
-  Printf.printf "make env with %s\n" (String.concat ~sep:"," (List.map vars_and_vals ~f:fst)) ;
+  let vars_and_vals = List.map vars ~f:(fun v -> (Apron.Var.of_string (Spec_inference.var_to_string v), match v with
+    | Spec_inference.Local n when n >= List.length cfg.arg_types -> Apron.Interval.of_int 0 0
+    | Spec_inference.Local _ | Spec_inference.Global _ | Spec_inference.MemoryKey _ | Spec_inference.MemoryVal _ -> Apron.Interval.top
+    | _ -> Apron.Interval.bottom))
+  in
+  let apron_vars = Array.of_list (List.map vars_and_vals  ~f:fst) in
   let apron_env = Apron.Environment.make apron_vars [| |] in
   let apron_abs = Apron.Abstract1.of_box manager apron_env apron_vars (Array.of_list (List.map vars_and_vals ~f:(fun (_, v) -> v))) in
-  {
-    vstack = [];
-    locals = List.map locals ~f:fst;
-    globals = List.map globals ~f:fst;
-    memory = Memory.empty;
-    constraints = apron_abs;
-    env = apron_env;
-  }
+  { env = apron_env; constraints = apron_abs }
 
 (** Creates the bottom value *)
-let bottom (cfg : Cfg.t) (nglobals : int) (vars : string list) : state =
-  let locals = List.mapi cfg.arg_types ~f:(fun argi _typ -> (arg_name cfg.idx argi, Apron.Interval.bottom)) @
-               List.mapi cfg.local_types ~f:(fun locali _typ -> (Printf.sprintf "f%d_l%d" cfg.idx locali, Apron.Interval.bottom)) in
-  let globals = List.init nglobals ~f:(fun globali -> (Printf.sprintf "f%d_g%d" cfg.idx globali, Apron.Interval.bottom)) in
-  let vars_and_vals = locals @ globals @ (List.map vars ~f:(fun v -> (v, Apron.Interval.bottom))) in
-  let apron_vars = Array.of_list (List.map vars_and_vals  ~f:(fun (var, _) -> Apron.Var.of_string var)) in
-  Printf.printf "vars: %s\n" (String.concat ~sep:"," (List.map ~f:fst vars_and_vals));
+let bottom (_cfg : Cfg.t) (vars : Spec_inference.var list) : state =
+  let vars_and_vals = List.map vars ~f:(fun v -> (Apron.Var.of_string (Spec_inference.var_to_string v), Apron.Interval.bottom)) in
+  let apron_vars = Array.of_list (List.map vars_and_vals  ~f:fst) in
   let apron_env = Apron.Environment.make apron_vars [| |] in
   let apron_abs = Apron.Abstract1.of_box manager apron_env apron_vars (Array.of_list (List.map vars_and_vals ~f:(fun (_, v) -> v))) in
-  {
-    vstack = [];
-    locals = List.map locals ~f:fst;
-    globals = List.map globals ~f:fst;
-    memory = Memory.empty;
-    constraints = apron_abs;
-    env = apron_env;
-  }
+  { constraints = apron_abs; env = apron_env }
 
 let join (s1 : state) (s2 : state) : state =
   let res = {
   constraints = Apron.Abstract1.join manager s1.constraints s2.constraints;
-  vstack = Vstack.join s1.vstack s2.vstack;
-  locals = List.map2_exn s1.locals s2.locals ~f:Value.join;
-  globals = Globals.join s1.globals s2.globals;
-  memory = Memory.join s1.memory s2.memory;
   env = (assert Stdlib.(s1.env = s2.env); s1.env);
 } in
   Printf.printf "join %s\n and %s\ngives %s" (to_string s1) (to_string s2) (to_string res);

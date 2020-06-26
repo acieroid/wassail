@@ -1,6 +1,9 @@
 open Core_kernel
 open Helpers
 
+(** The specification inferred by spec_inference. This should be set before using this module *)
+let spec_data : (Spec_inference.state * Spec_inference.state) IntMap.t ref = ref IntMap.empty
+
 type state = Domain.state
 [@@deriving compare]
 
@@ -10,7 +13,7 @@ type result =
   | Branch of state * state
 [@@deriving compare]
 
-let init_state (cfg : Cfg.t) = Domain.init cfg (failwith "TODO") (failwith "TODO")
+let init_state (cfg : Cfg.t) = Domain.init cfg (Spec_inference.VarSet.to_list (Spec_inference.vars !spec_data))
 
 let state_to_string = Domain.to_string
 
@@ -27,6 +30,9 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t)
       (* multiple states, block should be a control-flow merge *)
       begin match block.content with
         | ControlMerge ->
+          
+          failwith "TODO" (*
+          (* TODO: equate all variables from the input states to the ones for the output state. Use spec_inference.extract_different_vars *)
           let ret = failwith "TODO" in
           let locals = failwith "TODO" in
           let globals = failwith "TODO" in
@@ -46,7 +52,7 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t)
           (* now join all the states: their vstack, locals and globals should be
              the same, only their memory might differ, but joining memory is
              handled in memory.ml by computing the most general memory *)
-          List.reduce_exn states' ~f:Domain.join
+          List.reduce_exn states' ~f:Domain.join *)
         | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
       end
 

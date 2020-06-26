@@ -14,13 +14,13 @@ let to_string (s : t) : string =
     (Domain.to_string s.state)
 
 (** Constructs a summary given a CFG and a domain state resulting from that CFG *)
-let make (cfg : Cfg.t) (state : Domain.state) : t =
+let make (_cfg : Cfg.t) (_state : Domain.state) : t =
   (* Filter the state to only keep relevant variables:
       - the parameters
       - the return value if there is one (i.e., the top of the stack)
       - any variable bound in the store (TODO)
      - any variable used by a global (TODO) *)
-  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Domain.arg_name cfg.idx argi) in
+(*  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Domain.arg_name cfg.idx argi) in
   let ret = List.take state.vstack 1 in
   let globals = state.globals in
   (* let memories = Memory.variables state.memory in TODO *)
@@ -28,14 +28,16 @@ let make (cfg : Cfg.t) (state : Domain.state) : t =
   { params_and_return = to_keep;
     in_arity = List.length cfg.arg_types;
     state = Domain.keep_only state to_keep;
-  }
+    }*)
+  failwith "TODO"
 
 (** Constructs an empty bottom summary given a CFG *)
-let bottom (cfg : Cfg.t) (module_ : Wasm_module.t) (vars : string list) : t =
-  make cfg (Domain.bottom cfg module_.nglobals vars)
+let bottom (cfg : Cfg.t) (_module_ : Wasm_module.t) (vars : Spec_inference.var list) : t =
+  make cfg (Domain.bottom cfg vars)
 
 (** Constructs a summary from an imported function *)
-let of_import (idx : int) (name : string) (args : Type.t list) (ret : Type.t list) (_module_ : Wasm_module.t) : t =
+let of_import (_idx : int) (_name : string) (_args : Type.t list) (_ret : Type.t list) (_module_ : Wasm_module.t) : t =
+  failwith "TODO" (*
   (* These should be fairly easy to encode: we just list constraints between input and output, no constraint if we don't know anything about that name *)
   assert (List.length ret <= 1); (* wasm spec does not allow for more than one return type (currently) *)
   let params = List.mapi args ~f:(fun argi _ -> Domain.arg_name idx argi) in
@@ -69,7 +71,7 @@ let of_import (idx : int) (name : string) (args : Type.t list) (ret : Type.t lis
   { params_and_return = params_and_return;
     in_arity = List.length args;
     state = state
-  }
+  } *)
 
 (** Constructs all summaries for a given module, including imported functions *)
 let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntMap.t =
@@ -81,7 +83,8 @@ let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntM
 
 (* Apply the summary to a state, updating the vstack as if the function was
    called, AND updating the set of called functions *)
-let apply (summary : t) (_fidx : Var.t) (state : Domain.state) (ret : string option) (_module_ : Wasm_module.t) : Domain.state =
+let apply (_summary : t) (_fidx : Var.t) (_state : Domain.state) (_ret : string option) (_module_ : Wasm_module.t) : Domain.state =
+  failwith "TODO" (*
   try
     let retl = (match ret with
         | Some v -> [v]
@@ -107,3 +110,4 @@ let apply (summary : t) (_fidx : Var.t) (state : Domain.state) (ret : string opt
   with
   | Apron.Manager.Error { exn; funid; msg } ->
     failwith (Printf.sprintf "Apron error in Summary.apply: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
+*)
