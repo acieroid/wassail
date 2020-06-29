@@ -61,7 +61,6 @@ let extract_different_vars (s1 : state) (s2 : state) : (var * var) list =
   (* TODO: what about memory ? *)
   (f s1.vstack s2.vstack) @ (f s1.locals s2.locals) @ (f s1.globals s2.globals)
 
-
 let init_state (cfg : Cfg.t) : state = {
   vstack = []; (* the vstack is initially empty *)
   locals = List.mapi (cfg.arg_types @ cfg.local_types) ~f:(fun i _ -> Local i);

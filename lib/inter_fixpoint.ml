@@ -49,7 +49,7 @@ let analyze (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : unit =
              Callees for the same reason. *)
           let callees = Cfg.callees cfg in
           let callers = Cfg.callers cfgs cfg in
-          let summary = Summary.make cfg out_state in
+          let summary = Summary.make cfg out_state (if List.length cfg.return_types = 1 then Option.map ~f:Spec_inference.var_to_string (List.hd (Transfer.spec_post_block cfg.exit_block).vstack) else None) in
           Printf.printf "Final summary is: %s\n" (Summary.to_string summary);
           summaries := IntMap.set !summaries ~key:cfg.idx ~data:summary;
           (* Update data of the analysis and recurse *)

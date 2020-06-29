@@ -11,26 +11,24 @@ type t = {
 }
 
 let to_string (s : t) : string =
-  Printf.sprintf "state: %s"
+  Printf.sprintf "ret: %s, %s"
+    (Option.value ~default:"none" s.return)
     (Domain.to_string s.state)
 
 (** Constructs a summary.
     @param cfg the CFG for which the summary approximates the behavior
     @param ret the return value of the function (if there is any)
     @param state the final state of the summarized function *)
-let make (cfg : Cfg.t) (state : Domain.state) : t =
+let make (cfg : Cfg.t) (state : Domain.state) (ret : string option) : t =
   (* Filter the state to only keep relevant variables:
       - the parameters
       - the return value if there is one (i.e., the top of the stack)
       - any variable bound in the store (TODO)
      - any variable used by a global (TODO) *)
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
-  let ret = match cfg.return_types with
-    | [] -> None
-    | _ :: [] -> Some "ret"
-    | _ -> failwith (Printf.sprintf "more than one return value for cfg %d" cfg.idx) in
   (* TODO: globals and memories *)
   let to_keep = params @ (Option.to_list ret) in
+  Printf.printf "to_keep: %s\n" (String.concat ~sep:"," to_keep);
   { params = params;
     return = ret;
     in_arity = List.length cfg.arg_types;
@@ -39,7 +37,7 @@ let make (cfg : Cfg.t) (state : Domain.state) : t =
 
 (** Constructs an empty bottom summary given a CFG *)
 let bottom (cfg : Cfg.t) (_module_ : Wasm_module.t) (vars : Spec_inference.var list) : t =
-  make cfg (Domain.bottom cfg vars)
+  make cfg (Domain.bottom cfg vars) (if List.length cfg.return_types = 1 then Some "ret" else None)
 
 (** Constructs a summary from an imported function *)
 let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t list) (_module_ : Wasm_module.t) : t =

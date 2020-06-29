@@ -57,6 +57,8 @@ let intra =
       and funs = anon (sequence ("funs" %: int)) in
       fun () ->
         apply_to_textual filename (fun m ->
+            let module SpecIntra = Intra_fixpoint.Make(Spec_inference) in
+            let module ConstraintsIntra = Intra_fixpoint.Make(Transfer) in
             let wasm_mod = Wasm_module.of_wasm m in
             let nimports = List.length wasm_mod.imported_funcs in
             let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
@@ -72,20 +74,22 @@ let intra =
                     Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
                     summaries
                   end else
-                    let module Intra = Intra_fixpoint.Make(Spec_inference) in
                     let cfg = IntMap.find_exn cfgs fid in
-                    let results = Intra.analyze wasm_mod cfg in
-                    Printf.printf "finished\n--------------\n";
-                    List.iter (IntMap.to_alist (snd results)) ~f:(fun (k, v) ->
-                        match v with
-                        | _, Simple v -> Printf.printf "%d: %s\n" k (Spec_inference.state_to_string v)
-                        | _ -> ());
-                    let out_state = Intra.out_state cfg results in
-                    Printf.printf "%d: %s\n" cfg.idx (Spec_inference.state_to_string out_state);
-                    (* let summary = Summary.make cfg out_state in
+                    let (block_spec, instr_spec) = SpecIntra.analyze wasm_mod cfg in
+                    let extract_spec (m : SpecIntra.intra_results) = IntMap.filter_map m ~f:(function
+                        | Spec_inference.Uninitialized, _ -> None
+                        | Simple s, Simple s' -> Some (s, s')
+                        | Simple s, Branch (s1, s2) -> Some (s, Spec_inference.join_state s1 s2)
+                        | _ -> failwith "invalid spec") in
+                    (* Plug in the results of the spec analysis *)
+                    Transfer.spec_instr_data := extract_spec instr_spec;
+                    Transfer.spec_block_data := extract_spec block_spec;
+                    let results = ConstraintsIntra.analyze wasm_mod cfg in
+                    let out_state = ConstraintsIntra.out_state cfg results in
+                    Printf.printf "%d: %s\n" cfg.idx (Transfer.state_to_string out_state);
+                    let summary = Summary.make cfg out_state (if List.length cfg.return_types = 1 then Option.map ~f:Spec_inference.var_to_string (List.hd (Transfer.spec_post_block cfg.exit_block).vstack) else None) in
                     Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
-                       IntMap.set summaries ~key:fid ~data:summary *)
-                summaries) in
+                    IntMap.set summaries ~key:fid ~data:summary) in
             Printf.printf "---------------\nAnalysis done, resulting summaries are:\n";
             IntMap.iteri summaries ~f:(fun ~key:fid ~data:summary ->
                                         Printf.printf "function %d:\n%s\n" fid (Summary.to_string summary))))
