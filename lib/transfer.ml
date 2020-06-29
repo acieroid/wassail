@@ -5,6 +5,8 @@ open Helpers
 let spec_instr_data : (Spec_inference.state * Spec_inference.state) IntMap.t ref = ref IntMap.empty
 let spec_block_data : (Spec_inference.state * Spec_inference.state) IntMap.t ref = ref IntMap.empty
 
+let summaries : Summary.t IntMap.t ref = ref IntMap.empty
+
 let spec_pre_block (idx : int) : Spec_inference.state = fst (IntMap.find_exn !spec_block_data idx)
 let spec_post_block (idx : int) : Spec_inference.state = snd (IntMap.find_exn !spec_block_data idx)
 
@@ -220,7 +222,12 @@ let control_instr_transfer
     (i : Instr.control Instr.labelled) (* The instruction *)
     (state : Domain.state) (* The pre state *)
   : result =
-  let apply_summary (_fa : int) (_arity : int * int) (_state : state) : state = failwith "TODO: apply_summary" in
+  let apply_summary (f : int) (arity : int * int) (state : state) : state =
+    let summary = IntMap.find_exn !summaries f in
+    let args = List.take (spec_pre i.label).vstack (fst arity) in
+    let ret = if snd arity = 1 then List.hd (spec_post i.label).vstack else None in
+    Summary.apply summary state (List.map ~f:Spec_inference.var_to_string args) (Option.map ~f:Spec_inference.var_to_string ret)
+  in
   match i.instr with
   | Call (arity, f) ->
     (* We encounter a function call, retrieve its summary and apply it *)

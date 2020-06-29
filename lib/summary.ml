@@ -84,17 +84,13 @@ let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntM
 
 (* Apply the summary to a state, updating the vstack as if the function was
    called, AND updating the set of called functions *)
-let apply (_summary : t) (_fidx : Var.t) (_state : Domain.state) (_ret : string option) (_module_ : Wasm_module.t) : Domain.state =
-  failwith "TODO: Summary.apply" (*
+let apply (summary : t) (state : Domain.state) (args: string list) (ret : string option) : Domain.state =
   try
-    let retl = (match ret with
-        | Some v -> [v]
-        | None -> []) in
     (* A summary encodes the relation between the arguments and return value.
        To apply it, we do the following: *)
-    let args_and_ret = List.take state.vstack summary.in_arity @ state.globals @ retl in
+    let args_and_ret = args @ (Option.to_list ret) in
     (* 1. Rename the parameters and return value in the summary to match the actual arguments and return value *)
-    let rename_from = List.map summary.params_and_return ~f:Apron.Var.of_string in
+    let rename_from = List.map (summary.params @ (Option.to_list summary.return)) ~f:Apron.Var.of_string in
     let rename_to = List.map args_and_ret ~f:Apron.Var.of_string in
     let renamed = Apron.Abstract1.rename_array Domain.manager summary.state.constraints
         (Array.of_list rename_from)
@@ -104,11 +100,8 @@ let apply (_summary : t) (_fidx : Var.t) (_state : Domain.state) (_ret : string 
     let changed = Apron.Abstract1.change_environment Domain.manager renamed state.env false in
     (* 3. Finally, meet the summary with the current state *)
     let final = Apron.Abstract1.meet Domain.manager state.constraints changed in
-    { state with vstack = retl @ (List.drop state.vstack summary.in_arity);
-                 (* TODO: memory *)
-                 (* TODO: globals CAN change (but not often). At least make sure to fail when they do *)
-                 constraints = final }
+    (* TODO: memory and globals *)
+    { state with constraints = final }
   with
   | Apron.Manager.Error { exn; funid; msg } ->
     failwith (Printf.sprintf "Apron error in Summary.apply: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
-*)
