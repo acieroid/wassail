@@ -5,7 +5,8 @@ open Helpers
 (** A summary is the final state of the function, with some extra informations *)
 type t = {
   in_arity : int; (** The input arity for the function of this summary *)
-  params_and_return : string list; (** The name of the parameters and (optional) return value *) (* TODO: also contains the globals *)
+  params : string list; (** The name of the parameters  *)
+  return : string option; (** The name of the return value *)
   state : Domain.state; (** The final state *)
 }
 
@@ -13,53 +14,53 @@ let to_string (s : t) : string =
   Printf.sprintf "state: %s"
     (Domain.to_string s.state)
 
-(** Constructs a summary given a CFG and a domain state resulting from that CFG *)
-let make (_cfg : Cfg.t) (_state : Domain.state) : t =
+(** Constructs a summary.
+    @param cfg the CFG for which the summary approximates the behavior
+    @param ret the return value of the function (if there is any)
+    @param state the final state of the summarized function *)
+let make (cfg : Cfg.t) (state : Domain.state) : t =
   (* Filter the state to only keep relevant variables:
       - the parameters
       - the return value if there is one (i.e., the top of the stack)
       - any variable bound in the store (TODO)
      - any variable used by a global (TODO) *)
-(*  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Domain.arg_name cfg.idx argi) in
-  let ret = List.take state.vstack 1 in
-  let globals = state.globals in
-  (* let memories = Memory.variables state.memory in TODO *)
-  let to_keep = params @ globals @ ret in
-  { params_and_return = to_keep;
+  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
+  let ret = match cfg.return_types with
+    | [] -> None
+    | _ :: [] -> Some "ret"
+    | _ -> failwith (Printf.sprintf "more than one return value for cfg %d" cfg.idx) in
+  (* TODO: globals and memories *)
+  let to_keep = params @ (Option.to_list ret) in
+  { params = params;
+    return = ret;
     in_arity = List.length cfg.arg_types;
     state = Domain.keep_only state to_keep;
-    }*)
-  failwith "TODO"
+    }
 
 (** Constructs an empty bottom summary given a CFG *)
 let bottom (cfg : Cfg.t) (_module_ : Wasm_module.t) (vars : Spec_inference.var list) : t =
   make cfg (Domain.bottom cfg vars)
 
 (** Constructs a summary from an imported function *)
-let of_import (_idx : int) (_name : string) (_args : Type.t list) (_ret : Type.t list) (_module_ : Wasm_module.t) : t =
-  failwith "TODO" (*
+let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t list) (_module_ : Wasm_module.t) : t =
   (* These should be fairly easy to encode: we just list constraints between input and output, no constraint if we don't know anything about that name *)
+  let params = List.mapi args ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
   assert (List.length ret <= 1); (* wasm spec does not allow for more than one return type (currently) *)
-  let params = List.mapi args ~f:(fun argi _ -> Domain.arg_name idx argi) in
-  let return = List.mapi ret ~f:(fun reti _ -> Domain.return_name reti) in
-  let params_and_return = params @ return in
+  let return = match ret with
+    | [] -> None
+    | _ :: [] -> Some "ret"
+    | _ -> failwith (Printf.sprintf "more than one return value for %s" name) in
+  let params_and_return = params @ (Option.to_list return) in
   let apron_vars = Array.of_list (List.map params_and_return ~f:Apron.Var.of_string) in
   let apron_env = Apron.Environment.make apron_vars [| |] in (* only int variables *)
   (* Everything is set to top *)
   let constraints = Apron.Abstract1.of_box Domain.manager apron_env apron_vars
       (Array.of_list (List.map params_and_return ~f:(fun _ -> Apron.Interval.top))) in
-  let topstate = Domain.{
-      env = apron_env;
-      locals = [];
-      globals = []; (* TODO: they should be in the env + bound to top *)
-      memory = Memory.empty;
-      vstack = return; (* vstack is the return value *)
-      constraints = constraints
-    } in
+  let topstate = Domain.{ env = apron_env; constraints = constraints } in
   let state = match name with
     | "fd_write" ->
       (* returns 0 *)
-      Domain.add_constraint topstate (Domain.return_name idx) "0"
+      Domain.add_constraint topstate "ret" "0"
     | "proc_exit" ->
       (* does not return anything, hence no constraint *)
       topstate
@@ -68,10 +69,10 @@ let of_import (_idx : int) (_name : string) (_args : Type.t list) (_ret : Type.t
       Logging.info (Printf.sprintf "Imported function is not modelled: %s" name);
       topstate
   in
-  { params_and_return = params_and_return;
+  { params = params;
+    return = return;
     in_arity = List.length args;
-    state = state
-  } *)
+    state = state }
 
 (** Constructs all summaries for a given module, including imported functions *)
 let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntMap.t =
@@ -84,7 +85,7 @@ let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntM
 (* Apply the summary to a state, updating the vstack as if the function was
    called, AND updating the set of called functions *)
 let apply (_summary : t) (_fidx : Var.t) (_state : Domain.state) (_ret : string option) (_module_ : Wasm_module.t) : Domain.state =
-  failwith "TODO" (*
+  failwith "TODO: Summary.apply" (*
   try
     let retl = (match ret with
         | Some v -> [v]
