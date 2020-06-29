@@ -194,7 +194,7 @@ let control_instr_transfer (_module_ : Wasm_module.t) (cfg : Cfg.t) (i : Instr.c
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i.instr))
 
 
-let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : state list) : state =
+let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
   let counter = ref 0 in
   let new_var () : var =
     let res = Merge (block.idx, !counter) in
@@ -204,12 +204,12 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t)
     List.map2_exn  l1 l2 ~f:(fun x y -> if Stdlib.(x = y) then x else new_var()) in
   match states with
   | [] -> init_state cfg
-  | s :: [] -> s
-  | s1 :: rest -> begin match block.content with
+  | (_, s) :: [] -> s
+  | (_, s1) :: rest -> begin match block.content with
       | ControlMerge ->
         List.fold_left rest
           ~init:s1
-          ~f:(fun acc s ->
+          ~f:(fun acc (_, s) ->
               assert (VarMap.equal (Stdlib.(=)) acc.memory s.memory); (* TODO: could be different in practice, and in that case we need to introduce new vars for their join *)
               { acc with vstack = substitute acc.vstack s.vstack;
                          locals = substitute acc.locals s.locals;
