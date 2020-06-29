@@ -31,7 +31,7 @@ module type TRANSFER = sig
   val data_instr_transfer : Wasm_module.t -> Cfg.t -> Instr.data Instr.labelled -> state -> state
 
   (** Merges flows for blocks that have multiple predecessors *)
-  val merge_flows : Wasm_module.t -> Cfg.t -> Basic_block.t -> state list -> state
+  val merge_flows : Wasm_module.t -> Cfg.t -> Basic_block.t -> (int * state) list -> state
 end
 
 module Make = functor (Transfer : TRANSFER) -> struct
@@ -89,11 +89,11 @@ module Make = functor (Transfer : TRANSFER) -> struct
          Special case: if the out_state of a predecessor is not a simple one, that means we are the target of a break.
          If this is the case, we pick the right branch, according to the edge data *)
       let pred_states = (List.map predecessors ~f:(fun (idx, d) -> match (snd (IntMap.find_exn !block_data idx), d) with
-          | Simple s, _ -> s
-          | Branch (t, _), Some true -> t
-          | Branch (_, f), Some false -> f
+          | Simple s, _ -> (idx, s)
+          | Branch (t, _), Some true -> (idx, t)
+          | Branch (_, f), Some false -> (idx, f)
           | Branch _, None -> failwith "invalid branch state"
-          | Uninitialized, _ -> init)) in
+          | Uninitialized, _ -> (idx, init))) in
       let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
       let result = transfer block in_state in

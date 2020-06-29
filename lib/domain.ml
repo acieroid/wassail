@@ -79,6 +79,14 @@ let add_constraints (s : state) (constraints : (string * string) list) : state =
 let add_constraint (s : state) (v : string) (linexpr : string) : state =
   add_constraints s [(v,  linexpr)]
 
+let add_equality_constraints (s : state) (vs : (Spec_inference.var * Spec_inference.var) list) : state =
+  add_constraints s (List.map vs ~f:(fun (v1, v2) -> (Spec_inference.var_to_string v1, Spec_inference.var_to_string v2)))
+
+let add_equality_constraint (s : state) (v1 : Spec_inference.var) (v2 : Spec_inference.var) : state =
+  add_constraint s (Spec_inference.var_to_string v1) (Spec_inference.var_to_string v2)
+
+let add_interval_constraint (s : state) (v : Spec_inference.var) (bounds: int * int) : state =
+  add_constraint s (Spec_inference.var_to_string v) (Printf.sprintf "[%d,%d]" (fst bounds) (snd bounds))
 
 (** Only keep the given variables in the constraints, returns the updated state *)
 let keep_only (s : state) (vars : string list) : state =
