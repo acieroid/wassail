@@ -28,7 +28,6 @@ let make (cfg : Cfg.t) (state : Domain.state) (ret : string option) : t =
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
   (* TODO: globals and memories *)
   let to_keep = params @ (Option.to_list ret) in
-  Printf.printf "to_keep: %s\n" (String.concat ~sep:"," to_keep);
   { params = params;
     return = ret;
     in_arity = List.length cfg.arg_types;

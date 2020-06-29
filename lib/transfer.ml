@@ -43,7 +43,9 @@ type result =
   | Branch of state * state
 [@@deriving compare]
 
-let init_state (cfg : Cfg.t) = Domain.init cfg (Spec_inference.VarSet.to_list (Spec_inference.vars !spec_instr_data))
+let init_state (cfg : Cfg.t) = Domain.init cfg Spec_inference.(VarSet.to_list (VarSet.union
+                                                                                 (vars !spec_block_data)
+                                                                                 (vars !spec_instr_data)))
 
 let state_to_string = Domain.to_string
 

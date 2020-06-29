@@ -97,7 +97,6 @@ module Make = functor (Transfer : TRANSFER) -> struct
       let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
       let result = transfer block in_state in
-      Printf.printf "block: %s\n" (Basic_block.to_string block);
       Printf.printf "block %d results: %s\n" block_idx (result_to_string result);
       (in_state, result)
     in

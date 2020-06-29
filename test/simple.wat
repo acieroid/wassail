@@ -19,9 +19,9 @@
     i32.store offset=12
     global.get 0
     i32.load offset=12
-    ;; ret = p0
+    ;; ret = p0 (if memory is supported)
     )
-  (func (;test-if;) (type 1) (param i32) (result i32)
+  (func (;test-if;) (type 1) (param i32) (result i32) ;; 3
     local.get 0
     i32.const 0
     i32.eq
@@ -30,7 +30,7 @@
     else
       i32.const 0
     end) ;; Expected summary: return value is in [0,1]
-  (func (;test-if-return;) (type 1) (param i32) (result i32)
+  (func (;test-if-return;) (type 1) (param i32) (result i32) ;; 4
     i32.const 5
     i32.const 0
     i32.eq
@@ -38,9 +38,9 @@
       i32.const 6
       return
     end
-    i32.const 0
+    i32.const 0 ;; expected summary: [0, 6]
     )
-  (func (;test-join;) (type 1) (param i32) (result i32)
+  (func (;test-join;) (type 1) (param i32) (result i32) ;; 5
     local.get 0
     i32.eqz
     if  ;; label = @1
@@ -53,7 +53,7 @@
     i32.const -1 ;; here we have memory M[1200: p0], vstack: [-1]
     ;; We expect the final summary to be: M, vstack[[-1,1]]
     )
-  (func (;test-merge-after-if;) (type 1) (param i32) (result i32)
+  (func (;test-merge-after-if;) (type 1) (param i32) (result i32) ;; 6
     local.get 0
     i32.const 0
     i32.ge_s
@@ -64,7 +64,7 @@
     end
     drop
     i32.const 0)
-  (func (;test-merge-locals-after-if;) (type 1) (param i32) (result i32)
+  (func (;test-merge-locals-after-if;) (type 1) (param i32) (result i32) ;; 7
     (local i32 i32 i32)
     local.get 0
     i32.eqz
@@ -76,7 +76,7 @@
       local.set 0
     end
     local.get 0) ;; ret = [1,2]
-  (func (;test-merge-globals-after-if;) (type 1) (param i32) (result i32)
+  (func (;test-merge-globals-after-if;) (type 1) (param i32) (result i32) ;; 8
     (local i32 i32 i32)
     local.get 0
     i32.eqz
@@ -88,7 +88,7 @@
       global.set 0
     end
     local.get 0) ;; ret = p0
-  (func (;test-loop;) (type 1) (param i32) (result i32)
+  (func (;test-loop;) (type 1) (param i32) (result i32) ;; 9
     (local i32 i32 i32)
     nop
     loop  ;; label = @1
@@ -97,7 +97,7 @@
       br_if 0 (;@1;)
     end
     i32.const 0)
-  (func (;test-if-result;) (type 1) (param i32) (result i32)
+  (func (;test-if-result;) (type 1) (param i32) (result i32) ;; 10
     (local i32 i32 i32 i32 i32)
     i32.const 0
     if (result i32)  ;; label = @2

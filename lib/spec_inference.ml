@@ -57,7 +57,7 @@ let extract_different_vars (s1 : state) (s2 : state) : (var * var) list =
   let f (l1 : var list) (l2 : var list) : (var * var) list =
     assert (List.length l1 = List.length l2);
     List.filter_map (List.map2_exn l1 l2 ~f:(fun v1 v2 -> (v1, v2, equal_var v1 v2)))
-      ~f:(fun (v1, v2, eq) -> if eq then Some (v1, v2) else None) in
+      ~f:(fun (v1, v2, eq) -> if not eq then Some (v1, v2) else None) in
   (* TODO: what about memory ? *)
   (f s1.vstack s2.vstack) @ (f s1.locals s2.locals) @ (f s1.globals s2.globals)
 
@@ -186,7 +186,7 @@ let control_instr_transfer (_module_ : Wasm_module.t) (cfg : Cfg.t) (i : Instr.c
     Branch ({ state with vstack = drop 1 state.vstack },
             { state with vstack = drop 1 state.vstack })
   | Return -> Simple (if List.length cfg.return_types = 1 then
-                          { state with vstack = [ret] }
+                          { state with vstack = [List.hd_exn state.vstack] }
                         else
                           { state with vstack = [] })
   | Unreachable -> Simple { state with vstack = [] }
