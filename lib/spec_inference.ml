@@ -75,7 +75,9 @@ let init_state (cfg : Cfg.t) : state = {
             List.fold_left instrs
               ~init:m
               ~f:(fun m i -> match i.instr with
-                  | Load op | Store op ->
+                  | Load _op | Store _op ->
+                    VarMap.add_exn ~key:(key i.label 0) ~data:(value i.label 0) m
+                    (*
                     begin match op with
                       | { typ = I32; sz = None; _ } ->
                         (* I32 is 4 bytes *)
@@ -99,8 +101,8 @@ let init_state (cfg : Cfg.t) : state = {
                       | { typ = I32; sz = Some (Pack8, _); _ } ->
                         (* only one byte *)
                         VarMap.add_exn ~key:(key i.label 0) ~data:(value i.label 0) m
-                      | _ -> failwith "unsupported memory op"
-                    end
+                      | _ -> failwith "unsupported memory op" 
+                    end*)
                   | _ -> m)
           | Control _ | ControlMerge | Nothing -> m)
   end;
@@ -115,6 +117,7 @@ let state_to_string (s : state) : string =
 
 let join_state (s1 : state) (s2 : state) : state =
   (* States can only be joined if they actually match! (They should always match if they have to be joined) *)
+  Printf.printf "state1 %s\nstate2: %s\n" (state_to_string s1) (state_to_string s2); 
   assert (compare_state s1 s2 = 0);
   s1
 
@@ -157,7 +160,10 @@ let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.dat
     (* TODO: load can load one byte, or more. For now, this is entirely encoded in the constraints *)
     (* let v = VarMap.find_exn state.memory (key 0) in *)
     { state with vstack = ret :: (drop 1 state.vstack) }
-  | Store { typ = I32; sz = None; _ } ->
+  | Store _ ->
+    { state with vstack = drop 2 state.vstack;
+                 memory = VarMap.update state.memory (key 0) ~f:(fun _ -> (value 0)) }
+(*  | Store { typ = I32; sz = None; _ } ->
     { state with vstack = drop 2 state.vstack;
                  memory = List.fold_left
                      ~init:state.memory
@@ -173,7 +179,7 @@ let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.dat
   | Store { typ = I32; sz = Some (Pack8, _); _ } ->
     { state with vstack = drop 2 state.vstack;
                  memory = VarMap.update state.memory (key 0) ~f:(fun _ -> value 0) }
-  | Store _ -> failwith "unsupported memory op"
+    | Store _ -> failwith "unsupported memory op" *)
 
 let control_instr_transfer (_module_ : Wasm_module.t) (cfg : Cfg.t) (i : Instr.control Instr.labelled) (state : state) : result =
   let ret = Var i.label in
@@ -199,8 +205,18 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t)
     let res = Merge (block.idx, !counter) in
     counter := !counter + 1;
     res in
+  (* Takes two list of variables: in places they differ, replace the element by a fresh variable *)
   let substitute (l1 : var list) (l2 : var list) : var list =
-    List.map2_exn  l1 l2 ~f:(fun x y -> if Stdlib.(x = y) then x else new_var()) in
+    List.map2_exn  l1 l2 ~f:(fun x y -> if equal_var x y then x else new_var ()) in
+  (* Similar as substitute, for maps (ie., the memory). Assumes they key are always the same *)
+  let substitute_map (m1 : var VarMap.t) (m2 : var VarMap.t) : var VarMap.t =
+    assert (Stdlib.(=) (VarMap.keys m1) (VarMap.keys m2));
+    List.fold_left (VarMap.keys m1)
+      ~init:m1
+      ~f:(fun acc k ->
+          if equal_var (VarMap.find_exn m1 k) (VarMap.find_exn m2 k)
+          then acc
+          else VarMap.update acc k ~f:(fun _ -> new_var ())) in
   match states with
   | [] -> init_state cfg
   | (_, s) :: [] -> s
@@ -209,9 +225,9 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t)
         List.fold_left rest
           ~init:s1
           ~f:(fun acc (_, s) ->
-              assert (VarMap.equal (Stdlib.(=)) acc.memory s.memory); (* TODO: could be different in practice, and in that case we need to introduce new vars for their join *)
-              { acc with vstack = substitute acc.vstack s.vstack;
-                         locals = substitute acc.locals s.locals;
-                         globals = substitute acc.globals s.globals })
+              { vstack = substitute acc.vstack s.vstack;
+                locals = substitute acc.locals s.locals;
+                globals = substitute acc.globals s.globals;
+                memory = substitute_map acc.memory s.memory })
       | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
       end

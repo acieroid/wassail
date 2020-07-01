@@ -84,6 +84,7 @@ let intra =
                     (* Plug in the results of the spec analysis *)
                     Transfer.spec_instr_data := extract_spec instr_spec;
                     Transfer.spec_block_data := extract_spec block_spec;
+                    Transfer.summaries := summaries;
                     let results = ConstraintsIntra.analyze wasm_mod cfg in
                     let out_state = ConstraintsIntra.out_state cfg results in
                     Printf.printf "%d: %s\n" cfg.idx (Transfer.state_to_string out_state);
@@ -92,7 +93,7 @@ let intra =
                     IntMap.set summaries ~key:fid ~data:summary) in
             Printf.printf "---------------\nAnalysis done, resulting summaries are:\n";
             IntMap.iteri summaries ~f:(fun ~key:fid ~data:summary ->
-                                        Printf.printf "function %d:\n%s\n" fid (Summary.to_string summary))))
+                                        Printf.printf "function %d: %s\n" fid (Summary.to_string summary))))
 
 
 let inter =

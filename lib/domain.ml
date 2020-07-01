@@ -41,8 +41,8 @@ let init (cfg : Cfg.t) (vars : Spec_inference.var list) : state =
   { env = apron_env; constraints = apron_abs }
 
 (** Creates the bottom value *)
-let bottom (_cfg : Cfg.t) (vars : Spec_inference.var list) : state =
-  let vars_and_vals = List.map vars ~f:(fun v -> (Apron.Var.of_string (Spec_inference.var_to_string v), Apron.Interval.bottom)) in
+let bottom (_cfg : Cfg.t) (vars : string list) : state =
+  let vars_and_vals = List.map vars ~f:(fun v -> (Apron.Var.of_string v, Apron.Interval.bottom)) in
   let apron_vars = Array.of_list (List.map vars_and_vals  ~f:fst) in
   let apron_env = Apron.Environment.make apron_vars [| |] in
   let apron_abs = Apron.Abstract1.of_box manager apron_env apron_vars (Array.of_list (List.map vars_and_vals ~f:(fun (_, v) -> v))) in

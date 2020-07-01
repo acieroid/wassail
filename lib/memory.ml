@@ -1,23 +1,25 @@
-open Core_kernel
+(* Not used anymore *)
+
+(*open Core_kernel
 
 module Map = Map.Make(Value)
 
-(** The memory is a map from values to bytes *)
-type t = Value.byte Map.t
+(** The memory is a map from values to values. *)
+type t = Value.t Map.t
 [@@deriving sexp, compare]
 
 let to_string (m : t) : string =
   Printf.sprintf "M%s" (String.concat ~sep:"" (List.map (Map.to_alist m) ~f:(fun (a, b) ->
-      Printf.sprintf "[%s: %s]" (Value.to_string a) (Value.byte_to_string b))))
+      Printf.sprintf "[%s: %s]" (Value.to_string a) (Value.to_string b))))
 
 (** The initial memory is empty *)
 let empty = Map.empty
 
 (** Stores one byte in memory, at address ea *)
-let store8 (m : t) (ea : Value.t) (b : Value.byte) : t =
+let store (m : t) (ea : Value.t) (v : Value.t) : t =
   Map.update m ea ~f:(function
-      | None -> b
-      | Some _b' -> (* strong update. TODO: is it safe? *) b)
+      | None -> v
+      | Some _v' -> (* strong update. TODO: is it safe? *) v)
 
 (** Stores multiple bytes in memory
     @param vs is the list of (address, byte) to store *)
@@ -55,3 +57,4 @@ let join (m1 : t) (m2 : t) : t =
           Map.set m ~key:k ~data:v1
         else
           m)
+*)

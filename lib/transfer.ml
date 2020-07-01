@@ -150,8 +150,13 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data
     (*    let _v, vstack' = Vstack.pop state.vstack in *)
     (* Don't add any constraint *)
     state
-  | Load ({ typ = I32; offset; sz = None }) ->
+  | Load {offset; _ } ->
+    let ret = pop (spec_post i.label).vstack in
     let vaddr = Spec_inference.var_to_string (pop (spec_pre i.label).vstack) in
+    (* We assume load/stores are symmetric, i.e., when a load/store operation is made on an address for a specific type and size, all other operations on the same address are made with the same type and size *)
+     Domain.add_constraints state [(Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)), Printf.sprintf "%s+%d" vaddr offset);
+                                   (Spec_inference.var_to_string ret, (Spec_inference.var_to_string (Spec_inference.MemoryVal (i.label, 0))))]
+    (* If we want to model values as bytes, we will have to do the following
     let (addr0, addr1, addr2, addr3) = (Spec_inference.MemoryKey (i.label, 0),
                                         Spec_inference.MemoryKey (i.label, 1),
                                         Spec_inference.MemoryKey (i.label, 2),
@@ -161,8 +166,6 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data
                                                (Spec_inference.var_to_string addr2, (Printf.sprintf "%s+%d" vaddr (offset+2)));
                                                (Spec_inference.var_to_string addr1, (Printf.sprintf "%s+%d" vaddr (offset+1)));
                                                (Spec_inference.var_to_string addr0, (Printf.sprintf "%s+%d" vaddr offset))] in
-    (* TODO: add constraints on the return value? or have an other domain for encoding this *)
-    state'
   | Load ({ typ = I32; offset; sz = Some (Pack8, _) }) ->
     Logging.warn "ImpreciseOperation" "load8 returns top, and ignores sx/zx";
     let vaddr = Spec_inference.var_to_string (pop (spec_pre i.label).vstack) in
@@ -172,7 +175,12 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data
     state'
   | Load op ->
     (* TODO: load with sz=8,zx (and others, but this is the most important now *)
-    failwith (Printf.sprintf "load not supported with such op argument: %s" (Memoryop.to_string op))
+       failwith (Printf.sprintf "load not supported with such op argument: %s" (Memoryop.to_string op)) *)
+  | Store { offset; _ } ->
+    let vval, vaddr = pop2 (spec_pre i.label).vstack in
+    Domain.add_constraints state [(Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)), Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset);
+                                  (Spec_inference.var_to_string (Spec_inference.MemoryValNew (i.label, 0)), Spec_inference.var_to_string vval)]
+      (*
   | Store { typ = I32; offset; sz = None } ->
     let (addr0, addr1, addr2, addr3) = (Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)),
                                         Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 1)),
@@ -216,7 +224,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data
     state'
   | Store op ->
     (* TODO: store with i64? *)
-    failwith (Printf.sprintf "store not supported with such op argument: %s" (Memoryop.to_string op))
+    failwith (Printf.sprintf "store not supported with such op argument: %s" (Memoryop.to_string op)) *)
 
 let control_instr_transfer
     (module_ : Wasm_module.t) (* The wasm module (read-only) *)
@@ -234,6 +242,7 @@ let control_instr_transfer
   | Call (arity, f) ->
     (* We encounter a function call, retrieve its summary and apply it *)
     (* We assume all summaries are defined *)
+    Printf.printf "Calling function %d\n" f;
     Simple (apply_summary f arity state)
   | CallIndirect (arity, typ) ->
     (* v is the index in the table that points to the called functiion *)
