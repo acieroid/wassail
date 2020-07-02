@@ -209,6 +209,15 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
           | None, Some b -> (src, dst, Some b)
           | None, None -> (src, dst, None)
           | Some _, Some _ -> failwith "trying to merge two conditional edges, should not happen"))) @ edges'') in
+
+  (* Create the entry block if needed *)
+  let first_block = Option.value_exn (List.min_elt (List.map actual_blocks ~f:(fun b -> b.idx)) ~compare:Stdlib.compare) in
+  (* In general, the first block is the entry block. But in some cases, it could be a block with back edges, and we want to avoid that. So we check if there's an edge to the entry block: if there is one, we need an extra entry block *)
+  let entry_block, actual_blocks', actual_edges' = match List.find actual_edges ~f:(fun (_, idx, _) -> idx = first_block) with
+    | None -> first_block, actual_blocks, actual_edges
+    | Some _ ->
+      let block = mk_empty_block () in
+      block.idx, block :: actual_blocks, (block.idx, first_block, None) :: actual_edges in
   Cfg.{
     (* Exported functions have names, non-exported don't *)
     exported = Option.is_some funcinst.name;
@@ -225,14 +234,13 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
     (* Types of the locals *)
     local_types = funcinst.code.locals;
     (*The basic blocks *)
-    basic_blocks = IntMap.of_alist_exn (List.map actual_blocks ~f:(fun b -> (b.idx, b)));
+    basic_blocks = IntMap.of_alist_exn (List.map actual_blocks' ~f:(fun b -> (b.idx, b)));
     (* The forward edges *)
-    edges = IntMap.of_alist_multi (List.map actual_edges ~f:(fun (src, dst, data) -> (src, (dst, data))));
+    edges = IntMap.of_alist_multi (List.map actual_edges' ~f:(fun (src, dst, data) -> (src, (dst, data))));
     (* The backward edges *)
-    back_edges = IntMap.of_alist_multi (List.map actual_edges ~f:(fun (left, right, data) -> (right, (left, data))));
+    back_edges = IntMap.of_alist_multi (List.map actual_edges' ~f:(fun (left, right, data) -> (right, (left, data))));
     (* The entry block *)
-    (* TODO: probably not fully correct so we have to pay close attention to that: there should be a single entry block *)
-    entry_block = Option.value_exn (List.min_elt (List.map actual_blocks ~f:(fun b -> b.idx)) ~compare:Stdlib.compare);
+    entry_block = entry_block;
     (* The exit block is the return block *)
     exit_block = return_block.idx;
   }

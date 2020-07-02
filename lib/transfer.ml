@@ -47,21 +47,29 @@ let init_state (cfg : Cfg.t) = Domain.init cfg Spec_inference.(VarSet.to_list (V
                                                                                  (vars !spec_block_data)
                                                                                  (vars !spec_instr_data)))
 
+let bottom_state (cfg : Cfg.t) = Domain.bottom cfg (List.map ~f:Spec_inference.var_to_string
+                                                      Spec_inference.(VarSet.to_list (VarSet.union
+                                                                                        (vars !spec_block_data)
+                                                                                        (vars !spec_instr_data))))
+
 let state_to_string = Domain.to_string
 
-let join_state = Domain.join
+let join_state (_module_ : Wasm_module.t) (_cfg : Cfg.t) (_block : Basic_block.t) =
+  Printf.printf "joining for block %d\n" _block.idx;
+  Domain.join
 
 (** Merges the entry states before analyzing the given block *)
-let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
+let merge_flows (module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
     match states with
     | [] -> (* no in state, use init *)
       init_state cfg
-    | s :: [] -> (* single state *)
-      snd s
     | _ ->
-      (* multiple states, block should be a control-flow merge *)
+      (* one or multiple states *)
       begin match block.content with
         | ControlMerge ->
+          Printf.printf "merge for block %d" block.idx;
+          (* TODO: what happens is probably that we don't have a bottom where we'd need, and rather we have an init_state *)
+          (* block is a control-flow merge *)
           let spec = spec_post_block block.idx in
           let states' = List.map states ~f:(fun (idx, s) ->
               (* get the spec after that state *)
@@ -71,8 +79,13 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t)
                                           ~f:(fun (x, y) -> (Spec_inference.var_to_string x, Spec_inference.var_to_string y))
                                           (Spec_inference.extract_different_vars spec spec'))) in
           (* And finally joins all the states *)
-          List.reduce_exn states' ~f:join_state
-        | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
+          List.reduce_exn states' ~f:(join_state module_ cfg block)
+        | _ ->
+          (* Not a control-flow merge, there should be a single predecessor *)
+          begin match states with
+            | (_, s) :: [] -> s
+            | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
+          end
       end
 
 (** Transfer function for data instructions.
@@ -82,6 +95,7 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t)
    @return the resulting state (poststate).
 *)
 let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data Instr.labelled) (state : state) : state =
+  Printf.printf "Instr: %s\nPre: %s\nPost: %s\n" (Instr.data_to_string i.instr) (Spec_inference.state_to_string (spec_pre i.label)) (Spec_inference.state_to_string (spec_post i.label));
   match i.instr with
   | Nop -> state
   | MemorySize ->
@@ -276,17 +290,12 @@ let control_instr_transfer
     end
   | Br _ ->
     Simple state
-  | BrIf _ ->
-    let cond = pop (spec_pre i.label).vstack in
-    (* Add cond = 1 to the constraints of the true branch, cond = 0 to the constrainst of the false branch *)
-      Branch (Domain.add_interval_constraint state cond (1, 1) (* true branch *),
-              Domain.add_interval_constraint state cond (0, 0) (* false branch *))
+  | BrIf _
   | If _ ->
-    (* If is similar to br_if, and the control flow is handled by the CFG visitor.
-       We only need to propagate the right state in the right branch, just like br_if *)
-    let cond = pop (spec_pre i.label).vstack in
-    Branch (Domain.add_interval_constraint state cond (1, 1),
-            Domain.add_interval_constraint state cond (0, 0))
+    let cond = Spec_inference.var_to_string (pop (spec_pre i.label).vstack) in
+    (* restrict cond = 1 to the constraints of the true branch, cond = 0 to the constrainst of the false branch *)
+      Branch (Domain.meet_interval state cond (1, 1) (* true branch *),
+              Domain.meet_interval state cond (0, 0) (* false branch *))
   | Return ->
     (* return does not change anything *)
     Simple state

@@ -11,11 +11,14 @@ module type TRANSFER = sig
   (** The initial state *)
   val init_state : Cfg.t -> state
 
+  (** The bottom state *)
+  val bottom_state : Cfg.t -> state
+
   (** Convert a state to its textual representation *)
   val state_to_string : state -> string
 
   (** Joins two states of the analysis *)
-  val join_state : state -> state -> state
+  val join_state : Wasm_module.t -> Cfg.t -> Basic_block.t -> state -> state -> state
 
   (** The result of applying the transfer function. *)
   type result =
@@ -41,14 +44,6 @@ module Make = functor (Transfer : TRANSFER) -> struct
     | Simple st -> Transfer.state_to_string st
     | Branch (st1, st2) -> Printf.sprintf "branch:\n%s\n%s" (Transfer.state_to_string st1) (Transfer.state_to_string st2)
 
-  let join_result (r1 : Transfer.result) (r2 : Transfer.result) =
-    match (r1, r2) with
-    | Uninitialized, _ -> r2
-    | _, Uninitialized -> r1
-    | Simple st1, Simple st2 -> Simple (Transfer.join_state st1 st2)
-    | Branch (st1, st2), Branch (st1', st2') -> Branch (Transfer.join_state st1 st1', Transfer.join_state st2 st2')
-    | _ -> failwith "Cannot join results"
-
   (** The results of an intra analysis are a mapping from indices (block or instructions) to their in and out values *)
   type intra_results = (Transfer.result * Transfer.result) IntMap.t
 
@@ -57,7 +52,6 @@ module Make = functor (Transfer : TRANSFER) -> struct
       @param cfg is the CFG to analyze *)
   let analyze (module_ : Wasm_module.t) (cfg : Cfg.t) : intra_results * intra_results =
     let bottom = Transfer.Uninitialized in
-    let init = Transfer.init_state cfg in
     (* Data of the analysis, per block *)
     let block_data : intra_results ref = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
                                                  ~f:(fun idx ->
@@ -67,10 +61,19 @@ module Make = functor (Transfer : TRANSFER) -> struct
 
     (* Applies the transfer function to an entire block *)
     let transfer (b : Basic_block.t) (state : Transfer.state) : Transfer.result =
+      Printf.printf "transfer for block: %d (%s)\n" b.idx (match b.content with
+          | Data _ -> "data"
+          | Control _ -> "control"
+          | Nothing -> "nothing"
+          | ControlMerge -> "merge");
+      Printf.printf "prestate is %s\n" (Transfer.state_to_string state);
       match b.content with
       | Data instrs ->
         Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
+            Printf.printf "instr: %s\n" (Instr.data_to_string instr.instr);
+            Printf.printf "prestate: %s\n" (Transfer.state_to_string prestate);
             let poststate = Transfer.data_instr_transfer module_ cfg instr prestate in
+            Printf.printf "poststate: %s\n" (Transfer.state_to_string poststate);
             instr_data := IntMap.set !instr_data ~key:instr.label ~data:(Simple prestate, Simple poststate);
             poststate))
       | Control instr ->
@@ -85,6 +88,7 @@ module Make = functor (Transfer : TRANSFER) -> struct
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
       let predecessors = Cfg.predecessors cfg block_idx in
+      Printf.printf "predecessors of block %d: %s\n" block.idx (String.concat ~sep:"," (List.map predecessors ~f:(fun (idx, _) -> Printf.sprintf "%d" idx)));
       (* in_state is the join of all the the out_state of the predecessors.
          Special case: if the out_state of a predecessor is not a simple one, that means we are the target of a break.
          If this is the case, we pick the right branch, according to the edge data *)
@@ -93,13 +97,27 @@ module Make = functor (Transfer : TRANSFER) -> struct
           | Branch (t, _), Some true -> (idx, t)
           | Branch (_, f), Some false -> (idx, f)
           | Branch _, None -> failwith "invalid branch state"
-          | Uninitialized, _ -> (idx, init))) in
+          | Uninitialized, _ -> (idx, Transfer.bottom_state cfg))) in
       let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
       let result = transfer block in_state in
       Printf.printf "block %d results: %s\n" block_idx (result_to_string result);
       (in_state, result)
     in
+    let join_result (block : Basic_block.t) (r1 : Transfer.result) (r2 : Transfer.result) =
+    match (r1, r2) with
+    | Uninitialized, _ -> r2
+    | _, Uninitialized -> r1
+    | Simple st1, Simple st2 ->
+      Printf.printf "join results for block %d (simple)\n" block.idx;
+      let joined = Transfer.join_state module_ cfg block st1 st2 in
+      Printf.printf "joining %s\n with %s\ngives %s\n" (Transfer.state_to_string st1) (Transfer.state_to_string st2) (Transfer.state_to_string joined);
+      Simple joined
+    | Branch (st1, st2), Branch (st1', st2') ->
+      Branch (Transfer.join_state module_ cfg block st1 st1',
+              Transfer.join_state module_ cfg block st2 st2')
+    | _ -> failwith "Cannot join results" in
+
     let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =
       if IntSet.is_empty worklist then
         () (* No more elements to consider. We can stop here *)
@@ -115,7 +133,7 @@ module Make = functor (Transfer : TRANSFER) -> struct
         | _ ->
           (* Update the out state in the analysis results.
              We join with the previous results *)
-          let new_out_state = join_result out_state previous_out_state in
+          let new_out_state = join_result (Cfg.find_block_exn cfg block_idx) out_state previous_out_state in
           block_data := IntMap.set !block_data ~key:block_idx ~data:(Simple in_state, new_out_state);
           (* And recurse by adding all successors *)
           let successors = Cfg.successors cfg block_idx in

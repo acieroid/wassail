@@ -108,6 +108,8 @@ let init_state (cfg : Cfg.t) : state = {
   end;
 }
 
+let bottom_state (cfg : Cfg.t) : state = init_state cfg (* TODO? *)
+
 let state_to_string (s : state) : string =
   Printf.sprintf "{\nvstack: [%s]\nlocals: [%s]\nglobals: [%s]\nmemory: [%s]\n}"
     (String.concat ~sep:", " (List.map s.vstack ~f:var_to_string))
@@ -115,11 +117,6 @@ let state_to_string (s : state) : string =
     (String.concat ~sep:", " (List.map s.globals ~f:var_to_string))
     (String.concat ~sep:", " (List.map (VarMap.to_alist s.memory) ~f:(fun (k, v) -> Printf.sprintf "%s: %s" (var_to_string k) (var_to_string v))))
 
-let join_state (s1 : state) (s2 : state) : state =
-  (* States can only be joined if they actually match! (They should always match if they have to be joined) *)
-  Printf.printf "state1 %s\nstate2: %s\n" (state_to_string s1) (state_to_string s2); 
-  assert (compare_state s1 s2 = 0);
-  s1
 
 type result =
   | Uninitialized
@@ -140,6 +137,7 @@ let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.dat
   let key (n : int) : var = MemoryKey (i.label, n) in
   let value (n : int) : var = MemoryValNew (i.label, n) in
   let ret = Var i.label in
+  (* Printf.printf "transfer for %s with state %s\n" (Instr.data_to_string i.instr) (state_to_string state); *)
   match i.instr with
   | Nop -> state
   | MemorySize -> { state with vstack = ret :: state.vstack }
@@ -199,35 +197,41 @@ let control_instr_transfer (_module_ : Wasm_module.t) (cfg : Cfg.t) (i : Instr.c
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i.instr))
 
 
-let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
+let merge (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : state list) : state =
   let counter = ref 0 in
   let new_var () : var =
     let res = Merge (block.idx, !counter) in
     counter := !counter + 1;
     res in
-  (* Takes two list of variables: in places they differ, replace the element by a fresh variable *)
-  let substitute (l1 : var list) (l2 : var list) : var list =
-    List.map2_exn  l1 l2 ~f:(fun x y -> if equal_var x y then x else new_var ()) in
-  (* Similar as substitute, for maps (ie., the memory). Assumes they key are always the same *)
-  let substitute_map (m1 : var VarMap.t) (m2 : var VarMap.t) : var VarMap.t =
-    assert (Stdlib.(=) (VarMap.keys m1) (VarMap.keys m2));
-    List.fold_left (VarMap.keys m1)
-      ~init:m1
-      ~f:(fun acc k ->
-          if equal_var (VarMap.find_exn m1 k) (VarMap.find_exn m2 k)
-          then acc
-          else VarMap.update acc k ~f:(fun _ -> new_var ())) in
-  match states with
-  | [] -> init_state cfg
-  | (_, s) :: [] -> s
-  | (_, s1) :: rest -> begin match block.content with
-      | ControlMerge ->
-        List.fold_left rest
-          ~init:s1
-          ~f:(fun acc (_, s) ->
-              { vstack = substitute acc.vstack s.vstack;
-                locals = substitute acc.locals s.locals;
-                globals = substitute acc.globals s.globals;
-                memory = substitute_map acc.memory s.memory })
+  match block.content with
+  | ControlMerge -> 
+    let st = match states with
+      | [] -> init_state cfg
+      | s :: _ -> s (* ensures the vstack has the right number of elements *)in
+    (* TODO: for now we replace every variable. Less variables could be produced by avoiding replacing the same ones, but this is more tricky than it appears *)
+    { vstack = List.map st.vstack ~f:(fun _ -> new_var());
+      locals = List.map st.locals ~f:(fun _ -> new_var());
+      globals = List.map st.globals ~f:(fun _ -> new_var());
+      memory = VarMap.map st.memory ~f:(fun _ -> new_var()) }
+  | _ ->
+    (* not a control-flow merge, should only be one predecessor (or none if it is the entry point) *)
+    begin match states with
+      | [] -> init_state cfg
+      | s :: [] -> s
+      | _ ->  failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
+    end
+
+let merge_flows (module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
+  begin match states with
+  | _ :: _ :: _ -> begin match block.content with
+      | ControlMerge -> ()
       | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
-      end
+    end
+  | _ -> ()
+  end;
+  merge module_ cfg block (List.map ~f:snd states)
+
+let join_state (_module_ : Wasm_module.t) (_cfg : Cfg.t) (_block : Basic_block.t) (s1 : state) (s2 : state) : state =
+  Printf.printf "[block %d] joining %s with %s\n" _block.idx( state_to_string s1) (state_to_string s2);
+  assert (compare_state s1 s2 = 0);
+  s1

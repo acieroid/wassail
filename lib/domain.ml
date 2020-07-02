@@ -42,11 +42,13 @@ let init (cfg : Cfg.t) (vars : Spec_inference.var list) : state =
 
 (** Creates the bottom value *)
 let bottom (_cfg : Cfg.t) (vars : string list) : state =
-  let vars_and_vals = List.map vars ~f:(fun v -> (Apron.Var.of_string v, Apron.Interval.bottom)) in
-  let apron_vars = Array.of_list (List.map vars_and_vals  ~f:fst) in
+  let apron_vars = Array.of_list (List.map vars  ~f:Apron.Var.of_string) in
   let apron_env = Apron.Environment.make apron_vars [| |] in
-  let apron_abs = Apron.Abstract1.of_box manager apron_env apron_vars (Array.of_list (List.map vars_and_vals ~f:(fun (_, v) -> v))) in
-  { constraints = apron_abs; env = apron_env }
+  let apron_abs = Apron.Abstract1.bottom manager apron_env in
+  let res = { constraints = apron_abs; env = apron_env } in
+  Printf.printf "bottom created: %s\n" (to_string res);
+  res
+
 
 let join (s1 : state) (s2 : state) : state =
   let res = {
@@ -87,6 +89,11 @@ let add_equality_constraint (s : state) (v1 : Spec_inference.var) (v2 : Spec_inf
 
 let add_interval_constraint (s : state) (v : Spec_inference.var) (bounds: int * int) : state =
   add_constraint s (Spec_inference.var_to_string v) (Printf.sprintf "[%d;%d]" (fst bounds) (snd bounds))
+
+let meet_interval (s : state) (v : string) (bounds : int * int) : state =
+  let earray = Apron.Lincons1.array_make s.env 1 in
+  Apron.Lincons1.array_set earray 0 (Apron.Parser.lincons1_of_string s.env (Printf.sprintf "%s=[%d;%d]" v (fst bounds) (snd bounds)));
+  { s with constraints = Apron.Abstract1.meet_lincons_array manager s.constraints earray }
 
 (** Only keep the given variables in the constraints, returns the updated state *)
 let keep_only (s : state) (vars : string list) : state =

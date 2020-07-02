@@ -79,12 +79,15 @@ let intra =
                     let extract_spec (m : SpecIntra.intra_results) = IntMap.filter_map m ~f:(function
                         | Spec_inference.Uninitialized, _ -> None
                         | Simple s, Simple s' -> Some (s, s')
-                        | Simple s, Branch (s1, s2) -> Some (s, Spec_inference.join_state s1 s2)
+                        | Simple s, Branch (s1, s2) ->
+                          assert (Spec_inference.compare_state s1 s2 = 0); (* both states should be equal *)
+                          Some (s, s1)
                         | _ -> failwith "invalid spec") in
                     (* Plug in the results of the spec analysis *)
                     Transfer.spec_instr_data := extract_spec instr_spec;
                     Transfer.spec_block_data := extract_spec block_spec;
                     Transfer.summaries := summaries;
+                    Printf.printf "-------------------------\nMain analysis\n-------------------\n";
                     let results = ConstraintsIntra.analyze wasm_mod cfg in
                     let out_state = ConstraintsIntra.out_state cfg results in
                     Printf.printf "%d: %s\n" cfg.idx (Transfer.state_to_string out_state);
