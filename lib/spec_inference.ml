@@ -182,9 +182,11 @@ let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.dat
 let control_instr_transfer (_module_ : Wasm_module.t) (cfg : Cfg.t) (i : Instr.control Instr.labelled) (state : state) : result =
   let ret = Var i.label in
   match i.instr with
-  | Call ((arity_in, arity_out), _)
-  | CallIndirect ((arity_in, arity_out), _) ->
+  | Call ((arity_in, arity_out), _) ->
     Simple { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) }
+  | CallIndirect ((arity_in, arity_out), _) ->
+    (* Like call, but reads the function index from the vstack *)
+    Simple { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) }
   | Br _ -> Simple state
   | BrIf _ | If _ ->
     Branch ({ state with vstack = drop 1 state.vstack },
