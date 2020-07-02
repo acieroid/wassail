@@ -63,7 +63,7 @@
       local.get 0
       call $__overflow
     end)
-  (func $memcpy (type 0) (param i32 i32 i32) (result i32)
+  (func $memcpy (type 0) (param i32 i32 i32) (result i32) ;; 3
     (local i32 i32 i32)
     local.get 2
     i32.const 512
@@ -578,7 +578,7 @@
         br_if 0 (;@2;)
       end
     end)
-  (func $_start (type 1)
+  (func $_start (type 1) ;; 11
     block (result i32)  ;; label = @1
       call $puts
       i32.const 0

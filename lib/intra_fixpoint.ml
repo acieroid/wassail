@@ -61,19 +61,10 @@ module Make = functor (Transfer : TRANSFER) -> struct
 
     (* Applies the transfer function to an entire block *)
     let transfer (b : Basic_block.t) (state : Transfer.state) : Transfer.result =
-      Printf.printf "transfer for block: %d (%s)\n" b.idx (match b.content with
-          | Data _ -> "data"
-          | Control _ -> "control"
-          | Nothing -> "nothing"
-          | ControlMerge -> "merge");
-      Printf.printf "prestate is %s\n" (Transfer.state_to_string state);
       match b.content with
       | Data instrs ->
         Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
-            Printf.printf "instr: %s\n" (Instr.data_to_string instr.instr);
-            Printf.printf "prestate: %s\n" (Transfer.state_to_string prestate);
             let poststate = Transfer.data_instr_transfer module_ cfg instr prestate in
-            Printf.printf "poststate: %s\n" (Transfer.state_to_string poststate);
             instr_data := IntMap.set !instr_data ~key:instr.label ~data:(Simple prestate, Simple poststate);
             poststate))
       | Control instr ->
@@ -88,7 +79,6 @@ module Make = functor (Transfer : TRANSFER) -> struct
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
       let predecessors = Cfg.predecessors cfg block_idx in
-      Printf.printf "predecessors of block %d: %s\n" block.idx (String.concat ~sep:"," (List.map predecessors ~f:(fun (idx, _) -> Printf.sprintf "%d" idx)));
       (* in_state is the join of all the the out_state of the predecessors.
          Special case: if the out_state of a predecessor is not a simple one, that means we are the target of a break.
          If this is the case, we pick the right branch, according to the edge data *)
@@ -101,7 +91,6 @@ module Make = functor (Transfer : TRANSFER) -> struct
       let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
       let result = transfer block in_state in
-      Printf.printf "block %d results: %s\n" block_idx (result_to_string result);
       (in_state, result)
     in
     let join_result (block : Basic_block.t) (r1 : Transfer.result) (r2 : Transfer.result) =
@@ -109,9 +98,7 @@ module Make = functor (Transfer : TRANSFER) -> struct
     | Uninitialized, _ -> r2
     | _, Uninitialized -> r1
     | Simple st1, Simple st2 ->
-      Printf.printf "join results for block %d (simple)\n" block.idx;
       let joined = Transfer.join_state module_ cfg block st1 st2 in
-      Printf.printf "joining %s\n with %s\ngives %s\n" (Transfer.state_to_string st1) (Transfer.state_to_string st2) (Transfer.state_to_string joined);
       Simple joined
     | Branch (st1, st2), Branch (st1', st2') ->
       Branch (Transfer.join_state module_ cfg block st1 st1',
@@ -143,7 +130,6 @@ module Make = functor (Transfer : TRANSFER) -> struct
     let rec _narrow (blocks : int list) : unit = match blocks with
       | [] -> ()
       | block_idx :: blocks ->
-        Printf.printf "narrowing block %d\n" block_idx;
         let (in_state, out_state) = analyze_block block_idx in
         block_data := IntMap.set !block_data ~key:block_idx ~data:(Simple in_state, out_state);
         _narrow blocks

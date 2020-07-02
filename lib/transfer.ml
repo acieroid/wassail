@@ -55,7 +55,6 @@ let bottom_state (cfg : Cfg.t) = Domain.bottom cfg (List.map ~f:Spec_inference.v
 let state_to_string = Domain.to_string
 
 let join_state (_module_ : Wasm_module.t) (_cfg : Cfg.t) (_block : Basic_block.t) =
-  Printf.printf "joining for block %d\n" _block.idx;
   Domain.join
 
 (** Merges the entry states before analyzing the given block *)
@@ -67,8 +66,6 @@ let merge_flows (module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) 
       (* one or multiple states *)
       begin match block.content with
         | ControlMerge ->
-          Printf.printf "merge for block %d" block.idx;
-          (* TODO: what happens is probably that we don't have a bottom where we'd need, and rather we have an init_state *)
           (* block is a control-flow merge *)
           let spec = spec_post_block block.idx in
           let states' = List.map states ~f:(fun (idx, s) ->
@@ -95,7 +92,6 @@ let merge_flows (module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) 
    @return the resulting state (poststate).
 *)
 let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data Instr.labelled) (state : state) : state =
-  Printf.printf "Instr: %s\nPre: %s\nPost: %s\n" (Instr.data_to_string i.instr) (Spec_inference.state_to_string (spec_pre i.label)) (Spec_inference.state_to_string (spec_post i.label));
   match i.instr with
   | Nop -> state
   | MemorySize ->
@@ -256,7 +252,6 @@ let control_instr_transfer
   | Call (arity, f) ->
     (* We encounter a function call, retrieve its summary and apply it *)
     (* We assume all summaries are defined *)
-    Printf.printf "Calling function %d\n" f;
     Simple (apply_summary f arity state)
   | CallIndirect (arity, typ) ->
     (* v is the index in the table that points to the called functiion *)
