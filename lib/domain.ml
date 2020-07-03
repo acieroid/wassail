@@ -42,13 +42,17 @@ let init (cfg : Cfg.t) (vars : Spec_inference.var list) : state =
 
 (** Creates the bottom value *)
 let bottom (_cfg : Cfg.t) (vars : string list) : state =
-  let apron_vars = Array.of_list (List.map vars  ~f:Apron.Var.of_string) in
+  let apron_vars = Array.of_list (List.map vars ~f:Apron.Var.of_string) in
   let apron_env = Apron.Environment.make apron_vars [| |] in
   let apron_abs = Apron.Abstract1.bottom manager apron_env in
-  let res = { constraints = apron_abs; env = apron_env } in
-  Printf.printf "bottom created: %s\n" (to_string res);
-  res
+  { constraints = apron_abs; env = apron_env }
 
+(** Creates the top value *)
+let top (_cfg : Cfg.t) (vars : string list) : state =
+  let apron_vars = Array.of_list (List.map vars ~f:Apron.Var.of_string) in
+  let apron_env = Apron.Environment.make apron_vars [| |] in
+  let apron_abs = Apron.Abstract1.top manager apron_env in
+  { constraints = apron_abs; env = apron_env }
 
 let join (s1 : state) (s2 : state) : state =
   let res = {

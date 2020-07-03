@@ -57,8 +57,8 @@ let analyze (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : unit =
           fixpoint (IntSet.union (IntSet.remove worklist cfg_idx) (IntSet.union callees callers))
       end
   in
-  (* Initial summaries are all empty *)
-  summaries := Summary.initial_summaries cfgs module_;
+  (* Initial summaries are bottom *)
+  summaries := Summary.initial_summaries cfgs module_ `Bottom;
   (* Run the analysis *)
   fixpoint (IntSet.of_list (IntMap.keys cfgs))
 

@@ -104,7 +104,7 @@ let init_state (cfg : Cfg.t) : state = {
                       | _ -> failwith "unsupported memory op" 
                     end*)
                   | _ -> m)
-          | Control _ | ControlMerge | Nothing -> m)
+          | Control _ | ControlMerge -> m)
   end;
 }
 

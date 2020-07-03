@@ -65,7 +65,7 @@ let intra =
                 let faddr = nimports + i in
                 (faddr, Cfg_builder.build faddr wasm_mod))) in
             let summaries = List.fold_left funs
-              ~init:(Summary.initial_summaries cfgs wasm_mod)
+              ~init:(Summary.initial_summaries cfgs wasm_mod `Top)
               ~f:(fun summaries fid ->
                   Printf.printf "Analyzing function %d\n" fid;
                   if fid < nimports then begin

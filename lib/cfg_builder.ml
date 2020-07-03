@@ -15,7 +15,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
   let mk_merge_block () =
     Basic_block.{ idx = new_idx () ; content = ControlMerge } in
   let mk_empty_block () : Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Nothing } in
+    Basic_block.{ idx = new_idx () ; content = Data [] } in
   let rec helper (instrs : Instr.data Instr.labelled list) (remaining : Instr.t list) : (
     (* The blocks created *)
     Basic_block.t list *
@@ -30,6 +30,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
     match remaining with
     | [] ->
       (* If there's no instruction anymore, build the block and connect it to exit_id *)
+      (if List.is_empty instrs then Printf.printf "making empty block at pos 1\n");
       let block = mk_data_block instrs in
       ([block] (* only this block *), [] (* no edge *),
        [] (* no break point *), [] (* not connected to return *),
@@ -41,6 +42,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
         | BrIf level ->
           (* This is a break up to level `level` *)
           (* First, construct the current block *)
+          (if List.is_empty instrs then Printf.printf "making empty block at pos 2\n");
           let block = mk_data_block instrs in
           (* Then construct the brif block *)
           let brif_block = mk_control_block instr in
@@ -58,6 +60,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
             block.idx, exit')
         |  If (_arity, instrs1, instrs2) ->
           (* Construct the current block *)
+          (if List.is_empty instrs then Printf.printf "making empty block at pos 3\n");
           let block = mk_data_block instrs in
           (* Construct the if block *)
           let if_block = mk_control_block instr in
@@ -91,6 +94,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
              from this block to the next. In practice, rest should always be
              empty here *)
           assert (List.is_empty rest);
+          (if List.is_empty instrs then Printf.printf "making empty block at pos 4\n");
           let block = mk_data_block instrs in
           let br_block = mk_control_block instr in
           let (blocks, edges, breaks, returns, _entry', exit') = helper [] rest in
@@ -103,6 +107,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
           (* Also similar to br, but connects the edges differently. Moreover,
              we don't include the call in this block because it has to be
              treated differently. *)
+          (if List.is_empty instrs then Printf.printf "making empty block at pos 5\n");
           let block = mk_data_block instrs in
           let call_block = mk_control_block instr in
           let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
@@ -117,6 +122,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
         | ((Block (_arity, instrs')) as b)
         | ((Loop (_arity, instrs')) as b) ->
           (* Create a new block with all instructions collected, without the current instruction *)
+          (if List.is_empty instrs then Printf.printf "making empty block at pos 6\n");
           let block = mk_data_block instrs in
           (* Is the current instruction a loop? *)
           let is_loop = match b with
@@ -158,6 +164,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
              should be empty) *)
           assert (List.is_empty rest);
           (* We create a new block with all instructions collected *)
+          (if List.is_empty instrs then Printf.printf "making empty block at pos 7\n");
           let block = mk_data_block instrs in
           (* We create a control block for this return *)
           let return_block = mk_control_block instr in
@@ -174,6 +181,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
            return_block.idx)
         | Unreachable ->
           (* Simply construct a block containig the unreachable instruction *)
+          (if List.is_empty instrs then Printf.printf "making empty block at pos 8\n");
           let block = mk_data_block instrs in
           let unreachable_block = mk_control_block instr in
           let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
@@ -193,7 +201,6 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
   (* We now filter empty normal blocks *)
   let (actual_blocks, filtered_blocks) = List.partition_tf blocks' ~f:(fun block -> match block.content with
       | Data [] -> not simplify (* only filter if we need to simplify *)
-      | Nothing -> not simplify || block.idx = return_block.idx (* Don't remove the return block *)
       | _ -> true) in
   let filtered_blocks_idx = List.map filtered_blocks ~f:(fun b -> b.idx) in
   (* And we have to redirect the edges: if there is an edge to a removed block, we make it point to its successors *)

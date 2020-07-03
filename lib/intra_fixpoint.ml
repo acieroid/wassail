@@ -71,7 +71,6 @@ module Make = functor (Transfer : TRANSFER) -> struct
         let poststate = Transfer.control_instr_transfer module_ cfg instr state in
         instr_data := IntMap.set !instr_data ~key:instr.label ~data:(Simple state, poststate);
         poststate
-      | Nothing -> Simple state
       | ControlMerge -> Simple state in
 
     (* Analyzes one block, returning the pre and post states *)

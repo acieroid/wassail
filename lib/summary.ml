@@ -40,6 +40,12 @@ let bottom (cfg : Cfg.t) (_module_ : Wasm_module.t) (vars : Spec_inference.var l
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
   make cfg (Domain.bottom cfg ((Option.to_list ret) @ params @ (List.map ~f:Spec_inference.var_to_string vars))) ret
 
+(** Constructs the top summary given a CFG *)
+let top (cfg : Cfg.t) (_module_ : Wasm_module.t) (vars : Spec_inference.var list) : t =
+  let ret = if List.length cfg.return_types = 1 then Some "ret" else None in
+  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
+  make cfg (Domain.top cfg ((Option.to_list ret) @ params @ (List.map ~f:Spec_inference.var_to_string vars))) ret
+
 (** Constructs a summary from an imported function *)
 let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t list) (_module_ : Wasm_module.t) : t =
   (* These should be fairly easy to encode: we just list constraints between input and output, no constraint if we don't know anything about that name *)
@@ -75,10 +81,13 @@ let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t li
     state = state }
 
 (** Constructs all summaries for a given module, including imported functions *)
-let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : t IntMap.t =
+let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t IntMap.t =
   List.fold_left module_.imported_funcs
     (* Summaries for defined functions are all initialized to bottom *)
-    ~init:(IntMap.map cfgs ~f:(fun cfg -> bottom cfg module_ [] (* TODO: vars *)))
+    ~init:(IntMap.map cfgs ~f:(fun cfg ->
+        (match typ with
+         | `Bottom -> bottom
+         | `Top -> top) cfg module_ [] (* TODO: vars *)))
     ~f:(fun sum import -> match import with
         | (idx, name, (args, ret)) -> IntMap.set sum ~key:idx ~data:(of_import idx name args ret module_))
 
