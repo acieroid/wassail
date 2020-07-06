@@ -164,6 +164,8 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data
     let ret = pop (spec_post i.label).vstack in
     let vaddr = Spec_inference.var_to_string (pop (spec_pre i.label).vstack) in
     (* We assume load/stores are symmetric, i.e., when a load/store operation is made on an address for a specific type and size, all other operations on the same address are made with the same type and size *)
+    (* TODO: we need to extract from the memory all values that can be pointed by the memory key. It could be that we are loading key mk1 from memory [mk0: mv0, mk1: mv1], and that from the constraints we have mk0 = mk1.
+       Currently in that case, we return mv1 (which is correct), but we should add the constraint mv0 = mv1? Or rather, join (ret = mv0) (ret = mv1) *)
      Domain.add_constraints state [(Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)), Printf.sprintf "%s+%d" vaddr offset);
                                    (Spec_inference.var_to_string ret, (Spec_inference.var_to_string (Spec_inference.MemoryVal (i.label, 0))))]
     (* If we want to model values as bytes, we will have to do the following

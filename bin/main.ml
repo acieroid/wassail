@@ -100,8 +100,9 @@ let intra =
                     Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
                     IntMap.set summaries ~key:fid ~data:summary) in
             Printf.printf "---------------\nAnalysis done, resulting summaries are:\n";
-            IntMap.iteri summaries ~f:(fun ~key:fid ~data:summary ->
-                                        Printf.printf "function %d: %s\n" fid (Summary.to_string summary))))
+            List.iter funs ~f:(fun fid ->
+                let summary = IntMap.find_exn summaries fid in
+                Printf.printf "function %d: %s\n" fid (Summary.to_string summary))))
 
 
 let inter =

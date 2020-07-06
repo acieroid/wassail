@@ -8,19 +8,23 @@
     i32.const 256
     i32.const 512
     i32.const 0
-    select) ;; summary: returns 512
+    select
+    ;; summary: ret = 512
+    )
   (func (;test-store;) (type 1) (param i32) (result i32) ;; 1
     global.get 0
     local.get 0
     i32.store offset=12
-    local.get 0) ;; ret = p0
+    local.get 0
+    ;; summary: ret = l0, memory[g0] = l0
+    )
   (func (;test-load;) (type 1) (param i32) (result i32) ;; 2
     global.get 0
     local.get 0
     i32.store offset=12
     global.get 0
     i32.load offset=12
-    ;; ret = p0 (if memory is supported)
+    ;; ret = p0
     )
   (func (;test-if;) (type 1) (param i32) (result i32) ;; 3
     local.get 0

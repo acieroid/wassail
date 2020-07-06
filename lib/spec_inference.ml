@@ -61,8 +61,13 @@ let extract_different_vars (s1 : state) (s2 : state) : (var * var) list =
     assert (List.length l1 = List.length l2);
     List.filter_map (List.map2_exn l1 l2 ~f:(fun v1 v2 -> (v1, v2, equal_var v1 v2)))
       ~f:(fun (v1, v2, eq) -> if not eq then Some (v1, v2) else None) in
-  (* TODO: what about memory ? *)
-  (f s1.vstack s2.vstack) @ (f s1.locals s2.locals) @ (f s1.globals s2.globals)
+  let fmap (m1 : var VarMap.t) (m2 : var VarMap.t) : (var * var) list =
+    assert (Stdlib.(=) (VarMap.keys m1) (VarMap.keys m2)); (* Memory keys never change (assumption) *)
+    List.filter_map (VarMap.keys m1) ~f:(fun k ->
+        let v1 = VarMap.find_exn m1 k in
+        let v2 = VarMap.find_exn m2 k in
+        if equal_var v1 v2 then None else Some (v1, v2)) in
+  (f s1.vstack s2.vstack) @ (f s1.locals s2.locals) @ (f s1.globals s2.globals) @ (fmap s1.memory s2.memory)
 
 let init_state (cfg : Cfg.t) : state = {
   vstack = []; (* the vstack is initially empty *)
