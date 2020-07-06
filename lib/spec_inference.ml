@@ -37,14 +37,17 @@ type state = {
 }
 [@@deriving sexp, compare]
 
+(** Returns all variables contained in the memory of a state *)
+let memvars (s : state) : var list =
+  (List.concat (List.map (VarMap.to_alist s.memory)
+                             ~f:(fun (k, v) -> [k; v])))
+
 (** Returns all the variables contained in the state *)
 let vars_of (s : state) : VarSet.t =
   VarSet.union (VarSet.of_list s.vstack)
     (VarSet.union (VarSet.of_list s.locals)
        (VarSet.union (VarSet.of_list s.globals)
-          (VarSet.of_list
-             (List.concat (List.map (VarMap.to_alist s.memory)
-                             ~f:(fun (k, v) -> [k; v]))))))
+          (VarSet.of_list (memvars s))))
 
 (** Returns all the variables contained in the spec map *)
 let vars (data : (state * state) IntMap.t) : VarSet.t =

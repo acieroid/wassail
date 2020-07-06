@@ -91,7 +91,12 @@ let intra =
                     let results = ConstraintsIntra.analyze wasm_mod cfg in
                     let out_state = ConstraintsIntra.out_state cfg results in
                     Printf.printf "%d: %s\n" cfg.idx (Transfer.state_to_string out_state);
-                    let summary = Summary.make cfg out_state (if List.length cfg.return_types = 1 then Option.map ~f:Spec_inference.var_to_string (List.hd (Transfer.spec_post_block cfg.exit_block).vstack) else None) in
+                    let summary = Summary.make cfg out_state
+                        (if List.length cfg.return_types = 1 then Option.map ~f:Spec_inference.var_to_string (List.hd (Transfer.spec_post_block cfg.exit_block).vstack) else None)
+                        (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Transfer.spec_pre_block cfg.entry_block)))
+                        (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Transfer.spec_post_block cfg.exit_block)))
+                        (List.map ~f:Spec_inference.var_to_string (Transfer.spec_post_block cfg.exit_block).globals)
+                    in
                     Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
                     IntMap.set summaries ~key:fid ~data:summary) in
             Printf.printf "---------------\nAnalysis done, resulting summaries are:\n";

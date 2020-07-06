@@ -75,6 +75,7 @@ module Make = functor (Transfer : TRANSFER) -> struct
 
     (* Analyzes one block, returning the pre and post states *)
     let analyze_block (block_idx : int) : Transfer.state * Transfer.result =
+      Printf.printf "Analyzing block %d\n" block_idx;
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
       let predecessors = Cfg.predecessors cfg block_idx in

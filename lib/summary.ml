@@ -7,29 +7,44 @@ type t = {
   in_arity : int; (** The input arity for the function of this summary *)
   params : string list; (** The name of the parameters  *)
   return : string option; (** The name of the return value *)
+  mem_pre : string list;
+  mem_post : string list;
+  globals_pre : string list;
+  globals_post : string list;
   state : Domain.state; (** The final state *)
 }
 
 let to_string (s : t) : string =
-  Printf.sprintf "ret: %s, %s"
+  Printf.sprintf "pre: mem: [%s]\npost: ret: %s, globals: [%s], mem: [%s]\nstate: %s"
+    (String.concat ~sep:"," s.mem_pre) (* TODO: should maybe be a map? *)
     (Option.value ~default:"none" s.return)
+    (String.concat ~sep:"," s.globals_post)
+    (String.concat ~sep:"," s.mem_post) (* TODO: should maybe be a map? *)
     (Domain.to_string s.state)
 
 (** Constructs a summary.
     @param cfg the CFG for which the summary approximates the behavior
     @param ret the return value of the function (if there is any)
     @param state the final state of the summarized function *)
-let make (cfg : Cfg.t) (state : Domain.state) (ret : string option) : t =
+let make (cfg : Cfg.t) (state : Domain.state) (ret : string option)
+    (mem_pre : string list) (mem_post : string list)
+    (globals_post : string list)
+  : t =
   (* Filter the state to only keep relevant variables:
       - the parameters
       - the return value if there is one (i.e., the top of the stack)
       - any variable bound in the store (TODO)
      - any variable used by a global (TODO) *)
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
+  let globals_pre = List.mapi cfg.global_types ~f:(fun i _ -> Spec_inference.var_to_string (Spec_inference.Global i)) in
   (* TODO: globals and memories *)
-  let to_keep = params @ (Option.to_list ret) in
+  let to_keep = params @ globals_pre @ globals_post @ mem_pre @ mem_post @ (Option.to_list ret) in
   { params = params;
     return = ret;
+    mem_pre = mem_pre;
+    mem_post = mem_post;
+    globals_pre = globals_pre;
+    globals_post = globals_post;
     in_arity = List.length cfg.arg_types;
     state = Domain.keep_only state to_keep;
     }
@@ -38,13 +53,14 @@ let make (cfg : Cfg.t) (state : Domain.state) (ret : string option) : t =
 let bottom (cfg : Cfg.t) (_module_ : Wasm_module.t) (vars : Spec_inference.var list) : t =
   let ret = if List.length cfg.return_types = 1 then Some "ret" else None in
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
-  make cfg (Domain.bottom cfg ((Option.to_list ret) @ params @ (List.map ~f:Spec_inference.var_to_string vars))) ret
+  make cfg (Domain.bottom cfg ((Option.to_list ret) @ params @ (List.map ~f:Spec_inference.var_to_string vars))) ret [] [] []
 
 (** Constructs the top summary given a CFG *)
 let top (cfg : Cfg.t) (_module_ : Wasm_module.t) (vars : Spec_inference.var list) : t =
   let ret = if List.length cfg.return_types = 1 then Some "ret" else None in
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
-  make cfg (Domain.top cfg ((Option.to_list ret) @ params @ (List.map ~f:Spec_inference.var_to_string vars))) ret
+  (* TODO: top memory and globals? *)
+  make cfg (Domain.top cfg ((Option.to_list ret) @ params @ (List.map ~f:Spec_inference.var_to_string vars))) ret [] [] []
 
 (** Constructs a summary from an imported function *)
 let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t list) (_module_ : Wasm_module.t) : t =
@@ -77,6 +93,10 @@ let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t li
   in
   { params = params;
     return = return;
+    mem_pre = [];
+    mem_post = [];
+    globals_pre = [];
+    globals_post = [];
     in_arity = List.length args;
     state = state }
 
