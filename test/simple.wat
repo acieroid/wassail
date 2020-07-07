@@ -24,7 +24,7 @@
     i32.store offset=12
     global.get 0
     i32.load offset=12
-    ;; ret = p0
+    ;; summary: ret = p0
     )
   (func (;test-if;) (type 1) (param i32) (result i32) ;; 3
     local.get 0
@@ -34,7 +34,9 @@
       i32.const 1
     else
       i32.const 0
-    end) ;; Expected summary: return value is in [0,1]
+    end
+    ;; summary: ret = [0,1]
+    )
   (func (;test-if-return;) (type 1) (param i32) (result i32) ;; 4
     i32.const 5
     i32.const 0
@@ -43,20 +45,21 @@
       i32.const 6
       return
     end
-    i32.const 0 ;; expected summary: [0, 6]
+    i32.const 0
+    ;; summary: ret = [0, 6]
     )
   (func (;test-join;) (type 1) (param i32) (result i32) ;; 5
     local.get 0
     i32.eqz
     if  ;; label = @1
       i32.const 0
-      return ;; at this point, we have memory M, vstack [1]
+      return
     end
     i32.const 1200
     local.get 0
     i32.store
-    i32.const -1 ;; here we have memory M[1200: p0], vstack: [-1]
-    ;; We expect the final summary to be: M, vstack[[-1,1]]
+    i32.const -1
+    ;; summary: ret = [-1, 0], memory? can be unchanged (if), or can be memory[1200: l0] -> we need an overapproximation of the taint flow, hence memory[1200] may be tainted -> maybe we need an extra domain to track that, where join([], [1200: l0]) = [1200: l0]. And in that case, we can probably completely ignore the memory from the relational domain?! (We definitely can, the big question is how does it influence precision)
     )
   (func (;test-merge-after-if;) (type 1) (param i32) (result i32) ;; 6
     local.get 0
@@ -215,6 +218,45 @@
       br_if 0 (;@2;) ;; []
     end
     local.get 0)     ;; [p0]
+  (func (;test-taint-arg0;) (type 1) (param i32) (result i32) ;; 20
+    local.get 0)
+  (func (;test-taint-arg0-add;) (type 1) (param i32) (result i32) ;; 21
+    local.get 0
+    i32.const 1
+    i32.add)
+  (func (;tset-taint-arg0-arg1;) (type 4) (param i32 i32 i32) (result i32) ;; 22
+    local.get 0
+    local.get 1
+    i32.add)
+  (func (;test-taint-local-set;) (type 1) (param i32) (result i32) ;; 23
+    (local i32)
+    local.get 0
+    local.set 1
+    local.get 1)
+  (func (;test-taint-if;) (type 4) (param i32 i32 i32) (result i32) ;; 24
+    local.get 0
+    if (result i32)
+      local.get 1
+    else
+      local.get 2
+    end)
+  (func (;test-taint-if-localset;) (type 4) (param i32 i32 i32) (result i32) ;; 25
+    (local i32)
+    local.get 0
+    if
+      local.get 1
+      local.set 3
+    else
+      local.get 2
+      local.set 3
+    end
+    local.get 3)
+  (func (;test-taint-getglobal;) (type 1) (param i32) (result i32) ;; 26
+    global.get 0)
+  (func (;test-taint-setglobal;) (type 1) (param i32) (result i32) ;; 27
+    local.get 0
+    global.set 0
+    global.get 0)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))

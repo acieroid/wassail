@@ -59,7 +59,7 @@ let join (s1 : state) (s2 : state) : state =
   constraints = Apron.Abstract1.join manager s1.constraints s2.constraints;
   env = (assert Stdlib.(s1.env = s2.env); s1.env);
 } in
-  Printf.printf "join %s\n and %s\ngives %s" (to_string s1) (to_string s2) (to_string res);
+  Printf.printf "join %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res);
   res
 
 let join_opt (s1 : state) (s2 : state option) : state =

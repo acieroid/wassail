@@ -38,6 +38,7 @@ module type TRANSFER = sig
 end
 
 module Make = functor (Transfer : TRANSFER) -> struct
+  include Transfer
 
   let result_to_string (r : Transfer.result) : string = match r with
     | Uninitialized -> "uninitialized"

@@ -14,6 +14,7 @@ module Logging = Logging
 module Transfer = Transfer
 module Summary = Summary
 module Spec_inference = Spec_inference
+module Taint_analysis = Taint_analysis
 
 let error at category msg =
   failwith (Printf.sprintf "Error: %s" (Source.string_of_region at ^ ": " ^ category ^ ": " ^ msg))

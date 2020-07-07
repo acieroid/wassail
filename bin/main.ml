@@ -59,6 +59,7 @@ let intra =
         apply_to_textual filename (fun m ->
             let module SpecIntra = Intra_fixpoint.Make(Spec_inference) in
             let module ConstraintsIntra = Intra_fixpoint.Make(Transfer) in
+            let module TaintIntra = Intra_fixpoint.Make(Taint_analysis) in
             let wasm_mod = Wasm_module.of_wasm m in
             let nimports = List.length wasm_mod.imported_funcs in
             let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
@@ -98,7 +99,17 @@ let intra =
                         (List.map ~f:Spec_inference.var_to_string (Transfer.spec_post_block cfg.exit_block).globals)
                     in
                     Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
-                    IntMap.set summaries ~key:fid ~data:summary) in
+
+                    (* Run the taint analysis *)
+                    Taint_analysis.spec_instr_data := extract_spec instr_spec;
+                    Taint_analysis.spec_block_data := extract_spec block_spec;
+                    let results = TaintIntra.analyze wasm_mod cfg in
+                    let out_state = TaintIntra.out_state cfg results in
+                    Printf.printf "%d: %s\n" cfg.idx (TaintIntra.state_to_string out_state);
+                    IntMap.set summaries ~key:fid ~data:summary
+
+
+                ) in
             Printf.printf "---------------\nAnalysis done, resulting summaries are:\n";
             List.iter funs ~f:(fun fid ->
                 let summary = IntMap.find_exn summaries fid in
