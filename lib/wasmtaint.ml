@@ -2,19 +2,25 @@ open Core_kernel
 open Wasm
 
 include Helpers
+
+module Logging = Logging
+
 module Wasm_module = Wasm_module
 module Cfg_builder = Cfg_builder
 module Cfg = Cfg
-module Domain = Domain
 module Instr = Instr
+module Basic_block = Basic_block
+
 module Inter_fixpoint = Inter_fixpoint
 module Intra_fixpoint = Intra_fixpoint
-module Basic_block = Basic_block
-module Logging = Logging
-module Transfer = Transfer
-module Summary = Summary
+
 module Spec_inference = Spec_inference
-module Taint_analysis = Taint_analysis
+
+module Relational_domain = Relational_domain
+module Relational_transfer = Relational_transfer
+module Relational_summary = Relational_summary
+
+module Taint_transfer = Taint_transfer
 
 let error at category msg =
   failwith (Printf.sprintf "Error: %s" (Source.string_of_region at ^ ": " ^ category ^ ": " ^ msg))

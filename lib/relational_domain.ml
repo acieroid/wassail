@@ -4,14 +4,14 @@ type apron_domain = Polka.strict Polka.t
 let manager = Polka.manager_alloc_strict ()
 
 (** A state that contains the constraints *)
-type state = {
+type t = {
   constraints : apron_domain Apron.Abstract1.t; (** The relational constraints *)
   env : Apron.Environment.t; (** The relational environment *)
 }
 
 let bind_compare (res : int) (cmp : 'a -> 'a -> int) (x : 'a) (y : 'a) : int =
   if res = 0 then 0 else cmp x y
-let compare_state (s1 : state) (s2 : state) : int =
+let compare (s1 : t) (s2 : t) : int =
   bind_compare (Apron.Environment.compare s1.env s2.env)
     (fun c1 c2 ->
        if Apron.Abstract1.is_eq manager c1 c2 then 0
@@ -21,14 +21,14 @@ let compare_state (s1 : state) (s2 : state) : int =
 let constraints_to_string (c : apron_domain Apron.Abstract1.t) : string =
   (Apron.Abstract1.print Stdlib.Format.str_formatter c; Stdlib.Format.flush_str_formatter ())
 
-let to_string (s : state) : string =
+let to_string (s : t) : string =
   Printf.sprintf "constraints: %s" (constraints_to_string s.constraints)
 
 (** Initializes the state for the analysis of CFG cfg. All variables are unconstrained, except for locals with have 0 as initial value
     @param cfg is the CFG under analysis
     @param vars the set of Apron variables to create. It is expected that variables for locals are named l0 to ln, where l0 to li are parameters (there are i params), and li+1 to ln are locals that are initialized to 0.
  *)
-let init (cfg : Cfg.t) (vars : Spec_inference.var list) : state =
+let init (cfg : Cfg.t) (vars : Spec_inference.var list) : t =
   assert (List.length cfg.return_types <= 1); (* wasm spec does not allow for more than one return type (currently) *)
   let vars_and_vals = List.map vars ~f:(fun v -> (Apron.Var.of_string (Spec_inference.var_to_string v), match v with
     | Spec_inference.Local n when n >= List.length cfg.arg_types -> Apron.Interval.of_int 0 0
@@ -41,20 +41,20 @@ let init (cfg : Cfg.t) (vars : Spec_inference.var list) : state =
   { env = apron_env; constraints = apron_abs }
 
 (** Creates the bottom value *)
-let bottom (_cfg : Cfg.t) (vars : string list) : state =
+let bottom (_cfg : Cfg.t) (vars : string list) : t =
   let apron_vars = Array.of_list (List.map vars ~f:Apron.Var.of_string) in
   let apron_env = Apron.Environment.make apron_vars [| |] in
   let apron_abs = Apron.Abstract1.bottom manager apron_env in
   { constraints = apron_abs; env = apron_env }
 
 (** Creates the top value *)
-let top (_cfg : Cfg.t) (vars : string list) : state =
+let top (_cfg : Cfg.t) (vars : string list) : t =
   let apron_vars = Array.of_list (List.map vars ~f:Apron.Var.of_string) in
   let apron_env = Apron.Environment.make apron_vars [| |] in
   let apron_abs = Apron.Abstract1.top manager apron_env in
   { constraints = apron_abs; env = apron_env }
 
-let join (s1 : state) (s2 : state) : state =
+let join (s1 : t) (s2 : t) : t =
   let res = {
   constraints = Apron.Abstract1.join manager s1.constraints s2.constraints;
   env = (assert Stdlib.(s1.env = s2.env); s1.env);
@@ -62,13 +62,13 @@ let join (s1 : state) (s2 : state) : state =
   Printf.printf "join %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res);
   res
 
-let join_opt (s1 : state) (s2 : state option) : state =
+let join_opt (s1 : t) (s2 : t option) : t =
   match s2 with
   | Some s -> join s1 s
   | None -> s1
 
 (** Add multiple constraints *)
-let add_constraints (s : state) (constraints : (string * string) list) : state =
+let add_constraints (s : t) (constraints : (string * string) list) : t =
   try
     List.iter constraints ~f:(fun (x, y) -> Printf.printf "add constraint: %s = %s\n" x y);
     { s
@@ -82,25 +82,25 @@ let add_constraints (s : state) (constraints : (string * string) list) : state =
     failwith (Printf.sprintf "Apron error in add_constraint: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
 
 (** Add one constrait of the form v = linexpr to the state constraints, returns the updated state *)
-let add_constraint (s : state) (v : string) (linexpr : string) : state =
+let add_constraint (s : t) (v : string) (linexpr : string) : t =
   add_constraints s [(v,  linexpr)]
 
-let add_equality_constraints (s : state) (vs : (Spec_inference.var * Spec_inference.var) list) : state =
+let add_equality_constraints (s : t) (vs : (Spec_inference.var * Spec_inference.var) list) : t =
   add_constraints s (List.map vs ~f:(fun (v1, v2) -> (Spec_inference.var_to_string v1, Spec_inference.var_to_string v2)))
 
-let add_equality_constraint (s : state) (v1 : Spec_inference.var) (v2 : Spec_inference.var) : state =
+let add_equality_constraint (s : t) (v1 : Spec_inference.var) (v2 : Spec_inference.var) : t =
   add_constraint s (Spec_inference.var_to_string v1) (Spec_inference.var_to_string v2)
 
-let add_interval_constraint (s : state) (v : Spec_inference.var) (bounds: int * int) : state =
+let add_interval_constraint (s : t) (v : Spec_inference.var) (bounds: int * int) : t =
   add_constraint s (Spec_inference.var_to_string v) (Printf.sprintf "[%d;%d]" (fst bounds) (snd bounds))
 
-let meet_interval (s : state) (v : string) (bounds : int * int) : state =
+let meet_interval (s : t) (v : string) (bounds : int * int) : t =
   let earray = Apron.Lincons1.array_make s.env 1 in
   Apron.Lincons1.array_set earray 0 (Apron.Parser.lincons1_of_string s.env (Printf.sprintf "%s=[%d;%d]" v (fst bounds) (snd bounds)));
   { s with constraints = Apron.Abstract1.meet_lincons_array manager s.constraints earray }
 
-(** Only keep the given variables in the constraints, returns the updated state *)
-let keep_only (s : state) (vars : string list) : state =
+(** Only keep the given variables in the constraints, returns the updated t *)
+let keep_only (s : t) (vars : string list) : t =
   { s with constraints = Apron.Abstract1.forget_array manager s.constraints
                (Array.filter (fst (Apron.Environment.vars s.env)) (* fst because we only have int variables for now *)
                   ~f:(fun v -> not (List.mem vars (Apron.Var.to_string v) ~equal:Stdlib.(=))))
@@ -109,7 +109,7 @@ let keep_only (s : state) (vars : string list) : state =
 
 (** Checks if the value of variable v may be equal to a given number.
     Returns two booleans: the first one indicates if v can be equal to n, and the second if it can be different than n *)
-let is_equal (s : state) (v : string) (n : int) : bool * bool =
+let is_equal (s : t) (v : string) (n : int) : bool * bool =
   let box = Apron.Abstract1.to_box manager s.constraints in
   let dim = Apron.Environment.dim_of_var box.box1_env (Apron.Var.of_string v) in
   let interval = Array.get box.interval_array dim in
@@ -121,11 +121,11 @@ let is_equal (s : state) (v : string) (n : int) : bool * bool =
   | -2 | +2 -> (false, true) (* definitely not n *)
   | _ -> failwith "should not happen"
 
-let is_zero (s : state) (v : string) : bool * bool = is_equal s v 0
+let is_zero (s : t) (v : string) : bool * bool = is_equal s v 0
 
 (** Checks if two variables may be equal.
     Returns two booleans: the first one indicates if they may be equal, the second one if they may be different *)
-let are_equal (s : state) (v1 : string) (v2 : string) : bool * bool =
+let are_equal (s : t) (v1 : string) (v2 : string) : bool * bool =
   let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "%s-%s" v1 v2)) in
   match Apron.Interval.cmp interval (Apron.Interval.of_int 0 0) with
   | 0 -> (true, false)
@@ -134,7 +134,7 @@ let are_equal (s : state) (v1 : string) (v2 : string) : bool * bool =
   | -2 | +2 -> (false, true)
   | _ -> failwith "should not happen"
 
-let are_precisely_equal (s : state) (v1 : string) (v2 : string) =
+let are_precisely_equal (s : t) (v1 : string) (v2 : string) =
   match are_equal s v1 v2 with
   | true, false -> true
   | _ -> false
