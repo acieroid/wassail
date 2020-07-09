@@ -58,8 +58,6 @@ let intra =
       fun () ->
         apply_to_textual filename (fun m ->
             let module SpecIntra = Intra_fixpoint.Make(Spec_inference) in
-            let module ConstraintsIntra = Intra_fixpoint.Make(Transfer) in
-            let module TaintIntra = Intra_fixpoint.Make(Taint_analysis) in
             let wasm_mod = Wasm_module.of_wasm m in
             let nimports = List.length wasm_mod.imported_funcs in
             let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
@@ -84,25 +82,27 @@ let intra =
                           assert (Spec_inference.compare_state s1 s2 = 0); (* both states should be equal *)
                           Some (s, s1)
                         | _ -> failwith "invalid spec") in
+                    let module Spec = Spec_inference.Spec(struct
+                      let instr_data = extract_spec instr_spec
+                      let block_data = extract_spec block_spec
+                    end) in
                     (* Plug in the results of the spec analysis *)
-                    Transfer.spec_instr_data := extract_spec instr_spec;
-                    Transfer.spec_block_data := extract_spec block_spec;
+                    let module ConstraintsIntra = Intra_fixpoint.Make(Transfer.Make(Spec)) in
                     Transfer.summaries := summaries;
                     Printf.printf "-------------------------\nMain analysis\n-------------------\n";
                     let results = ConstraintsIntra.analyze wasm_mod cfg in
                     let out_state = ConstraintsIntra.out_state cfg results in
-                    Printf.printf "%d: %s\n" cfg.idx (Transfer.state_to_string out_state);
+                    Printf.printf "%d: %s\n" cfg.idx (ConstraintsIntra.state_to_string out_state);
                     let summary = Summary.make cfg out_state
-                        (if List.length cfg.return_types = 1 then Option.map ~f:Spec_inference.var_to_string (List.hd (Transfer.spec_post_block cfg.exit_block).vstack) else None)
-                        (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Transfer.spec_pre_block cfg.entry_block)))
-                        (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Transfer.spec_post_block cfg.exit_block)))
-                        (List.map ~f:Spec_inference.var_to_string (Transfer.spec_post_block cfg.exit_block).globals)
+                        (if List.length cfg.return_types = 1 then Option.map ~f:Spec_inference.var_to_string (List.hd (Spec.post_block cfg.exit_block).vstack) else None)
+                        (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Spec.pre_block cfg.entry_block)))
+                        (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Spec.post_block cfg.exit_block)))
+                        (List.map ~f:Spec_inference.var_to_string (Spec.post_block cfg.exit_block).globals)
                     in
                     Printf.printf "Summary is:\n%s\n" (Summary.to_string summary);
 
                     (* Run the taint analysis *)
-                    Taint_analysis.spec_instr_data := extract_spec instr_spec;
-                    Taint_analysis.spec_block_data := extract_spec block_spec;
+                    let module TaintIntra = Intra_fixpoint.Make(Taint_analysis.Make(Spec)) in
                     let results = TaintIntra.analyze wasm_mod cfg in
                     let out_state = TaintIntra.out_state cfg results in
                     Printf.printf "%d: %s\n" cfg.idx (TaintIntra.state_to_string out_state);
@@ -122,7 +122,8 @@ let inter =
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string) in
       fun () ->
-        apply_to_textual filename (fun m ->
+        apply_to_textual filename (fun _m ->
+            failwith "TODO" (*
             let wasm_mod = Wasm_module.of_wasm m in
             let nimports = List.length wasm_mod.imported_funcs in
             let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
@@ -132,7 +133,7 @@ let inter =
             Printf.printf "--------- Results ---------\n";
             IntMap.iteri !(Inter_fixpoint.summaries)
               ~f:(fun ~key:fid ~data:summary ->
-                  Printf.printf "Summary of function %d:\n%s" fid (Summary.to_string summary))))
+                  Printf.printf "Summary of function %d:\n%s" fid (Summary.to_string summary))*)))
 
 let () =
   Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);

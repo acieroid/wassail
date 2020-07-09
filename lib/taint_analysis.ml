@@ -1,6 +1,9 @@
 open Core_kernel
 open Helpers
 
+module Make = functor (Spec : Spec_inference.SPEC) -> struct
+  (* TODO: Make summaries. A summary is the final state restricted to only reachable vars: args, globals, mems and return value. *)
+
 (** A taint value is a set of variables *)
 type taint = Spec_inference.VarSet.t
 [@@deriving sexp, compare, equal]
@@ -60,66 +63,37 @@ type result =
 [@@deriving sexp, compare, equal]
 
 (* TODO: this is the same as in transfer.ml, should be refactored *)
-(** The specification inferred by spec_inference. This should be set before using this module *)
-let spec_instr_data : (Spec_inference.state * Spec_inference.state) IntMap.t ref = ref IntMap.empty
-let spec_block_data : (Spec_inference.state * Spec_inference.state) IntMap.t ref = ref IntMap.empty
 
 let summaries : Summary.t IntMap.t ref = ref IntMap.empty
-
-let spec_pre_block (idx : int) : Spec_inference.state = fst (IntMap.find_exn !spec_block_data idx)
-let spec_post_block (idx : int) : Spec_inference.state = snd (IntMap.find_exn !spec_block_data idx)
-
-let spec_pre (label : Instr.label) = fst (IntMap.find_exn !spec_instr_data label)
-let spec_post (label : Instr.label) = snd (IntMap.find_exn !spec_instr_data label)
-
-let spec_ret (label : Instr.label) : Spec_inference.var =
-  let spec = snd (IntMap.find_exn !spec_instr_data label) in
-  List.hd_exn spec.vstack
-
-let get_local (l : Spec_inference.var list) (x : int) : Spec_inference.var = List.nth_exn l x
-let get_global = get_local
-
-let pop (vstack : Spec_inference.var list) : Spec_inference.var =
-  match vstack with
-  | hd :: _ -> hd
-  | _ -> failwith "Invalid vstack"
-let pop2 (vstack : Spec_inference.var list) : (Spec_inference.var * Spec_inference.var) =
-  match vstack with
-  | x :: y :: _ -> (x, y)
-  | _ -> failwith "Invalid vstack"
-let pop3 (vstack : Spec_inference.var list) : (Spec_inference.var * Spec_inference.var * Spec_inference.var) =
-  match vstack with
-  | x :: y :: z :: _ -> (x, y, z)
-  | _ -> failwith "Invalid vstack"
 
 let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data Instr.labelled) (state : state) : state =
   match i.instr with
   | Nop | MemorySize | Drop -> state
   | Select ->
-    let ret = spec_ret i.label in
-    let (_c, v2, v1) = pop3 (spec_pre i.label).vstack in
+    let ret = Spec.ret i.label in
+    let (_c, v2, v1) = Spec.pop3 (Spec.pre i.label).vstack in
     (* TODO: could improve precision by checking the constraints on c: if it is precisely zero/not-zero, we can only include v1 or v2 *)
     state_add_taint (state_add_taint state ret v1) ret v2
   | LocalGet l ->
-    state_add_taint state (spec_ret i.label) (get_local (spec_pre i.label).locals l)
+    state_add_taint state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).locals l)
   | LocalSet l ->
-    state_add_taint state (get_local (spec_pre i.label).locals l) (pop (spec_pre i.label).locals)
+    state_add_taint state (Spec.get_nth (Spec.pre i.label).locals l) (Spec.pop (Spec.pre i.label).locals)
   | LocalTee l ->
     state_add_taint
-      (state_add_taint state (get_local (spec_pre i.label).locals l) (pop (spec_pre i.label).locals))
-      (spec_ret i.label) (get_local (spec_pre i.label).locals l)
+      (state_add_taint state (Spec.get_nth (Spec.pre i.label).locals l) (Spec.pop (Spec.pre i.label).locals))
+      (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).locals l)
   | GlobalGet g ->
-      state_add_taint state (spec_ret i.label) (get_global (spec_pre i.label).globals g)
+      state_add_taint state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).globals g)
   | GlobalSet g ->
-    state_add_taint state (get_global (spec_pre i.label).globals g) (pop (spec_pre i.label).globals)
+    state_add_taint state (Spec.get_nth (Spec.pre i.label).globals g) (Spec.pop (Spec.pre i.label).globals)
   | Const _ -> state
   | Binary _ | Compare _ ->
-    let v1, v2 = pop2 (spec_pre i.label).vstack in
+    let v1, v2 = Spec.pop2 (Spec.pre i.label).vstack in
     state_add_taint
-      (state_add_taint state (spec_ret i.label) v1)
-      (spec_ret i.label) v2
+      (state_add_taint state (Spec.ret i.label) v1)
+      (Spec.ret i.label) v2
   | Test _ | Convert _ ->
-    state_add_taint state (spec_ret i.label) (pop (spec_pre i.label).vstack)
+    state_add_taint state (Spec.ret i.label) (Spec.pop (Spec.pre i.label).vstack)
   | Load _ -> failwith "TODO: load"
   | Store _ -> failwith "TODO: store"
 
@@ -148,10 +122,10 @@ let merge_flows (module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) 
       begin match block.content with
         | ControlMerge ->
           (* block is a control-flow merge *)
-          let spec = spec_post_block block.idx in
+          let spec = Spec.post_block block.idx in
           let states' = List.map states ~f:(fun (idx, s) ->
               (* get the spec after that state *)
-              let spec' = spec_post_block idx in
+              let spec' = Spec.post_block idx in
               (* equate all different variables in the post-state with the ones in the pre-state *)
               List.fold_left (Spec_inference.extract_different_vars spec spec')
                 ~init:s
@@ -167,3 +141,5 @@ let merge_flows (module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) 
             | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
           end
       end
+
+end

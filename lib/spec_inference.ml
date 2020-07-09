@@ -245,3 +245,53 @@ let join_state (_module_ : Wasm_module.t) (_cfg : Cfg.t) (_block : Basic_block.t
   Printf.printf "[block %d] joining %s with %s\n" _block.idx( state_to_string s1) (state_to_string s2);
   assert (compare_state s1 s2 = 0);
   s1
+
+module type SPEC_DATA = sig
+  val instr_data : (state * state) IntMap.t
+  val block_data : (state * state) IntMap.t
+end
+
+module type SPEC = sig
+  val vars : var list
+  val pre : Instr.label -> state
+  val post : Instr.label -> state
+  val pre_block : int -> state
+  val post_block : int -> state
+  val ret : Instr.label -> var
+
+  val get_nth : var list -> int -> var
+  val pop : var list -> var
+  val pop2 : var list -> var * var
+  val pop3 : var list -> var * var * var
+end
+
+module Spec (Data : SPEC_DATA) : SPEC = struct
+  let vars : var list = VarSet.to_list (VarSet.union
+                                          (vars Data.block_data)
+                                          (vars Data.instr_data))
+  let pre (label : Instr.label) : state = fst (IntMap.find_exn Data.instr_data label)
+  let post (label : Instr.label) : state = snd (IntMap.find_exn Data.instr_data label)
+
+  let pre_block (idx : int) : state = fst (IntMap.find_exn Data.block_data idx)
+  let post_block (idx : int) : state = snd (IntMap.find_exn Data.block_data idx)
+
+  let ret (label : Instr.label) : var =
+    let spec = snd (IntMap.find_exn Data.instr_data label) in
+    List.hd_exn spec.vstack
+
+  let get_nth (l : var list) (x : int) : var = List.nth_exn l x
+
+  let pop (vstack : var list) : var =
+    match vstack with
+    | hd :: _ -> hd
+    | _ -> failwith "Invalid vstack"
+  let pop2 (vstack : var list) : (var * var) =
+    match vstack with
+    | x :: y :: _ -> (x, y)
+    | _ -> failwith "Invalid vstack"
+  let pop3 (vstack : var list) : (var * var * var) =
+    match vstack with
+    | x :: y :: z :: _ -> (x, y, z)
+    | _ -> failwith "Invalid vstack"
+
+end

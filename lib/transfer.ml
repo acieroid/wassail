@@ -1,41 +1,11 @@
 open Core_kernel
 open Helpers
 
-(** The specification inferred by spec_inference. This should be set before using this module *)
-let spec_instr_data : (Spec_inference.state * Spec_inference.state) IntMap.t ref = ref IntMap.empty
-let spec_block_data : (Spec_inference.state * Spec_inference.state) IntMap.t ref = ref IntMap.empty
+module Make = functor (Spec : Spec_inference.SPEC) -> struct
+  let summaries : Summary.t IntMap.t ref = ref IntMap.empty
 
-let summaries : Summary.t IntMap.t ref = ref IntMap.empty
-
-let spec_pre_block (idx : int) : Spec_inference.state = fst (IntMap.find_exn !spec_block_data idx)
-let spec_post_block (idx : int) : Spec_inference.state = snd (IntMap.find_exn !spec_block_data idx)
-
-let spec_pre (label : Instr.label) = fst (IntMap.find_exn !spec_instr_data label)
-let spec_post (label : Instr.label) = snd (IntMap.find_exn !spec_instr_data label)
-
-let spec_ret (label : Instr.label) : Spec_inference.var =
-  let spec = snd (IntMap.find_exn !spec_instr_data label) in
-  List.hd_exn spec.vstack
-
-let get_local (l : Spec_inference.var list) (x : int) : Spec_inference.var = List.nth_exn l x
-let get_global = get_local
-
-let pop (vstack : Spec_inference.var list) : Spec_inference.var =
-  match vstack with
-  | hd :: _ -> hd
-  | _ -> failwith "Invalid vstack"
-let pop2 (vstack : Spec_inference.var list) : (Spec_inference.var * Spec_inference.var) =
-  match vstack with
-  | x :: y :: _ -> (x, y)
-  | _ -> failwith "Invalid vstack"
-let pop3 (vstack : Spec_inference.var list) : (Spec_inference.var * Spec_inference.var * Spec_inference.var) =
-  match vstack with
-  | x :: y :: z :: _ -> (x, y, z)
-  | _ -> failwith "Invalid vstack"
-
-
-type state = Domain.state
-[@@deriving compare]
+  type state = Domain.state
+  [@@deriving compare]
 
 type result =
   | Uninitialized
@@ -43,14 +13,9 @@ type result =
   | Branch of state * state
 [@@deriving compare]
 
-let init_state (cfg : Cfg.t) = Domain.init cfg Spec_inference.(VarSet.to_list (VarSet.union
-                                                                                 (vars !spec_block_data)
-                                                                                 (vars !spec_instr_data)))
+let init_state (cfg : Cfg.t) = Domain.init cfg Spec.vars
 
-let bottom_state (cfg : Cfg.t) = Domain.bottom cfg (List.map ~f:Spec_inference.var_to_string
-                                                      Spec_inference.(VarSet.to_list (VarSet.union
-                                                                                        (vars !spec_block_data)
-                                                                                        (vars !spec_instr_data))))
+let bottom_state (cfg : Cfg.t) = Domain.bottom cfg (List.map ~f:Spec_inference.var_to_string Spec.vars)
 
 let state_to_string = Domain.to_string
 
@@ -67,10 +32,10 @@ let merge_flows (module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) 
       begin match block.content with
         | ControlMerge ->
           (* block is a control-flow merge *)
-          let spec = spec_post_block block.idx in
+          let spec = Spec.post_block block.idx in
           let states' = List.map states ~f:(fun (idx, s) ->
               (* get the spec after that state *)
-              let spec' = spec_post_block idx in
+              let spec' = Spec.post_block idx in
               (* equate all different variables in the post-state with the ones in the pre-state *)
               Domain.add_constraints s (List.map
                                           ~f:(fun (x, y) -> (Spec_inference.var_to_string x, Spec_inference.var_to_string y))
@@ -98,16 +63,16 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data
     (* memory size is bounded by the initial memory size and the maximum memory size *)
     let mem = List.nth_exn module_.mems 0 in
     (* add ret = [min,max] where min and max are the memory size bounds *)
-    Domain.add_interval_constraint state (spec_ret i.label)
+    Domain.add_interval_constraint state (Spec.ret i.label)
       (mem.min_size,
        (match mem.max_size with
         | Some max -> max
         | None -> failwith "unsupported infinite max size" (* can easily supported, the constraint just becomes ret >= min *)))
   | Drop -> state
   | Select ->
-    let ret = spec_ret i.label in
-    let vstack = (spec_pre i.label).vstack in
-    let (c, v2, v1) = pop3 vstack in
+    let ret = Spec.ret i.label in
+    let vstack = (Spec.pre i.label).vstack in
+    let (c, v2, v1) = Spec.pop3 vstack in
     begin
       match Domain.is_zero state (Spec_inference.var_to_string c) with
       | (true, false) -> (* definitely 0, add ret = v2 *)
@@ -123,31 +88,31 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data
     end
   | LocalGet l ->
     (* add ret = ln where ln is the local accessed *)
-    Domain.add_equality_constraint state (spec_ret i.label) (get_local (spec_pre i.label).locals l)
+    Domain.add_equality_constraint state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).locals l)
   | LocalSet l ->
-    let local = get_local (spec_pre i.label).locals l in
+    let local = Spec.get_nth (Spec.pre i.label).locals l in
     (* add ln' = v where ln' is the variable for the local set and v is the top of the vstack *)
-    let v = pop (spec_pre i.label).vstack in
+    let v = Spec.pop (Spec.pre i.label).vstack in
     Domain.add_equality_constraint state local v
   | LocalTee l ->
-    let local = get_local (spec_pre i.label).locals l in
+    let local = Spec.get_nth (Spec.pre i.label).locals l in
     (* same as local.set x followed by local.get x *)
-    let v = pop (spec_pre i.label).vstack in
-    Domain.add_equality_constraints state [(spec_ret i.label, v); (local, v)]
+    let v = Spec.pop (Spec.pre i.label).vstack in
+    Domain.add_equality_constraints state [(Spec.ret i.label, v); (local, v)]
   | GlobalGet g ->
     (* add v = gn where gn is the local accessed *)
-    Domain.add_equality_constraint state (spec_ret i.label) (get_global (spec_pre i.label).globals g)
+    Domain.add_equality_constraint state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).globals g)
   | GlobalSet g ->
-    let global = get_global (spec_pre i.label).globals g in
-    let v = pop (spec_pre i.label).vstack in
+    let global = Spec.get_nth (Spec.pre i.label).globals g in
+    let v = Spec.pop (Spec.pre i.label).vstack in
     Domain.add_equality_constraint state global v
   | Const n ->
     (* add ret = n *)
-    Domain.add_constraint state (Spec_inference.var_to_string (spec_ret i.label)) (Prim_value.to_string n)
+    Domain.add_constraint state (Spec_inference.var_to_string (Spec.ret i.label)) (Prim_value.to_string n)
   | Compare _ ->
     (* TODO: reflect "rel v1 v2" in the constraints, when possible *)
     (* add ret = [0;1] *)
-    Domain.add_interval_constraint state (spec_ret i.label) (0, 1)
+    Domain.add_interval_constraint state (Spec.ret i.label) (0, 1)
   | Binary _ ->
     (* TODO: reflect "bin v1 v2" the operation in the constraints, when possible *)
     (* don't add any constraint (for now)  *)
@@ -155,14 +120,14 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data
   | Test _ ->
     (* TODO: reflect "test v" in the constraints, when possible *)
     (* add ret = [0;1] *)
-    Domain.add_interval_constraint state (spec_ret i.label) (0, 1)
+    Domain.add_interval_constraint state (Spec.ret i.label) (0, 1)
   | Convert _ ->
-    (*    let _v, vstack' = Vstack.pop state.vstack in *)
+    (*    let _v, vstack' = Vstack.Spec.pop state.vstack in *)
     (* Don't add any constraint *)
     state
   | Load {offset; _ } ->
-    let ret = pop (spec_post i.label).vstack in
-    let vaddr = Spec_inference.var_to_string (pop (spec_pre i.label).vstack) in
+    let ret = Spec.ret i.label in
+    let vaddr = Spec_inference.var_to_string (Spec.pop (Spec.pre i.label).vstack) in
     (* We assume load/stores are symmetric, i.e., when a load/store operation is made on an address for a specific type and size, all other operations on the same address are made with the same type and size *)
     (* TODO: we need to extract from the memory all values that can be pointed by the memory key. It could be that we are loading key mk1 from memory [mk0: mv0, mk1: mv1], and that from the constraints we have mk0 = mk1.
        Currently in that case, we return mv1 (which is correct), but we should add the constraint mv0 = mv1? Or rather, join (ret = mv0) (ret = mv1) *)
@@ -180,7 +145,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data
                                                (Spec_inference.var_to_string addr0, (Printf.sprintf "%s+%d" vaddr offset))] in
   | Load ({ typ = I32; offset; sz = Some (Pack8, _) }) ->
     Logging.warn "ImpreciseOperation" "load8 returns top, and ignores sx/zx";
-    let vaddr = Spec_inference.var_to_string (pop (spec_pre i.label).vstack) in
+    let vaddr = Spec_inference.var_to_string (Spec.pop (Spec.pre i.label).vstack) in
     let addr0 = Spec_inference.MemoryKey (i.label, 0) in
     let state' = Domain.add_constraint state (Spec_inference.var_to_string addr0) (Printf.sprintf "%s+%d" vaddr offset) in
     (* TODO: add constraints on the return value? *)
@@ -189,7 +154,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data
     (* TODO: load with sz=8,zx (and others, but this is the most important now *)
        failwith (Printf.sprintf "load not supported with such op argument: %s" (Memoryop.to_string op)) *)
   | Store { offset; _ } ->
-    let vval, vaddr = pop2 (spec_pre i.label).vstack in
+    let vval, vaddr = Spec.pop2 (Spec.pre i.label).vstack in
     Domain.add_constraints state [(Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)), Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset);
                                   (Spec_inference.var_to_string (Spec_inference.MemoryValNew (i.label, 0)), Spec_inference.var_to_string vval)]
       (*
@@ -198,7 +163,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data
                                         Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 1)),
                                         Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 2)),
                                         Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 3))) in
-    let (_vval, vaddr) = pop2 (spec_pre i.label).vstack in
+    let (_vval, vaddr) = Spec.pop2 (Spec.pre i.label).vstack in
     let state' = Domain.add_constraints state [(addr3, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+3)));
                                                (addr2, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+2)));
                                                (addr1, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+1)));
@@ -215,7 +180,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data
                                         Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 5)),
                                         Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 6)),
                                         Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 7))) in
-    let (_vval, vaddr) = pop2 (spec_pre i.label).vstack in
+    let (_vval, vaddr) = Spec.pop2 (Spec.pre i.label).vstack in
     let state' = Domain.add_constraints state
         [(addr7, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+7)));
          (addr6, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+6)));
@@ -230,7 +195,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data
   | Store { typ = I32; offset; sz = Some (Pack8, SX)} ->
     Logging.warn "ImpreciseOperation" "store8 ignores sx/zx";
     let addr0 = Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)) in
-    let (_vval, vaddr) = pop2 (spec_pre i.label).vstack in
+    let (_vval, vaddr) = Spec.pop2 (Spec.pre i.label).vstack in
     let state' = Domain.add_constraint state addr0 (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset) in
     (* TODO: update memory *)
     state'
@@ -246,8 +211,8 @@ let control_instr_transfer
   : result =
   let apply_summary (f : int) (arity : int * int) (state : state) : state =
     let summary = IntMap.find_exn !summaries f in
-    let args = List.take (spec_pre i.label).vstack (fst arity) in
-    let ret = if snd arity = 1 then List.hd (spec_post i.label).vstack else None in
+    let args = List.take (Spec.pre i.label).vstack (fst arity) in
+    let ret = if snd arity = 1 then List.hd (Spec.post i.label).vstack else None in
     Summary.apply summary state (List.map ~f:Spec_inference.var_to_string args) (Option.map ~f:Spec_inference.var_to_string ret)
   in
   match i.instr with
@@ -257,7 +222,7 @@ let control_instr_transfer
     Simple (apply_summary f arity state)
   | CallIndirect (arity, typ) ->
     (* v is the index in the table that points to the called functiion *)
-    let v = Spec_inference.var_to_string (pop (spec_pre i.label).vstack) in
+    let v = Spec_inference.var_to_string (Spec.pop (Spec.pre i.label).vstack) in
     (* Get table 0 *)
     let table = List.nth_exn module_.tables 0 in
     (* Get all indices that v could be equal to *)
@@ -289,7 +254,7 @@ let control_instr_transfer
     Simple state
   | BrIf _
   | If _ ->
-    let cond = Spec_inference.var_to_string (pop (spec_pre i.label).vstack) in
+    let cond = Spec_inference.var_to_string (Spec.pop (Spec.pre i.label).vstack) in
     (* restrict cond = 1 to the constraints of the true branch, cond = 0 to the constrainst of the false branch *)
       Branch (Domain.meet_interval state cond (1, 1) (* true branch *),
               Domain.meet_interval state cond (0, 0) (* false branch *))
@@ -300,3 +265,4 @@ let control_instr_transfer
     (* Unreachable, so what we return does not really matter *)
     Simple state
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i.instr))
+end

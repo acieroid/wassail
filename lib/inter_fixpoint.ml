@@ -1,8 +1,5 @@
-open Core_kernel
+(*open Core_kernel
 open Helpers
-
-
-module Intra = Intra_fixpoint.Make(Transfer)
 
 (** Results of the inter-analysis are stored in the form of a map from function id to (optional) results from the intra-analysis *)
 type inter_results = ((Intra.intra_results * Intra.intra_results) option) IntMap.t
@@ -50,10 +47,10 @@ let analyze (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : unit =
           let callees = Cfg.callees cfg in
           let callers = Cfg.callers cfgs cfg in
           let summary = Summary.make cfg out_state
-              (if List.length cfg.return_types = 1 then Option.map ~f:Spec_inference.var_to_string (List.hd (Transfer.spec_post_block cfg.exit_block).vstack) else None)
-              (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Transfer.spec_pre_block cfg.entry_block)))
-              (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Transfer.spec_post_block cfg.exit_block)))
-              (List.map ~f:Spec_inference.var_to_string (Transfer.spec_post_block cfg.exit_block).globals)
+              (if List.length cfg.return_types = 1 then Option.map ~f:Spec_inference.var_to_string (List.hd (Spec.post_block cfg.exit_block).vstack) else None)
+              (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Spec.pre_block cfg.entry_block)))
+              (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Spec.post_block cfg.exit_block)))
+              (List.map ~f:Spec_inference.var_to_string (Spec.post_block cfg.exit_block).globals)
           in
           Printf.printf "Final summary is: %s\n" (Summary.to_string summary);
           summaries := IntMap.set !summaries ~key:cfg.idx ~data:summary;
@@ -66,4 +63,4 @@ let analyze (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) : unit =
   summaries := Summary.initial_summaries cfgs module_ `Bottom;
   (* Run the analysis *)
   fixpoint (IntSet.of_list (IntMap.keys cfgs))
-
+*)
