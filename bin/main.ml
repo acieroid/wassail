@@ -76,7 +76,7 @@ let intra =
                     let cfg = IntMap.find_exn cfgs fid in
                     let (block_spec, instr_spec) = SpecIntra.analyze wasm_mod cfg in
                     let extract_spec (m : SpecIntra.intra_results) = IntMap.filter_map m ~f:(function
-                        | Spec_inference.Uninitialized, _ -> None
+                        | Uninitialized, _ -> None
                         | Simple s, Simple s' -> Some (s, s')
                         | Simple s, Branch (s1, s2) ->
                           assert (Spec_inference.compare_state s1 s2 = 0); (* both states should be equal *)

@@ -11,12 +11,6 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
 
   let init_summaries s = SummaryManager.init s
 
-  type result =
-    | Uninitialized
-    | Simple of state
-    | Branch of state * state
-  [@@deriving compare]
-
 let init_state (cfg : Cfg.t) = Domain.init cfg Spec.vars
 
 let bottom_state (cfg : Cfg.t) = Domain.bottom cfg (List.map ~f:Spec_inference.var_to_string Spec.vars)
@@ -212,7 +206,7 @@ let control_instr_transfer
     (_cfg : Cfg.t) (* The CFG analyzed *)
     (i : Instr.control Instr.labelled) (* The instruction *)
     (state : Domain.state) (* The pre state *)
-  : result =
+  : [`Simple of state | `Branch of state * state] =
   let apply_summary (f : int) (arity : int * int) (state : state) : state =
     let summary = SummaryManager.get f in
     let args = List.take (Spec.pre i.label).vstack (fst arity) in
@@ -223,7 +217,7 @@ let control_instr_transfer
   | Call (arity, f) ->
     (* We encounter a function call, retrieve its summary and apply it *)
     (* We assume all summaries are defined *)
-    Simple (apply_summary f arity state)
+    `Simple (apply_summary f arity state)
   | CallIndirect (arity, typ) ->
     (* v is the index in the table that points to the called functiion *)
     let v = Spec_inference.var_to_string (Spec.pop (Spec.pre i.label).vstack) in
@@ -249,24 +243,24 @@ let control_instr_transfer
             acc
         | None -> acc) in
     begin match resulting_state with
-      | Some st -> Simple st
+      | Some st -> `Simple st
       | None ->
         (* The call can't be resolved, no constraints to add *)
-        Simple state
+        `Simple state
     end
   | Br _ ->
-    Simple state
+    `Simple state
   | BrIf _
   | If _ ->
     let cond = Spec_inference.var_to_string (Spec.pop (Spec.pre i.label).vstack) in
     (* restrict cond = 1 to the constraints of the true branch, cond = 0 to the constrainst of the false branch *)
-      Branch (Domain.meet_interval state cond (1, 1) (* true branch *),
-              Domain.meet_interval state cond (0, 0) (* false branch *))
+      `Branch (Domain.meet_interval state cond (1, 1) (* true branch *),
+               Domain.meet_interval state cond (0, 0) (* false branch *))
   | Return ->
     (* return does not change anything *)
-    Simple state
+    `Simple state
   | Unreachable ->
     (* Unreachable, so what we return does not really matter *)
-    Simple state
+    `Simple state
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i.instr))
 end

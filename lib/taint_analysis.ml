@@ -58,12 +58,6 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
   type summary = unit
   let init_summaries _ = ()
 
-  type result =
-    | Uninitialized
-    | Simple of state
-    | Branch of state * state
-[@@deriving sexp, compare, equal]
-
 let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data Instr.labelled) (state : state) : state =
   match i.instr with
   | Nop | MemorySize | Drop -> state
@@ -100,17 +94,17 @@ let control_instr_transfer
     (_cfg : Cfg.t) (* The CFG analyzed *)
     (i : Instr.control Instr.labelled) (* The instruction *)
     (state : state) (* The pre state *)
-  : result =
+  : [`Simple of state | `Branch of state * state] =
   match i.instr with
   | Call (_arity, _f) -> failwith "taint summaries"
   | CallIndirect (_arity, _typ) ->
     (* TODO: we could rely on the constraints to know which function is called *)
     failwith "taint summaries"
-  | Br _ -> Simple state
-  | BrIf _ | If _ -> Branch (state, state)
-  | Return -> Simple state
-  | Unreachable -> Simple state
-  | _ -> Simple state
+  | Br _ -> `Simple state
+  | BrIf _ | If _ -> `Branch (state, state)
+  | Return -> `Simple state
+  | Unreachable -> `Simple state
+  | _ -> `Simple state
 
 let merge_flows (module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
   match states with

@@ -129,12 +129,6 @@ let state_to_string (s : state) : string =
     (String.concat ~sep:", " (List.map (VarMap.to_alist s.memory) ~f:(fun (k, v) -> Printf.sprintf "%s: %s" (var_to_string k) (var_to_string v))))
 
 
-type result =
-  | Uninitialized
-  | Simple of state
-  | Branch of state * state
-[@@deriving sexp, compare]
-
 (** Like List.drop, but raises an exception if the list does not contain enough element *)
 let drop (n : int) (vstack : var list) =
   assert (List.length vstack >= n);
@@ -190,23 +184,23 @@ let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.dat
                  memory = VarMap.update state.memory (key 0) ~f:(fun _ -> value 0) }
     | Store _ -> failwith "unsupported memory op" *)
 
-let control_instr_transfer (_module_ : Wasm_module.t) (cfg : Cfg.t) (i : Instr.control Instr.labelled) (state : state) : result =
+let control_instr_transfer (_module_ : Wasm_module.t) (cfg : Cfg.t) (i : Instr.control Instr.labelled) (state : state) : [`Simple of state | `Branch of state * state] =
   let ret = Var i.label in
   match i.instr with
   | Call ((arity_in, arity_out), _) ->
-    Simple { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) }
+    `Simple { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) }
   | CallIndirect ((arity_in, arity_out), _) ->
     (* Like call, but reads the function index from the vstack *)
-    Simple { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) }
-  | Br _ -> Simple state
+    `Simple { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) }
+  | Br _ -> `Simple state
   | BrIf _ | If _ ->
-    Branch ({ state with vstack = drop 1 state.vstack },
-            { state with vstack = drop 1 state.vstack })
-  | Return -> Simple (if List.length cfg.return_types = 1 then
+    `Branch ({ state with vstack = drop 1 state.vstack },
+             { state with vstack = drop 1 state.vstack })
+  | Return -> `Simple (if List.length cfg.return_types = 1 then
                           { state with vstack = [List.hd_exn state.vstack] }
                         else
                           { state with vstack = [] })
-  | Unreachable -> Simple { state with vstack = [] }
+  | Unreachable -> `Simple { state with vstack = [] }
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i.instr))
 
 
@@ -217,7 +211,7 @@ let merge (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (stat
     counter := !counter + 1;
     res in
   match block.content with
-  | ControlMerge -> 
+  | ControlMerge ->
     let st = match states with
       | [] -> init_state cfg
       | s :: _ -> s (* ensures the vstack has the right number of elements *)in
