@@ -1,6 +1,9 @@
 open Core_kernel
 open Helpers
 
+type summary = unit
+let init_summaries _ = ()
+
 type var =
   | Var of int
   | Local of int (* nth local *)

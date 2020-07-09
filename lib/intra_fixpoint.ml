@@ -5,6 +5,10 @@ module type TRANSFER = sig
   (** The state of the analysis *)
   type state
 
+  type summary
+
+  val init_summaries : summary IntMap.t -> unit
+
   (** States should be comparable *)
   val compare_state : state -> state -> int
 

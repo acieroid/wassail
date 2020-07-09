@@ -2,6 +2,31 @@
 open Core_kernel
 open Helpers
 
+
+module type SUMMARY_T = sig
+  type t
+  type state
+  val to_string : t -> string
+  val bottom : Cfg.t -> Spec_inference.var list -> t
+  val top : Cfg.t -> Spec_inference.var list -> t
+  val of_import : int -> string -> Type.t list -> Type.t list -> t
+  val initial_summaries : Cfg.t IntMap.t -> Wasm_module.t -> [`Bottom | `Top ] -> t IntMap.t
+  val apply : t -> state -> string list -> string option -> state
+end
+
+module MakeManager = functor (Summary : SUMMARY_T) -> struct
+  let summaries : Summary.t IntMap.t ref = ref IntMap.empty
+
+  let init (sums : Summary.t IntMap.t) : unit = summaries := sums
+
+  let get (f : int) : Summary.t = IntMap.find_exn !summaries f
+
+  let set (f : int) (s : Summary.t) : unit = summaries := IntMap.set !summaries ~key:f ~data:s
+
+end
+
+module ConstraintSummary = struct
+
 (** A summary is the final state of the function, with some extra informations *)
 type t = {
   in_arity : int; (** The input arity for the function of this summary *)
@@ -13,6 +38,8 @@ type t = {
   globals_post : string list;
   state : Domain.state; (** The final state *)
 }
+
+type state = Domain.state
 
 let to_string (s : t) : string =
   Printf.sprintf "pre: mem: [%s]\npost: ret: %s, globals: [%s], mem: [%s]\nstate: %s"
@@ -50,20 +77,20 @@ let make (cfg : Cfg.t) (state : Domain.state) (ret : string option)
     }
 
 (** Constructs an empty bottom summary given a CFG *)
-let bottom (cfg : Cfg.t) (_module_ : Wasm_module.t) (vars : Spec_inference.var list) : t =
+let bottom (cfg : Cfg.t) (vars : Spec_inference.var list) : t =
   let ret = if List.length cfg.return_types = 1 then Some "ret" else None in
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
   make cfg (Domain.bottom cfg ((Option.to_list ret) @ params @ (List.map ~f:Spec_inference.var_to_string vars))) ret [] [] []
 
 (** Constructs the top summary given a CFG *)
-let top (cfg : Cfg.t) (_module_ : Wasm_module.t) (vars : Spec_inference.var list) : t =
+let top (cfg : Cfg.t) (vars : Spec_inference.var list) : t =
   let ret = if List.length cfg.return_types = 1 then Some "ret" else None in
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
   (* TODO: top memory and globals? *)
   make cfg (Domain.top cfg ((Option.to_list ret) @ params @ (List.map ~f:Spec_inference.var_to_string vars))) ret [] [] []
 
 (** Constructs a summary from an imported function *)
-let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t list) (_module_ : Wasm_module.t) : t =
+let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t list) : t =
   (* These should be fairly easy to encode: we just list constraints between input and output, no constraint if we don't know anything about that name *)
   let params = List.mapi args ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
   assert (List.length ret <= 1); (* wasm spec does not allow for more than one return type (currently) *)
@@ -107,9 +134,9 @@ let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [
     ~init:(IntMap.map cfgs ~f:(fun cfg ->
         (match typ with
          | `Bottom -> bottom
-         | `Top -> top) cfg module_ [] (* TODO: vars *)))
+         | `Top -> top) cfg [] (* TODO: vars *)))
     ~f:(fun sum import -> match import with
-        | (idx, name, (args, ret)) -> IntMap.set sum ~key:idx ~data:(of_import idx name args ret module_))
+        | (idx, name, (args, ret)) -> IntMap.set sum ~key:idx ~data:(of_import idx name args ret))
 
 (* Apply the summary to a state, updating the vstack as if the function was
    called, AND updating the set of called functions *)
@@ -139,3 +166,4 @@ let apply (summary : t) (state : Domain.state) (args: string list) (ret : string
   with
   | Apron.Manager.Error { exn; funid; msg } ->
     failwith (Printf.sprintf "Apron error in Summary.apply: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
+end

@@ -1,70 +1,68 @@
 open Core_kernel
-open Helpers
 
 module Make = functor (Spec : Spec_inference.SPEC) -> struct
   (* TODO: Make summaries. A summary is the final state restricted to only reachable vars: args, globals, mems and return value. *)
 
-(** A taint value is a set of variables *)
-type taint = Spec_inference.VarSet.t
-[@@deriving sexp, compare, equal]
+  (** A taint value is a set of variables *)
+  type taint = Spec_inference.VarSet.t
+  [@@deriving sexp, compare, equal]
 
-(** Joining taints is simply taking their union *)
-let join_taint (t1 : taint) (t2 : taint) : taint = Spec_inference.VarSet.union t1 t2
+  (** Joining taints is simply taking their union *)
+  let join_taint (t1 : taint) (t2 : taint) : taint = Spec_inference.VarSet.union t1 t2
 
-let taint_to_string (t : taint) : string = String.concat ~sep:"," (List.map (Spec_inference.VarSet.to_list t)
+  let taint_to_string (t : taint) : string = String.concat ~sep:"," (List.map (Spec_inference.VarSet.to_list t)
                                                                      ~f:Spec_inference.var_to_string)
 
-(** The state of the taint analysis is a map from variables to their taint values.
-    If a variable is not bound in the state, it is assumed that its taint is bottom *)
-type state = taint Spec_inference.VarMap.t
-[@@deriving sexp, compare, equal]
+  (** The state of the taint analysis is a map from variables to their taint values.
+      If a variable is not bound in the state, it is assumed that its taint is bottom *)
+  type state = taint Spec_inference.VarMap.t
+  [@@deriving sexp, compare, equal]
 
-(** In the initial state, we only set the taint for for parameters and the globals. *)
-let init_state (cfg : Cfg.t) : state =
-  Spec_inference.VarMap.of_alist_exn
-    ((List.mapi cfg.arg_types ~f:(fun i _ -> (Spec_inference.Local i,
-                                              Spec_inference.VarSet.singleton (Spec_inference.Local i)))) @
-     (List.mapi cfg.global_types ~f:(fun i _ -> (Spec_inference.Global i,
+  (** In the initial state, we only set the taint for for parameters and the globals. *)
+  let init_state (cfg : Cfg.t) : state =
+    Spec_inference.VarMap.of_alist_exn
+      ((List.mapi cfg.arg_types ~f:(fun i _ -> (Spec_inference.Local i,
+                                                Spec_inference.VarSet.singleton (Spec_inference.Local i)))) @
+       (List.mapi cfg.global_types ~f:(fun i _ -> (Spec_inference.Global i,
                                                  Spec_inference.VarSet.singleton (Spec_inference.Global i)))))
 
-(** The bottom state does not contain any taint. *)
-let bottom_state (_cfg : Cfg.t) : state =
-  Spec_inference.VarMap.empty
+  (** The bottom state does not contain any taint. *)
+  let bottom_state (_cfg : Cfg.t) : state =
+    Spec_inference.VarMap.empty
 
-let state_to_string (s : state) : string =
-  Printf.sprintf "[%s]" (String.concat ~sep:", "
-                           (List.map (Spec_inference.VarMap.to_alist s)
-                              ~f:(fun (k, t) ->
-                                  Printf.sprintf "%s: %s"
-                                    (Spec_inference.var_to_string k)
-                                    (taint_to_string t))))
+  let state_to_string (s : state) : string =
+    Printf.sprintf "[%s]" (String.concat ~sep:", "
+                             (List.map (Spec_inference.VarMap.to_alist s)
+                                ~f:(fun (k, t) ->
+                                    Printf.sprintf "%s: %s"
+                                      (Spec_inference.var_to_string k)
+                                      (taint_to_string t))))
 
-let join_state _mod _cfg _block (s1 : state) (s2 : state) : state =
-  Spec_inference.VarMap.merge s1 s2 ~f:(fun ~key:_ v -> match v with
-      | `Both (x, y) -> Some (Spec_inference.VarSet.union x y)
-      | `Left x | `Right x -> Some x)
+  let join_state _mod _cfg _block (s1 : state) (s2 : state) : state =
+    Spec_inference.VarMap.merge s1 s2 ~f:(fun ~key:_ v -> match v with
+        | `Both (x, y) -> Some (Spec_inference.VarSet.union x y)
+        | `Left x | `Right x -> Some x)
 
-let get_taint (s : state) (var : Spec_inference.var) : taint =
-  match Spec_inference.VarMap.find s var with
-  | Some t -> t
-  | None -> Spec_inference.VarSet.empty
+  let get_taint (s : state) (var : Spec_inference.var) : taint =
+    match Spec_inference.VarMap.find s var with
+    | Some t -> t
+    | None -> Spec_inference.VarSet.empty
 
-(** Add taint to avariable *)
-let state_add_taint (s : state) (v : Spec_inference.var) (taint : Spec_inference.var) : state =
-  Printf.printf "add taint: %s -> %s\n" (Spec_inference.var_to_string v) (Spec_inference.var_to_string taint);
-  Spec_inference.VarMap.update s v ~f:(function
-      | None -> get_taint s taint
-      | Some t -> Spec_inference.VarSet.union t (get_taint s taint))
+  (** Add taint to avariable *)
+  let state_add_taint (s : state) (v : Spec_inference.var) (taint : Spec_inference.var) : state =
+    Printf.printf "add taint: %s -> %s\n" (Spec_inference.var_to_string v) (Spec_inference.var_to_string taint);
+    Spec_inference.VarMap.update s v ~f:(function
+        | None -> get_taint s taint
+        | Some t -> Spec_inference.VarSet.union t (get_taint s taint))
 
-type result =
-  | Uninitialized
-  | Simple of state
-  | Branch of state * state
+  type summary = unit
+  let init_summaries _ = ()
+
+  type result =
+    | Uninitialized
+    | Simple of state
+    | Branch of state * state
 [@@deriving sexp, compare, equal]
-
-(* TODO: this is the same as in transfer.ml, should be refactored *)
-
-let summaries : Summary.t IntMap.t ref = ref IntMap.empty
 
 let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data Instr.labelled) (state : state) : state =
   match i.instr with

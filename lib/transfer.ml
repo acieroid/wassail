@@ -1,17 +1,21 @@
 open Core_kernel
-open Helpers
 
 module Make = functor (Spec : Spec_inference.SPEC) -> struct
-  let summaries : Summary.t IntMap.t ref = ref IntMap.empty
 
   type state = Domain.state
   [@@deriving compare]
 
-type result =
-  | Uninitialized
-  | Simple of state
-  | Branch of state * state
-[@@deriving compare]
+  module SummaryManager = Summary.MakeManager(Summary.ConstraintSummary)
+
+  type summary = Summary.ConstraintSummary.t
+
+  let init_summaries s = SummaryManager.init s
+
+  type result =
+    | Uninitialized
+    | Simple of state
+    | Branch of state * state
+  [@@deriving compare]
 
 let init_state (cfg : Cfg.t) = Domain.init cfg Spec.vars
 
@@ -210,10 +214,10 @@ let control_instr_transfer
     (state : Domain.state) (* The pre state *)
   : result =
   let apply_summary (f : int) (arity : int * int) (state : state) : state =
-    let summary = IntMap.find_exn !summaries f in
+    let summary = SummaryManager.get f in
     let args = List.take (Spec.pre i.label).vstack (fst arity) in
     let ret = if snd arity = 1 then List.hd (Spec.post i.label).vstack else None in
-    Summary.apply summary state (List.map ~f:Spec_inference.var_to_string args) (Option.map ~f:Spec_inference.var_to_string ret)
+    Summary.ConstraintSummary.apply summary state (List.map ~f:Spec_inference.var_to_string args) (Option.map ~f:Spec_inference.var_to_string ret)
   in
   match i.instr with
   | Call (arity, f) ->
