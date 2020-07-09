@@ -64,13 +64,14 @@ let intra =
                 let faddr = nimports + i in
                 (faddr, Cfg_builder.build faddr wasm_mod))) in
             let summaries = List.fold_left funs
-              ~init:(Relational_summary.initial_summaries cfgs wasm_mod `Top)
+                ~init:(Relational_summary.initial_summaries cfgs wasm_mod `Top,
+                       Taint_summary.initial_summaries cfgs wasm_mod `Top)
               ~f:(fun summaries fid ->
                   Printf.printf "Analyzing function %d\n" fid;
                   if fid < nimports then begin
                     Printf.printf "This is an imported function, it does not have to be analyzed.\n";
-                    let summary = IntMap.find_exn summaries fid in
-                    Printf.printf "Summary is:\n%s\n" (Relational_summary.to_string summary);
+                    Printf.printf "Relational summary is:\n%s\n" (Relational_summary.to_string (IntMap.find_exn (fst summaries) fid));
+                    Printf.printf "Taint summary is:\n%s\n" (Taint_summary.to_string (IntMap.find_exn (snd summaries) fid));
                     summaries
                   end else
                     let cfg = IntMap.find_exn cfgs fid in
@@ -87,32 +88,31 @@ let intra =
                       let block_data = extract_spec block_spec
                     end) in
                     (* Plug in the results of the spec analysis *)
-                    let module ConstraintsIntra = Intra_fixpoint.Make(Relational_transfer.Make(Spec)) in
-                    ConstraintsIntra.init_summaries summaries;
+                    let module RelationalIntra = Intra_fixpoint.Make(Relational_transfer.Make(Spec)) in
+                    RelationalIntra.init_summaries (fst summaries);
                     Printf.printf "-------------------------\nMain analysis\n-------------------\n";
-                    let results = ConstraintsIntra.analyze wasm_mod cfg in
-                    let out_state = ConstraintsIntra.out_state cfg results in
-                    Printf.printf "%d: %s\n" cfg.idx (ConstraintsIntra.state_to_string out_state);
-                    let summary = Relational_summary.make cfg out_state
-                        (if List.length cfg.return_types = 1 then Option.map ~f:Spec_inference.var_to_string (List.hd (Spec.post_block cfg.exit_block).vstack) else None)
-                        (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Spec.pre_block cfg.entry_block)))
-                        (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Spec.post_block cfg.exit_block)))
-                        (List.map ~f:Spec_inference.var_to_string (Spec.post_block cfg.exit_block).globals)
-                    in
-                    Printf.printf "Summary is:\n%s\n" (Relational_summary.to_string summary);
+                    let results = RelationalIntra.analyze wasm_mod cfg in
+                    let out_state = RelationalIntra.out_state cfg results in
+                    (* Printf.printf "%d: %s\n" cfg.idx (RelationalIntra.state_to_string out_state); *)
+                    let relational_summary = RelationalIntra.summary cfg out_state in
+                    Printf.printf "Relational summary is:\n%s\n" (Relational_summary.to_string relational_summary);
 
                     (* Run the taint analysis *)
                     let module TaintIntra = Intra_fixpoint.Make(Taint_transfer.Make(Spec)) in
+                    TaintIntra.init_summaries (snd summaries);
                     let results = TaintIntra.analyze wasm_mod cfg in
                     let out_state = TaintIntra.out_state cfg results in
                     Printf.printf "%d: %s\n" cfg.idx (TaintIntra.state_to_string out_state);
-                    IntMap.set summaries ~key:fid ~data:summary
+                    let taint_summary = TaintIntra.summary cfg out_state in
+                    Printf.printf "Taint summary is:\n%s\n" (Taint_summary.to_string taint_summary);
+                    (IntMap.set (fst summaries) ~key:fid ~data:relational_summary,
+                     IntMap.set (snd summaries) ~key:fid ~data:taint_summary)
 
 
                 ) in
             Printf.printf "---------------\nAnalysis done, resulting summaries are:\n";
             List.iter funs ~f:(fun fid ->
-                let summary = IntMap.find_exn summaries fid in
+                let summary = IntMap.find_exn (fst summaries) fid in
                 Printf.printf "function %d: %s\n" fid (Relational_summary.to_string summary))))
 
 

@@ -3,6 +3,7 @@ open Helpers
 
 type summary = unit
 let init_summaries _ = ()
+let summary _ _ = ()
 
 type var =
   | Var of int
@@ -292,3 +293,4 @@ module Spec (Data : SPEC_DATA) : SPEC = struct
     | _ -> failwith "Invalid vstack"
 
 end
+

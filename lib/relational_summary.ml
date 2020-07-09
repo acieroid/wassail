@@ -3,7 +3,7 @@ open Helpers
 
 module Domain = Relational_domain
 
-type state = Relational_domain.t
+type state = Domain.t
 
 (** A summary is the final state of the function, with some extra informations *)
 type t = {

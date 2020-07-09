@@ -264,4 +264,11 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       (* Unreachable, so what we return does not really matter *)
       `Simple state
     | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i.instr))
+
+  let summary (cfg : Cfg.t) (out_state : state) : summary =
+    Relational_summary.make cfg out_state
+      (if List.length cfg.return_types = 1 then Option.map ~f:Spec_inference.var_to_string (List.hd (Spec.post_block cfg.exit_block).vstack) else None)
+      (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Spec.pre_block cfg.entry_block)))
+      (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Spec.post_block cfg.exit_block)))
+      (List.map ~f:Spec_inference.var_to_string (Spec.post_block cfg.exit_block).globals)
 end

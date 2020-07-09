@@ -32,6 +32,9 @@ module type TRANSFER = sig
 
   (** Merges flows for blocks that have multiple predecessors *)
   val merge_flows : Wasm_module.t -> Cfg.t -> Basic_block.t -> (int * state) list -> state
+
+  (** Builds the summary after the analysis, from the final state *)
+  val summary : Cfg.t -> state -> summary
 end
 
 module Make = functor (Transfer : TRANSFER) -> struct
@@ -146,7 +149,7 @@ module Make = functor (Transfer : TRANSFER) -> struct
     (* _narrow (IntMap.keys cfg.basic_blocks); *)
     (!block_data, !instr_data)
 
-  (* Extract the out state from intra-procedural results *)
+  (** Extract the out state from intra-procedural results *)
   let out_state (cfg : Cfg.t) (results : intra_results * intra_results) : Transfer.state =
     match snd (IntMap.find_exn (fst results) cfg.exit_block) with
     | Simple s -> s

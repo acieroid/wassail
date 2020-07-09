@@ -20,7 +20,4 @@ module MakeManager = functor (Summary : SUMMARY_T) -> struct
   let init (sums : Summary.t IntMap.t) : unit = summaries := sums
 
   let get (f : int) : Summary.t = IntMap.find_exn !summaries f
-
-  let set (f : int) (s : Summary.t) : unit = summaries := IntMap.set !summaries ~key:f ~data:s
-
 end

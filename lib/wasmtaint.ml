@@ -20,7 +20,9 @@ module Relational_domain = Relational_domain
 module Relational_transfer = Relational_transfer
 module Relational_summary = Relational_summary
 
+module Taint_domain = Taint_domain
 module Taint_transfer = Taint_transfer
+module Taint_summary = Taint_summary
 
 let error at category msg =
   failwith (Printf.sprintf "Error: %s" (Source.string_of_region at ^ ": " ^ category ^ ": " ^ msg))
