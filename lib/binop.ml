@@ -2,7 +2,7 @@ open Core_kernel
 
 (** Binary operations *)
 module T = struct
-  type op = Add | Sub | Mul | DivS | DivU | RemS | RemU | And | Or | Xor | Shl | ShrS | ShrU | Rotl | Rotr
+  type op = Add | Sub | Mul | DivS | DivU | RemS | RemU | And | Or | Xor | Shl | ShrS | ShrU | Rotl | Rotr | Min | Max | CopySign
   [@@deriving sexp, compare, equal]
   type t = { op: op; typ: Type.t }
   [@@deriving sexp, compare, equal]
@@ -30,10 +30,20 @@ let of_wasm (b : Wasm.Ast.binop) : t =
     | Rotl -> Rotl
     | Rotr -> Rotr
   in
+  let of_op_f (op : Wasm.Ast.FloatOp.binop) : op = match op with
+    | Add -> Add
+    | Sub -> Sub
+    | Mul -> Mul
+    | Div -> DivS
+    | Min -> Min
+    | Max -> Max
+    | CopySign -> CopySign
+  in
   match b with
   | I32 op -> { typ = I32; op = of_op op }
   | I64 op -> { typ = I64; op = of_op op }
-  | _ -> failwith "Unsupported type"
+  | F32 op -> { typ = F32; op = of_op_f op }
+  | F64 op -> { typ = F64; op = of_op_f op }
 
 let to_string (b : t) : string =
   Printf.sprintf "%s.%s"
@@ -53,7 +63,10 @@ let to_string (b : t) : string =
      | ShrS -> "shr_s"
      | ShrU -> "shr_u"
      | Rotl -> "rotl"
-     | Rotr -> "rotr")
+     | Rotr -> "rotr"
+     | Min -> "min"
+     | Max -> "max"
+     | CopySign -> "copy_sign")
 
 (*
 (** Evaluates a binary operation on two values *)

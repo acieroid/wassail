@@ -1,4 +1,3 @@
-open Core_kernel
 open Wasm
 
 (** Test operations *)
@@ -16,6 +15,7 @@ module T = struct
     | TruncSatSF64
     | TruncSatUF64
     | ReinterpretFloat
+    | FloatOp (* TODO: refine *)
   [@@deriving sexp, compare]
 end
 include T
@@ -45,8 +45,7 @@ let of_wasm (t : Ast.cvtop) : t =
   | I64 TruncSatSF64 -> TruncSatSF64
   | I64 TruncSatUF64 -> TruncSatUF64
   | I64 ReinterpretFloat -> ReinterpretFloat
-  | F32 _ -> failwith "unsupported type: F32"
-  | F64 _ -> failwith "unsupported type: F64"
+  | F32 _ | F64 _ -> FloatOp
 let to_string (t : t) : string =
   match t with
   | _ -> "cvt"

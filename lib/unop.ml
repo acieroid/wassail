@@ -1,7 +1,7 @@
 open Core_kernel
 
 module T = struct
-  type op = Clz | Ctz | Popcnt | ExtendS
+  type op = Clz | Ctz | Popcnt | ExtendS | Other
   [@@deriving sexp, compare, equal]
   type t = { op: op; typ: Type.t }
   [@@deriving sexp, compare, equal]
@@ -15,10 +15,14 @@ let of_wasm (u : Wasm.Ast.unop) : t =
     | Popcnt -> Popcnt
     | ExtendS _todo -> ExtendS
   in
+  let of_op_f (op : Wasm.Ast.FloatOp.unop) : op = match op with
+    | _ -> Other (* TODO *)
+  in
   match u with
   | I32 op -> { typ = I32; op = of_op op }
   | I64 op -> { typ = I64; op = of_op op }
-  | _ -> failwith "unsupported type"
+  | F32 op -> { typ = F32; op = of_op_f op }
+  | F64 op -> { typ = F64; op = of_op_f op }
 
 let to_string (u : t) : string =
   Printf.sprintf "%s.%s"
@@ -27,4 +31,5 @@ let to_string (u : t) : string =
      | Clz -> "clz"
      | Ctz -> "ctz"
      | Popcnt -> "popcnt"
-     | ExtendS -> "extend_s")
+     | ExtendS -> "extend_s"
+     | Other -> "todo")

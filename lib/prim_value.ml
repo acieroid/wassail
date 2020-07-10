@@ -6,7 +6,8 @@ module T = struct
   type t =
     | I32 of int32
     | I64 of int64
-    (* TODO: f32 & f64 *)
+    | F32 of int64 (* TODO: proper representation *)
+    | F64 of int64 (* TODO: proper representation *)
   [@@deriving sexp, compare]
 end
 
@@ -20,12 +21,13 @@ let of_wasm (v : Wasm.Values.value) : t =
   match v with
   | I32 x -> I32 x
   | I64 x -> I64 x
-  | F32 _ -> failwith "unsupported type: F32"
-  | F64 _ -> failwith "unsupported type: F64"
+  | F32 _x ->  F32 0L (* TODO *)
+  | F64 _x -> F64 0L (* TODO *)
 
 let to_string (v : t) : string = match v with
   | I32 n -> Int32.to_string n
   | I64 n -> Int64.to_string n
+  | F32 _  | F64 _ -> failwith "unsupported"
 
 let is_zero (v : t) : bool = match v with
   | I32 0l | I64 0L -> true
@@ -38,10 +40,12 @@ let is_one (v : t) : bool = match v with
 let is_positive (v : t) : bool = match v with
   | I32 n -> Int32.(n > 0l)
   | I64 n -> Int64.(n > 0L)
+  | F32 _ | F64 _ -> failwith "unsupported"
 
 let is_negative (v : t) : bool = match v with
   | I32 n -> Int32.(n < 0l)
   | I64 n -> Int64.(n < 0L)
+  | F32 _ | F64 _ -> failwith "unsupported"
 
 let byte_of (v : t) (byte : int) = match (v, byte) with
   | (I32 x, 0) -> I32 Int32.(x land  0xFFl)
@@ -57,6 +61,7 @@ let byte_of (v : t) (byte : int) = match (v, byte) with
 let is (v : t) (n : int) : bool = match v with
   | I32 n' -> Int32.(n' = of_int_exn n)
   | I64 n' -> Int64.(n' = of_int_exn n)
+  | F32 _ | F64 _ -> failwith "unsupported"
 
 (** Returns zero of type t *)
 let zero_of_t (t : Type.t) : t = match t with
@@ -68,6 +73,7 @@ let zero_of_t (t : Type.t) : t = match t with
 let zero_of_same_t (v : t) : t = match v with
   | I32 _ -> I32 0l
   | I64 _ -> I64 0L
+  | F32 _ | F64 _ -> failwith "unsupported"
 
 let of_int_t (t : Type.t) (n : int) : t = match t with
   | I32 -> I32 (Int32.of_int_exn n)
@@ -79,6 +85,7 @@ let of_int (n : int) : t = I32 (Int32.of_int_exn n)
 let add_int (v : t) (n : int) : t = match v with
   | I32 x -> I32 Int32.(x + (of_int_exn n))
   | I64 x -> I64 Int64.(x + (of_int_exn n))
+  | F32 _ | F64 _ -> failwith "unsupported type"
 
 let min (v1 : t) (v2 : t) : t  = match (v1, v2) with
   | (I32 x, I32 y) -> I32 (Int32.(min x y))
@@ -105,6 +112,7 @@ let lift_wasm_un
   : t -> t = function
   | I32 x -> I32 (op32 x)
   | I64 x -> I64 (op64 x)
+  | F32 _ | F64 _ -> failwith "unsupported"
 
 let lift_wasm_test
     (op32 : Wasm.I32.t -> bool)
@@ -112,6 +120,7 @@ let lift_wasm_test
   : t -> bool = function
   | I32 x -> op32 x
   | I64 x -> op64 x
+  | F32 _ | F64 _ -> failwith "unsupported"
 
 let lift_wasm_rel
     (op32 : Wasm.I32.t -> Wasm.I32.t -> bool)

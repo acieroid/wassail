@@ -26,10 +26,19 @@ let of_wasm (r : Ast.relop) : t =
     | GeS -> GeS
     | GeU -> GeU
   in
+  let of_op_f (op : Wasm.Ast.FloatOp.relop) : op = match op with
+    | Eq -> Eq
+    | Ne -> Ne
+    | Lt -> LtS
+    | Gt -> GtS
+    | Le -> LeS
+    | Ge -> GeS
+  in
   match r with
   | I32 op -> { typ = I32; op = of_op op }
   | I64 op -> { typ = I64; op = of_op op }
-  | _ -> failwith "unsupported type: float in relop"
+  | F32 op -> { typ = F32; op = of_op_f op }
+  | F64 op -> { typ = F64; op = of_op_f op }
 
 let to_string (r : t) : string =
   Printf.sprintf "%s.%s"
