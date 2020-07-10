@@ -115,6 +115,20 @@ let intra =
                 let summary = IntMap.find_exn (fst summaries) fid in
                 Printf.printf "function %d: %s\n" fid (Relational_summary.to_string summary))))
 
+let check =
+  Command.basic
+    ~summary:"Check functions supported by the analysis"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string) in
+      fun () ->
+        apply_to_textual filename (fun m ->
+            let module SpecIntra = Intra_fixpoint.Make(Spec_inference) in
+            let nimports = List.length (List.filter m.it.imports ~f:(fun import -> match import.it.idesc.it with
+                | Ast.FuncImport _ -> true
+                | _ -> false)) in
+            let funcs = List.mapi m.it.funcs ~f:(fun i f -> (i+nimports, Check_support.func_is_supported f)) in
+            let supported = List.filter funcs ~f:snd in
+            Printf.printf "Supported [%d/%d]: %s\n" (List.length supported) (List.length funcs) (String.concat ~sep:" " (List.map supported ~f:(fun (idx, _) -> Printf.sprintf "%d" idx)))))
 
 let inter =
   Command.basic
@@ -142,4 +156,5 @@ let () =
        ["cfg", cfg
        ; "cfgs", cfgs
        ; "inter", inter
-       ; "intra", intra])
+       ; "intra", intra
+       ; "check", check])
