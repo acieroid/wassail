@@ -147,6 +147,7 @@ let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.dat
   match i.instr with
   | Nop -> state
   | MemorySize -> { state with vstack = ret :: state.vstack }
+  | MemoryGrow -> { state with vstack = ret :: drop 1 state.vstack }
   | Drop -> { state with vstack = drop 1 state.vstack }
   | Select -> { state with vstack = ret :: (drop 3 state.vstack) }
   | LocalGet l -> { state with vstack = get l state.locals :: state.vstack }
@@ -157,6 +158,7 @@ let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.dat
   | Const _ -> { state with vstack = ret :: state.vstack }
   | Compare _ -> { state with vstack = ret :: (drop 2 state.vstack) }
   | Binary _ -> { state with vstack = ret :: (drop 2 state.vstack) }
+  | Unary _ -> { state with vstack = ret :: (drop 1 state.vstack) }
   | Test _ -> { state with vstack = ret :: (drop 1 state.vstack) }
   | Convert _ -> { state with vstack = ret :: (drop 1 state.vstack) }
   | Load _ ->

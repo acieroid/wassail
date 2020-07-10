@@ -3,9 +3,9 @@ open Core_kernel
 (** Binary operations *)
 module T = struct
   type op = Add | Sub | Mul | DivS | DivU | RemS | RemU | And | Or | Xor | Shl | ShrS | ShrU | Rotl | Rotr
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
   type t = { op: op; typ: Type.t }
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
 end
 include T
 

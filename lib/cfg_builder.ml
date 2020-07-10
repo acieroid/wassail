@@ -99,6 +99,17 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
            (br_block.idx, level, None) :: breaks (* add the break *),
            returns (* no return *),
            block.idx, exit')
+        | BrTable (table, level) ->
+          (* Similar to break, but there are multiple outgoing edges here *)
+          assert (List.is_empty rest);
+          let block = mk_data_block instrs in
+          let br_block = mk_control_block instr in
+          let (blocks, edges, breaks, returns, _entry', exit') = helper [] rest in
+          (block :: br_block :: blocks (* add the current block *),
+           (block.idx, br_block.idx, None) :: edges (* only sequential edge *),
+           (br_block.idx, level, None) :: (List.map table ~f:(fun lvl -> (br_block.idx, lvl, None))) @ breaks (* add all the breaks *),
+           returns,
+           block.idx, exit')
         | Call _ | CallIndirect _ ->
           (* Also similar to br, but connects the edges differently. Moreover,
              we don't include the call in this block because it has to be

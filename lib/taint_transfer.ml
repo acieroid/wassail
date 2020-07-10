@@ -27,7 +27,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
 
   let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data Instr.labelled) (state : state) : state =
     match i.instr with
-    | Nop | MemorySize | Drop -> state
+    | Nop | MemorySize | Drop | MemoryGrow -> state
     | Select ->
       let ret = Spec.ret i.label in
       let (_c, v2, v1) = Spec.pop3 (Spec.pre i.label).vstack in
@@ -51,7 +51,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       Taint_domain.add_taint
         (Taint_domain.add_taint state (Spec.ret i.label) v1)
         (Spec.ret i.label) v2
-    | Test _ | Convert _ ->
+    | Unary _ | Test _ | Convert _ ->
       Taint_domain.add_taint state (Spec.ret i.label) (Spec.pop (Spec.pre i.label).vstack)
     | Load _ -> failwith "TODO: load"
     | Store _ -> failwith "TODO: store"

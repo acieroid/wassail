@@ -19,8 +19,9 @@ module T = struct
     | Nop
     | Drop
     | Select
-    | MemorySize
+    | MemorySize | MemoryGrow
     | Const of Prim_value.t
+    | Unary of Unop.t
     | Binary of Binop.t
     | Compare of Relop.t
     | Test of Testop.t
@@ -41,6 +42,7 @@ module T = struct
     | CallIndirect of arity * Var.t
     | Br of Var.t
     | BrIf of Var.t
+    | BrTable of Var.t list * Var.t
     | Return
     | Unreachable
   (** All instructions *)
@@ -59,8 +61,10 @@ let data_to_string (instr : data) : string =
      | Drop -> "drop"
      | Select -> "select"
      | MemorySize -> "memory_size"
+     | MemoryGrow -> "memory_grow"
      | Const v -> Printf.sprintf "const %s" (Prim_value.to_string v)
      | Binary b -> Printf.sprintf "binary %s" (Binop.to_string b)
+     | Unary u -> Printf.sprintf "unary %s" (Unop.to_string u)
      | Compare r -> Printf.sprintf "compare %s" (Relop.to_string r)
      | Test t -> Printf.sprintf "test %s" (Testop.to_string t)
      | Convert t -> Printf.sprintf "cvt %s" (Convertop.to_string t)
@@ -77,6 +81,7 @@ let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (inst
   | CallIndirect (_, v) -> Printf.sprintf "call_indirect %d" v
   | Br b -> Printf.sprintf "br %d" b
   | BrIf b -> Printf.sprintf "brif %d" b
+  | BrTable (t, b) -> Printf.sprintf "br_table %s %d" (String.concat ~sep:" " (List.map t ~f:(Printf.sprintf "%d"))) b
   | Return -> "return"
   | Unreachable -> "unreachable"
   | Block (_, instrs) -> Printf.sprintf "block%s%s" sep (list_to_string instrs ~indent:(i+2) ~sep:sep)
@@ -94,15 +99,10 @@ and list_to_string ?indent:(i : int = 0) ?sep:(sep : string = ", ") (l : t list)
 
 let control_to_short_string (instr : control) : string =
   match instr with
-  | Call (_, v) -> Printf.sprintf "call %d" v
-  | CallIndirect (_, v) -> Printf.sprintf "call_indirect %d" v
-  | Br b -> Printf.sprintf "br %d" b
-  | BrIf b -> Printf.sprintf "brif %d" b
-  | Return -> "return"
-  | Unreachable -> "unreachable"
   | Block _ -> "block"
   | Loop _ -> "loop"
   | If _ -> "if"
+  | _ -> control_to_string instr
 
 let vstack_pop (vstack : string list) : string list = match vstack with
   | [] -> failwith "incorrect vstack manipulation when parsing instructions"
@@ -172,6 +172,8 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) : t =
     control_labelled (BrIf (Var.of_wasm label))
   | Ast.Br label ->
     control_labelled (Br (Var.of_wasm label))
+  | Ast.BrTable (table, label) ->
+    control_labelled (BrTable (List.map table ~f:Var.of_wasm, Var.of_wasm label))
   | Ast.Call f ->
     let (arity_in, arity_out) = arity_of_fun m f in
     assert (arity_out <= 1);
@@ -193,7 +195,6 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) : t =
     let body1 = seq_of_wasm m instrs1 in
     let body2 = seq_of_wasm m instrs2 in
     control_labelled (If ((arity_in, arity_out), body1, body2))
-  | Ast.BrTable (_vs, _v) -> failwith "unsupported: br_table"
   | Ast.CallIndirect f ->
     let (arity_in, arity_out) = arity_of_fun_type m f in
     assert (arity_out <= 1);
@@ -208,11 +209,12 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) : t =
     data_labelled (Store (Memoryop.of_wasm_store op))
   | Ast.MemorySize ->
     data_labelled (MemorySize)
-  | Ast.MemoryGrow -> failwith "memory_grow unsupported"
+  | Ast.MemoryGrow -> data_labelled MemoryGrow
   | Ast.Test op ->
     data_labelled (Test (Testop.of_wasm op))
   | Ast.Convert op ->
     data_labelled (Convert (Convertop.of_wasm op))
-  | Ast.Unary _op -> failwith "unary unsupported"
+  | Ast.Unary op ->
+    data_labelled (Unary (Unop.of_wasm op))
 and seq_of_wasm (m : Ast.module_) (is : Ast.instr list) : t list =
   List.map is ~f:(of_wasm m)

@@ -67,6 +67,9 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
          (match mem.max_size with
           | Some max -> max
           | None -> failwith "unsupported infinite max size" (* can easily supported, the constraint just becomes ret >= min *)))
+    | MemoryGrow ->
+      (* not modeled precisely: returns the size of the memory before it has grown *)
+      state
     | Drop -> state
     | Select ->
       let ret = Spec.ret i.label in
@@ -115,6 +118,8 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     | Binary _ ->
       (* TODO: reflect "bin v1 v2" the operation in the constraints, when possible *)
       (* don't add any constraint (for now)  *)
+      state
+    | Unary _ ->
       state
     | Test _ ->
       (* TODO: reflect "test v" in the constraints, when possible *)
