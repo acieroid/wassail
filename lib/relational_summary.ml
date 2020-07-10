@@ -103,18 +103,7 @@ let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t li
     in_arity = List.length args;
     state = state }
 
-(** Constructs all summaries for a given module, including imported functions *)
-let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t IntMap.t =
-  List.fold_left module_.imported_funcs
-    (* Summaries for defined functions are all initialized to bottom *)
-    ~init:(IntMap.map cfgs ~f:(fun cfg ->
-        (match typ with
-         | `Bottom -> bottom
-         | `Top -> top) cfg [] (* TODO: vars *)))
-    ~f:(fun sum import -> match import with
-        | (idx, name, (args, ret)) -> IntMap.set sum ~key:idx ~data:(of_import idx name args ret))
-
-(* Apply the summary to a state, updating the vstack as if the function was
+(** Apply the summary to a state, updating the vstack as if the function was
    called, AND updating the set of called functions *)
 let apply (summary : t) (state : Domain.t) (args: string list) (ret : string option) : Domain.t =
   try
@@ -142,3 +131,15 @@ let apply (summary : t) (state : Domain.t) (args: string list) (ret : string opt
   with
   | Apron.Manager.Error { exn; funid; msg } ->
     failwith (Printf.sprintf "Apron error in Summary.apply: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
+
+(** Constructs all summaries for a given module, including imported functions *)
+let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t IntMap.t =
+  List.fold_left module_.imported_funcs
+    (* Summaries for defined functions are all initialized to bottom (or top) *)
+    ~init:(IntMap.map cfgs ~f:(fun cfg ->
+        (match typ with
+         | `Bottom -> bottom
+         | `Top -> top) cfg [] (* TODO: vars *)))
+    ~f:(fun summaries (idx, name, (args, ret)) ->
+        IntMap.set summaries ~key:idx ~data:(of_import idx name args ret))
+

@@ -12,13 +12,11 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
   let init_state (cfg : Cfg.t) : state =
     Spec_inference.VarMap.of_alist_exn
       ((List.mapi cfg.arg_types ~f:(fun i _ -> (Spec_inference.Local i,
-                                                Spec_inference.VarSet.singleton (Spec_inference.Local i)))) @
+                                                Taint_domain.taint (Spec_inference.Local i)))) @
        (List.mapi cfg.global_types ~f:(fun i _ -> (Spec_inference.Global i,
-                                                 Spec_inference.VarSet.singleton (Spec_inference.Global i)))))
+                                                 Taint_domain.taint (Spec_inference.Global i)))))
 
-  (** The bottom state does not contain any taint. *)
-  let bottom_state (_cfg : Cfg.t) : state =
-    Spec_inference.VarMap.empty
+  let bottom_state (_cfg : Cfg.t) : state = Taint_domain.bottom
 
   let state_to_string (s : state) : string = Taint_domain.to_string s
 
