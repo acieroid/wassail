@@ -9,9 +9,7 @@ module type SUMMARY_T = sig
   val to_string : t -> string
   val bottom : Cfg.t -> Spec_inference.var list -> t
   val top : Cfg.t -> Spec_inference.var list -> t
-  val of_import : int -> string -> Type.t list -> Type.t list -> t
   val initial_summaries : Cfg.t IntMap.t -> Wasm_module.t -> [`Bottom | `Top ] -> t IntMap.t
-  val apply : t -> state -> string list -> string option -> state
 end
 
 module MakeManager = functor (Summary : SUMMARY_T) -> struct

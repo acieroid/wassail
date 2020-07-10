@@ -6,6 +6,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
   type state = Taint_domain.t
   [@@deriving compare]
 
+  module SummaryManager = Summary.MakeManager(Taint_summary)
   type summary = Taint_summary.t
 
   (** In the initial state, we only set the taint for for parameters and the globals. *)
@@ -22,7 +23,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
 
   let join_state _mod _cfg _block (s1 : state) (s2 : state) : state = Taint_domain.join s1 s2
 
-  let init_summaries _ = ()
+  let init_summaries s = SummaryManager.init s
 
   let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data Instr.labelled) (state : state) : state =
     match i.instr with
@@ -61,11 +62,19 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       (i : Instr.control Instr.labelled) (* The instruction *)
       (state : state) (* The pre state *)
     : [`Simple of state | `Branch of state * state] =
+    let apply_summary (f : int) (arity : int * int) (state : state) : state =
+      let summary = SummaryManager.get f in
+      let args = List.take (Spec.pre i.label).vstack (fst arity) in
+      let ret = if snd arity = 1 then List.hd (Spec.post i.label).vstack else None in
+      let globals = (Spec.post i.label).globals in
+      Taint_summary.apply summary state args globals ret
+    in
     match i.instr with
-    | Call (_arity, _f) -> failwith "taint summaries"
+    | Call (arity, f) ->
+      `Simple (apply_summary f arity state)
     | CallIndirect (_arity, _typ) ->
       (* TODO: we could rely on the constraints to know which function is called *)
-      failwith "taint summaries"
+      failwith "taint_transfer: call_indirect"
     | Br _ -> `Simple state
     | BrIf _ | If _ -> `Branch (state, state)
     | Return -> `Simple state
