@@ -56,3 +56,25 @@ let make (cfg : Cfg.t) (state : Taint_domain.t)
     args = List.init (List.length cfg.arg_types) ~f:(fun i -> Spec_inference.Local i);
     ret = ret;
     state = Taint_domain.restrict state (globals_post @ (Option.to_list ret)) }
+
+let apply (summary : t) (state : Taint_domain.t) (args : Spec_inference.var list) (globals : Spec_inference.var list) (ret : Spec_inference.var option) : Taint_domain.t =
+  (* To apply a summary, we first rename the return value and the globals:
+     if summary.state is for example [v0 : l0][v1: l1] where v0 is the return value and v1 is a global,
+     and the variable for the return value (ret) and global (globals) are x0 and x1, then we obtain:
+     [x0: l0][x1: l1]
+    *)
+  let with_ret = match summary.ret, ret with
+    | Some r, Some r' -> Taint_domain.rename_key summary.state r r'
+    | None, None -> summary.state
+    | _ -> failwith "incompatible return value for summary"
+  in
+  let with_globals = List.fold_left (List.map2_exn summary.globals globals ~f:(fun x y -> (x, y)))
+      ~init:with_ret
+      ~f:(fun acc (g, g') -> Taint_domain.rename_key acc g g') in
+  (* Then we update the argument values.
+     If the arguments are a0 and a1, then we replace l0 by state[a0] and l1 by state[a1] *)
+  let with_args = List.fold_left (List.map2_exn summary.args args ~f:(fun x y -> (x, y)))
+      ~init:with_globals
+      ~f:(fun acc (a, a') -> Taint_domain.replace_taint acc a (Taint_domain.get_taint state a')) in
+  with_args
+  

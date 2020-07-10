@@ -14,6 +14,10 @@ let join_taint (t1 : taint) (t2 : taint) : taint = match t1, t2 with
   | _, TopTaint -> TopTaint
   | Taints t1, Taints t2 -> Taints (Spec_inference.VarSet.union t1 t2)
 
+let taint_replace_join (t : taint) (var : Spec_inference.var) (t2 : taint) = match t with
+  | Taints ts -> join_taint (Taints (Spec_inference.VarSet.remove ts var)) t2
+  | TopTaint -> TopTaint
+
 let taint_to_string (t : taint) : string = match t with
   | Taints t ->
     String.concat ~sep:"," (List.map (Spec_inference.VarSet.to_list t)
@@ -45,6 +49,14 @@ let get_taint (s : t) (var : Spec_inference.var) : taint =
   match Spec_inference.VarMap.find s var with
   | Some t -> t
   | None -> Taints Spec_inference.VarSet.empty
+
+(** Rename a key in the taint domain: rename_key [a: b][c: d] a e results in [e: b][c: d] *)
+let rename_key (s : t) (from : Spec_inference.var) (to_ : Spec_inference.var) : t =
+  Spec_inference.VarMap.set (Spec_inference.VarMap.remove s from) ~key:to_ ~data:(Spec_inference.VarMap.find_exn s from)
+
+(** Replace all taints: replace_taint [a: {b,c}][d: {b,e}] b f results in [a: {c} join f][d: {e} join f] *)
+let replace_taint (s : t) (from : Spec_inference.var) (to_ : taint) : t =
+  Spec_inference.VarMap.map s ~f:(fun v -> taint_replace_join v from to_)
 
 (** Add taint to avariable *)
 let add_taint (s : t) (v : Spec_inference.var) (taint : Spec_inference.var) : t =
