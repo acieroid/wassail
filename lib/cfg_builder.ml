@@ -3,6 +3,11 @@ open Helpers
 
 let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
   (* true to simplify the CFG, false to disable simplification *)
+  let rec check_no_rest (rest : Instr.t list) : unit = match rest with
+    | [] -> ()
+    | Control { instr = Unreachable; _ } :: rest -> check_no_rest rest
+    | _ -> failwith "Invalid CFG: instructions found where none expected!"
+  in
   let simplify = true in
   let funcinst = Wasm_module.get_funcinst module_ fid in
   let cur_idx : int ref = ref 0 in
@@ -90,7 +95,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
           (* Similar to break, but because it is inconditional, there is no edge
              from this block to the next. In practice, rest should always be
              empty here *)
-          assert (List.is_empty rest);
+          check_no_rest rest;
           let block = mk_data_block instrs in
           let br_block = mk_control_block instr in
           let (blocks, edges, breaks, returns, _entry', exit') = helper [] rest in
@@ -101,7 +106,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
            block.idx, exit')
         | BrTable (table, level) ->
           (* Similar to break, but there are multiple outgoing edges here *)
-          assert (List.is_empty rest);
+          check_no_rest rest;
           let block = mk_data_block instrs in
           let br_block = mk_control_block instr in
           let (blocks, edges, breaks, returns, _entry', exit') = helper [] rest in
@@ -167,7 +172,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
         | Return ->
           (* Return block. The rest of the instructions does not matter (it
              should be empty) *)
-          assert (List.is_empty rest);
+          check_no_rest rest;
           (* We create a new block with all instructions collected *)
           let block = mk_data_block instrs in
           (* We create a control block for this return *)

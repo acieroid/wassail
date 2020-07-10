@@ -55,14 +55,18 @@ let intra =
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string)
       and funs = anon (sequence ("funs" %: int)) in
+      Logging.info (Printf.sprintf "Parsing program from file %s...\n" filename);
       fun () ->
         apply_to_textual filename (fun m ->
             let module SpecIntra = Intra_fixpoint.Make(Spec_inference) in
+            Logging.info "Importing module...\n";
             let wasm_mod = Wasm_module.of_wasm m in
             let nimports = List.length wasm_mod.imported_funcs in
             let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
                 let faddr = nimports + i in
+                Logging.info (Printf.sprintf "Building CFG %d\n" faddr);
                 (faddr, Cfg_builder.build faddr wasm_mod))) in
+            Logging.info "Initializing summaries\n";
             let summaries = List.fold_left funs
                 ~init:(Relational_summary.initial_summaries cfgs wasm_mod `Top,
                        Taint_summary.initial_summaries cfgs wasm_mod `Top)
@@ -91,11 +95,11 @@ let intra =
                     let module RelationalIntra = Intra_fixpoint.Make(Relational_transfer.Make(Spec)) in
                     RelationalIntra.init_summaries (fst summaries);
                     Printf.printf "-------------------------\nMain analysis\n-------------------\n";
-                    let results = RelationalIntra.analyze wasm_mod cfg in
+                    (* let results = RelationalIntra.analyze wasm_mod cfg in
                     let out_state = RelationalIntra.out_state cfg results in
                     (* Printf.printf "%d: %s\n" cfg.idx (RelationalIntra.state_to_string out_state); *)
                     let relational_summary = RelationalIntra.summary cfg out_state in
-                    Printf.printf "Relational summary is:\n%s\n" (Relational_summary.to_string relational_summary);
+                       Printf.printf "Relational summary is:\n%s\n" (Relational_summary.to_string relational_summary); *)
 
                     (* Run the taint analysis *)
                     let module TaintIntra = Intra_fixpoint.Make(Taint_transfer.Make(Spec)) in
@@ -105,7 +109,7 @@ let intra =
                     Printf.printf "%d: %s\n" cfg.idx (TaintIntra.state_to_string out_state);
                     let taint_summary = TaintIntra.summary cfg out_state in
                     Printf.printf "Taint summary is:\n%s\n" (Taint_summary.to_string taint_summary);
-                    (IntMap.set (fst summaries) ~key:fid ~data:relational_summary,
+                    (fst summaries (* IntMap.set (fst summaries) ~key:fid ~data:relational_summary *),
                      IntMap.set (snd summaries) ~key:fid ~data:taint_summary)
 
 
@@ -122,13 +126,15 @@ let check =
       let%map_open filename = anon ("file" %: string) in
       fun () ->
         apply_to_textual filename (fun m ->
-            let module SpecIntra = Intra_fixpoint.Make(Spec_inference) in
-            let nimports = List.length (List.filter m.it.imports ~f:(fun import -> match import.it.idesc.it with
-                | Ast.FuncImport _ -> true
-                | _ -> false)) in
-            let funcs = List.mapi m.it.funcs ~f:(fun i f -> (i+nimports, Check_support.func_is_supported f)) in
-            let supported = List.filter funcs ~f:snd in
-            Printf.printf "Supported [%d/%d]: %s\n" (List.length supported) (List.length funcs) (String.concat ~sep:" " (List.map supported ~f:(fun (idx, _) -> Printf.sprintf "%d" idx)))))
+            let wasm_mod = Wasm_module.of_wasm m in
+            let nimports = List.length wasm_mod.imported_funcs in
+            let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
+                let faddr = nimports + i in
+                (faddr, Cfg_builder.build faddr wasm_mod))) in
+            let supported = IntMap.filter cfgs ~f:Check_support.cfg_is_supported in
+            let nsupported = List.length (IntMap.keys supported) in
+            let nfuns = List.length (IntMap.keys cfgs) in
+            Printf.printf "Supported [%d/%d]: %s\n" nsupported nfuns (String.concat ~sep:" " (List.map (IntMap.data supported) ~f:(fun cfg -> Printf.sprintf "%d" cfg.idx)))))
 
 let inter =
   Command.basic
