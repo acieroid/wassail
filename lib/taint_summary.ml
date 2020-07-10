@@ -2,8 +2,8 @@ open Core_kernel
 open Helpers
 
 type t = {
-  globals : Spec_inference.var list;
   args : Spec_inference.var list;
+  globals : Spec_inference.var list; (** globals after the function execution *)
   ret : Spec_inference.var option;
   state : Taint_domain.t;
 }
@@ -11,7 +11,7 @@ type t = {
 let to_string (s : t) : string = Taint_domain.to_string s.state
 
 let bottom (nglobals : int) (nargs : int) (nret : int) : t =
-  { globals = List.init nglobals ~f:(fun i -> Spec_inference.Global i);
+  { globals = List.init nglobals ~f:(fun i -> Spec_inference.Var i);
     args = List.init nargs ~f:(fun i -> Spec_inference.Local i);
     ret = (match nret with
         | 0 -> None
@@ -20,7 +20,7 @@ let bottom (nglobals : int) (nargs : int) (nret : int) : t =
     state = Taint_domain.bottom }
 
 let top (nglobals : int) (nargs : int) (nret : int) : t =
-  let globals = List.init nglobals ~f:(fun i -> Spec_inference.Global i) in
+  let globals = List.init nglobals ~f:(fun i -> Spec_inference.Var i) in
   let args = List.init nargs ~f:(fun i -> Spec_inference.Local i) in
   let ret = (match nret with
         | 0 -> None
@@ -48,3 +48,11 @@ let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [
          | `Top -> top) module_.nglobals (List.length cfg.arg_types) (List.length cfg.return_types)))
     ~f:(fun summaries (idx, name, (args, ret)) ->
         IntMap.set summaries ~key:idx ~data:(of_import idx name module_.nglobals args ret))
+
+let make (cfg : Cfg.t) (state : Taint_domain.t)
+    (ret : Spec_inference.var option) (globals_post : Spec_inference.var list)
+  : t =
+  { globals = globals_post;
+    args = List.init (List.length cfg.arg_types) ~f:(fun i -> Spec_inference.Local i);
+    ret = ret;
+    state = Taint_domain.restrict state (globals_post @ (Option.to_list ret)) }

@@ -61,10 +61,15 @@ let set_top_taint (s : t) (v : Spec_inference.var) : t =
 (** The bottom state does not contain any taint *)
 let bottom : t = Spec_inference.VarMap.empty
 
-(** The top state taints all globals and the return value with the taint from all arguments and globals *)
+(** The top state taints all globals and the return value with the top taint *)
 let top (globals : Spec_inference.var list) (ret : Spec_inference.var option) : t =
   Option.fold ret
     ~init:(List.fold_left globals
              ~init:bottom
              ~f:set_top_taint)
     ~f:set_top_taint
+
+(** Restrict the domain of a taint state to only variables contained in the vars argument *)
+let restrict (s : t) (vars : Spec_inference.var list) : t =
+  Spec_inference.VarMap.filter_keys s ~f:(fun k -> List.mem vars k ~equal:Spec_inference.equal_var)
+  

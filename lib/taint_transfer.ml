@@ -100,6 +100,8 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
             end
         end
 
-  let summary (_cfg : Cfg.t) (_out_state : state) : summary =
-    failwith "TODO: Taint_transfer.summary"
+  let summary (cfg : Cfg.t) (out_state : state) : summary =
+    Taint_summary.make cfg out_state
+      (if List.length cfg.return_types = 1 then List.hd (Spec.post_block cfg.exit_block).vstack else None)
+      (Spec.post_block cfg.exit_block).globals
 end
