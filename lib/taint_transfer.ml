@@ -59,29 +59,33 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     | Load _ ->
       (* Simplest case: get the taint of the entire memory.
          Refined case: get the taint of the memory cells that can pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-      if !use_relational then
-        failwith "TODO: taint_transfer load"
-      else
-        let mem = (Spec.pre i.label).memory in
-        (* Get the taint of every memory location *)
-        let taints = List.map (Spec_inference.VarMap.keys mem) ~f:(fun k -> Taint_domain.get_taint state k) in
-        Taint_domain.add_taint
-          state
-          (Spec.ret i.label)
-          (* ret is the join of all these taints *)
-          (List.fold_left taints ~init:Taint_domain.taint_bottom ~f:Taint_domain.join_taint)
+      let mem = (Spec.pre i.label).memory in
+      let all_locs = Spec_inference.VarMap.keys mem in
+      (* Filter the memory location using results from the relational analysis if possible *)
+      let locs = if !use_relational then
+          failwith "TODO: taint_transfer load"
+        else
+          all_locs in
+      (* Get the taint of possible memory location *)
+      let taints = List.map locs ~f:(fun k -> Taint_domain.get_taint state k) in
+      Taint_domain.add_taint
+        state
+        (Spec.ret i.label)
+        (* ret is the join of all these taints *)
+        (List.fold_left taints ~init:Taint_domain.taint_bottom ~f:Taint_domain.join_taint)
     | Store _ ->
       (* Simplest case: set the taint for the entire memory
          Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
       let vval, _vaddr = Spec.pop2 (Spec.pre i.label).vstack in
-      if !use_relational then
-        failwith "TODO: taint_transfer store"
-      else
-        let mem = (Spec.post i.label).memory in
-        (* Set the taint of all memory locations to the taint of vval *)
-        List.fold_left (Spec_inference.VarMap.keys mem)
-          ~init:state
-          ~f:(fun s k -> Taint_domain.add_taint_v s k vval)
+      let mem = (Spec.post i.label).memory in
+      let all_locs = Spec_inference.VarMap.keys mem in
+      (* Refine memory locations using relational innformation, if available *)
+      let locs = if !use_relational then
+          failwith "TODO: taint_transfer store"
+        else
+          all_locs in
+      (* Set the taint of memory locations to the taint of vval *)
+      List.fold_left locs ~init:state ~f:(fun s k -> Taint_domain.add_taint_v s k vval)
 
   let control_instr_transfer
       (module_ : Wasm_module.t) (* The wasm module (read-only) *)
