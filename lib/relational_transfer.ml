@@ -132,6 +132,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     | Load {offset; _ } ->
       let ret = Spec.ret i.label in
       let vaddr = Spec_inference.var_to_string (Spec.pop (Spec.pre i.label).vstack) in
+      let addr = Spec_inference.MemoryKey (i.label, 0) in
       (* We are loading from address vaddr (also mk_i.label_0).
          The resulting value is ret (also mv_i.label_0).
          a. If there are addresses that are equal to vaddr, we join all the values they map to and assign ret to it. In case they differ, ret will be top.
@@ -141,13 +142,14 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
            b. the resulting value is top, hence it is soundly over-approximative *)
       (* We assume load/stores are symmetric, i.e., when a load/store operation is made on an address for a specific type and size, all other operations on the same address are made with the same type and size *)
       (* First, connect the right variables: vaddr is mk_i.label_0, ret is mv_i.label_0 *)
-      let state' = Domain.add_constraints state [(Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)), Printf.sprintf "%s+%d" vaddr offset);
+      let state' = Domain.add_constraints state [(Spec_inference.var_to_string addr, Printf.sprintf "%s+%d" vaddr offset);
                                                  (Spec_inference.var_to_string ret, (Spec_inference.var_to_string (Spec_inference.MemoryVal (i.label, 0))))] in
+      Printf.printf "load\n";
       (* Then, find all addresses that are equal to vaddr *)
       let mem = (Spec.pre i.label).memory in
       let addrs = List.filter (Spec_inference.VarMap.keys mem)
-          ~f:(fun a -> match Domain.are_equal state vaddr (Spec_inference.var_to_string a) with
-              | (true, true) -> true (* definitely equal *)
+          ~f:(fun a -> match Domain.are_equal state' vaddr (Spec_inference.var_to_string a) with
+              | (true, false) -> true (* definitely equal *)
               | _ -> false) in
       if List.is_empty addrs then
         (* Case b: no such addresses, then ret is unconstrained *)
@@ -158,7 +160,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
             (* Get the value *)
             let v = Spec_inference.VarMap.find_exn mem a in
             (* ret = value *)
-            Domain.add_constraint state (Spec_inference.var_to_string ret) (Spec_inference.var_to_string v)) in
+            Domain.add_constraint state' (Spec_inference.var_to_string ret) (Spec_inference.var_to_string v)) in
         List.reduce_exn states ~f:Domain.join
     (* If we want to model values as bytes, we will have to do the following
        let (addr0, addr1, addr2, addr3) = (Spec_inference.MemoryKey (i.label, 0),
@@ -181,9 +183,39 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     (* TODO: load with sz=8,zx (and others, but this is the most important now *)
        failwith (Printf.sprintf "load not supported with such op argument: %s" (Memoryop.to_string op)) *)
     | Store { offset; _ } ->
+      Printf.printf "store\n";
       let vval, vaddr = Spec.pop2 (Spec.pre i.label).vstack in
-      Domain.add_constraints state [(Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)), Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset);
-                                    (Spec_inference.var_to_string (Spec_inference.MemoryValNew (i.label, 0)), Spec_inference.var_to_string vval)]
+      let addr = Spec_inference.MemoryKey (i.label, 0) in
+      let v = Spec_inference.MemoryValNew (i.label, 0) in
+      let state' = Domain.add_constraints state [
+          (Spec_inference.var_to_string addr, Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset);
+          (Spec_inference.var_to_string v, Spec_inference.var_to_string vval)] in
+      (* Find all memory keys that are definitely equal to the address *)
+      let mem = (Spec.pre i.label).memory in
+      let equal_addrs = List.filter (Spec_inference.VarMap.keys mem)
+          ~f:(fun a -> match Domain.are_equal state (Spec_inference.var_to_string addr) (Spec_inference.var_to_string a) with
+              | (true, false) -> true (* definitely equal *)
+              | _ -> false) in
+      if not (List.is_empty equal_addrs) then
+        (* If there are addresses that are definitely equal, update the corresponding value *)
+        let states = List.map equal_addrs
+            ~f:(fun a ->
+                let v' = Spec_inference.VarMap.find_exn mem a in
+                Domain.add_constraint state' (Spec_inference.var_to_string v) (Spec_inference.var_to_string v')) in
+        List.reduce_exn states ~f:Domain.join
+      else
+        (* Otherwise, do similar for all addresses that may be equal *)
+        let maybe_equal_addrs = List.filter (Spec_inference.VarMap.keys mem)
+            ~f:(fun a -> match Domain.are_equal state (Spec_inference.var_to_string addr) (Spec_inference.var_to_string a) with
+                | (true, true) -> true (* maybe equal *)
+                | _ -> false) in
+        let states = List.map maybe_equal_addrs
+            ~f:(fun a ->
+                let v' = Spec_inference.VarMap.find_exn mem a in
+                (* We need to join with the unmodified state because the addres *may* be equal *)
+                Domain.join state'
+                  (Domain.add_constraint state' (Spec_inference.var_to_string v) (Spec_inference.var_to_string v'))) in
+        List.reduce_exn states ~f:Domain.join
       (*
   | Store { typ = I32; offset; sz = None } ->
     let (addr0, addr1, addr2, addr3) = (Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)),

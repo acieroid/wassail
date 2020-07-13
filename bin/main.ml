@@ -49,6 +49,7 @@ let cfgs =
                   Out_channel.with_file (Printf.sprintf "%s/%d.dot" out_dir faddr)
                     ~f:(fun ch ->
                         Out_channel.output_string ch (Cfg.to_dot cfg)))))
+
 let intra =
   Command.basic
     ~summary:"Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)"
@@ -102,15 +103,15 @@ let intra =
                        Printf.printf "Relational summary is:\n%s\n" (Relational_summary.to_string relational_summary);
 
                     (* Run the taint analysis *)
-                    let module TaintIntra = Intra_fixpoint.Make(Taint_transfer.Make(Spec)) in
+                       (*let module TaintIntra = Intra_fixpoint.Make(Taint_transfer.Make(Spec)) in
                     TaintIntra.init_summaries (snd summaries);
                     let results = TaintIntra.analyze wasm_mod cfg in
                     let out_state = TaintIntra.out_state cfg results in
                     Printf.printf "%d: %s\n" cfg.idx (TaintIntra.state_to_string out_state);
                     let taint_summary = TaintIntra.summary cfg out_state in
-                    Printf.printf "Taint summary is:\n%s\n" (Taint_summary.to_string taint_summary);
-                    (fst summaries (* IntMap.set (fst summaries) ~key:fid ~data:relational_summary *),
-                     IntMap.set (snd summaries) ~key:fid ~data:taint_summary)
+                         Printf.printf "Taint summary is:\n%s\n" (Taint_summary.to_string taint_summary); *)
+                    (IntMap.set (fst summaries) ~key:fid ~data:relational_summary,
+                    snd summaries (*IntMap.set (snd summaries) ~key:fid ~data:taint_summary*))
 
 
                 ) in
