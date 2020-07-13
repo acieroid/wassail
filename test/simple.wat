@@ -257,6 +257,46 @@
     local.get 0
     global.set 0
     global.get 0)
+  (func (;test-load;) (type 1) (param i32) (result i32) ;; 28
+    local.get 0
+    i32.load
+    ;; ret = m[l0]
+    )
+  (func (;test-store;) (type 1) (param i32) (result i32) ;; 29
+    global.get 0
+    local.get 0
+    ;; mem is [k: v]
+    ;; no constraints
+    i32.store
+    ;; mem is [k: v']
+    ;; constraints: k = g0, v' = l0
+    local.get 0
+    ;; ret = l0, mem[g0] = l0
+    )
+  (func (;test-store-join-addr-top;) (type 1) (param i32) (result i32) ;; 30
+    local.get 0
+    if (result i32)
+      global.get 0
+    else
+      local.get 0
+    end
+    i32.const 0
+    i32.store
+    local.get 0
+    ;; result: ret = l0, mem[X] = 0, where X is join(g0, l0) = Top
+    )
+  (func (;test-store-join-addr-itv;) (type 1) (param i32) (result i32) ;; 31
+    local.get 0
+    if (result i32)
+      i32.const 1024
+    else
+      i32.const 1025
+    end
+    i32.const 0
+    i32.store
+    local.get 0
+    ;; result: ret = l0, mem[X] = 0 where X is [1024, 1024]
+    )
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))
