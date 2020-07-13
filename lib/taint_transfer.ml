@@ -84,7 +84,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
           ~f:(fun s k -> Taint_domain.add_taint_v s k vval)
 
   let control_instr_transfer
-      (_module_ : Wasm_module.t) (* The wasm module (read-only) *)
+      (module_ : Wasm_module.t) (* The wasm module (read-only) *)
       (_cfg : Cfg.t) (* The CFG analyzed *)
       (i : Instr.control Instr.labelled) (* The instruction *)
       (state : state) (* The pre state *)
@@ -99,10 +99,27 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     match i.instr with
     | Call (arity, f) ->
       `Simple (apply_summary f arity state)
-    | CallIndirect (_arity, _typ) ->
+    | CallIndirect (arity, typ) ->
       (* Simplest case: all functions with the proper type can be called.
          Refined case: all functions that are deemed reachable by previous analysis stages (i.e., relational analysis) can be called *)
-      failwith "TODO: taint_transfer: call_indirect"
+      let table = List.nth_exn module_.tables 0 in
+      let funs = List.map (Table_inst.indices table) ~f:(fun idx -> (Table_inst.get table idx, idx)) in
+      let ftype = Wasm_module.get_type module_ typ in
+      assert (snd arity <= 1);
+      (* These are all the functions with a valid type *)
+      let funs_with_matching_type = List.filter funs ~f:(function
+          | (Some fa, _) -> Stdlib.(ftype = (Wasm_module.get_func_type module_ fa))
+          | _ -> false) in
+      let funs_to_apply = if !use_relational then
+            failwith "TODO: taint_transfer: call_indirect"
+          else
+            (* All functions with a matching types are applicable *)
+            funs_with_matching_type in
+      (* Apply the summaries *)
+      `Simple (List.fold_left funs_to_apply
+        ~init:state
+        ~f:(fun acc (_, fa) ->
+            Taint_domain.join (apply_summary fa arity state) acc))
     | Br _ -> `Simple state
     | BrIf _ | If _ -> `Branch (state, state)
     | Return -> `Simple state

@@ -6,6 +6,7 @@ type t = {
   globals : Spec_inference.var list; (** globals after the function execution *)
   ret : Spec_inference.var option;
   state : Taint_domain.t;
+  (* TODO: memory *)
 }
 
 type state = Taint_domain.t
