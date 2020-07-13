@@ -60,7 +60,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     | Nop -> state
     | MemorySize ->
       (* memory size is bounded by the initial memory size and the maximum memory size *)
-      let mem = List.nth_exn module_.mems 0 in
+      let mem = Wasm_module.get_meminst module_ 0 in
       (* add ret = [min,max] where min and max are the memory size bounds *)
       Domain.add_interval_constraint state (Spec.ret i.label)
         (mem.min_size,

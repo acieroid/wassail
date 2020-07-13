@@ -95,11 +95,11 @@ let intra =
                     let module RelationalIntra = Intra_fixpoint.Make(Relational_transfer.Make(Spec)) in
                     RelationalIntra.init_summaries (fst summaries);
                     Printf.printf "-------------------------\nMain analysis\n-------------------\n";
-                    (* let results = RelationalIntra.analyze wasm_mod cfg in
+                    let results = RelationalIntra.analyze wasm_mod cfg in
                     let out_state = RelationalIntra.out_state cfg results in
                     (* Printf.printf "%d: %s\n" cfg.idx (RelationalIntra.state_to_string out_state); *)
                     let relational_summary = RelationalIntra.summary cfg out_state in
-                       Printf.printf "Relational summary is:\n%s\n" (Relational_summary.to_string relational_summary); *)
+                       Printf.printf "Relational summary is:\n%s\n" (Relational_summary.to_string relational_summary);
 
                     (* Run the taint analysis *)
                     let module TaintIntra = Intra_fixpoint.Make(Taint_transfer.Make(Spec)) in

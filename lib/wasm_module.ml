@@ -39,6 +39,9 @@ let of_wasm (m : Wasm.Ast.module_) : t =
         | _ -> None) in
   let nimports = List.length imported_funcs in
   let nglobals = List.length m.it.globals in
+  let memories = List.filter_map m.it.imports ~f:(fun import -> match import.it.idesc.it with
+      | MemoryImport m -> Some (Memory_inst.of_wasm_type m)
+      | _ -> None) @ (List.map m.it.memories ~f:Memory_inst.of_wasm) in
   ({
     nimports = nimports;
     imported_funcs = imported_funcs;
@@ -47,7 +50,7 @@ let of_wasm (m : Wasm.Ast.module_) : t =
       | Wasm.Types.GlobalType (t, _) -> Type.of_wasm t);
     nglobals = nglobals;
     (*globals = List.map m.it.globals ~f:Global_inst.of_wasm; *)
-    mems = List.map m.it.memories ~f:Memory_inst.of_wasm;
+    mems = memories;
     tables = List.map m.it.tables ~f:(fun t ->
         Table_inst.init
           (Table.of_wasm t)
