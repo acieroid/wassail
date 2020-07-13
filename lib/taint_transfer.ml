@@ -63,6 +63,9 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       let all_locs = Spec_inference.VarMap.keys mem in
       (* Filter the memory location using results from the relational analysis if possible *)
       let locs = if !use_relational then
+          (* TODO: We need to filter locs to only have the locs that can be loaded.
+             This means for each loc, we can ask the relational domain if are_equal loc v (where v is the top of the stack.
+          If some are truly equal, we know we can only keep these. Otherwise, if some maybe equal, then these have to be kept. *)
           failwith "TODO: taint_transfer load"
         else
           all_locs in

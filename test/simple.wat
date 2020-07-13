@@ -297,6 +297,24 @@
     local.get 0
     ;; result: ret = l0, mem[X] = 0 where X is [1024, 1024]
     )
+  (func (;test-load-twice;) (type 1) (param i32) (result i32) ;; 32
+    global.get 0
+    i32.load
+    drop
+    global.get 0
+    i32.load
+    ;; expected: mem is [a: b, c: d] where a = b = g0, c = d
+    )
+  (func (;test-store-twice;) (type 1) (param i32) (result i32) ;; 33
+    global.get 0
+    local.get 0
+    i32.store
+    global.get 0
+    local.get 0
+    i32.store
+    i32.const 0
+    ;; expected: mem is [a: b, c: d] where a = b = g0, c = d = l0
+    )
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))

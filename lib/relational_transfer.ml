@@ -159,8 +159,11 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
             (* Get the value *)
             let v = Spec_inference.VarMap.find_exn mem a in
             (* ret = value *)
+            Printf.printf "ret is %s\n" (Spec_inference.var_to_string ret);
             Domain.add_constraint state' (Spec_inference.var_to_string ret) (Spec_inference.var_to_string v)) in
-        List.reduce_exn states ~f:Domain.join
+        (* Meet the domains! This is because they should all be equivalent.
+           TODO: carefully check that *)
+        List.reduce_exn states ~f:Domain.meet
     (* If we want to model values as bytes, we will have to do the following
        let (addr0, addr1, addr2, addr3) = (Spec_inference.MemoryKey (i.label, 0),
                                         Spec_inference.MemoryKey (i.label, 1),

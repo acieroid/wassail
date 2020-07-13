@@ -62,6 +62,14 @@ let join (s1 : t) (s2 : t) : t =
   Printf.printf "join %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res);
   res
 
+let meet (s1 : t) (s2 : t) : t =
+  let res = {
+    constraints = Apron.Abstract1.meet manager s1.constraints s2.constraints;
+    env = (assert Stdlib.(s1.env = s2.env); s1.env);
+  } in
+  Printf.printf "meet %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res);
+  res
+
 let join_opt (s1 : t) (s2 : t option) : t =
   match s2 with
   | Some s -> join s1 s
