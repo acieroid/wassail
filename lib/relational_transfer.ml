@@ -132,11 +132,34 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     | Load {offset; _ } ->
       let ret = Spec.ret i.label in
       let vaddr = Spec_inference.var_to_string (Spec.pop (Spec.pre i.label).vstack) in
+      (* We are loading from address vaddr (also mk_i.label_0).
+         The resulting value is ret (also mv_i.label_0).
+         a. If there are addresses that are equal to vaddr, we join all the values they map to and assign ret to it. In case they differ, ret will be top.
+         b. If there are no such addresses, then ret is not constrained and remains Top.
+         We can safely ignore the case where addresses "may be equal to" vaddr, because this is correctly handled by both previous cases:
+           a. there is at least one address that is definitely equal to vaddr, then these addresses are definitely loaded
+           b. the resulting value is top, hence it is soundly over-approximative *)
       (* We assume load/stores are symmetric, i.e., when a load/store operation is made on an address for a specific type and size, all other operations on the same address are made with the same type and size *)
-      (* TODO: we need to extract from the memory all values that can be pointed by the memory key. It could be that we are loading key mk1 from memory [mk0: mv0, mk1: mv1], and that from the constraints we have mk0 = mk1.
-         Currently in that case, we return mv1 (which is correct), but we should add the constraint mv0 = mv1? Or rather, join (ret = mv0) (ret = mv1) *)
-      Domain.add_constraints state [(Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)), Printf.sprintf "%s+%d" vaddr offset);
-                                    (Spec_inference.var_to_string ret, (Spec_inference.var_to_string (Spec_inference.MemoryVal (i.label, 0))))]
+      (* First, connect the right variables: vaddr is mk_i.label_0, ret is mv_i.label_0 *)
+      let state' = Domain.add_constraints state [(Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)), Printf.sprintf "%s+%d" vaddr offset);
+                                                 (Spec_inference.var_to_string ret, (Spec_inference.var_to_string (Spec_inference.MemoryVal (i.label, 0))))] in
+      (* Then, find all addresses that are equal to vaddr *)
+      let mem = (Spec.pre i.label).memory in
+      let addrs = List.filter (Spec_inference.VarMap.keys mem)
+          ~f:(fun a -> match Domain.are_equal state vaddr (Spec_inference.var_to_string a) with
+              | (true, true) -> true (* definitely equal *)
+              | _ -> false) in
+      if List.is_empty addrs then
+        (* Case b: no such addresses, then ret is unconstrained *)
+        state'
+      else
+        (* Case a: at least one address: join their value into the state after adding the constraint *)
+        let states = List.map addrs ~f:(fun a ->
+            (* Get the value *)
+            let v = Spec_inference.VarMap.find_exn mem a in
+            (* ret = value *)
+            Domain.add_constraint state (Spec_inference.var_to_string ret) (Spec_inference.var_to_string v)) in
+        List.reduce_exn states ~f:Domain.join
     (* If we want to model values as bytes, we will have to do the following
        let (addr0, addr1, addr2, addr3) = (Spec_inference.MemoryKey (i.label, 0),
                                         Spec_inference.MemoryKey (i.label, 1),

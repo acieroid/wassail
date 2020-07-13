@@ -53,8 +53,14 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
         (Spec.ret i.label) v2
     | Unary _ | Test _ | Convert _ ->
       Taint_domain.add_taint state (Spec.ret i.label) (Spec.pop (Spec.pre i.label).vstack)
-    | Load _ -> failwith "TODO: load"
-    | Store _ -> failwith "TODO: store"
+    | Load _ ->
+      (* Simplest case: get the taint of the entire memory.
+         Refined case: get the taint of the memory cells that can pointed to, according to the previous analysis stages (i.e., relational analysis) *)
+      failwith "TODO: taint_transfer load"
+    | Store _ ->
+      (* Simplest case: set the taint for the entire memory
+         Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
+      failwith "TODO: taint_transfer store"
 
   let control_instr_transfer
       (_module_ : Wasm_module.t) (* The wasm module (read-only) *)
@@ -73,8 +79,9 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     | Call (arity, f) ->
       `Simple (apply_summary f arity state)
     | CallIndirect (_arity, _typ) ->
-      (* TODO: we could rely on the constraints to know which function is called *)
-      failwith "taint_transfer: call_indirect"
+      (* Simplest case: all functions with the proper type can be called.
+         Refined case: all functions that are deemed reachable by previous analysis stages (i.e., relational analysis) can be called *)
+      failwith "TODO: taint_transfer: call_indirect"
     | Br _ -> `Simple state
     | BrIf _ | If _ -> `Branch (state, state)
     | Return -> `Simple state
