@@ -6,6 +6,7 @@ type taint =
   | TopTaint
 [@@deriving sexp, compare, equal]
 
+let taint_bottom : taint = Taints Spec_inference.VarSet.empty
 let taint (v : Spec_inference.var) : taint = Taints (Spec_inference.VarSet.singleton v)
 
 (** Joining taints is simply taking their union *)
@@ -58,12 +59,16 @@ let rename_key (s : t) (from : Spec_inference.var) (to_ : Spec_inference.var) : 
 let replace_taint (s : t) (from : Spec_inference.var) (to_ : taint) : t =
   Spec_inference.VarMap.map s ~f:(fun v -> taint_replace_join v from to_)
 
-(** Add taint to avariable *)
-let add_taint (s : t) (v : Spec_inference.var) (taint : Spec_inference.var) : t =
-  Printf.printf "add taint: %s -> %s\n" (Spec_inference.var_to_string v) (Spec_inference.var_to_string taint);
+(** Add taint to a variable *)
+let add_taint (s : t) (v : Spec_inference.var) (taint : taint) : t =
+  Printf.printf "update taint: %s -> %s\n" (Spec_inference.var_to_string v) (taint_to_string taint);
   Spec_inference.VarMap.update s v ~f:(function
-      | None -> get_taint s taint
-      | Some t -> join_taint t (get_taint s taint))
+      | None -> taint
+      | Some t -> join_taint t taint)
+
+(** Make the taint flow from one variable to another *)
+let add_taint_v (s : t) (v : Spec_inference.var) (taint : Spec_inference.var) : t =
+  add_taint s v (get_taint s taint)
 
 (** Sets the taint of a variable to top *)
 let set_top_taint (s : t) (v : Spec_inference.var) : t =

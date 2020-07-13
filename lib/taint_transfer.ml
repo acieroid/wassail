@@ -9,6 +9,9 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
   module SummaryManager = Summary.MakeManager(Taint_summary)
   type summary = Taint_summary.t
 
+  (** Set to true to refine the analysis with the results from the relational analysis *)
+  let use_relational = ref false
+
   (** In the initial state, we only set the taint for for parameters and the globals. *)
   let init_state (cfg : Cfg.t) : state =
     Spec_inference.VarMap.of_alist_exn
@@ -32,35 +35,53 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       let ret = Spec.ret i.label in
       let (_c, v2, v1) = Spec.pop3 (Spec.pre i.label).vstack in
       (* TODO: could improve precision by checking the constraints on c: if it is precisely zero/not-zero, we can only include v1 or v2 *)
-      Taint_domain.add_taint (Taint_domain.add_taint state ret v1) ret v2
+      Taint_domain.add_taint_v (Taint_domain.add_taint_v state ret v1) ret v2
     | LocalGet l ->
-      Taint_domain.add_taint state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).locals l)
+      Taint_domain.add_taint_v state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).locals l)
     | LocalSet l ->
-      Taint_domain.add_taint state (Spec.get_nth (Spec.pre i.label).locals l) (Spec.pop (Spec.pre i.label).locals)
+      Taint_domain.add_taint_v state (Spec.get_nth (Spec.pre i.label).locals l) (Spec.pop (Spec.pre i.label).locals)
     | LocalTee l ->
-      Taint_domain.add_taint
-        (Taint_domain.add_taint state (Spec.get_nth (Spec.pre i.label).locals l) (Spec.pop (Spec.pre i.label).locals))
+      Taint_domain.add_taint_v
+        (Taint_domain.add_taint_v state (Spec.get_nth (Spec.pre i.label).locals l) (Spec.pop (Spec.pre i.label).locals))
         (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).locals l)
     | GlobalGet g ->
-        Taint_domain.add_taint state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).globals g)
+        Taint_domain.add_taint_v state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).globals g)
     | GlobalSet g ->
-      Taint_domain.add_taint state (Spec.get_nth (Spec.pre i.label).globals g) (Spec.pop (Spec.pre i.label).globals)
+      Taint_domain.add_taint_v state (Spec.get_nth (Spec.pre i.label).globals g) (Spec.pop (Spec.pre i.label).globals)
     | Const _ -> state
     | Binary _ | Compare _ ->
       let v1, v2 = Spec.pop2 (Spec.pre i.label).vstack in
-      Taint_domain.add_taint
-        (Taint_domain.add_taint state (Spec.ret i.label) v1)
+      Taint_domain.add_taint_v
+        (Taint_domain.add_taint_v state (Spec.ret i.label) v1)
         (Spec.ret i.label) v2
     | Unary _ | Test _ | Convert _ ->
-      Taint_domain.add_taint state (Spec.ret i.label) (Spec.pop (Spec.pre i.label).vstack)
+      Taint_domain.add_taint_v state (Spec.ret i.label) (Spec.pop (Spec.pre i.label).vstack)
     | Load _ ->
       (* Simplest case: get the taint of the entire memory.
          Refined case: get the taint of the memory cells that can pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-      failwith "TODO: taint_transfer load"
+      if !use_relational then
+        failwith "TODO: taint_transfer load"
+      else
+        let mem = (Spec.pre i.label).memory in
+        (* Get the taint of every memory location *)
+        let taints = List.map (Spec_inference.VarMap.keys mem) ~f:(fun k -> Taint_domain.get_taint state k) in
+        Taint_domain.add_taint
+          state
+          (Spec.ret i.label)
+          (* ret is the join of all these taints *)
+          (List.fold_left taints ~init:Taint_domain.taint_bottom ~f:Taint_domain.join_taint)
     | Store _ ->
       (* Simplest case: set the taint for the entire memory
          Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-      failwith "TODO: taint_transfer store"
+      let vval, _vaddr = Spec.pop2 (Spec.pre i.label).vstack in
+      if !use_relational then
+        failwith "TODO: taint_transfer store"
+      else
+        let mem = (Spec.post i.label).memory in
+        (* Set the taint of all memory locations to the taint of vval *)
+        List.fold_left (Spec_inference.VarMap.keys mem)
+          ~init:state
+          ~f:(fun s k -> Taint_domain.add_taint_v s k vval)
 
   let control_instr_transfer
       (_module_ : Wasm_module.t) (* The wasm module (read-only) *)
@@ -105,7 +126,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
                   ~init:s
                   ~f:(fun s (x, y) ->
                       (* TODO: should it be x y or y x? *)
-                      Taint_domain.add_taint s x y)) in
+                      Taint_domain.add_taint_v s x y)) in
             (* And finally joins all the states *)
             List.reduce_exn states' ~f:(join_state module_ cfg block)
           | _ ->
