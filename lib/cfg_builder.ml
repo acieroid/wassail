@@ -21,6 +21,7 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
     Basic_block.{ idx = new_idx () ; content = ControlMerge } in
   let mk_empty_block () : Basic_block.t =
     Basic_block.{ idx = new_idx () ; content = Data [] } in
+  let loop_heads = ref IntSet.empty in
   let rec helper (instrs : Instr.data Instr.labelled list) (remaining : Instr.t list) : (
     (* The blocks created *)
     Basic_block.t list *
@@ -140,6 +141,9 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
             | _ -> false in
           (* The block entry *)
           let block_entry = if is_loop then mk_merge_block () else mk_empty_block () in
+          begin if is_loop then
+              loop_heads := IntSet.add !loop_heads block_entry.idx
+          end;
           (* Recurse inside the block *)
           let (blocks, edges, breaks, returns, entry', exit') = helper [] instrs' in
           (* Create a node for the exit of the block *)
@@ -258,4 +262,6 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
     entry_block = entry_block;
     (* The exit block is the return block *)
     exit_block = return_block.idx;
+    (* The loop heads *)
+    loop_heads = !loop_heads;
   }

@@ -43,6 +43,8 @@ type t = {
   entry_block: int;
   (* The exit block *)
   exit_block: int;
+  (* The loop heads *)
+  loop_heads: IntSet.t;
 }
 
 let dependencies (cfg : t) : int list =

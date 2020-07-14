@@ -62,6 +62,14 @@ let join (s1 : t) (s2 : t) : t =
   Printf.printf "join %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res);
   res
 
+let widen (s1 : t) (s2 : t) : t =
+  let res = {
+    constraints = Apron.Abstract1.widening manager s1.constraints s2.constraints;
+    env = (assert Stdlib.(s1.env = s2.env); s1.env);
+  } in
+  Printf.printf "widening %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res);
+  res
+
 let meet (s1 : t) (s2 : t) : t =
   let res = {
     constraints = Apron.Abstract1.meet manager s1.constraints s2.constraints;

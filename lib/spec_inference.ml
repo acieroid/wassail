@@ -245,6 +245,9 @@ let join_state (s1 : state) (s2 : state) : state =
   assert (compare_state s1 s2 = 0);
   s1
 
+(* No widening *)
+let widen _ s2 = s2
+
 module type SPEC_DATA = sig
   val instr_data : (state * state) IntMap.t
   val block_data : (state * state) IntMap.t

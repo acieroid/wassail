@@ -3,7 +3,8 @@ open Core_kernel
 module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SPEC) -> struct
   (* TODO: 
      1. Taint summaries need to preserve information about memory.
-     2. When applied, taint summary should rely on relational results to apply on the memory*)
+     2. When applied, taint summary should rely on relational results to apply on the memory
+*)
 
   type state = Taint_domain.t
   [@@deriving compare]
@@ -27,6 +28,8 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
   let state_to_string (s : state) : string = Taint_domain.to_string s
 
   let join_state (s1 : state) (s2 : state) : state = Taint_domain.join s1 s2
+
+  let widen (_s1 : state) (s2 : state) : state = s2 (* no widening *)
 
   let init_summaries s = SummaryManager.init s
 

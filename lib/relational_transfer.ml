@@ -20,6 +20,8 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
 
   let join_state = Domain.join
 
+  let widen = Domain.widen
+
   (** Merges the entry states before analyzing the given block *)
   let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
     match states with

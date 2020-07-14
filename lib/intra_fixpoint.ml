@@ -24,6 +24,9 @@ module type TRANSFER = sig
   (** Joins two states of the analysis *)
   val join_state : state -> state -> state
 
+  (** Widening operator *)
+  val widen : state -> state -> state
+
   (** Transfer function for control instructions *)
   val control_instr_transfer : Wasm_module.t -> Cfg.t -> Instr.control Instr.labelled -> state -> [`Simple of state | `Branch of state * state]
 
@@ -115,7 +118,16 @@ module Make = functor (Transfer : TRANSFER) -> struct
       Branch (Transfer.join_state st1 st1',
               Transfer.join_state st2 st2')
     | _ -> failwith "Cannot join results" in
-
+    let widen_result (r1 : result) (r2 : result) =
+      match (r1, r2) with
+      | Uninitialized, _ -> r2
+      | _, Uninitialized -> r1
+      | Simple st1, Simple st2 ->
+        Simple (Transfer.widen st1 st2)
+      | Branch (st1, st2), Branch (st1', st2') ->
+        Branch (Transfer.widen st1 st1',
+                Transfer.widen st2 st2')
+      | _ -> failwith "Cannot widen results" in
     let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =
       if IntSet.is_empty worklist then
         () (* No more elements to consider. We can stop here *)
@@ -131,7 +143,12 @@ module Make = functor (Transfer : TRANSFER) -> struct
         | _ ->
           (* Update the out state in the analysis results.
              We join with the previous results *)
-          let new_out_state = join_result out_state previous_out_state in
+          let new_out_state =
+            if IntSet.mem cfg.loop_heads block_idx then
+              widen_result previous_out_state (join_result out_state previous_out_state)
+            else
+              join_result out_state previous_out_state
+          in
           block_data := IntMap.set !block_data ~key:block_idx ~data:(Simple in_state, new_out_state);
           (* And recurse by adding all successors *)
           let successors = Cfg.successors cfg block_idx in
