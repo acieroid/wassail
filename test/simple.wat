@@ -303,7 +303,7 @@
     drop
     global.get 0
     i32.load
-    ;; expected: mem is [a: b, c: d] where a = b = g0, c = d
+    ;; expected: mem is [a: b, c: d] where a = c = g0, b = d
     )
   (func (;test-store-twice;) (type 1) (param i32) (result i32) ;; 33
     global.get 0
@@ -315,6 +315,7 @@
     i32.const 0
     ;; expected: mem is [a: b, c: d] where a = b = g0, c = d = l0
     )
+    ;; TODO: multiple loads from addresses that could be the same (e.g., l0 and l1)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))

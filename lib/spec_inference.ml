@@ -241,8 +241,7 @@ let merge_flows (module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) 
   end;
   merge module_ cfg block (List.map ~f:snd states)
 
-let join_state (_module_ : Wasm_module.t) (_cfg : Cfg.t) (_block : Basic_block.t) (s1 : state) (s2 : state) : state =
-  Printf.printf "[block %d] joining %s with %s\n" _block.idx( state_to_string s1) (state_to_string s2);
+let join_state (s1 : state) (s2 : state) : state =
   assert (compare_state s1 s2 = 0);
   s1
 

@@ -1,6 +1,6 @@
 open Core_kernel
 
-module Make = functor (Spec : Spec_inference.SPEC) -> struct
+module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SPEC) -> struct
   (* TODO: Make summaries. A summary is the final state restricted to only reachable vars: args, globals, mems and return value. *)
 
   type state = Taint_domain.t
@@ -24,7 +24,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
 
   let state_to_string (s : state) : string = Taint_domain.to_string s
 
-  let join_state _mod _cfg _block (s1 : state) (s2 : state) : state = Taint_domain.join s1 s2
+  let join_state (s1 : state) (s2 : state) : state = Taint_domain.join s1 s2
 
   let init_summaries s = SummaryManager.init s
 
@@ -56,17 +56,28 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
         (Spec.ret i.label) v2
     | Unary _ | Test _ | Convert _ ->
       Taint_domain.add_taint_v state (Spec.ret i.label) (Spec.pop (Spec.pre i.label).vstack)
-    | Load _ ->
+    | Load { offset; _ } ->
       (* Simplest case: get the taint of the entire memory.
          Refined case: get the taint of the memory cells that can pointed to, according to the previous analysis stages (i.e., relational analysis) *)
+      let addr = Spec.pop (Spec.pre i.label).vstack in
       let mem = (Spec.pre i.label).memory in
       let all_locs = Spec_inference.VarMap.keys mem in
       (* Filter the memory location using results from the relational analysis if possible *)
       let locs = if !use_relational then
-          (* TODO: We need to filter locs to only have the locs that can be loaded.
+          (* We need to filter locs to only have the locs that can be loaded.
              This means for each loc, we can ask the relational domain if are_equal loc v (where v is the top of the stack.
-          If some are truly equal, we know we can only keep these. Otherwise, if some maybe equal, then these have to be kept. *)
-          failwith "TODO: taint_transfer load"
+             If some are truly equal, we know we can only keep these. Otherwise, if some maybe equal, then these have to be kept. *)
+          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal (RelSpec.pre i.label) (Spec_inference.var_to_string loc) (Printf.sprintf "%s+%d" (Spec_inference.var_to_string addr) offset) with
+              | (true, false) -> true
+              | _ -> false) in
+          if not (List.is_empty equal) then
+            (* There are addresses that are definitely equal to addr, so we get their taint *)
+            equal
+          else
+            (* No address is definitely equal to addr, so we take the ones that may be equal *)
+            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal (RelSpec.pre i.label) (Spec_inference.var_to_string loc) (Printf.sprintf "%s+%d" (Spec_inference.var_to_string addr) offset) with
+                | (true, _) -> true
+                | _ -> false)
         else
           all_locs in
       (* Get the taint of possible memory location *)
@@ -76,15 +87,25 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
         (Spec.ret i.label)
         (* ret is the join of all these taints *)
         (List.fold_left taints ~init:Taint_domain.taint_bottom ~f:Taint_domain.join_taint)
-    | Store _ ->
+    | Store { offset; _ } ->
       (* Simplest case: set the taint for the entire memory
          Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-      let vval, _vaddr = Spec.pop2 (Spec.pre i.label).vstack in
+      let vval, vaddr = Spec.pop2 (Spec.pre i.label).vstack in
       let mem = (Spec.post i.label).memory in
       let all_locs = Spec_inference.VarMap.keys mem in
       (* Refine memory locations using relational innformation, if available *)
       let locs = if !use_relational then
-          failwith "TODO: taint_transfer store"
+          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal (RelSpec.pre i.label) (Spec_inference.var_to_string loc) (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset) with
+              | (true, false) -> true
+              | _ -> false) in
+          if not (List.is_empty equal) then
+            (* There are addresses that are definitely equal to addr, so we get their taint *)
+            equal
+          else
+            (* No address is definitely equal to addr, so we take the ones that may be equal *)
+            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal (RelSpec.pre i.label) (Spec_inference.var_to_string loc) (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset) with
+                | (true, _) -> true
+                | _ -> false)
         else
           all_locs in
       (* Set the taint of memory locations to the taint of vval *)
@@ -118,7 +139,11 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
           | (Some fa, _) -> Stdlib.(ftype = (Wasm_module.get_func_type module_ fa))
           | _ -> false) in
       let funs_to_apply = if !use_relational then
-            failwith "TODO: taint_transfer: call_indirect"
+          let v = Spec_inference.var_to_string (Spec.pop (Spec.pre i.label).vstack) in
+          List.filter funs_with_matching_type ~f:(fun (_, idx) ->
+              (* Only keep the functions for which the index may match *)
+              (* TODO: instead of fst, we could take the ones that are (true, false) first, and if there's none, take the ones that are (true, true) *)
+              fst (Relational_domain.is_equal (RelSpec.pre i.label) v idx))
           else
             (* All functions with a matching types are applicable *)
             funs_with_matching_type in
@@ -133,7 +158,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     | Unreachable -> `Simple state
     | _ -> `Simple state
 
-  let merge_flows (module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
+  let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
     match states with
     | [] -> init_state cfg
     | _ ->
@@ -152,7 +177,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
                       (* TODO: should it be x y or y x? *)
                       Taint_domain.add_taint_v s x y)) in
             (* And finally joins all the states *)
-            List.reduce_exn states' ~f:(join_state module_ cfg block)
+            List.reduce_exn states' ~f:join_state
           | _ ->
             (* Not a control-flow merge, there should be a single predecessor *)
             begin match states with

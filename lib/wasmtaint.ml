@@ -19,6 +19,7 @@ module Spec_inference = Spec_inference
 module Relational_domain = Relational_domain
 module Relational_transfer = Relational_transfer
 module Relational_summary = Relational_summary
+module Relational_spec = Relational_spec
 
 module Taint_domain = Taint_domain
 module Taint_transfer = Taint_transfer

@@ -89,4 +89,3 @@ let top (globals : Spec_inference.var list) (ret : Spec_inference.var option) : 
 (** Restrict the domain of a taint state to only variables contained in the vars argument *)
 let restrict (s : t) (vars : Spec_inference.var list) : t =
   Spec_inference.VarMap.filter_keys s ~f:(fun k -> List.mem vars k ~equal:Spec_inference.equal_var)
-  

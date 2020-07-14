@@ -18,11 +18,10 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
 
   let state_to_string = Domain.to_string
 
-  let join_state (_module_ : Wasm_module.t) (_cfg : Cfg.t) (_block : Basic_block.t) =
-    Domain.join
+  let join_state = Domain.join
 
   (** Merges the entry states before analyzing the given block *)
-  let merge_flows (module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
+  let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
     match states with
     | [] -> (* no in state, use init *)
       init_state cfg
@@ -40,7 +39,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
                                           ~f:(fun (x, y) -> (Spec_inference.var_to_string x, Spec_inference.var_to_string y))
                                           (Spec_inference.extract_different_vars spec spec'))) in
           (* And finally joins all the states *)
-          List.reduce_exn states' ~f:(join_state module_ cfg block)
+          List.reduce_exn states' ~f:join_state
         | _ ->
           (* Not a control-flow merge, there should be a single predecessor *)
           begin match states with
@@ -147,7 +146,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       (* Then, find all addresses that are equal to vaddr *)
       let mem = (Spec.pre i.label).memory in
       let addrs = List.filter (Spec_inference.VarMap.keys mem)
-          ~f:(fun a -> match Domain.are_equal state' vaddr (Spec_inference.var_to_string a) with
+          ~f:(fun a -> match Domain.are_equal state' (Printf.sprintf "%s+%d" vaddr offset) (Spec_inference.var_to_string a) with
               | (true, false) -> true (* definitely equal *)
               | _ -> false) in
       if List.is_empty addrs then
@@ -195,7 +194,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       (* Find all memory keys that are definitely equal to the address *)
       let mem = (Spec.post i.label).memory in
       let equal_addrs = List.filter (Spec_inference.VarMap.keys mem)
-          ~f:(fun a -> match Domain.are_equal state (Spec_inference.var_to_string addr) (Spec_inference.var_to_string a) with
+          ~f:(fun a -> match Domain.are_equal state (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset) (Spec_inference.var_to_string a) with
               | (true, false) -> true (* definitely equal *)
               | _ -> false) in
       if not (List.is_empty equal_addrs) then begin
@@ -208,7 +207,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       end else begin
         (* Otherwise, do similar for all addresses that may be equal *)
         let maybe_equal_addrs = List.filter (Spec_inference.VarMap.keys mem)
-            ~f:(fun a -> match Domain.are_equal state (Spec_inference.var_to_string addr) (Spec_inference.var_to_string a) with
+            ~f:(fun a -> match Domain.are_equal state (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset) (Spec_inference.var_to_string a) with
                 | (true, true) -> true (* maybe equal *)
                 | _ -> false) in
         let states = List.map maybe_equal_addrs

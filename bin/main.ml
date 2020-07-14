@@ -81,16 +81,9 @@ let intra =
                   end else
                     let cfg = IntMap.find_exn cfgs fid in
                     let (block_spec, instr_spec) = SpecIntra.analyze wasm_mod cfg in
-                    let extract_spec (m : SpecIntra.intra_results) = IntMap.filter_map m ~f:(function
-                        | Uninitialized, _ -> None
-                        | Simple s, Simple s' -> Some (s, s')
-                        | Simple s, Branch (s1, s2) ->
-                          assert (Spec_inference.compare_state s1 s2 = 0); (* both states should be equal *)
-                          Some (s, s1)
-                        | _ -> failwith "invalid spec") in
                     let module Spec = Spec_inference.Spec(struct
-                      let instr_data = extract_spec instr_spec
-                      let block_data = extract_spec block_spec
+                      let instr_data = SpecIntra.extract_spec instr_spec
+                      let block_data = SpecIntra.extract_spec block_spec
                     end) in
                     (* Plug in the results of the spec analysis *)
                     let module RelationalIntra = Intra_fixpoint.Make(Relational_transfer.Make(Spec)) in
@@ -100,20 +93,22 @@ let intra =
                     let out_state = RelationalIntra.out_state cfg results in
                     (* Printf.printf "%d: %s\n" cfg.idx (RelationalIntra.state_to_string out_state); *)
                     let relational_summary = RelationalIntra.summary cfg out_state in
-                       Printf.printf "Relational summary is:\n%s\n" (Relational_summary.to_string relational_summary);
-
-                    (* Run the taint analysis *)
-                       (*let module TaintIntra = Intra_fixpoint.Make(Taint_transfer.Make(Spec)) in
-                    TaintIntra.init_summaries (snd summaries);
+                    Printf.printf "Relational summary is:\n%s\n" (Relational_summary.to_string relational_summary);
+                  let module RelSpec = Relational_spec.Spec(struct
+                      let instr_data = RelationalIntra.extract_spec (snd results)
+                    end) in
+                  (* Run the taint analysis *)
+                  let module TaintTransfer = Taint_transfer.Make(Spec)(RelSpec) in
+                  TaintTransfer.use_relational := true;
+                  let module TaintIntra = Intra_fixpoint.Make(TaintTransfer) in
+                  TaintIntra.init_summaries (snd summaries);
                     let results = TaintIntra.analyze wasm_mod cfg in
                     let out_state = TaintIntra.out_state cfg results in
                     Printf.printf "%d: %s\n" cfg.idx (TaintIntra.state_to_string out_state);
                     let taint_summary = TaintIntra.summary cfg out_state in
-                         Printf.printf "Taint summary is:\n%s\n" (Taint_summary.to_string taint_summary); *)
+                    Printf.printf "Taint summary is:\n%s\n" (Taint_summary.to_string taint_summary);
                     (IntMap.set (fst summaries) ~key:fid ~data:relational_summary,
-                    snd summaries (*IntMap.set (snd summaries) ~key:fid ~data:taint_summary*))
-
-
+                    IntMap.set (snd summaries) ~key:fid ~data:taint_summary)
                 ) in
             Printf.printf "---------------\nAnalysis done, resulting summaries are:\n";
             List.iter funs ~f:(fun fid ->

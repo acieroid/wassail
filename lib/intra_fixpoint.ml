@@ -22,7 +22,7 @@ module type TRANSFER = sig
   val state_to_string : state -> string
 
   (** Joins two states of the analysis *)
-  val join_state : Wasm_module.t -> Cfg.t -> Basic_block.t -> state -> state -> state
+  val join_state : state -> state -> state
 
   (** Transfer function for control instructions *)
   val control_instr_transfer : Wasm_module.t -> Cfg.t -> Instr.control Instr.labelled -> state -> [`Simple of state | `Branch of state * state]
@@ -104,16 +104,16 @@ module Make = functor (Transfer : TRANSFER) -> struct
       let result = transfer block in_state in
       (in_state, result)
     in
-    let join_result (block : Basic_block.t) (r1 : result) (r2 : result) =
+    let join_result  (r1 : result) (r2 : result) =
     match (r1, r2) with
     | Uninitialized, _ -> r2
     | _, Uninitialized -> r1
     | Simple st1, Simple st2 ->
-      let joined = Transfer.join_state module_ cfg block st1 st2 in
+      let joined = Transfer.join_state st1 st2 in
       Simple joined
     | Branch (st1, st2), Branch (st1', st2') ->
-      Branch (Transfer.join_state module_ cfg block st1 st1',
-              Transfer.join_state module_ cfg block st2 st2')
+      Branch (Transfer.join_state st1 st1',
+              Transfer.join_state st2 st2')
     | _ -> failwith "Cannot join results" in
 
     let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =
@@ -131,7 +131,7 @@ module Make = functor (Transfer : TRANSFER) -> struct
         | _ ->
           (* Update the out state in the analysis results.
              We join with the previous results *)
-          let new_out_state = join_result (Cfg.find_block_exn cfg block_idx) out_state previous_out_state in
+          let new_out_state = join_result out_state previous_out_state in
           block_data := IntMap.set !block_data ~key:block_idx ~data:(Simple in_state, new_out_state);
           (* And recurse by adding all successors *)
           let successors = Cfg.successors cfg block_idx in
@@ -154,4 +154,12 @@ module Make = functor (Transfer : TRANSFER) -> struct
     match snd (IntMap.find_exn (fst results) cfg.exit_block) with
     | Simple s -> s
     | _ -> failwith "Multiple exits for function? This should not happen"
+
+  let extract_spec (results : intra_results) : (state * state) IntMap.t =
+    IntMap.filter_map results ~f:(function
+        | Uninitialized, _ -> None
+        | Simple s, Simple s' -> Some (s, s')
+        | Simple s, Branch (s1, s2) ->
+          Some (s, join_state s1 s2)
+        | _ -> failwith "invalid spec")
 end

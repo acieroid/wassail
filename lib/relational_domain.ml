@@ -131,11 +131,11 @@ let is_equal (s : t) (v : string) (n : int) : bool * bool =
 
 let is_zero (s : t) (v : string) : bool * bool = is_equal s v 0
 
-(** Checks if two variables may be equal.
+(** Checks if two expressions may be equal.
     Returns two booleans: the first one indicates if they may be equal, the second one if they may be different *)
 let are_equal (s : t) (v1 : string) (v2 : string) : bool * bool =
   if Stdlib.(v1 = v2) then (true, false) else
-  let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "%s-%s" v1 v2)) in
+  let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "(%s)-(%s)" v1 v2)) in
   match Apron.Interval.cmp interval (Apron.Interval.of_int 0 0) with
   | 0 -> (true, false)
   | -1 -> (true, false)
