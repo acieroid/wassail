@@ -190,9 +190,10 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       let v = Spec_inference.MemoryValNew (i.label, 0) in
       let state' = Domain.add_constraints state [
           (Spec_inference.var_to_string addr, Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset);
-          (Spec_inference.var_to_string v, Spec_inference.var_to_string vval)] in
+          (Spec_inference.var_to_string v, Spec_inference.var_to_string vval)]
+      in
       (* Find all memory keys that are definitely equal to the address *)
-      let mem = (Spec.pre i.label).memory in
+      let mem = (Spec.post i.label).memory in
       let equal_addrs = List.filter (Spec_inference.VarMap.keys mem)
           ~f:(fun a -> match Domain.are_equal state (Spec_inference.var_to_string addr) (Spec_inference.var_to_string a) with
               | (true, false) -> true (* definitely equal *)
@@ -201,9 +202,9 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
         (* If there are addresses that are definitely equal, update the corresponding value *)
         let states = List.map equal_addrs
             ~f:(fun a ->
-                let _v' = Spec_inference.VarMap.find_exn mem a in (* TODO: what about v'? *)
-                Domain.add_constraint state' (Spec_inference.var_to_string vval) (Spec_inference.var_to_string v)) in
-        List.reduce_exn states ~f:Domain.join
+                let v' = Spec_inference.VarMap.find_exn mem a in
+                Domain.add_constraint state' (Spec_inference.var_to_string vval) (Spec_inference.var_to_string v')) in
+        List.reduce_exn states ~f:Domain.meet
       end else begin
         (* Otherwise, do similar for all addresses that may be equal *)
         let maybe_equal_addrs = List.filter (Spec_inference.VarMap.keys mem)
