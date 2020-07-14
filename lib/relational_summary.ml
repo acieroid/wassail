@@ -36,11 +36,10 @@ let make (cfg : Cfg.t) (state : Domain.t) (ret : string option)
   (* Filter the state to only keep relevant variables:
       - the parameters
       - the return value if there is one (i.e., the top of the stack)
-      - any variable bound in the store (TODO)
-     - any variable used by a global (TODO) *)
+      - any variable bound in the store
+      - any variable used by a global *)
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
   let globals_pre = List.mapi cfg.global_types ~f:(fun i _ -> Spec_inference.var_to_string (Spec_inference.Global i)) in
-  (* TODO: globals and memories *)
   let to_keep = params @ globals_pre @ globals_post @ mem_pre @ mem_post @ (Option.to_list ret) in
   { params = params;
     return = ret;

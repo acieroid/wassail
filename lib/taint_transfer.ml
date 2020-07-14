@@ -1,7 +1,9 @@
 open Core_kernel
 
 module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SPEC) -> struct
-  (* TODO: Make summaries. A summary is the final state restricted to only reachable vars: args, globals, mems and return value. *)
+  (* TODO: 
+     1. Taint summaries need to preserve information about memory.
+     2. When applied, taint summary should rely on relational results to apply on the memory*)
 
   type state = Taint_domain.t
   [@@deriving compare]
@@ -80,8 +82,10 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
                 | _ -> false)
         else
           all_locs in
-      (* Get the taint of possible memory location *)
-      let taints = List.map locs ~f:(fun k -> Taint_domain.get_taint state k) in
+      (* Get the taint of possible memory location and their value.
+         In practice, both the memory location and the value have the same taint
+      *)
+      let taints = List.map locs ~f:(fun k -> Taint_domain.join_taint (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Spec_inference.VarMap.find_exn mem k))) in
       Taint_domain.add_taint
         state
         (Spec.ret i.label)
@@ -108,8 +112,10 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
                 | _ -> false)
         else
           all_locs in
-      (* Set the taint of memory locations to the taint of vval *)
-      List.fold_left locs ~init:state ~f:(fun s k -> Taint_domain.add_taint_v s k vval)
+      (* Set the taint of memory locations and the value to the taint of vval *)
+      List.fold_left locs ~init:state ~f:(fun s k ->
+          Taint_domain.add_taint_v (Taint_domain.add_taint_v s k vval)
+            (Spec_inference.VarMap.find_exn mem k) vval)
 
   let control_instr_transfer
       (module_ : Wasm_module.t) (* The wasm module (read-only) *)
@@ -190,4 +196,6 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
     Taint_summary.make cfg out_state
       (if List.length cfg.return_types = 1 then List.hd (Spec.post_block cfg.exit_block).vstack else None)
       (Spec.post_block cfg.exit_block).globals
+      (List.concat_map (Spec_inference.VarMap.to_alist (Spec.post_block cfg.exit_block).memory)
+         ~f:(fun (a, b) -> [a; b]))
 end

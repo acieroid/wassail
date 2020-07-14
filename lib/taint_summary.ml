@@ -5,6 +5,7 @@ type t = {
   args : Spec_inference.var list;
   globals : Spec_inference.var list; (** globals after the function execution *)
   ret : Spec_inference.var option;
+  mem : Spec_inference.var list;
   state : Taint_domain.t;
   (* TODO: memory *)
 }
@@ -21,6 +22,7 @@ let bottom (cfg : Cfg.t) (_vars : Spec_inference.var list) : t =
       | _ :: [] -> Some (Spec_inference.Var (List.length globals))
       | _ -> failwith "more than one return value") in
   { globals; args; ret;
+    mem = [];
     state = Taint_domain.bottom }
 
 let top (cfg : Cfg.t) (_vars : Spec_inference.var list) : t =
@@ -31,6 +33,7 @@ let top (cfg : Cfg.t) (_vars : Spec_inference.var list) : t =
       | _ :: [] -> Some (Spec_inference.Var (List.length globals))
       | _ -> failwith "more than one return value") in
   { globals; args; ret;
+    mem = []; (* TODO: mem *)
     state = Taint_domain.top globals ret }
 
 let of_import (_idx : int) (name : string) (nglobals : int) (args : Type.t list) (ret : Type.t list) : t =
@@ -41,6 +44,7 @@ let of_import (_idx : int) (name : string) (nglobals : int) (args : Type.t list)
     | _ :: [] -> Some (Spec_inference.Var (nglobals+1))
     | _ -> failwith "more than one return value" in
   { globals; args; ret;
+    mem = [];
     state = match name with
       | "fd_write" | "proc_exit" ->
         Taint_domain.bottom
@@ -59,11 +63,13 @@ let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [
 
 let make (cfg : Cfg.t) (state : Taint_domain.t)
     (ret : Spec_inference.var option) (globals_post : Spec_inference.var list)
+    (mem_post : Spec_inference.var list)
   : t =
   { globals = globals_post;
     args = List.init (List.length cfg.arg_types) ~f:(fun i -> Spec_inference.Local i);
     ret = ret;
-    state = Taint_domain.restrict state (globals_post @ (Option.to_list ret)) }
+    mem = mem_post;
+    state = Taint_domain.restrict state (globals_post @ mem_post @ (Option.to_list ret)) }
 
 let apply (summary : t) (state : Taint_domain.t) (args : Spec_inference.var list) (globals : Spec_inference.var list) (ret : Spec_inference.var option) : Taint_domain.t =
   (* To apply a summary, we first rename the return value and the globals:
@@ -84,5 +90,6 @@ let apply (summary : t) (state : Taint_domain.t) (args : Spec_inference.var list
   let with_args = List.fold_left (List.map2_exn summary.args args ~f:(fun x y -> (x, y)))
       ~init:with_globals
       ~f:(fun acc (a, a') -> Taint_domain.replace_taint acc a (Taint_domain.get_taint state a')) in
+  (* TODO: apply mem! *)
   with_args
   
