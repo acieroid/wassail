@@ -75,7 +75,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       let vstack = (Spec.pre i.label).vstack in
       let (c, v2, v1) = Spec.pop3 vstack in
       begin
-        match Domain.is_zero state (Spec_inference.var_to_string c) with
+        match Domain.is_zero state c with
         | (true, false) -> (* definitely 0, add ret = v2 *)
           Domain.add_equality_constraint state ret v2
         | (false, true) -> (* definitely not 0, add ret = v2 *)
@@ -130,7 +130,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       state
     | Load {offset; _ } ->
       let ret = Spec.ret i.label in
-      let vaddr = Spec_inference.var_to_string (Spec.pop (Spec.pre i.label).vstack) in
+      let vaddr = Spec.pop (Spec.pre i.label).vstack in
       let addr = Spec_inference.MemoryKey (i.label, 0) in
       (* We are loading from address vaddr (also mk_i.label_0).
          The resulting value is ret (also mv_i.label_0).
@@ -141,12 +141,12 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
            b. the resulting value is top, hence it is soundly over-approximative *)
       (* We assume load/stores are symmetric, i.e., when a load/store operation is made on an address for a specific type and size, all other operations on the same address are made with the same type and size *)
       (* First, connect the right variables: vaddr is mk_i.label_0, ret is mv_i.label_0 *)
-      let state' = Domain.add_constraints state [(Spec_inference.var_to_string addr, Printf.sprintf "%s+%d" vaddr offset);
+      let state' = Domain.add_constraints state [(Spec_inference.var_to_string addr, Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset);
                                                  (Spec_inference.var_to_string ret, (Spec_inference.var_to_string (Spec_inference.MemoryVal (i.label, 0))))] in
       (* Then, find all addresses that are equal to vaddr *)
       let mem = (Spec.pre i.label).memory in
       let addrs = List.filter (Spec_inference.VarMap.keys mem)
-          ~f:(fun a -> match Domain.are_equal state' (Printf.sprintf "%s+%d" vaddr offset) (Spec_inference.var_to_string a) with
+          ~f:(fun a -> match Domain.are_equal_offset state' a vaddr offset with
               | (true, false) -> true (* definitely equal *)
               | _ -> false) in
       if List.is_empty addrs then
@@ -194,7 +194,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       (* Find all memory keys that are definitely equal to the address *)
       let mem = (Spec.post i.label).memory in
       let equal_addrs = List.filter (Spec_inference.VarMap.keys mem)
-          ~f:(fun a -> match Domain.are_equal state (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset) (Spec_inference.var_to_string a) with
+          ~f:(fun a -> match Domain.are_equal_offset state a vaddr offset with
               | (true, false) -> true (* definitely equal *)
               | _ -> false) in
       if not (List.is_empty equal_addrs) then begin
@@ -207,7 +207,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       end else begin
         (* Otherwise, do similar for all addresses that may be equal *)
         let maybe_equal_addrs = List.filter (Spec_inference.VarMap.keys mem)
-            ~f:(fun a -> match Domain.are_equal state (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset) (Spec_inference.var_to_string a) with
+            ~f:(fun a -> match Domain.are_equal_offset state a vaddr offset with
                 | (true, true) -> true (* maybe equal *)
                 | _ -> false) in
         let states = List.map maybe_equal_addrs
@@ -283,7 +283,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       `Simple (apply_summary f arity state)
     | CallIndirect (arity, typ) ->
       (* v is the index in the table that points to the called functiion *)
-      let v = Spec_inference.var_to_string (Spec.pop (Spec.pre i.label).vstack) in
+      let v = Spec.pop (Spec.pre i.label).vstack in
       (* Get table 0 *)
       let table = List.nth_exn module_.tables 0 in
       (* Get all indices that v could be equal to *)

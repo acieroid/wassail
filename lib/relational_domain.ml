@@ -117,9 +117,9 @@ let keep_only (s : t) (vars : string list) : t =
 
 (** Checks if the value of variable v may be equal to a given number.
     Returns two booleans: the first one indicates if v can be equal to n, and the second if it can be different than n *)
-let is_equal (s : t) (v : string) (n : int) : bool * bool =
+let is_equal (s : t) (v : Spec_inference.var) (n : int) : bool * bool =
   let box = Apron.Abstract1.to_box manager s.constraints in
-  let dim = Apron.Environment.dim_of_var box.box1_env (Apron.Var.of_string v) in
+  let dim = Apron.Environment.dim_of_var box.box1_env (Apron.Var.of_string (Spec_inference.var_to_string v)) in
   let interval = Array.get box.interval_array dim in
   (* Apron doc: cmp is: "0: equality -1: i1 included in i2 +1: i2 included in i1 -2: i1.inf less than or equal to i2.inf +2: i1.inf greater than i2.inf" *)
   match Apron.Interval.cmp interval (Apron.Interval.of_int n n) with
@@ -129,13 +129,13 @@ let is_equal (s : t) (v : string) (n : int) : bool * bool =
   | -2 | +2 -> (false, true) (* definitely not n *)
   | _ -> failwith "should not happen"
 
-let is_zero (s : t) (v : string) : bool * bool = is_equal s v 0
+let is_zero (s : t) (v : Spec_inference.var) : bool * bool = is_equal s v 0
 
-(** Checks if two expressions may be equal.
+(** Checks if two variables may be equal.
     Returns two booleans: the first one indicates if they may be equal, the second one if they may be different *)
-let are_equal (s : t) (v1 : string) (v2 : string) : bool * bool =
+let are_equal (s : t) (v1 : Spec_inference.var) (v2 : Spec_inference.var) : bool * bool =
   if Stdlib.(v1 = v2) then (true, false) else
-  let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "(%s)-(%s)" v1 v2)) in
+  let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "%s-%s" (Spec_inference.var_to_string v1) (Spec_inference.var_to_string v2))) in
   match Apron.Interval.cmp interval (Apron.Interval.of_int 0 0) with
   | 0 -> (true, false)
   | -1 -> (true, false)
@@ -143,7 +143,22 @@ let are_equal (s : t) (v1 : string) (v2 : string) : bool * bool =
   | -2 | +2 -> (false, true)
   | _ -> failwith "should not happen"
 
-let are_precisely_equal (s : t) (v1 : string) (v2 : string) =
+(** Check if v1 = v2+offset, i.e., v1-v2 = offset *)
+let are_equal_offset (s : t) (v1 : Spec_inference.var) (v2 : Spec_inference.var) (offset : int) : bool * bool =
+  if Stdlib.(v1 = v2) then
+    if offset = 0 then (true, false) else (false, true)
+  else
+  let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "%s-%s" (Spec_inference.var_to_string v1) (Spec_inference.var_to_string v2))) in
+  match Apron.Interval.cmp interval (Apron.Interval.of_int offset offset) with
+  | 0 -> (true, false)
+  | -1 -> (true, false)
+  | +1 -> (true, true)
+  | -2 | +2 -> (false, true)
+  | _ -> failwith "should not happen"
+
+
+
+let are_precisely_equal (s : t) (v1 : Spec_inference.var) (v2 : Spec_inference.var) =
   match are_equal s v1 v2 with
   | true, false -> true
   | _ -> false
