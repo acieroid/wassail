@@ -4,6 +4,7 @@
   (type (;2;) (func (result i32)))
   (type (;3;) (func (param i32 i32) (result i32)))
   (type (;4;) (func (param i32 i32 i32) (result i32)))
+  (type (;5;) (func (param i64) (result i32)))
   (func (;test-select;) (type 1) (param i32) (result i32) ;; 0
     i32.const 256
     i32.const 512
@@ -17,6 +18,7 @@
     i32.store offset=12
     local.get 0
     ;; summary: ret = l0, memory[g0] = l0
+    ;; taint: ret tainted with l0, memory[g0] tainted with l0
     )
   (func (;test-load;) (type 1) (param i32) (result i32) ;; 2
     global.get 0
@@ -219,27 +221,37 @@
     end
     local.get 0)     ;; [p0]
   (func (;test-taint-arg0;) (type 1) (param i32) (result i32) ;; 20
-    local.get 0)
+    local.get 0
+    ;; taint: ret is tainted with l0
+    )
   (func (;test-taint-arg0-add;) (type 1) (param i32) (result i32) ;; 21
     local.get 0
     i32.const 1
-    i32.add)
+    i32.add
+    ;; taint: ret is tainted with l0
+    )
   (func (;tset-taint-arg0-arg1;) (type 4) (param i32 i32 i32) (result i32) ;; 22
     local.get 0
     local.get 1
-    i32.add)
+    i32.add
+    ;; taint: ret is tainted with l0 and l1
+    )
   (func (;test-taint-local-set;) (type 1) (param i32) (result i32) ;; 23
     (local i32)
     local.get 0
     local.set 1
-    local.get 1)
+    local.get 1
+    ;; taint: ret is tainted with l0
+    )
   (func (;test-taint-if;) (type 4) (param i32 i32 i32) (result i32) ;; 24
     local.get 0
     if (result i32)
       local.get 1
     else
       local.get 2
-    end)
+    end
+    ;; taint: ret is tainted with l1 and l2
+    )
   (func (;test-taint-if-localset;) (type 4) (param i32 i32 i32) (result i32) ;; 25
     (local i32)
     local.get 0
@@ -252,7 +264,9 @@
     end
     local.get 3)
   (func (;test-taint-getglobal;) (type 1) (param i32) (result i32) ;; 26
-    global.get 0)
+    global.get 0
+    ;; taint: ret is tainted with g0
+    )
   (func (;test-taint-setglobal;) (type 1) (param i32) (result i32) ;; 27
     local.get 0
     global.set 0
@@ -315,7 +329,17 @@
     i32.const 0
     ;; expected: mem is [a: b, c: d] where a = b = g0, c = d = l0
     )
+  (func (;35;) (type 3) (param i32 i32) (result i32) ;; 34
+    (local i32 i32 i32)
+    local.get 2
+    loop  ;; label = @3
+      local.get 2
+      br_if 0 (;@3;)
+    end
+    local.set 2
+    i32.const 0)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))
+  (export "_start" (func 26))
   (export "memory" (memory 0)))

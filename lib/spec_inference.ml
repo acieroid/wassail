@@ -60,19 +60,6 @@ let vars (data : (state * state) IntMap.t) : VarSet.t =
     ~f:(fun acc (_, (pre, post)) ->
         VarSet.union acc (VarSet.union (vars_of pre) (vars_of post)))
 
-let extract_different_vars (s1 : state) (s2 : state) : (var * var) list =
-  let f (l1 : var list) (l2 : var list) : (var * var) list =
-    assert (List.length l1 = List.length l2);
-    List.filter_map (List.map2_exn l1 l2 ~f:(fun v1 v2 -> (v1, v2, equal_var v1 v2)))
-      ~f:(fun (v1, v2, eq) -> if not eq then Some (v1, v2) else None) in
-  let fmap (m1 : var VarMap.t) (m2 : var VarMap.t) : (var * var) list =
-    assert (Stdlib.(=) (VarMap.keys m1) (VarMap.keys m2)); (* Memory keys never change (assumption) *)
-    List.filter_map (VarMap.keys m1) ~f:(fun k ->
-        let v1 = VarMap.find_exn m1 k in
-        let v2 = VarMap.find_exn m2 k in
-        if equal_var v1 v2 then None else Some (v1, v2)) in
-  (f s1.vstack s2.vstack) @ (f s1.locals s2.locals) @ (f s1.globals s2.globals) @ (fmap s1.memory s2.memory)
-
 let init_state (cfg : Cfg.t) : state = {
   vstack = []; (* the vstack is initially empty *)
   locals = List.mapi (cfg.arg_types @ cfg.local_types) ~f:(fun i _ -> Local i);
@@ -129,6 +116,19 @@ let state_to_string (s : state) : string =
     (String.concat ~sep:", " (List.map s.globals ~f:var_to_string))
     (String.concat ~sep:", " (List.map (VarMap.to_alist s.memory) ~f:(fun (k, v) -> Printf.sprintf "%s: %s" (var_to_string k) (var_to_string v))))
 
+
+let extract_different_vars (s1 : state) (s2 : state) : (var * var) list =
+  let f (l1 : var list) (l2 : var list) : (var * var) list =
+    assert (List.length l1 = List.length l2);
+    List.filter_map (List.map2_exn l1 l2 ~f:(fun v1 v2 -> (v1, v2, equal_var v1 v2)))
+      ~f:(fun (v1, v2, eq) -> if not eq then Some (v1, v2) else None) in
+  let fmap (m1 : var VarMap.t) (m2 : var VarMap.t) : (var * var) list =
+    assert (Stdlib.(=) (VarMap.keys m1) (VarMap.keys m2)); (* Memory keys never change (assumption) *)
+    List.filter_map (VarMap.keys m1) ~f:(fun k ->
+        let v1 = VarMap.find_exn m1 k in
+        let v2 = VarMap.find_exn m2 k in
+        if equal_var v1 v2 then None else Some (v1, v2)) in
+  (f s1.vstack s2.vstack) @ (f s1.locals s2.locals) @ (f s1.globals s2.globals) @ (fmap s1.memory s2.memory)
 
 (** Like List.drop, but raises an exception if the list does not contain enough element *)
 let drop (n : int) (vstack : var list) =
@@ -215,9 +215,12 @@ let merge (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (stat
     res in
   match block.content with
   | ControlMerge ->
-    let st = match states with
-      | [] -> init_state cfg
-      | s :: _ -> s (* ensures the vstack has the right number of elements *)in
+    (* Ensures the vstack has the right number of elements.
+       To do so, we take the max of the length of the vstacks that reach this point.
+       Basically, max is needed because it could be that some flows have not been analyzed yet *)
+    let st = match List.max_elt states ~compare:(fun s1 s2 -> Stdlib.compare (List.length s1.vstack) (List.length s2.vstack)) with
+      | None -> init_state cfg
+      | Some s -> s in
     (* TODO: for now we replace every variable. Less variables could be produced by avoiding replacing the same ones, but this is more tricky than it appears *)
     { vstack = List.map st.vstack ~f:(fun _ -> new_var());
       locals = List.map st.locals ~f:(fun _ -> new_var());
