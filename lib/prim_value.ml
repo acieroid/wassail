@@ -27,7 +27,7 @@ let of_wasm (v : Wasm.Values.value) : t =
 let to_string (v : t) : string = match v with
   | I32 n -> Int32.to_string n
   | I64 n -> Int64.to_string n
-  | F32 _  | F64 _ -> failwith "unsupported"
+  | F32 _  | F64 _ -> "unsupported float"
 
 let is_zero (v : t) : bool = match v with
   | I32 0l | I64 0L -> true

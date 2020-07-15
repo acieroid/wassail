@@ -47,7 +47,7 @@ let of_import (_idx : int) (name : string) (nglobals : int) (args : Type.t list)
     mem = [];
     state = match name with
       | "fd_write" | "proc_exit" ->
-        Taint_domain.bottom
+        Taint_domain.bottom_with_keys (globals @ args @ (Option.to_list ret))
       | _ ->
         Logging.info (Printf.sprintf "Imported function is not modelled: %s" name);
         Taint_domain.top globals ret }

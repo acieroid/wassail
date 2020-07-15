@@ -78,6 +78,9 @@ let set_top_taint (s : t) (v : Spec_inference.var) : t =
 (** The bottom state does not contain any taint *)
 let bottom : t = Spec_inference.VarMap.empty
 
+let bottom_with_keys (keys : Spec_inference.var list) : t =
+  Spec_inference.VarMap.of_alist_exn (List.map keys ~f:(fun k -> (k, taint_bottom)))
+
 (** The top state taints all globals and the return value with the top taint *)
 let top (globals : Spec_inference.var list) (ret : Spec_inference.var option) : t =
   Option.fold ret

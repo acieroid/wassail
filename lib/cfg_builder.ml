@@ -196,9 +196,9 @@ let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
           (* Simply construct a block containig the unreachable instruction *)
           let block = mk_data_block instrs in
           let unreachable_block = mk_control_block instr in
-          let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
+          let (blocks, edges, breaks, returns, _entry', exit') = helper [] rest in
           (block :: unreachable_block :: blocks,
-           (block.idx, unreachable_block.idx, None) :: (unreachable_block.idx, entry', None) :: edges,
+           (block.idx, unreachable_block.idx, None) :: edges (* The unreachable block is not connected to the rest of the CFG *),
            breaks, returns, block.idx, exit')
 
       end
