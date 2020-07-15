@@ -122,13 +122,20 @@ let extract_different_vars (s1 : state) (s2 : state) : (var * var) list =
     assert (List.length l1 = List.length l2);
     List.filter_map (List.map2_exn l1 l2 ~f:(fun v1 v2 -> (v1, v2, equal_var v1 v2)))
       ~f:(fun (v1, v2, eq) -> if not eq then Some (v1, v2) else None) in
+  let fvstack (l1 : var list) (l2 : var list) : (var * var) list =
+    (* Like f, but only checks a prefix.
+       For example, it can sometimes happen that on one path we have [x, y] as the vstack, and another we have [y].
+       We can safely assume that if the code has passed validation, then y will never be used.
+       Hence, it is safe to treat the first vstack as if it was [x] *)
+    let min_size = min (List.length l1) (List.length l2) in
+    f (List.take l1 min_size) (List.take l2 min_size) in
   let fmap (m1 : var VarMap.t) (m2 : var VarMap.t) : (var * var) list =
     assert (Stdlib.(=) (VarMap.keys m1) (VarMap.keys m2)); (* Memory keys never change (assumption) *)
     List.filter_map (VarMap.keys m1) ~f:(fun k ->
         let v1 = VarMap.find_exn m1 k in
         let v2 = VarMap.find_exn m2 k in
         if equal_var v1 v2 then None else Some (v1, v2)) in
-  (f s1.vstack s2.vstack) @ (f s1.locals s2.locals) @ (f s1.globals s2.globals) @ (fmap s1.memory s2.memory)
+  (fvstack s1.vstack s2.vstack) @ (f s1.locals s2.locals) @ (f s1.globals s2.globals) @ (fmap s1.memory s2.memory)
 
 (** Like List.drop, but raises an exception if the list does not contain enough element *)
 let drop (n : int) (vstack : var list) =

@@ -329,7 +329,7 @@
     i32.const 0
     ;; expected: mem is [a: b, c: d] where a = b = g0, c = d = l0
     )
-  (func (;35;) (type 3) (param i32 i32) (result i32) ;; 34
+  (func (;bug-loop-surrounded-vstack;) (type 3) (param i32 i32) (result i32) ;; 34
     (local i32 i32 i32)
     local.get 2
     loop  ;; label = @3
@@ -337,6 +337,30 @@
       br_if 0 (;@3;)
     end
     local.set 2
+    i32.const 0)
+  (func (;bug-different-vstacks;) (type 3) (param i32 i32) (result i32)
+    (local i32 i32 i32)
+    block  ;; label = @1
+      block  ;; label = @2
+        local.get 2
+        loop  ;; label = @3
+          local.get 0
+          br_if 1 (;@2;)
+          local.get 0
+          i32.const 4
+          i32.add
+          local.set 0
+          local.get 2
+          i32.const -4
+          i32.add
+          local.tee 2
+          i32.const 3
+          i32.gt_u
+          br_if 0 (;@3;)
+        end
+        local.set 2
+      end
+    end
     i32.const 0)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)

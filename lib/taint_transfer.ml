@@ -144,9 +144,10 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
       let ftype = Wasm_module.get_type module_ typ in
       assert (snd arity <= 1);
       (* These are all the functions with a valid type *)
-      let funs_with_matching_type = List.filter funs ~f:(function
-          | (Some fa, _) -> Stdlib.(ftype = (Wasm_module.get_func_type module_ fa))
-          | _ -> false) in
+      let funs_with_matching_type = List.filter_map funs ~f:(function
+          | (Some fa, idx) ->
+            if Stdlib.(ftype = (Wasm_module.get_func_type module_ fa)) then Some (fa, idx) else None
+          | _ -> None) in
       let funs_to_apply = if !use_relational then
           let v = Spec.pop (Spec.pre i.label).vstack in
           List.filter funs_with_matching_type ~f:(fun (_, idx) ->
@@ -159,7 +160,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
       (* Apply the summaries *)
       `Simple (List.fold_left funs_to_apply
         ~init:state
-        ~f:(fun acc (_, fa) ->
+        ~f:(fun acc (fa, _) ->
             Taint_domain.join (apply_summary fa arity state) acc))
     | Br _ -> `Simple state
     | BrIf _ | If _ -> `Branch (state, state)
