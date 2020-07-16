@@ -26,11 +26,11 @@ module T = struct
     | Compare of Relop.t
     | Test of Testop.t
     | Convert of Convertop.t
-    | LocalGet of Var.t
-    | LocalSet of Var.t
-    | LocalTee of Var.t
-    | GlobalGet of Var.t
-    | GlobalSet of Var.t
+    | LocalGet of int
+    | LocalSet of int
+    | LocalTee of int
+    | GlobalGet of int
+    | GlobalSet of int
     | Load of Memoryop.t
     | Store of Memoryop.t
   (** Control instructions *)
@@ -38,11 +38,11 @@ module T = struct
     | Block of arity * t list
     | Loop of arity * t list
     | If of arity * t list * t list
-    | Call of arity * Var.t
-    | CallIndirect of arity * Var.t
-    | Br of Var.t
-    | BrIf of Var.t
-    | BrTable of Var.t list * Var.t
+    | Call of arity * int
+    | CallIndirect of arity * int
+    | Br of int
+    | BrIf of int
+    | BrTable of int list * int
     | Return
     | Unreachable
   (** All instructions *)
@@ -163,21 +163,21 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) : t =
   | Ast.Compare rel ->
     data_labelled (Compare (Relop.of_wasm rel))
   | Ast.LocalGet l ->
-    data_labelled (LocalGet (Var.of_wasm l))
+    data_labelled (LocalGet (Index.of_wasm l))
   | Ast.LocalSet l ->
-    data_labelled (LocalSet (Var.of_wasm l))
+    data_labelled (LocalSet (Index.of_wasm l))
   | Ast.LocalTee l ->
-    data_labelled (LocalTee (Var.of_wasm l))
+    data_labelled (LocalTee (Index.of_wasm l))
   | Ast.BrIf label ->
-    control_labelled (BrIf (Var.of_wasm label))
+    control_labelled (BrIf (Index.of_wasm label))
   | Ast.Br label ->
-    control_labelled (Br (Var.of_wasm label))
+    control_labelled (Br (Index.of_wasm label))
   | Ast.BrTable (table, label) ->
-    control_labelled (BrTable (List.map table ~f:Var.of_wasm, Var.of_wasm label))
+    control_labelled (BrTable (List.map table ~f:Index.of_wasm, Index.of_wasm label))
   | Ast.Call f ->
     let (arity_in, arity_out) = arity_of_fun m f in
     assert (arity_out <= 1);
-    control_labelled (Call ((arity_in, arity_out), Var.of_wasm f))
+    control_labelled (Call ((arity_in, arity_out), Index.of_wasm f))
   | Ast.Return ->
     control_labelled (Return)
   | Ast.Unreachable ->
@@ -198,11 +198,11 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) : t =
   | Ast.CallIndirect f ->
     let (arity_in, arity_out) = arity_of_fun_type m f in
     assert (arity_out <= 1);
-    control_labelled (CallIndirect ((arity_in, arity_out), Var.of_wasm f))
+    control_labelled (CallIndirect ((arity_in, arity_out), Index.of_wasm f))
   | Ast.GlobalGet g ->
-    data_labelled (GlobalGet (Var.of_wasm g))
+    data_labelled (GlobalGet (Index.of_wasm g))
   | Ast.GlobalSet g ->
-    data_labelled (GlobalSet (Var.of_wasm g))
+    data_labelled (GlobalSet (Index.of_wasm g))
   | Ast.Load op ->
     data_labelled (Load (Memoryop.of_wasm_load op))
   | Ast.Store op ->

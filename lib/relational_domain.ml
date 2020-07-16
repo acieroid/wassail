@@ -28,11 +28,11 @@ let to_string (s : t) : string =
     @param cfg is the CFG under analysis
     @param vars the set of Apron variables to create. It is expected that variables for locals are named l0 to ln, where l0 to li are parameters (there are i params), and li+1 to ln are locals that are initialized to 0.
  *)
-let init (cfg : Cfg.t) (vars : Spec_inference.var list) : t =
+let init (cfg : Cfg.t) (vars : Var.t list) : t =
   assert (List.length cfg.return_types <= 1); (* wasm spec does not allow for more than one return type (currently) *)
-  let vars_and_vals = List.map vars ~f:(fun v -> (Apron.Var.of_string (Spec_inference.var_to_string v), match v with
-    | Spec_inference.Local n when n >= List.length cfg.arg_types -> Apron.Interval.of_int 0 0
-    | Spec_inference.Local _ | Spec_inference.Global _ | Spec_inference.MemoryKey _ | Spec_inference.MemoryVal _ -> Apron.Interval.top
+  let vars_and_vals = List.map vars ~f:(fun v -> (Apron.Var.of_string (Var.to_string v), match v with
+    | Var.Local n when n >= List.length cfg.arg_types -> Apron.Interval.of_int 0 0
+    | Var.Local _ | Var.Global _ | Var.MemoryKey _ | Var.MemoryVal _ -> Apron.Interval.top
     | _ -> Apron.Interval.bottom))
   in
   let apron_vars = Array.of_list (List.map vars_and_vals  ~f:fst) in
@@ -101,14 +101,14 @@ let add_constraints (s : t) (constraints : (string * string) list) : t =
 let add_constraint (s : t) (v : string) (linexpr : string) : t =
   add_constraints s [(v,  linexpr)]
 
-let add_equality_constraints (s : t) (vs : (Spec_inference.var * Spec_inference.var) list) : t =
-  add_constraints s (List.map vs ~f:(fun (v1, v2) -> (Spec_inference.var_to_string v1, Spec_inference.var_to_string v2)))
+let add_equality_constraints (s : t) (vs : (Var.t * Var.t) list) : t =
+  add_constraints s (List.map vs ~f:(fun (v1, v2) -> (Var.to_string v1, Var.to_string v2)))
 
-let add_equality_constraint (s : t) (v1 : Spec_inference.var) (v2 : Spec_inference.var) : t =
-  add_constraint s (Spec_inference.var_to_string v1) (Spec_inference.var_to_string v2)
+let add_equality_constraint (s : t) (v1 : Var.t) (v2 : Var.t) : t =
+  add_constraint s (Var.to_string v1) (Var.to_string v2)
 
-let add_interval_constraint (s : t) (v : Spec_inference.var) (bounds: int * int) : t =
-  add_constraint s (Spec_inference.var_to_string v) (Printf.sprintf "[%d;%d]" (fst bounds) (snd bounds))
+let add_interval_constraint (s : t) (v : Var.t) (bounds: int * int) : t =
+  add_constraint s (Var.to_string v) (Printf.sprintf "[%d;%d]" (fst bounds) (snd bounds))
 
 let meet_interval (s : t) (v : string) (bounds : int * int) : t =
   let earray = Apron.Lincons1.array_make s.env 1 in
@@ -125,9 +125,9 @@ let keep_only (s : t) (vars : string list) : t =
 
 (** Checks if the value of variable v may be equal to a given number.
     Returns two booleans: the first one indicates if v can be equal to n, and the second if it can be different than n *)
-let is_equal (s : t) (v : Spec_inference.var) (n : int) : bool * bool =
+let is_equal (s : t) (v : Var.t) (n : int) : bool * bool =
   let box = Apron.Abstract1.to_box manager s.constraints in
-  let dim = Apron.Environment.dim_of_var box.box1_env (Apron.Var.of_string (Spec_inference.var_to_string v)) in
+  let dim = Apron.Environment.dim_of_var box.box1_env (Apron.Var.of_string (Var.to_string v)) in
   let interval = Array.get box.interval_array dim in
   (* Apron doc: cmp is: "0: equality -1: i1 included in i2 +1: i2 included in i1 -2: i1.inf less than or equal to i2.inf +2: i1.inf greater than i2.inf" *)
   match Apron.Interval.cmp interval (Apron.Interval.of_int n n) with
@@ -137,13 +137,13 @@ let is_equal (s : t) (v : Spec_inference.var) (n : int) : bool * bool =
   | -2 | +2 -> (false, true) (* definitely not n *)
   | _ -> failwith "should not happen"
 
-let is_zero (s : t) (v : Spec_inference.var) : bool * bool = is_equal s v 0
+let is_zero (s : t) (v : Var.t) : bool * bool = is_equal s v 0
 
 (** Checks if two variables may be equal.
     Returns two booleans: the first one indicates if they may be equal, the second one if they may be different *)
-let are_equal (s : t) (v1 : Spec_inference.var) (v2 : Spec_inference.var) : bool * bool =
+let are_equal (s : t) (v1 : Var.t) (v2 : Var.t) : bool * bool =
   if Stdlib.(v1 = v2) then (true, false) else
-  let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "%s-%s" (Spec_inference.var_to_string v1) (Spec_inference.var_to_string v2))) in
+  let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "%s-%s" (Var.to_string v1) (Var.to_string v2))) in
   match Apron.Interval.cmp interval (Apron.Interval.of_int 0 0) with
   | 0 -> (true, false)
   | -1 -> (true, false)
@@ -152,11 +152,11 @@ let are_equal (s : t) (v1 : Spec_inference.var) (v2 : Spec_inference.var) : bool
   | _ -> failwith "should not happen"
 
 (** Check if v1 = v2+offset, i.e., v1-v2 = offset *)
-let are_equal_offset (s : t) (v1 : Spec_inference.var) (v2 : Spec_inference.var) (offset : int) : bool * bool =
+let are_equal_offset (s : t) (v1 : Var.t) (v2 : Var.t) (offset : int) : bool * bool =
   if Stdlib.(v1 = v2) then
     if offset = 0 then (true, false) else (false, true)
   else
-  let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "%s-%s" (Spec_inference.var_to_string v1) (Spec_inference.var_to_string v2))) in
+  let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "%s-%s" (Var.to_string v1) (Var.to_string v2))) in
   match Apron.Interval.cmp interval (Apron.Interval.of_int offset offset) with
   | 0 -> (true, false)
   | -1 -> (true, false)
@@ -166,7 +166,7 @@ let are_equal_offset (s : t) (v1 : Spec_inference.var) (v2 : Spec_inference.var)
 
 
 
-let are_precisely_equal (s : t) (v1 : Spec_inference.var) (v2 : Spec_inference.var) =
+let are_precisely_equal (s : t) (v1 : Var.t) (v2 : Var.t) =
   match are_equal s v1 v2 with
   | true, false -> true
   | _ -> false

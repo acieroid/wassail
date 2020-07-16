@@ -14,7 +14,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
 
   let init_state (cfg : Cfg.t) = Domain.init cfg Spec.vars
 
-  let bottom_state (cfg : Cfg.t) = Domain.bottom cfg (List.map ~f:Spec_inference.var_to_string Spec.vars)
+  let bottom_state (cfg : Cfg.t) = Domain.bottom cfg (List.map ~f:Var.to_string Spec.vars)
 
   let state_to_string = Domain.to_string
 
@@ -38,7 +38,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
               let spec' = Spec.post_block idx in
               (* equate all different variables in the post-state with the ones in the pre-state *)
               Domain.add_constraints s (List.map
-                                          ~f:(fun (x, y) -> (Spec_inference.var_to_string x, Spec_inference.var_to_string y))
+                                          ~f:(fun (x, y) -> (Var.to_string x, Var.to_string y))
                                           (Spec_inference.extract_different_vars spec spec'))) in
           (* And finally joins all the states *)
           List.reduce_exn states' ~f:join_state
@@ -111,7 +111,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       Domain.add_equality_constraint state global v
     | Const n ->
       (* add ret = n *)
-      Domain.add_constraint state (Spec_inference.var_to_string (Spec.ret i.label)) (Prim_value.to_string n)
+      Domain.add_constraint state (Var.to_string (Spec.ret i.label)) (Prim_value.to_string n)
     | Compare _ ->
       (* TODO: reflect "rel v1 v2" in the constraints, when possible *)
       (* add ret = [0;1] *)
@@ -133,7 +133,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     | Load {offset; _ } ->
       let ret = Spec.ret i.label in
       let vaddr = Spec.pop (Spec.pre i.label).vstack in
-      let addr = Spec_inference.MemoryKey (i.label, 0) in
+      let addr = Var.MemoryKey (i.label, 0) in
       (* We are loading from address vaddr (also mk_i.label_0).
          The resulting value is ret (also mv_i.label_0).
          a. If there are addresses that are equal to vaddr, we join all the values they map to and assign ret to it. In case they differ, ret will be top.
@@ -143,11 +143,11 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
            b. the resulting value is top, hence it is soundly over-approximative *)
       (* We assume load/stores are symmetric, i.e., when a load/store operation is made on an address for a specific type and size, all other operations on the same address are made with the same type and size *)
       (* First, connect the right variables: vaddr is mk_i.label_0, ret is mv_i.label_0 *)
-      let state' = Domain.add_constraints state [(Spec_inference.var_to_string addr, Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset);
-                                                 (Spec_inference.var_to_string ret, (Spec_inference.var_to_string (Spec_inference.MemoryVal (i.label, 0))))] in
+      let state' = Domain.add_constraints state [(Var.to_string addr, Printf.sprintf "%s+%d" (Var.to_string vaddr) offset);
+                                                 (Var.to_string ret, (Var.to_string (Var.MemoryVal (i.label, 0))))] in
       (* Then, find all addresses that are equal to vaddr *)
       let mem = (Spec.pre i.label).memory in
-      let addrs = List.filter (Spec_inference.VarMap.keys mem)
+      let addrs = List.filter (Var.Map.keys mem)
           ~f:(fun a -> match Domain.are_equal_offset state' a vaddr offset with
               | (true, false) -> true (* definitely equal *)
               | _ -> false) in
@@ -158,10 +158,10 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
         (* Case a: at least one address: join their value into the state after adding the constraint *)
         let states = List.map addrs ~f:(fun a ->
             (* Get the value *)
-            let v = Spec_inference.VarMap.find_exn mem a in
+            let v = Var.Map.find_exn mem a in
             (* ret = value *)
-            Printf.printf "ret is %s\n" (Spec_inference.var_to_string ret);
-            Domain.add_constraint state' (Spec_inference.var_to_string ret) (Spec_inference.var_to_string v)) in
+            Printf.printf "ret is %s\n" (Var.to_string ret);
+            Domain.add_constraint state' (Var.to_string ret) (Var.to_string v)) in
         (* Meet the domains! This is because they should all be equivalent.
            TODO: carefully check that *)
         List.reduce_exn states ~f:Domain.meet
@@ -171,15 +171,15 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
                                         Spec_inference.MemoryKey (i.label, 2),
                                         Spec_inference.MemoryKey (i.label, 3)) in
     (* add the constraints on addresses, i.e., addri = vaddr+offset+i where vaddr is the variable from the stack, addri is the address from which we will load *)
-    let state' = Domain.add_constraints state [(Spec_inference.var_to_string addr3, (Printf.sprintf "%s+%d" vaddr (offset+3)));
-                                               (Spec_inference.var_to_string addr2, (Printf.sprintf "%s+%d" vaddr (offset+2)));
-                                               (Spec_inference.var_to_string addr1, (Printf.sprintf "%s+%d" vaddr (offset+1)));
-                                               (Spec_inference.var_to_string addr0, (Printf.sprintf "%s+%d" vaddr offset))] in
+    let state' = Domain.add_constraints state [(Var.to_string addr3, (Printf.sprintf "%s+%d" vaddr (offset+3)));
+                                               (Var.to_string addr2, (Printf.sprintf "%s+%d" vaddr (offset+2)));
+                                               (Var.to_string addr1, (Printf.sprintf "%s+%d" vaddr (offset+1)));
+                                               (Var.to_string addr0, (Printf.sprintf "%s+%d" vaddr offset))] in
   | Load ({ typ = I32; offset; sz = Some (Pack8, _) }) ->
     Logging.warn "ImpreciseOperation" "load8 returns top, and ignores sx/zx";
-    let vaddr = Spec_inference.var_to_string (Spec.pop (Spec.pre i.label).vstack) in
+    let vaddr = Var.to_string (Spec.pop (Spec.pre i.label).vstack) in
     let addr0 = Spec_inference.MemoryKey (i.label, 0) in
-    let state' = Domain.add_constraint state (Spec_inference.var_to_string addr0) (Printf.sprintf "%s+%d" vaddr offset) in
+    let state' = Domain.add_constraint state (Var.to_string addr0) (Printf.sprintf "%s+%d" vaddr offset) in
     (* TODO: add constraints on the return value? *)
     state'
   | Load op ->
@@ -187,15 +187,15 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
        failwith (Printf.sprintf "load not supported with such op argument: %s" (Memoryop.to_string op)) *)
     | Store { offset; _ } ->
       let vval, vaddr = Spec.pop2 (Spec.pre i.label).vstack in
-      let addr = Spec_inference.MemoryKey (i.label, 0) in
-      let v = Spec_inference.MemoryValNew (i.label, 0) in
+      let addr = Var.MemoryKey (i.label, 0) in
+      let v = Var.MemoryValNew (i.label, 0) in
       let state' = Domain.add_constraints state [
-          (Spec_inference.var_to_string addr, Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset);
-          (Spec_inference.var_to_string v, Spec_inference.var_to_string vval)]
+          (Var.to_string addr, Printf.sprintf "%s+%d" (Var.to_string vaddr) offset);
+          (Var.to_string v, Var.to_string vval)]
       in
       (* Find all memory keys that are definitely equal to the address *)
       let mem = (Spec.post i.label).memory in
-      let equal_addrs = List.filter (Spec_inference.VarMap.keys mem)
+      let equal_addrs = List.filter (Var.Map.keys mem)
           ~f:(fun a -> match Domain.are_equal_offset state a vaddr offset with
               | (true, false) -> true (* definitely equal *)
               | _ -> false) in
@@ -203,63 +203,63 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
         (* If there are addresses that are definitely equal, update the corresponding value *)
         let states = List.map equal_addrs
             ~f:(fun a ->
-                let v' = Spec_inference.VarMap.find_exn mem a in
-                Domain.add_constraint state' (Spec_inference.var_to_string vval) (Spec_inference.var_to_string v')) in
+                let v' = Var.Map.find_exn mem a in
+                Domain.add_constraint state' (Var.to_string vval) (Var.to_string v')) in
         List.reduce_exn states ~f:Domain.meet
       end else begin
         (* Otherwise, do similar for all addresses that may be equal *)
-        let maybe_equal_addrs = List.filter (Spec_inference.VarMap.keys mem)
+        let maybe_equal_addrs = List.filter (Var.Map.keys mem)
             ~f:(fun a -> match Domain.are_equal_offset state a vaddr offset with
                 | (true, true) -> true (* maybe equal *)
                 | _ -> false) in
         let states = List.map maybe_equal_addrs
             ~f:(fun a ->
-                let v' = Spec_inference.VarMap.find_exn mem a in
+                let v' = Var.Map.find_exn mem a in
                 (* We need to join with the unmodified state because the addres *may* be equal *)
                 Domain.join state'
-                  (Domain.add_constraint state' (Spec_inference.var_to_string v) (Spec_inference.var_to_string v'))) in
+                  (Domain.add_constraint state' (Var.to_string v) (Var.to_string v'))) in
         List.reduce_exn states ~f:Domain.join
       end
       (*
   | Store { typ = I32; offset; sz = None } ->
-    let (addr0, addr1, addr2, addr3) = (Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)),
-                                        Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 1)),
-                                        Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 2)),
-                                        Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 3))) in
+    let (addr0, addr1, addr2, addr3) = (Var.to_string (Spec_inference.MemoryKey (i.label, 0)),
+                                        Var.to_string (Spec_inference.MemoryKey (i.label, 1)),
+                                        Var.to_string (Spec_inference.MemoryKey (i.label, 2)),
+                                        Var.to_string (Spec_inference.MemoryKey (i.label, 3))) in
     let (_vval, vaddr) = Spec.pop2 (Spec.pre i.label).vstack in
-    let state' = Domain.add_constraints state [(addr3, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+3)));
-                                               (addr2, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+2)));
-                                               (addr1, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+1)));
-                                               (addr0, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset))] in
+    let state' = Domain.add_constraints state [(addr3, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+3)));
+                                               (addr2, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+2)));
+                                               (addr1, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+1)));
+                                               (addr0, (Printf.sprintf "%s+%d" (Var.to_string vaddr) offset))] in
     (* TODO: update memory *)
     state'
   | Store { typ = I64; offset; sz = None } ->
     let (addr0, addr1, addr2, addr3,
-         addr4, addr5, addr6, addr7) = (Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)),
-                                        Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 1)),
-                                        Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 2)),
-                                        Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 3)),
-                                        Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 4)),
-                                        Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 5)),
-                                        Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 6)),
-                                        Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 7))) in
+         addr4, addr5, addr6, addr7) = (Var.to_string (Spec_inference.MemoryKey (i.label, 0)),
+                                        Var.to_string (Spec_inference.MemoryKey (i.label, 1)),
+                                        Var.to_string (Spec_inference.MemoryKey (i.label, 2)),
+                                        Var.to_string (Spec_inference.MemoryKey (i.label, 3)),
+                                        Var.to_string (Spec_inference.MemoryKey (i.label, 4)),
+                                        Var.to_string (Spec_inference.MemoryKey (i.label, 5)),
+                                        Var.to_string (Spec_inference.MemoryKey (i.label, 6)),
+                                        Var.to_string (Spec_inference.MemoryKey (i.label, 7))) in
     let (_vval, vaddr) = Spec.pop2 (Spec.pre i.label).vstack in
     let state' = Domain.add_constraints state
-        [(addr7, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+7)));
-         (addr6, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+6)));
-         (addr5, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+5)));
-         (addr4, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+4)));
-         (addr3, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+3)));
-         (addr2, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+2)));
-         (addr1, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) (offset+1)));
-         (addr0, (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset))] in
+        [(addr7, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+7)));
+         (addr6, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+6)));
+         (addr5, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+5)));
+         (addr4, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+4)));
+         (addr3, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+3)));
+         (addr2, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+2)));
+         (addr1, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+1)));
+         (addr0, (Printf.sprintf "%s+%d" (Var.to_string vaddr) offset))] in
     (* TODO: update memory *)
     state'
   | Store { typ = I32; offset; sz = Some (Pack8, SX)} ->
     Logging.warn "ImpreciseOperation" "store8 ignores sx/zx";
-    let addr0 = Spec_inference.var_to_string (Spec_inference.MemoryKey (i.label, 0)) in
+    let addr0 = Var.to_string (Spec_inference.MemoryKey (i.label, 0)) in
     let (_vval, vaddr) = Spec.pop2 (Spec.pre i.label).vstack in
-    let state' = Domain.add_constraint state addr0 (Printf.sprintf "%s+%d" (Spec_inference.var_to_string vaddr) offset) in
+    let state' = Domain.add_constraint state addr0 (Printf.sprintf "%s+%d" (Var.to_string vaddr) offset) in
     (* TODO: update memory *)
     state'
   | Store op ->
@@ -276,7 +276,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       let summary = SummaryManager.get f in
       let args = List.take (Spec.pre i.label).vstack (fst arity) in
       let ret = if snd arity = 1 then List.hd (Spec.post i.label).vstack else None in
-      Relational_summary.apply summary state (List.map ~f:Spec_inference.var_to_string args) (Option.map ~f:Spec_inference.var_to_string ret)
+      Relational_summary.apply summary state (List.map ~f:Var.to_string args) (Option.map ~f:Var.to_string ret)
     in
     match i.instr with
     | Call (arity, f) ->
@@ -317,7 +317,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       `Simple state
     | BrIf _
     | If _ ->
-      let cond = Spec_inference.var_to_string (Spec.pop (Spec.pre i.label).vstack) in
+      let cond = Var.to_string (Spec.pop (Spec.pre i.label).vstack) in
       (* restrict cond = 1 to the constraints of the true branch, cond = 0 to the constrainst of the false branch *)
       `Branch (state (* true branch, cond is non-zero. Can't refine it (would have to meet with ]-inf,-1] union [1, +inf[, which is ]-inf,+inf[ in the current domains *),
                Domain.meet_interval state cond (0, 0) (* false branch, cond is zero *))
@@ -331,8 +331,8 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
 
   let summary (cfg : Cfg.t) (out_state : state) : summary =
     Relational_summary.make cfg out_state
-      (if List.length cfg.return_types = 1 then Option.map ~f:Spec_inference.var_to_string (List.hd (Spec.post_block cfg.exit_block).vstack) else None)
-      (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Spec.pre_block cfg.entry_block)))
-      (List.map ~f:Spec_inference.var_to_string (Spec_inference.memvars (Spec.post_block cfg.exit_block)))
-      (List.map ~f:Spec_inference.var_to_string (Spec.post_block cfg.exit_block).globals)
+      (if List.length cfg.return_types = 1 then Option.map ~f:Var.to_string (List.hd (Spec.post_block cfg.exit_block).vstack) else None)
+      (List.map ~f:Var.to_string (Spec_inference.memvars (Spec.pre_block cfg.entry_block)))
+      (List.map ~f:Var.to_string (Spec_inference.memvars (Spec.post_block cfg.exit_block)))
+      (List.map ~f:Var.to_string (Spec.post_block cfg.exit_block).globals)
 end

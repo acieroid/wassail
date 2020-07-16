@@ -1,10 +1,26 @@
 open Core_kernel
-open Wasm
 
-(** A variable in wasm is just an index *)
 module T = struct
-  type t = int
-  [@@deriving sexp, compare]
+  type t =
+    | Var of int
+    | Local of int (* nth local *)
+    | Global of int (* nth global *)
+    | MemoryKey of int * int
+    | MemoryVal of int * int
+    | MemoryValNew of int * int
+    | Merge of int * int
+  [@@deriving sexp, compare, equal]
 end
 include T
-let of_wasm (v : Ast.var) : t = Int32.to_int_exn v.it
+
+let to_string (v : t) : string = match v with
+  | Var n -> Printf.sprintf "i%d" n
+  | Local n -> Printf.sprintf "l%d" n
+  | Global n -> Printf.sprintf "g%d" n
+  | MemoryKey (l, v) -> Printf.sprintf "mk%d_%d" l v
+  | MemoryVal (l, v) -> Printf.sprintf "mv%d_%d" l v
+  | MemoryValNew (l, v) -> Printf.sprintf "mvnew%d_%d" l v
+  | Merge (idx, n) -> Printf.sprintf "merge%d_%d" idx n
+
+module Map = Map.Make(T)
+module Set = Set.Make(T)

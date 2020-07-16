@@ -2,10 +2,10 @@ open Core_kernel
 open Helpers
 
 type t = {
-  args : Spec_inference.var list;
-  globals : Spec_inference.var list; (** globals after the function execution *)
-  ret : Spec_inference.var option;
-  mem : Spec_inference.var list;
+  args : Var.t list;
+  globals : Var.t list; (** globals after the function execution *)
+  ret : Var.t option;
+  mem : Var.t list;
   state : Taint_domain.t;
   (* TODO: memory *)
 }
@@ -14,34 +14,34 @@ type state = Taint_domain.t
 
 let to_string (s : t) : string = Taint_domain.to_string s.state
 
-let bottom (cfg : Cfg.t) (_vars : Spec_inference.var list) : t =
-  let globals = List.mapi cfg.global_types ~f:(fun i _ -> Spec_inference.Var i) in
-  let args = List.mapi cfg.arg_types ~f:(fun i _ -> Spec_inference.Local i) in
+let bottom (cfg : Cfg.t) (_vars : Var.t list) : t =
+  let globals = List.mapi cfg.global_types ~f:(fun i _ -> Var.Var i) in
+  let args = List.mapi cfg.arg_types ~f:(fun i _ -> Var.Local i) in
   let ret = (match cfg.return_types with
       | [] -> None
-      | _ :: [] -> Some (Spec_inference.Var (List.length globals))
+      | _ :: [] -> Some (Var.Var (List.length globals))
       | _ -> failwith "more than one return value") in
   { globals; args; ret;
     mem = [];
     state = Taint_domain.bottom }
 
-let top (cfg : Cfg.t) (_vars : Spec_inference.var list) : t =
-  let globals = List.mapi cfg.global_types ~f:(fun i _ -> Spec_inference.Var i) in
-  let args = List.mapi cfg.arg_types ~f:(fun i _ -> Spec_inference.Local i) in
+let top (cfg : Cfg.t) (_vars : Var.t list) : t =
+  let globals = List.mapi cfg.global_types ~f:(fun i _ -> Var.Var i) in
+  let args = List.mapi cfg.arg_types ~f:(fun i _ -> Var.Local i) in
   let ret = (match cfg.return_types with
       | [] -> None
-      | _ :: [] -> Some (Spec_inference.Var (List.length globals))
+      | _ :: [] -> Some (Var.Var (List.length globals))
       | _ -> failwith "more than one return value") in
   { globals; args; ret;
     mem = []; (* TODO: mem *)
     state = Taint_domain.top globals ret }
 
 let of_import (_idx : int) (name : string) (nglobals : int) (args : Type.t list) (ret : Type.t list) : t =
-  let globals = List.init nglobals ~f:(fun i -> Spec_inference.Var i) in
-  let args = List.mapi args ~f:(fun i _ -> Spec_inference.Local i) in
+  let globals = List.init nglobals ~f:(fun i -> Var.Var i) in
+  let args = List.mapi args ~f:(fun i _ -> Var.Local i) in
   let ret = match ret with
     | [] -> None
-    | _ :: [] -> Some (Spec_inference.Var (nglobals+1))
+    | _ :: [] -> Some (Var.Var (nglobals+1))
     | _ -> failwith "more than one return value" in
   { globals; args; ret;
     mem = [];
@@ -62,16 +62,16 @@ let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [
         IntMap.set summaries ~key:idx ~data:(of_import idx name module_.nglobals args ret))
 
 let make (cfg : Cfg.t) (state : Taint_domain.t)
-    (ret : Spec_inference.var option) (globals_post : Spec_inference.var list)
-    (mem_post : Spec_inference.var list)
+    (ret : Var.t option) (globals_post : Var.t list)
+    (mem_post : Var.t list)
   : t =
   { globals = globals_post;
-    args = List.init (List.length cfg.arg_types) ~f:(fun i -> Spec_inference.Local i);
+    args = List.init (List.length cfg.arg_types) ~f:(fun i -> Var.Local i);
     ret = ret;
     mem = mem_post;
     state = Taint_domain.restrict state (globals_post @ mem_post @ (Option.to_list ret)) }
 
-let apply (summary : t) (state : Taint_domain.t) (args : Spec_inference.var list) (globals : Spec_inference.var list) (ret : Spec_inference.var option) : Taint_domain.t =
+let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals : Var.t list) (ret : Var.t option) : Taint_domain.t =
   (* To apply a summary, we first rename the return value and the globals:
      if summary.state is for example [v0 : l0][v1: l1] where v0 is the return value and v1 is a global,
      and the variable for the return value (ret) and global (globals) are x0 and x1, then we obtain:

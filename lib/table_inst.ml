@@ -1,7 +1,7 @@
 open Core_kernel
 
 module T = struct
-  type funcelem = Var.t option
+  type funcelem = int option
   [@@deriving sexp, compare]
 
   type t = {

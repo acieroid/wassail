@@ -17,11 +17,11 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
 
   (** In the initial state, we only set the taint for for parameters and the globals. *)
   let init_state (cfg : Cfg.t) : state =
-    Spec_inference.VarMap.of_alist_exn
-      ((List.mapi cfg.arg_types ~f:(fun i _ -> (Spec_inference.Local i,
-                                                Taint_domain.taint (Spec_inference.Local i)))) @
-       (List.mapi cfg.global_types ~f:(fun i _ -> (Spec_inference.Global i,
-                                                 Taint_domain.taint (Spec_inference.Global i)))))
+    Var.Map.of_alist_exn
+      ((List.mapi cfg.arg_types ~f:(fun i _ -> (Var.Local i,
+                                                Taint_domain.taint (Var.Local i)))) @
+       (List.mapi cfg.global_types ~f:(fun i _ -> (Var.Global i,
+                                                 Taint_domain.taint (Var.Global i)))))
 
   let bottom_state (_cfg : Cfg.t) : state = Taint_domain.bottom
 
@@ -66,7 +66,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
          Refined case: get the taint of the memory cells that can pointed to, according to the previous analysis stages (i.e., relational analysis) *)
       let addr = Spec.pop (Spec.pre i.label).vstack in
       let mem = (Spec.pre i.label).memory in
-      let all_locs = Spec_inference.VarMap.keys mem in
+      let all_locs = Var.Map.keys mem in
       (* Filter the memory location using results from the relational analysis if possible *)
       let locs = if !use_relational then
           (* We need to filter locs to only have the locs that can be loaded.
@@ -88,7 +88,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
       (* Get the taint of possible memory location and their value.
          In practice, both the memory location and the value have the same taint
       *)
-      let taints = List.map locs ~f:(fun k -> Taint_domain.join_taint (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Spec_inference.VarMap.find_exn mem k))) in
+      let taints = List.map locs ~f:(fun k -> Taint_domain.join_taint (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Var.Map.find_exn mem k))) in
       Taint_domain.add_taint
         state
         (Spec.ret i.label)
@@ -99,7 +99,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
          Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
       let vval, vaddr = Spec.pop2 (Spec.pre i.label).vstack in
       let mem = (Spec.post i.label).memory in
-      let all_locs = Spec_inference.VarMap.keys mem in
+      let all_locs = Var.Map.keys mem in
       (* Refine memory locations using relational innformation, if available *)
       let locs = if !use_relational then
           let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc vaddr offset with
@@ -118,7 +118,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
       (* Set the taint of memory locations and the value to the taint of vval *)
       List.fold_left locs ~init:state ~f:(fun s k ->
           Taint_domain.add_taint_v (Taint_domain.add_taint_v s k vval)
-            (Spec_inference.VarMap.find_exn mem k) vval)
+            (Var.Map.find_exn mem k) vval)
 
   let control_instr_transfer
       (module_ : Wasm_module.t) (* The wasm module (read-only) *)
@@ -200,6 +200,6 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
     Taint_summary.make cfg out_state
       (if List.length cfg.return_types = 1 then List.hd (Spec.post_block cfg.exit_block).vstack else None)
       (Spec.post_block cfg.exit_block).globals
-      (List.concat_map (Spec_inference.VarMap.to_alist (Spec.post_block cfg.exit_block).memory)
+      (List.concat_map (Var.Map.to_alist (Spec.post_block cfg.exit_block).memory)
          ~f:(fun (a, b) -> [a; b]))
 end

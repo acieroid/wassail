@@ -7,8 +7,8 @@ module type SUMMARY_T = sig
   type t
   type state
   val to_string : t -> string
-  val bottom : Cfg.t -> Spec_inference.var list -> t
-  val top : Cfg.t -> Spec_inference.var list -> t
+  val bottom : Cfg.t -> Var.t list -> t
+  val top : Cfg.t -> Var.t list -> t
   val initial_summaries : Cfg.t IntMap.t -> Wasm_module.t -> [`Bottom | `Top ] -> t IntMap.t
 end
 

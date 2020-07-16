@@ -33,7 +33,7 @@ let of_wasm (m : Wasm.Ast.module_) : t =
   let imported_funcs = List.filter_mapi m.it.imports ~f:(fun idx import -> match import.it.idesc.it with
         | FuncImport v ->
           Some (idx, Wasm.Ast.string_of_name import.it.item_name,
-                match (List.nth_exn m.it.types (Var.of_wasm v)).it with
+                match (List.nth_exn m.it.types (Index.of_wasm v)).it with
                 | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
                                                  List.map b ~f:Type.of_wasm))
         | _ -> None) in

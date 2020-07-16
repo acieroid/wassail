@@ -38,8 +38,8 @@ let make (cfg : Cfg.t) (state : Domain.t) (ret : string option)
       - the return value if there is one (i.e., the top of the stack)
       - any variable bound in the store
       - any variable used by a global *)
-  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
-  let globals_pre = List.mapi cfg.global_types ~f:(fun i _ -> Spec_inference.var_to_string (Spec_inference.Global i)) in
+  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.to_string (Var.Local argi)) in
+  let globals_pre = List.mapi cfg.global_types ~f:(fun i _ -> Var.to_string (Var.Global i)) in
   let to_keep = params @ globals_pre @ globals_post @ mem_pre @ mem_post @ (Option.to_list ret) in
   { params = params;
     return = ret;
@@ -52,22 +52,22 @@ let make (cfg : Cfg.t) (state : Domain.t) (ret : string option)
     }
 
 (** Constructs an empty bottom summary given a CFG *)
-let bottom (cfg : Cfg.t) (vars : Spec_inference.var list) : t =
+let bottom (cfg : Cfg.t) (vars : Var.t list) : t =
   let ret = if List.length cfg.return_types = 1 then Some "ret" else None in
-  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
-  make cfg (Domain.bottom cfg ((Option.to_list ret) @ params @ (List.map ~f:Spec_inference.var_to_string vars))) ret [] [] []
+  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.to_string (Var.Local argi)) in
+  make cfg (Domain.bottom cfg ((Option.to_list ret) @ params @ (List.map ~f:Var.to_string vars))) ret [] [] []
 
 (** Constructs the top summary given a CFG *)
-let top (cfg : Cfg.t) (vars : Spec_inference.var list) : t =
+let top (cfg : Cfg.t) (vars : Var.t list) : t =
   let ret = if List.length cfg.return_types = 1 then Some "ret" else None in
-  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
+  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.to_string (Var.Local argi)) in
   (* TODO: top memory and globals? *)
-  make cfg (Domain.top cfg ((Option.to_list ret) @ params @ (List.map ~f:Spec_inference.var_to_string vars))) ret [] [] []
+  make cfg (Domain.top cfg ((Option.to_list ret) @ params @ (List.map ~f:Var.to_string vars))) ret [] [] []
 
 (** Constructs a summary from an imported function *)
 let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t list) : t =
   (* These should be fairly easy to encode: we just list constraints between input and output, no constraint if we don't know anything about that name *)
-  let params = List.mapi args ~f:(fun argi _ -> Spec_inference.var_to_string (Spec_inference.Local argi)) in
+  let params = List.mapi args ~f:(fun argi _ -> Var.to_string (Var.Local argi)) in
   assert (List.length ret <= 1); (* wasm spec does not allow for more than one return type (currently) *)
   Printf.printf "[summary %d]: ret is %d\n" _idx (List.length ret);
   let return = match ret with
