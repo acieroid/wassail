@@ -179,6 +179,7 @@ let control_instr_transfer (_module_ : Wasm_module.t) (cfg : Cfg.t) (i : Instr.c
   | BrIf _ | If _ ->
     `Branch ({ state with vstack = drop 1 state.vstack },
              { state with vstack = drop 1 state.vstack })
+  | BrTable _ -> `Simple { state with vstack = drop 1 state.vstack }
   | Return -> `Simple (if List.length cfg.return_types = 1 then
                           { state with vstack = [List.hd_exn state.vstack] }
                         else
