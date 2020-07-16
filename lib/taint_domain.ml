@@ -7,6 +7,7 @@ type taint =
 [@@deriving sexp, compare, equal]
 
 let taint_bottom : taint = Taints Var.Set.empty
+let taint_top : taint = TopTaint
 let taint (v : Var.t) : taint = Taints (Var.Set.singleton v)
 
 (** Joining taints is simply taking their union *)
@@ -24,6 +25,16 @@ let taint_to_string (t : taint) : string = match t with
     String.concat ~sep:"," (List.map (Var.Set.to_list t)
                               ~f:Var.to_string)
   | TopTaint -> "TopTaint"
+
+(** Performs multiple substitutions of taint variables*)
+let taint_substitute (t : taint) (subst : (Var.t * Var.t) list) : taint = match t with
+  | Taints ts ->
+    (* It is important to perform all substitutions at the same time, otherwise we risk substituting incorrectly, e.g. with the substitution [(l0, l1); (l1; l2)]: clearly, l0 should become l1, and not "become l1 then become l2" *)
+    Taints (Var.Set.map ts ~f:(fun x ->
+        match List.find subst ~f:(fun (y, _) -> Var.equal x y) with
+        | None -> x
+        | Some (_, z) -> z))
+  | TopTaint -> TopTaint
 
 (** The state of the taint analysis is a map from variables to their taint values.
     If a variable is not bound in the state, it is assumed that its taint is bottom *)
@@ -61,7 +72,7 @@ let replace_taint (s : t) (from : Var.t) (to_ : taint) : t =
 
 (** Add taint to a variable *)
 let add_taint (s : t) (v : Var.t) (taint : taint) : t =
-  Printf.printf "update taint: %s -> %s\n" (Var.to_string v) (taint_to_string taint);
+  (* Printf.printf "update taint: %s -> %s\n" (Var.to_string v) (taint_to_string taint); *)
   Var.Map.update s v ~f:(function
       | None -> taint
       | Some t -> join_taint t taint)
@@ -72,7 +83,7 @@ let add_taint_v (s : t) (v : Var.t) (taint : Var.t) : t =
 
 (** Sets the taint of a variable to top *)
 let set_top_taint (s : t) (v : Var.t) : t =
-  Printf.printf "add taint: %s -> top\n" (Var.to_string v);
+  (* Printf.printf "add taint: %s -> top\n" (Var.to_string v); *)
   Var.Map.set s ~key:v ~data:TopTaint
 
 (** The bottom state does not contain any taint *)

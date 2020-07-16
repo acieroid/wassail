@@ -62,32 +62,32 @@ let mk_intra
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string)
       and funs = anon (sequence ("funs" %: int)) in
-      Logging.info (Printf.sprintf "Parsing program from file %s...\n" filename);
+      Logging.info (Printf.sprintf "Parsing program from file %s..." filename);
       fun () ->
         apply_to_textual filename (fun m ->
             let module SpecIntra = Intra_fixpoint.Make(Spec_inference) in
-            Logging.info "Importing module...\n";
+            Logging.info "Importing module...";
             let wasm_mod = Wasm_module.of_wasm m in
             let nimports = List.length wasm_mod.imported_funcs in
+            Logging.info "Building CFGs";
             let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
                 let faddr = nimports + i in
-                Logging.info (Printf.sprintf "Building CFG %d\n" faddr);
                 (faddr, Cfg_builder.build faddr wasm_mod))) in
-            Logging.info "Initializing summaries\n";
+            Logging.info "Initializing summaries";
             let summaries = List.fold_left funs
                 ~init:(init_summaries cfgs wasm_mod)
-              ~f:(fun summaries fid ->
-                  Logging.info (Printf.sprintf "Analyzing function %d\n" fid);
-                  if fid < nimports then begin
-                    Printf.printf "This is an imported function, it does not have to be analyzed.\n";
-                    cb_imported summaries fid;
-                    summaries
-                  end else
-                    let cfg = IntMap.find_exn cfgs fid in
-                    let (block_spec, instr_spec) = SpecIntra.analyze wasm_mod cfg in
-                    assert (cfg.idx = fid); (* quick check, can be removed *)
-                    analysis summaries (SpecIntra.extract_spec instr_spec) (SpecIntra.extract_spec block_spec) wasm_mod cfg) in
-            Printf.printf "---------------\nAnalysis done\n------------\n";
+                ~f:(fun summaries fid ->
+                    if fid < nimports then begin
+                      Printf.printf "This is an imported function, it does not have to be analyzed.\n";
+                      cb_imported summaries fid;
+                      summaries
+                    end else
+                      let cfg = IntMap.find_exn cfgs fid in
+                      Logging.info (Printf.sprintf "---------- Spec analysis of function %d ----------" cfg.idx);
+                      let (block_spec, instr_spec) = SpecIntra.analyze wasm_mod cfg in
+                      assert (cfg.idx = fid); (* quick check, can be removed *)
+                      analysis summaries (SpecIntra.extract_spec instr_spec) (SpecIntra.extract_spec block_spec) wasm_mod cfg) in
+            Logging.info "---------- Analysis done ----------";
             List.iter funs ~f:(fun fid ->
                 print_result summaries fid)))
 let intra =
@@ -105,7 +105,7 @@ let intra =
          end) in
        let module RelationalIntra = Intra_fixpoint.Make(Relational_transfer.Make(Spec)) in
        RelationalIntra.init_summaries (fst summaries);
-       Printf.printf "-------------------------\nMain analysis\n-------------------\n";
+       Logging.info "---------- Relational analysis ----------";
        let results = RelationalIntra.analyze wasm_mod cfg in
        let out_state = RelationalIntra.out_state cfg results in
        (* Printf.printf "%d: %s\n" cfg.idx (RelationalIntra.state_to_string out_state); *)
@@ -115,6 +115,7 @@ let intra =
            let instr_data = RelationalIntra.extract_spec (snd results)
          end) in
        (* Run the taint analysis *)
+       Logging.info "---------- Taint analysis ----------";
        let module TaintTransfer = Taint_transfer.Make(Spec)(RelSpec) in
        TaintTransfer.use_relational := true;
        let module TaintIntra = Intra_fixpoint.Make(TaintTransfer) in
@@ -139,7 +140,7 @@ let taint =
            let instr_data = instr_data
            let block_data = block_data
          end) in
-       Printf.printf "-------------------------\nMain analysis\n-------------------\n";
+       Logging.info (Printf.sprintf "---------- Taint analysis of function %d ----------" cfg.idx);
        let module RelSpec = Relational_spec.Spec(struct
            let instr_data = IntMap.empty
          end) in
@@ -169,7 +170,7 @@ let relational =
          end) in
        let module RelationalIntra = Intra_fixpoint.Make(Relational_transfer.Make(Spec)) in
        RelationalIntra.init_summaries summaries;
-       Printf.printf "-------------------------\nMain analysis\n-------------------\n";
+       Logging.info (Printf.sprintf "---------- Relational analysis of function %d ----------" cfg.idx);
        let results = RelationalIntra.analyze wasm_mod cfg in
        let out_state = RelationalIntra.out_state cfg results in
        let relational_summary = RelationalIntra.summary cfg out_state in

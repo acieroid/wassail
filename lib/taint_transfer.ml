@@ -130,8 +130,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
       let summary = SummaryManager.get f in
       let args = List.take (Spec.pre i.label).vstack (fst arity) in
       let ret = if snd arity = 1 then List.hd (Spec.post i.label).vstack else None in
-      let globals = (Spec.post i.label).globals in
-      Taint_summary.apply summary state args globals ret
+      Taint_summary.apply summary state args (Spec.pre i.label).globals (Spec.post i.label).globals ret
     in
     match i.instr with
     | Call (arity, f) ->

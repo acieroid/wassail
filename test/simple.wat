@@ -270,7 +270,9 @@
   (func (;test-taint-setglobal;) (type 1) (param i32) (result i32) ;; 27
     local.get 0
     global.set 0
-    global.get 0)
+    global.get 0
+    ;; ret: tainted with l0, global g0: tainted with l0
+    )
   (func (;test-load;) (type 1) (param i32) (result i32) ;; 28
     local.get 0
     i32.load
@@ -338,7 +340,7 @@
     end
     local.set 2
     i32.const 0)
-  (func (;bug-different-vstacks;) (type 3) (param i32 i32) (result i32)
+  (func (;bug-different-vstacks;) (type 3) (param i32 i32) (result i32) ;; 35
     (local i32 i32 i32)
     block  ;; label = @1
       block  ;; label = @2
@@ -362,9 +364,9 @@
       end
     end
     i32.const 0)
-  (func (;entry-point;) (type 2) (result i32)
+  (func (;entry-point;) (type 2) (result i32) ;; 36
     i32.const 53
-    call 1)
+    call 27)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))
