@@ -22,8 +22,9 @@ let taint_replace_join (t : taint) (var : Var.t) (t2 : taint) = match t with
 
 let taint_to_string (t : taint) : string = match t with
   | Taints t ->
-    String.concat ~sep:"," (List.map (Var.Set.to_list t)
-                              ~f:Var.to_string)
+    if Var.Set.is_empty t then "_" else
+      String.concat ~sep:"," (List.map (Var.Set.to_list t)
+                                ~f:Var.to_string)
   | TopTaint -> "TopTaint"
 
 (** Performs multiple substitutions of taint variables*)

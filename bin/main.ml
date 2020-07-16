@@ -50,6 +50,20 @@ let cfgs =
                     ~f:(fun ch ->
                         Out_channel.output_string ch (Cfg.to_dot cfg)))))
 
+let callgraph =
+  Command.basic
+    ~summary:"Generate the call graph for the module from file [in], outputs as DOT to file [out]"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string)
+      and file_out = anon ("out" %: string) in
+      fun () ->
+        apply_to_textual file_in (fun m ->
+            let wasm_mod = Wasm_module.of_wasm m in
+            let cg = Call_graph.make wasm_mod in
+            Out_channel.with_file file_out
+              ~f:(fun ch ->
+                  Out_channel.output_string ch (Call_graph.to_dot cg))))
+
 let mk_intra
     (desc : string)
     (init_summaries : Cfg.t IntMap.t -> Wasm_module.t -> 'a)
@@ -223,6 +237,7 @@ let () =
     (Command.group ~summary:"Static analysis of WebAssembly"
        ["cfg", cfg
        ; "cfgs", cfgs
+       ; "callgraph", callgraph
        ; "inter", inter
        ; "intra", intra
        ; "taint", taint

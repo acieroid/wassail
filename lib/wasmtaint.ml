@@ -10,6 +10,7 @@ module Cfg_builder = Cfg_builder
 module Cfg = Cfg
 module Instr = Instr
 module Basic_block = Basic_block
+module Call_graph = Call_graph
 
 module Inter_fixpoint = Inter_fixpoint
 module Intra_fixpoint = Intra_fixpoint

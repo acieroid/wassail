@@ -6,12 +6,13 @@ let is_data_instr_supported (d : Instr.data Instr.labelled) : bool = match d.ins
   | Const _ | Unary _ | Binary _ | Compare _ | Test _
   | LocalGet _ | LocalSet _ | LocalTee _
   | GlobalGet _ | GlobalSet _ -> true
-  | Load _ | Store _ -> false
-  | Convert _ -> false
+  | Load _ | Store _ -> true
+  | Convert _ -> true
 
 let is_control_instr_supported (c : Instr.control Instr.labelled) : bool = match c.instr with
   | Block _ | Loop _ | If _ | Call _ | Br _ | BrIf _ | Return | Unreachable -> true
-  | CallIndirect _ | BrTable _ -> false
+  | CallIndirect _ -> true
+  | BrTable _ -> false
 
 let is_block_supported (b : Basic_block.t) : bool = match b.content with
   | Control c -> is_control_instr_supported c
