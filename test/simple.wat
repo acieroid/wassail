@@ -362,8 +362,11 @@
       end
     end
     i32.const 0)
+  (func (;entry-point;) (type 2) (result i32)
+    i32.const 53
+    call 1)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))
-  (export "_start" (func 26))
+  (export "_start" (func 36))
   (export "memory" (memory 0)))
