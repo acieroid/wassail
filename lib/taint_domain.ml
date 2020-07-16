@@ -35,9 +35,7 @@ let taint_substitute (t : taint) (subst : (Var.t * taint) list) : taint = match 
         ~f:(fun (rm, add) x ->
             match List.find subst ~f:(fun (y, _) -> Var.equal x y) with
             | None -> (rm, add)
-            | Some (_, z) ->
-              Printf.printf "subst %s by %s\n" (Var.to_string x) (taint_to_string z);
-              (Var.Set.add rm x, join_taint z add)) in
+            | Some (_, z) -> (Var.Set.add rm x, join_taint z add)) in
     (join_taint (Taints (Var.Set.diff ts vars_to_remove)) taint_to_add)
   | TopTaint -> TopTaint
 

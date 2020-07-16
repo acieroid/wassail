@@ -41,7 +41,7 @@ let top (cfg : Cfg.t) (_vars : Var.t list) : t =
 let of_import (_idx : int) (name : string) (nglobals : int) (args : Type.t list) (ret : Type.t list) : t =
   let args = List.mapi args ~f:(fun i _ -> Var.Local i) in
   match name with
-  | "fd_write" | "proc_exit" ->
+  | "fd_write" | "fd_close" | "fd_seek" | "fd_fdstat_get" | "proc_exit" ->
     (* Globals are unchanged *)
     let globals = List.init nglobals ~f:(fun i -> Taint_domain.taint (Var.Global i)) in
     (* Ret is untainted *)
@@ -55,7 +55,7 @@ let of_import (_idx : int) (name : string) (nglobals : int) (args : Type.t list)
     Logging.info (Printf.sprintf "Imported function is not modelled: %s" name);
     let globals = List.init nglobals ~f:(fun i -> Taint_domain.taint (Var.Global i)) in
     (* Ret is tainted *)
-    let ret = match args with
+    let ret = match ret with
       | [] -> None
       | _ :: [] -> Some Taint_domain.taint_top
       | _ -> failwith "more than one return value" in
