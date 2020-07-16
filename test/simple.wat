@@ -364,8 +364,8 @@
       end
     end
     i32.const 0)
-  (func (;entry-point;) (type 2) (result i32) ;; 36
-    i32.const 53
+  (func (;entry-point;) (type 1) (param i32) (result i32) ;; 36
+    local.get 0
     call 27)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)

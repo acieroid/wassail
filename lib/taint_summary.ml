@@ -88,6 +88,13 @@ let make (cfg : Cfg.t) (state : Taint_domain.t)
     The process is similar for globals.
  *)
 let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pre : Var.t list) (globals_post : Var.t list) (ret : Var.t option) : Taint_domain.t =
+  (* Printf.printf "apply summary, args are %s, globals_pre are: %s, globals_post are: %s, ret is: %s\n"
+    (String.concat ~sep:"," (List.map args ~f:Var.to_string))
+    (String.concat ~sep:"," (List.map globals_pre ~f:Var.to_string))
+    (String.concat ~sep:"," (List.map globals_post ~f:Var.to_string))
+    (match ret with
+     | Some v -> Var.to_string v
+     | None -> "__none__"); *)
   (* The arguments of the summary are l0, l1, etc. *)
   let summary_args = List.init (List.length args) ~f:(fun i -> Var.Local i) in
   (* The globals of the summary are g0, g1, etc. *)
@@ -96,8 +103,8 @@ let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pr
     (* We substitute in the taint: l0 by the actual argument (a in the example.
        Similarly for globals: g0 becomes the corresponding global in globals_pre *)
     (Taint_domain.taint_substitute t
-           ((List.map2_exn summary_args args ~f:(fun x y -> (x, y))) @
-            (List.map2_exn summary_globals globals_pre ~f:(fun x y -> (x, y))))) in
+           ((List.map2_exn summary_args args ~f:(fun x y -> (x, Taint_domain.get_taint state y))) @
+            (List.map2_exn summary_globals globals_pre ~f:(fun x y -> (x, Taint_domain.get_taint state y))))) in
   (* First, propagate the taint for the return value in the given state *)
   let with_ret = match summary.ret, ret with
     | Some r, Some r' ->

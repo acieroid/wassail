@@ -27,13 +27,18 @@ let taint_to_string (t : taint) : string = match t with
   | TopTaint -> "TopTaint"
 
 (** Performs multiple substitutions of taint variables*)
-let taint_substitute (t : taint) (subst : (Var.t * Var.t) list) : taint = match t with
+let taint_substitute (t : taint) (subst : (Var.t * taint) list) : taint = match t with
   | Taints ts ->
     (* It is important to perform all substitutions at the same time, otherwise we risk substituting incorrectly, e.g. with the substitution [(l0, l1); (l1; l2)]: clearly, l0 should become l1, and not "become l1 then become l2" *)
-    Taints (Var.Set.map ts ~f:(fun x ->
-        match List.find subst ~f:(fun (y, _) -> Var.equal x y) with
-        | None -> x
-        | Some (_, z) -> z))
+    let (vars_to_remove, taint_to_add) = Var.Set.fold ts
+        ~init:(Var.Set.empty, taint_bottom)
+        ~f:(fun (rm, add) x ->
+            match List.find subst ~f:(fun (y, _) -> Var.equal x y) with
+            | None -> (rm, add)
+            | Some (_, z) ->
+              Printf.printf "subst %s by %s\n" (Var.to_string x) (taint_to_string z);
+              (Var.Set.add rm x, join_taint z add)) in
+    (join_taint (Taints (Var.Set.diff ts vars_to_remove)) taint_to_add)
   | TopTaint -> TopTaint
 
 (** The state of the taint analysis is a map from variables to their taint values.
