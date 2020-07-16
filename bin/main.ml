@@ -60,6 +60,10 @@ let callgraph =
         apply_to_textual file_in (fun m ->
             let wasm_mod = Wasm_module.of_wasm m in
             let cg = Call_graph.make wasm_mod in
+            let nimports = List.length wasm_mod.imported_funcs in
+            let schedule = Call_graph.analysis_schedule cg nimports in
+            List.iter schedule ~f:(fun elems ->
+                Printf.printf "%s\n" (String.concat ~sep:" " (List.map elems ~f:string_of_int)));
             Out_channel.with_file file_out
               ~f:(fun ch ->
                   Out_channel.output_string ch (Call_graph.to_dot cg))))
