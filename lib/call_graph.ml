@@ -11,7 +11,6 @@ let make (wasm_mod : Wasm_module.t) : t =
   let nodes = IntSet.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> i)) in
   let rec collect_calls (f : int) (instr : Instr.t) (edges : IntSet.t IntMap.t) : IntSet.t IntMap.t = match instr with
     | Control { instr = Call (_, f'); _ } ->
-      Printf.printf "[%d] call %d\n" f f';
       IntMap.update edges f ~f:(function
           | None -> IntSet.singleton f'
           | Some fs -> IntSet.add fs f')
@@ -80,7 +79,6 @@ let scc_topological (cg : t) : (int list) list =
   let sccs : (int list) list ref = ref [] in
   let stack = ref [] in
   let rec strong_connect (v : int) =
-    Printf.printf "strong_connect %d\n" v;
     indices := IntMap.set !indices ~key:v ~data:!index;
     lowlinks := IntMap.set !lowlinks ~key:v ~data:!index;
     index := !index + 1;

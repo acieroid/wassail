@@ -63,10 +63,25 @@ let callgraph =
             let nimports = List.length wasm_mod.imported_funcs in
             let schedule = Call_graph.analysis_schedule cg nimports in
             List.iter schedule ~f:(fun elems ->
-                Printf.printf "%s" (String.concat ~sep:"," (List.map elems ~f:string_of_int)));
+                Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:string_of_int)));
             Out_channel.with_file file_out
               ~f:(fun ch ->
                   Out_channel.output_string ch (Call_graph.to_dot cg))))
+
+let schedule =
+  Command.basic
+    ~summary:"Generate the analysis schedule for the module from file [in]"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string) in
+      fun () ->
+        apply_to_textual file_in (fun m ->
+            let wasm_mod = Wasm_module.of_wasm m in
+            let cg = Call_graph.make wasm_mod in
+            let nimports = List.length wasm_mod.imported_funcs in
+            let schedule = Call_graph.analysis_schedule cg nimports in
+            List.iter schedule ~f:(fun elems ->
+                Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:string_of_int)));
+            Printf.printf "\n"))
 
 let mk_intra
     (desc : string)
@@ -148,7 +163,7 @@ let reltaint_intra =
 let taint_intra =
   mk_intra
     "Just like `intra`, but only performs the taint analysis"
-    (fun cfgs wasm_mod -> Taint_summary.initial_summaries cfgs wasm_mod `Top)
+    (fun cfgs wasm_mod -> Taint_summary.initial_summaries cfgs wasm_mod `Bottom)
     (fun summaries fid ->
        Printf.printf "Taint summary is:\n%s\n" (Taint_summary.to_string (IntMap.find_exn summaries fid));)
     (fun summaries instr_data block_data wasm_mod cfg ->
@@ -219,7 +234,7 @@ let int_comma_separated_list =
       List.map (String.split ids ~on:',') ~f:int_of_string)
 
 let taint_inter =
-  let desc = "Performs inter analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `callgraph` target." in
+  let desc = "Performs inter analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target." in
   let init_summaries cfgs wasm_mod = Taint_summary.initial_summaries cfgs wasm_mod `Bottom in
   Command.basic
     ~summary:desc
@@ -256,6 +271,8 @@ let taint_inter =
                 let (block_spec, instr_spec) = SpecIntra.analyze wasm_mod cfg in
                 SpecData.i_data := SpecIntra.extract_spec instr_spec;
                 SpecData.b_data := SpecIntra.extract_spec block_spec;
+                Gc.compact ();
+                Printf.printf "Performing taint intra of %d\n" cfg.idx;
                 TaintIntra.analyze wasm_mod cfg
               let out_state cfg res = TaintIntra.out_state cfg res
               let summary cfg state = TaintIntra.summary cfg state
@@ -265,6 +282,7 @@ let taint_inter =
                 ~init:(init_summaries cfgs wasm_mod)
                 ~f:(fun summaries funs ->
                     let scc_cfgs = IntMap.filter_keys cfgs ~f:(fun idx -> List.mem funs idx ~equal:Stdlib.(=)) in
+                    TaintIntra.init_summaries summaries;
                     let sums = TaintInter.analyze scc_cfgs wasm_mod in
                     IntMap.fold sums
                       ~init:summaries
@@ -280,6 +298,7 @@ let () =
        ["cfg", cfg
        ; "cfgs", cfgs
        ; "callgraph", callgraph
+       ; "schedule", schedule
        ; "taint-inter", taint_inter
        ; "reltaint-intra", reltaint_intra
        ; "taint-intra", taint_intra
