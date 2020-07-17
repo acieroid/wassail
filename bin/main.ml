@@ -233,6 +233,11 @@ let int_comma_separated_list =
   Command.Arg_type.create (fun ids ->
       List.map (String.split ids ~on:',') ~f:int_of_string)
 
+let timer_start () = Unix.gettimeofday ()
+let timer_value t0 =
+  let t1 = Unix.gettimeofday () in
+  t1 -. t0
+
 let taint_inter =
   let desc = "Performs inter analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target." in
   let init_summaries cfgs wasm_mod = Taint_summary.initial_summaries cfgs wasm_mod `Bottom in
@@ -243,6 +248,7 @@ let taint_inter =
       and sccs = anon (sequence ("funs" %: int_comma_separated_list)) in
       fun () ->
         apply_to_textual filename (fun m ->
+            let timer_init = timer_start () in
             let wasm_mod = Wasm_module.of_wasm m in
             let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
                 let faddr = wasm_mod.nimports + i in
@@ -269,15 +275,21 @@ let taint_inter =
               let analyze wasm_mod (cfg : Cfg.t) =
                 (* TODO: this re-runs a spec analysis for every intra, not really useful... *)
                 let (block_spec, instr_spec) = SpecIntra.analyze wasm_mod cfg in
+                let timer_spec = timer_start () in
                 SpecData.i_data := SpecIntra.extract_spec instr_spec;
                 SpecData.b_data := SpecIntra.extract_spec block_spec;
+                Printf.printf "Spec of %d: %.3f\n" cfg.idx (timer_value timer_spec);
                 Gc.compact ();
+                let timer_inter = timer_start () in
                 Printf.printf "Performing taint intra of %d\n" cfg.idx;
-                TaintIntra.analyze wasm_mod cfg
+                let res = TaintIntra.analyze wasm_mod cfg in
+                Logging.info (Printf.sprintf "Inter-step time: %.3f" (timer_value timer_inter));
+                res
               let out_state cfg res = TaintIntra.out_state cfg res
               let summary cfg state = TaintIntra.summary cfg state
             end in
             let module TaintInter = Inter_fixpoint.Make(Intra) in
+            Logging.info (Printf.sprintf "Initialization time: %.3f" (timer_value timer_init));
             let summaries = List.fold_left sccs
                 ~init:(init_summaries cfgs wasm_mod)
                 ~f:(fun summaries funs ->
