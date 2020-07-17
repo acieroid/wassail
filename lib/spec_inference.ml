@@ -233,8 +233,8 @@ let join_state (s1 : state) (s2 : state) : state =
 let widen _ s2 = s2
 
 module type SPEC_DATA = sig
-  val instr_data : (state * state) IntMap.t
-  val block_data : (state * state) IntMap.t
+  val instr_data : unit -> (state * state) IntMap.t
+  val block_data : unit -> (state * state) IntMap.t
 end
 
 module type SPEC = sig
@@ -253,16 +253,16 @@ end
 
 module Spec (Data : SPEC_DATA) : SPEC = struct
   let vars () : Var.t list = Var.Set.to_list (Var.Set.union
-                                             (vars Data.block_data)
-                                             (vars Data.instr_data))
-  let pre (label : Instr.label) : state = fst (IntMap.find_exn Data.instr_data label)
-  let post (label : Instr.label) : state = snd (IntMap.find_exn Data.instr_data label)
+                                             (vars (Data.block_data ()))
+                                             (vars (Data.instr_data ())))
+  let pre (label : Instr.label) : state = fst (IntMap.find_exn (Data.instr_data ()) label)
+  let post (label : Instr.label) : state = snd (IntMap.find_exn (Data.instr_data ()) label)
 
-  let pre_block (idx : int) : state = fst (IntMap.find_exn Data.block_data idx)
-  let post_block (idx : int) : state = snd (IntMap.find_exn Data.block_data idx)
+  let pre_block (idx : int) : state = fst (IntMap.find_exn (Data.block_data ()) idx)
+  let post_block (idx : int) : state = snd (IntMap.find_exn (Data.block_data ()) idx)
 
   let ret (label : Instr.label) : Var.t =
-    let spec = snd (IntMap.find_exn Data.instr_data label) in
+    let spec = snd (IntMap.find_exn (Data.instr_data ()) label) in
     List.hd_exn spec.vstack
 
   let get_nth (l : Var.t list) (x : int) : Var.t = List.nth_exn l x

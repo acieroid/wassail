@@ -116,8 +116,8 @@ let reltaint_intra =
        Printf.printf "Taint summary is:\n%s\n" (Taint_summary.to_string (IntMap.find_exn (snd summaries) fid));)
     (fun summaries instr_data block_data wasm_mod cfg ->
        let module Spec = Spec_inference.Spec(struct
-           let instr_data = instr_data
-           let block_data = block_data
+           let instr_data () = instr_data
+           let block_data () = block_data
          end) in
        let module RelationalIntra = Intra_fixpoint.Make(Relational_transfer.Make(Spec)) in
        RelationalIntra.init_summaries (fst summaries);
@@ -153,8 +153,8 @@ let taint_intra =
        Printf.printf "Taint summary is:\n%s\n" (Taint_summary.to_string (IntMap.find_exn summaries fid));)
     (fun summaries instr_data block_data wasm_mod cfg ->
        let module Spec = Spec_inference.Spec(struct
-           let instr_data = instr_data
-           let block_data = block_data
+           let instr_data () = instr_data
+           let block_data () = block_data
          end) in
        Logging.info (Printf.sprintf "---------- Taint analysis of function %d ----------" cfg.idx);
        let module RelSpec = Relational_spec.Spec(struct
@@ -181,8 +181,8 @@ let relational_intra =
        Printf.printf "Relational summary is:\n%s\n" (Relational_summary.to_string (IntMap.find_exn summaries fid)))
     (fun summaries instr_data block_data wasm_mod cfg ->
        let module Spec = Spec_inference.Spec(struct
-           let instr_data = instr_data
-           let block_data = block_data
+           let instr_data () = instr_data
+           let block_data () = block_data
          end) in
        let module RelationalIntra = Intra_fixpoint.Make(Relational_transfer.Make(Spec)) in
        RelationalIntra.init_summaries summaries;
@@ -236,8 +236,8 @@ let taint_inter =
             let module SpecData = struct
               let i_data = ref IntMap.empty
               let b_data = ref IntMap.empty
-              let instr_data = !i_data
-              let block_data = !b_data
+              let instr_data () = !i_data
+              let block_data () = !b_data
             end in
             let module Spec = Spec_inference.Spec(SpecData) in
             let module RelSpec = Relational_spec.Spec(struct
@@ -251,7 +251,8 @@ let taint_inter =
               type state = TaintIntra.state
               type summary = TaintIntra.summary
               let equal_state = TaintIntra.equal_state
-              let analyze wasm_mod cfg =
+              let analyze wasm_mod (cfg : Cfg.t) =
+                (* TODO: this re-runs a spec analysis for every intra, not really useful... *)
                 let (block_spec, instr_spec) = SpecIntra.analyze wasm_mod cfg in
                 SpecData.i_data := SpecIntra.extract_spec instr_spec;
                 SpecData.b_data := SpecIntra.extract_spec block_spec;
