@@ -3,7 +3,7 @@ open Core_kernel
 module Make = functor (Spec : Spec_inference.SPEC) -> struct
 
   type state = Relational_domain.t
-  [@@deriving compare]
+  [@@deriving compare, equal]
 
   module Domain = Relational_domain
   module SummaryManager = Summary.MakeManager(Relational_summary)
@@ -12,9 +12,9 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
 
   let init_summaries s = SummaryManager.init s
 
-  let init_state (cfg : Cfg.t) = Domain.init cfg Spec.vars
+  let init_state (cfg : Cfg.t) = Domain.init cfg (Spec.vars ())
 
-  let bottom_state (cfg : Cfg.t) = Domain.bottom cfg (List.map ~f:Var.to_string Spec.vars)
+  let bottom_state (cfg : Cfg.t) = Domain.bottom cfg (List.map ~f:Var.to_string (Spec.vars ()))
 
   let state_to_string = Domain.to_string
 

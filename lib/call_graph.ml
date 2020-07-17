@@ -70,7 +70,6 @@ let remove_imports (cg : t) (nimports : int) : t =
     ) in
   { nodes; edges }
 
-
 (** Computes the SCC in topological order using Tarjan's algorithm.
     The implementation of Tarjan's algorithm follows the pseudo-code implementation of Wikipedia: https://en.wikipedia.org/wiki/Tarjan%27s_strongly_connected_components_algorithm *)
 let scc_topological (cg : t) : (int list) list =

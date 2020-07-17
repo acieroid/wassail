@@ -12,7 +12,7 @@ type state = {
   globals : Var.t list;
   memory : Var.t Var.Map.t;
 }
-[@@deriving sexp, compare]
+[@@deriving sexp, compare, equal]
 
 (** Returns all variables contained in the memory of a state *)
 let memvars (s : state) : Var.t list =
@@ -238,7 +238,7 @@ module type SPEC_DATA = sig
 end
 
 module type SPEC = sig
-  val vars : Var.t list
+  val vars : unit -> Var.t list
   val pre : Instr.label -> state
   val post : Instr.label -> state
   val pre_block : int -> state
@@ -252,7 +252,7 @@ module type SPEC = sig
 end
 
 module Spec (Data : SPEC_DATA) : SPEC = struct
-  let vars : Var.t list = Var.Set.to_list (Var.Set.union
+  let vars () : Var.t list = Var.Set.to_list (Var.Set.union
                                              (vars Data.block_data)
                                              (vars Data.instr_data))
   let pre (label : Instr.label) : state = fst (IntMap.find_exn Data.instr_data label)

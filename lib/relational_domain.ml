@@ -18,6 +18,8 @@ let compare (s1 : t) (s2 : t) : int =
        else if Apron.Abstract1.is_leq manager c1 c2 then -1
        else 1) s1.constraints s2.constraints
 
+let equal (s1 : t) (s2 : t) : bool = compare s1 s2 = 0
+
 let constraints_to_string (c : apron_domain Apron.Abstract1.t) : string =
   (Apron.Abstract1.print Stdlib.Format.str_formatter c; Stdlib.Format.flush_str_formatter ())
 

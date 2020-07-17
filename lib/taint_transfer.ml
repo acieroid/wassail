@@ -7,7 +7,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
 *)
 
   type state = Taint_domain.t
-  [@@deriving compare]
+  [@@deriving sexp, compare, equal]
 
   module SummaryManager = Summary.MakeManager(Taint_summary)
   type summary = Taint_summary.t
@@ -134,6 +134,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
     in
     match i.instr with
     | Call (arity, f) ->
+      Printf.printf "call %d\n" f;
       `Simple (apply_summary f arity state)
     | CallIndirect (arity, typ) ->
       (* Simplest case: all functions with the proper type can be called.

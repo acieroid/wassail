@@ -4,6 +4,7 @@ open Helpers
 module type TRANSFER = sig
   (** The state of the analysis *)
   type state
+  val equal_state : state -> state -> bool
 
   type summary
 
@@ -40,7 +41,17 @@ module type TRANSFER = sig
   val summary : Cfg.t -> state -> summary
 end
 
-module Make = functor (Transfer : TRANSFER) -> struct
+module type INTRA = sig
+  type full_results
+  type state
+  type summary
+  val equal_state : state -> state -> bool
+  val analyze : Wasm_module.t -> Cfg.t -> full_results
+  val out_state : Cfg.t -> full_results -> state
+  val summary : Cfg.t -> state -> summary
+end
+
+module Make (Transfer : TRANSFER) = struct
   include Transfer
 
   (** The result of applying the transfer function. *)
@@ -50,10 +61,10 @@ module Make = functor (Transfer : TRANSFER) -> struct
     | Branch of state * state (** Upon a `brif`, there are two successor states: one where the condition holds, and where where it does not hold. This is used to model that. *)
   [@@deriving compare]
 
-  let result_to_string (r : result) : string = match r with
+(*  let result_to_string (r : result) : string = match r with
     | Uninitialized -> "uninitialized"
     | Simple st -> Transfer.state_to_string st
-    | Branch (st1, st2) -> Printf.sprintf "branch:\n%s\n%s" (Transfer.state_to_string st1) (Transfer.state_to_string st2)
+    | Branch (st1, st2) -> Printf.sprintf "branch:\n%s\n%s" (Transfer.state_to_string st1) (Transfer.state_to_string st2) *)
 
   (** The results of an intra analysis are a mapping from indices (block or instructions) to their in and out values *)
   type intra_results = (result * result) IntMap.t
