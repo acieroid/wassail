@@ -133,9 +133,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
       Taint_summary.apply summary state args (Spec.pre i.label).globals (Spec.post i.label).globals ret
     in
     match i.instr with
-    | Call (arity, f) ->
-      Printf.printf "call %d\n" f;
-      `Simple (apply_summary f arity state)
+    | Call (arity, f) -> `Simple (apply_summary f arity state)
     | CallIndirect (arity, typ) ->
       (* Simplest case: all functions with the proper type can be called.
          Refined case: all functions that are deemed reachable by previous analysis stages (i.e., relational analysis) can be called *)
