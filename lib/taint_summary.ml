@@ -19,6 +19,16 @@ let to_string (s : t) : string =
     (String.concat ~sep:";"
        (List.map ~f:Taint_domain.taint_to_string s.globals))
 
+let of_string (s : string) : t =
+  let stack, globals = Scanf.sscanf s "stack: [%s], globals: [%s]" (fun x y -> (x, y)) in
+  let ret = match String.split stack ~on:';' with
+    | [] -> None
+    | taint :: [] -> Some (Taint_domain.taint_of_string taint)
+    | _ -> failwith "invalid taint summary"
+  in
+  let globals = List.map (String.split globals ~on:';') ~f:Taint_domain.taint_of_string in
+  { ret; globals }
+
 let bottom (cfg : Cfg.t) (_vars : Var.t list) : t =
   let globals = List.map cfg.global_types ~f:(fun _ -> Taint_domain.taint_bottom) in
   let ret = match cfg.return_types with

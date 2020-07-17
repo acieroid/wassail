@@ -27,6 +27,15 @@ let taint_to_string (t : taint) : string = match t with
                                 ~f:Var.to_string)
   | TopTaint -> "TopTaint"
 
+let taint_of_string (s : string) : taint = match s with
+  | "TopTaint" -> TopTaint
+  | "_" -> Taints Var.Set.empty
+  | _ -> Taints (Var.Set.of_list (List.map (String.split s ~on:',') ~f:(fun s ->
+      match String.get s 0 with
+      | 'l' -> Var.Local (int_of_string (String.drop_prefix s 1))
+      | 'g' -> Var.Global (int_of_string (String.drop_prefix s 1))
+      | _ -> failwith "invalid taint")))
+
 (** Performs multiple substitutions of taint variables*)
 let taint_substitute (t : taint) (subst : (Var.t * taint) list) : taint = match t with
   | Taints ts ->
