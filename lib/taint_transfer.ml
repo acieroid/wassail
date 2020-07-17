@@ -44,15 +44,15 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
     | LocalGet l ->
       Taint_domain.add_taint_v state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).locals l)
     | LocalSet l ->
-      Taint_domain.add_taint_v state (Spec.get_nth (Spec.pre i.label).locals l) (Spec.pop (Spec.pre i.label).locals)
+      Taint_domain.add_taint_v state (Spec.get_nth (Spec.pre i.label).locals l) (Spec.pop (Spec.pre i.label).vstack)
     | LocalTee l ->
       Taint_domain.add_taint_v
-        (Taint_domain.add_taint_v state (Spec.get_nth (Spec.pre i.label).locals l) (Spec.pop (Spec.pre i.label).locals))
+        (Taint_domain.add_taint_v state (Spec.get_nth (Spec.pre i.label).locals l) (Spec.pop (Spec.pre i.label).vstack))
         (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).locals l)
     | GlobalGet g ->
         Taint_domain.add_taint_v state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).globals g)
     | GlobalSet g ->
-      Taint_domain.add_taint_v state (Spec.get_nth (Spec.pre i.label).globals g) (Spec.pop (Spec.pre i.label).globals)
+      Taint_domain.add_taint_v state (Spec.get_nth (Spec.pre i.label).globals g) (Spec.pop (Spec.pre i.label).vstack)
     | Const _ -> state
     | Binary _ | Compare _ ->
       let v1, v2 = Spec.pop2 (Spec.pre i.label).vstack in

@@ -367,6 +367,14 @@
   (func (;entry-point;) (type 1) (param i32) (result i32) ;; 36
     local.get 0
     call 27)
+
+  (func (;taint-global-local;) (type 1) (param i32) (result i32) ;; 37
+    (local i32)
+    global.get 0
+    local.tee 1
+    global.set 0
+    i32.const -1
+    local.set 1)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))

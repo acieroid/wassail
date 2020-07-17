@@ -2,4 +2,5 @@
   (name main)
   (modules Main)
   (libraries wasmtaint core wasm)
+  ;; (link_flags :standard -cclib -static) ;; uncomment to enable static executable
   (preprocess (pps ppx_jane ppx_compare)))
