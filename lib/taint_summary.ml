@@ -3,7 +3,6 @@ open Helpers
 
 (** A taint summary *)
 type t = {
-  args : Var.t list; (** The variables for the function arguments. They are used to apply the summary *)
   ret : Taint_domain.taint option; (** The taint of the (optional) return value *)
   globals : Taint_domain.taint list; (** The taint of the globals after applying the function *)
   (* TODO: mem *)
@@ -22,24 +21,21 @@ let to_string (s : t) : string =
 
 let bottom (cfg : Cfg.t) (_vars : Var.t list) : t =
   let globals = List.map cfg.global_types ~f:(fun _ -> Taint_domain.taint_bottom) in
-  let args = List.mapi cfg.arg_types ~f:(fun i _ -> Var.Local i) in
   let ret = match cfg.return_types with
       | [] -> None
       | _ :: [] -> Some Taint_domain.taint_bottom
       | _ -> failwith "more than one return value" in
-  { args; ret; globals }
+  { ret; globals }
 
 let top (cfg : Cfg.t) (_vars : Var.t list) : t =
   let globals = List.map cfg.global_types ~f:(fun _ -> Taint_domain.taint_top) in
-  let args = List.mapi cfg.arg_types ~f:(fun i _ -> Var.Local i) in
   let ret = match cfg.return_types with
       | [] -> None
       | _ :: [] -> Some Taint_domain.taint_top
       | _ -> failwith "more than one return value" in
-  { globals; args; ret }
+  { globals; ret }
 
-let of_import (_idx : int) (name : string) (nglobals : int) (args : Type.t list) (ret : Type.t list) : t =
-  let args = List.mapi args ~f:(fun i _ -> Var.Local i) in
+let of_import (_idx : int) (name : string) (nglobals : int) (_args : Type.t list) (ret : Type.t list) : t =
   match name with
   | "fd_write" | "fd_close" | "fd_seek" | "fd_fdstat_get" | "proc_exit" ->
     (* Globals are unchanged *)
@@ -49,7 +45,7 @@ let of_import (_idx : int) (name : string) (nglobals : int) (args : Type.t list)
       | [] -> None
       | _ :: [] -> Some Taint_domain.taint_bottom
       | _ -> failwith "more than one return value" in
-    { globals; args; ret }
+    { globals; ret }
   | _ ->
     (* XXX: We assume globals are unchanged, might not always be the case! *)
     Logging.info (Printf.sprintf "Imported function is not modelled: %s" name);
@@ -59,7 +55,7 @@ let of_import (_idx : int) (name : string) (nglobals : int) (args : Type.t list)
       | [] -> None
       | _ :: [] -> Some Taint_domain.taint_top
       | _ -> failwith "more than one return value" in
-    { globals; args; ret }
+    { globals; ret }
 
 let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t IntMap.t =
   List.fold_left module_.imported_funcs
@@ -70,14 +66,13 @@ let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [
     ~f:(fun summaries (idx, name, (args, ret)) ->
         IntMap.set summaries ~key:idx ~data:(of_import idx name module_.nglobals args ret))
 
-let make (cfg : Cfg.t) (state : Taint_domain.t)
+let make (_cfg : Cfg.t) (state : Taint_domain.t)
     (ret : Var.t option) (globals_post : Var.t list)
     (_mem_post : Var.t list)
   : t =
-  let args = List.init (List.length cfg.arg_types) ~f:(fun i -> Var.Local i) in
   let globals = List.map globals_post ~f:(fun g -> Taint_domain.get_taint state g) in
   let ret = Option.map ret ~f:(fun r -> Taint_domain.get_taint state r) in
-  { globals; args; ret; }
+  { globals; ret; }
 
 
 (** Apply a summary to a given state, where args are the arguments to apply the summary, globals are the globals after the summary, and ret is the optional return value.
