@@ -22,6 +22,8 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
 
   let widen = Domain.widen
 
+  let ignore_memory = ref true
+
   (** Merges the entry states before analyzing the given block *)
   let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
     match states with
@@ -62,12 +64,12 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     | MemorySize ->
       (* memory size is bounded by the initial memory size and the maximum memory size *)
       let mem = Wasm_module.get_meminst module_ 0 in
-      (* add ret = [min,max] where min and max are the memory size bounds *)
-      Domain.add_interval_constraint state (Spec.ret i.label)
-        (mem.min_size,
-         (match mem.max_size with
-          | Some max -> max
-          | None -> failwith "unsupported infinite max size" (* can easily supported, the constraint just becomes ret >= min *)))
+      begin match mem.max_size with
+      | Some max ->
+        (* add ret = [min,max] where min and max are the memory size bounds *)
+        Domain.add_interval_constraint state (Spec.ret i.label) (mem.min_size, max)
+      | None -> (* TODO: add the constraint ret >= min *) state
+      end
     | MemoryGrow ->
       (* not modeled precisely: returns the size of the memory before it has grown *)
       state
@@ -131,6 +133,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       (* Don't add any constraint *)
       state
     | Load {offset; _ } ->
+      if !ignore_memory then state else
       let ret = Spec.ret i.label in
       let vaddr = Spec.pop (Spec.pre i.label).vstack in
       let addr = Var.MemoryKey (i.label, 0) in
@@ -186,6 +189,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     (* TODO: load with sz=8,zx (and others, but this is the most important now *)
        failwith (Printf.sprintf "load not supported with such op argument: %s" (Memoryop.to_string op)) *)
     | Store { offset; _ } ->
+      if !ignore_memory then state else
       let vval, vaddr = Spec.pop2 (Spec.pre i.label).vstack in
       let addr = Var.MemoryKey (i.label, 0) in
       let v = Var.MemoryValNew (i.label, 0) in

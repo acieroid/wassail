@@ -16,9 +16,9 @@
 // intptr_t should be the native integer type on most sane systems.
 typedef intptr_t intnative_t;
 
-int main(int argc, char ** argv){
+int main() {
    // Ensure image_Width_And_Height are multiples of 8.
-   const intnative_t image_Width_And_Height=(atoi(argv[1])+7)/8*8;
+   const intnative_t image_Width_And_Height=(512+7)/8*8;
 
    // The image will be black and white with one bit for each pixel. Bits with
    // a value of zero are white pixels which are the ones that "escape" from

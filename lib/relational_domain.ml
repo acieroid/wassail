@@ -1,7 +1,7 @@
 open Core_kernel
 
-type apron_domain = Polka.strict Polka.t
-let manager = Polka.manager_alloc_strict ()
+type apron_domain = Polka.equalities Polka.t
+let manager = Polka.manager_alloc_equalities ()
 
 (** A state that contains the constraints *)
 type t = {
