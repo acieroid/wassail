@@ -1,5 +1,8 @@
-Installing the dependencies
----------------------------
+Wassail is a static analyzer for WebAssembly.
+
+# Setup
+## Installing the dependencies
+
 0. Install opam
 
 1. Get the right version of the wasm spec:
@@ -14,13 +17,12 @@ opam pin add wasm .
 2. Install dependencies for this project
 
 ```sh
-opam install core core_kernel ppx_compare ppx_inline_test ppx_jane wasm js_of_ocaml js_of_ocaml-ppx
+opam install core core_kernel ppx_compare ppx_inline_test ppx_jane wasm sexplib apron
 ```
 
 (This list of dependencies may be outdated, you can find it by running `dune external-lib-deps ./bin/main.exe`)
 
-Running the tests
--------------------
+## Running the tests
 
 ```sh
 make test
@@ -28,15 +30,15 @@ make test
 
 If there is no output, this means all tests successfully passed.
 
-Building
----------
+## Building
 
 ```sh
 make
 ```
 
-Generating CFGs
------------------
+# Constructing Control-Flow Graphs and Call-Graphs
+
+## Generating Control Flow Graphs
 You can either generate a single CFG, for example to generate the CFG of function 1 from file `foo.wat` into `foo.dot`:
 
 ```sh
@@ -49,28 +51,24 @@ Or you can generate all CFGs in a given directory:
 ./main.exe cfgs foo.wat out/
 ```
 
-Running the analysis
-----------------------
-
-You can either run individual intra-analyses, by listing the functions that have to be analyzed.
-They will be analyzed in the given order, and summaries will be updated so that if a function relies on another one, it can use its summary.
-
-For example, to analyze function 1, followed by function 2, and re-analyze function 1:
+## Generating Call Graphs
+To generate the call graph for a module `foo.wat` into `foo.dot`:
 
 ```sh
-./main.exe intra foo.wat 1 2 1
+./main.exe callgraph foo.wat foo.dot
 ```
 
-Or you can use an inter-fixpoint mechanism to analyze all functions until no new results are produced:
+# Analyses
 
-```sh
-./main.exe inter foo.wat
-```
+## Taint Analysis
 
-All results (i.e., the generated summaries) are printed to the console.
+TODO
 
-Using the interface
----------------------
+
+# Web interface
+
+The web interface can be used to generate CFGs, call graphs, and run a naive taint analysis.
+It currently cannot perform any relational analysis, as it requires Apron which can't be compiled to JavaScript.
 
 ```sh
 make js
