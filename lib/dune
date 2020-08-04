@@ -1,6 +1,16 @@
 (library
    (name wassail)
-   (modules Wassail Helpers Wasm_helpers Type Binop Unop Memoryop Testop Relop Value Index Var Instr Basic_block Memory_inst Module_inst Global_inst Func Func_inst Wasm_module Cfg Cfg_builder Summary Intra_fixpoint Inter_fixpoint Vstack Locals Globals Logging Elem Table Table_inst Prim_value Convertop Spec_inference Taint_domain Taint_transfer Taint_summary Relational_transfer Relational_domain Relational_summary Check_support Relational_spec Call_graph)
+   (modules
+      Wassail
+      Logging Helpers Wasm_helpers
+      Type Binop Unop Memoryop Testop Relop Value Index Var Instr Memory_inst Module_inst Global_inst Func Func_inst Elem Table Table_inst Convertop Wasm_module
+      Basic_block Cfg Cfg_builder Call_graph
+      Summary Intra_fixpoint Inter_fixpoint
+      Vstack Locals Globals Prim_value
+      Spec_inference
+      Taint_options Taint_domain Taint_transfer Taint_summary
+      Relational_domain Relational_transfer Relational_summary  Relational_spec
+      Check_support)
    (libraries core_kernel wasm  apron apron.polkaMPQ apron.octD sexplib)
    (inline_tests)
    (preprocess (pps ppx_jane ppx_compare ppx_inline_test)))

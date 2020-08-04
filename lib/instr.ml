@@ -112,11 +112,6 @@ let control_to_short_string (instr : control) : string =
   | If _ -> "if"
   | _ -> control_to_string instr
 
-(** Pops an element from a vstack *)
-let vstack_pop (vstack : string list) : string list = match vstack with
-  | [] -> failwith "incorrect vstack manipulation when parsing instructions"
-  | _ :: rest -> rest
-
 (** The instruction counter *)
 let counter : label ref = ref 0
 

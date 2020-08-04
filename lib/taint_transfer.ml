@@ -12,9 +12,6 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
   module SummaryManager = Summary.MakeManager(Taint_summary)
   type summary = Taint_summary.t
 
-  (** Set to true to refine the analysis with the results from the relational analysis *)
-  let use_relational = ref false
-
   (** In the initial state, we only set the taint for for parameters and the globals. *)
   let init_state (cfg : Cfg.t) : state =
     Var.Map.of_alist_exn
@@ -68,7 +65,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
       let mem = (Spec.pre i.label).memory in
       let all_locs = Var.Map.keys mem in
       (* Filter the memory location using results from the relational analysis if possible *)
-      let locs = if !use_relational then
+      let locs = if !Taint_options.use_relational then
           (* We need to filter locs to only have the locs that can be loaded.
              This means for each loc, we can ask the relational domain if are_equal loc v (where v is the top of the stack.
              If some are truly equal, we know we can only keep these. Otherwise, if some maybe equal, then these have to be kept. *)
@@ -101,7 +98,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
       let mem = (Spec.post i.label).memory in
       let all_locs = Var.Map.keys mem in
       (* Refine memory locations using relational innformation, if available *)
-      let locs = if !use_relational then
+      let locs = if !Taint_options.use_relational then
           let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc vaddr offset with
               | (true, false) -> true
               | _ -> false) in
@@ -147,7 +144,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
           | (Some fa, idx) ->
             if Stdlib.(ftype = (Wasm_module.get_func_type module_ fa)) then Some (fa, idx) else None
           | _ -> None) in
-      let funs_to_apply = if !use_relational then
+      let funs_to_apply = if !Taint_options.use_relational then
           let v = Spec.pop (Spec.pre i.label).vstack in
           List.filter funs_with_matching_type ~f:(fun (_, idx) ->
               (* Only keep the functions for which the index may match *)

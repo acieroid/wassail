@@ -134,6 +134,9 @@ let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pr
           Taint_domain.add_taint acc g' (subst g))
   in
   (* Memory: propagate the join memory taint from the summary to all memory locs in the state *)
-  let with_mem = List.fold_left mem_post ~init:with_globals ~f:(fun acc v ->
-      Taint_domain.add_taint acc v (subst summary.mem)) in
+  let with_mem = if !Taint_options.keep_memory then
+      List.fold_left mem_post ~init:with_globals ~f:(fun acc v ->
+          Taint_domain.add_taint acc v (subst summary.mem))
+    else
+      with_globals in
   with_mem

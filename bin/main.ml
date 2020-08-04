@@ -148,7 +148,7 @@ let reltaint_intra =
        (* Run the taint analysis *)
        Logging.info "---------- Taint analysis ----------";
        let module TaintTransfer = Taint_transfer.Make(Spec)(RelSpec) in
-       TaintTransfer.use_relational := true;
+       Taint_options.use_relational := true;
        let module TaintIntra = Intra_fixpoint.Make(TaintTransfer) in
        TaintIntra.init_summaries (snd summaries);
        let results = TaintIntra.analyze wasm_mod cfg in
@@ -177,7 +177,7 @@ let taint_intra =
          end) in
        (* Run the taint analysis *)
        let module TaintTransfer = Taint_transfer.Make(Spec)(RelSpec) in
-       TaintTransfer.use_relational := false;
+       Taint_options.use_relational := false;
        let module TaintIntra = Intra_fixpoint.Make(TaintTransfer) in
        TaintIntra.init_summaries summaries;
        let results = TaintIntra.analyze wasm_mod cfg in
@@ -265,7 +265,7 @@ let taint_inter =
                 let instr_data = IntMap.empty
               end) in
             let module TaintTransfer = Taint_transfer.Make(Spec)(RelSpec) in
-            TaintTransfer.use_relational := false;
+            Taint_options.use_relational := false;
             let module TaintIntra = Intra_fixpoint.Make(TaintTransfer) in
             let module Intra = struct
               type full_results = TaintIntra.intra_results * TaintIntra.intra_results
