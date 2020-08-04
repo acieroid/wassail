@@ -1,5 +1,5 @@
 open Js_of_ocaml
-open Wasmtaint
+open Wassail
 
 let js_simple x = x + 42
 
@@ -25,46 +25,32 @@ let array_of_list (l : 'a list) (f : 'a -> 'b) : 'b array =
 
 let js_of_instr (instr : Instr.t) =  Js.string (Instr.to_string instr)
 
-let js_of_block_sort (sort : Basic_block.block_sort) = Js.string (match sort with
-    | BlockEntry -> "BlockEntry"
-    | BlockExit -> "BlockExit"
-    | LoopEntry -> "LoopEntry"
-    | LoopExit -> "LoopExit"
-    | Normal -> "Normal"
-    | Function -> "Function"
-    | Return -> "Return")
-
 let js_of_block (block : Basic_block.t) = object%js (self)
   val idx = block.idx
   val sort = match block.content with
-    | Nothing -> Js.string "Empty"
     | Control _ -> Js.string "Control"
     | Data _ -> Js.string "Data"
-    | ControlMerge _ -> Js.string "Control"
+    | ControlMerge -> Js.string "Control"
   val name = match block.content with
-    | Nothing -> Js.string ""
-    | Control i -> Js.string (Instr.control_to_short_string i)
+    | Control i -> Js.string (Instr.control_to_short_string i.instr)
     | Data _ -> Js.string ""
-    | ControlMerge _ -> Js.string "merge"
+    | ControlMerge -> Js.string "merge"
   val shape = match block.content with
     | Data _ -> "rect"
-    | Control (Call _)
-    | Control (CallIndirect _) -> "circle"
+    | Control ({ instr = Call _; _})
+    | Control ({ instr = CallIndirect _; _ }) -> "circle"
     | Control _ -> "ellipse"
-    | ControlMerge _ -> "diamond"
-    | Nothing -> "circle"
+    | ControlMerge -> "diamond"
   val instrs = Js.array (array_of_list (match block.content with
-      | Nothing -> []
-      | Control (Call _ as i) -> [Instr.control_to_string i]
+      | Control ({ instr = Call _ as i; _ }) -> [Instr.control_to_string i]
       | Control _ -> []
-      | Data is -> List.map Instr.data_to_string is
-      | ControlMerge _ -> [])
+      | Data is -> List.map (fun (i : Instr.data Instr.labelled) -> Instr.data_to_string i.instr) is
+      | ControlMerge -> [])
       Js.string)
   val label = Js.string (match block.content with
-    | Nothing -> ""
-    | Data is -> Printf.sprintf "%s" (String.concat "\n" (List.map Instr.data_to_string is))
-    | Control i -> Printf.sprintf "%s" (Instr.control_to_short_string i)
-    | ControlMerge _ -> Printf.sprintf "merge")
+    | Data is -> Printf.sprintf "%s" (String.concat "\n" (List.map (fun (i : Instr.data Instr.labelled) -> Instr.data_to_string i.instr) is))
+    | Control i -> Printf.sprintf "%s" (Instr.control_to_short_string i.instr)
+    | ControlMerge -> Printf.sprintf "merge")
 end
 
 let js_of_cfg (cfg : Cfg.t) = object%js (self)
@@ -78,12 +64,7 @@ let js_of_cfg (cfg : Cfg.t) = object%js (self)
             (fun x -> x)))))))
 end
 
-let js_of_state (state : Domain.state) = Js.string (Domain.to_string state)
-
-let js_of_result (result : Transfer.result) = Js.string (Transfer.result_to_string result)
-let js_of_result_pair (result : (Transfer.result * Transfer.result)) = Js.string (Printf.sprintf "pre:\n%s\npost:\n%s" (Transfer.result_to_string (fst result)) (Transfer.result_to_string (snd result)))
-
-let () =
+(*let () =
     Js.export "jsbridge"
       (object%js
         method init program = Wasmtaint.initialize (Js.to_string program)
@@ -139,3 +120,4 @@ let () =
             end
           | _ -> Js.Unsafe.inject (Js.undefined)
       end)
+*)

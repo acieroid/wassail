@@ -4,7 +4,7 @@ type t = {
   locals : Type.t list;
   body : Instr.t list;
 }
-[@@deriving sexp, compare]
+[@@deriving sexp, compare, equal]
 
 let of_wasm (m : Ast.module_) (_fid : int) (f : Ast.func) (_nargs : int) (_nglobals : int) (_nreturns : int) : t = {
   locals = List.map f.it.locals ~f:Type.of_wasm;

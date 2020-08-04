@@ -16,7 +16,7 @@ module T = struct
     | TruncSatUF64
     | ReinterpretFloat
     | FloatOp (* TODO: refine *)
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
 end
 include T
 let of_wasm (t : Ast.cvtop) : t =

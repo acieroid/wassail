@@ -4,9 +4,9 @@ open Wasm
 module T = struct
   (** Relational operation *)
   type op = Eq | Ne | LtS | LtU | GtS | GtU | LeS | LeU | GeS | GeU
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
   type t = { op: op; typ: Type.t }
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
 end
 include T
 

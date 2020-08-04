@@ -8,7 +8,7 @@ module T = struct
     module_: Module_inst.t;
     code: Func.t;
   }
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
 end
 include T
 let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (fid : int) (f : Wasm.Ast.func) (nglobals : int) : t =

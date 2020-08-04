@@ -1,9 +1,10 @@
 open Core_kernel
 
+(** The types of logged items *)
 type option =
   | Info
   | Warn of string
-[@@deriving sexp, compare]
+[@@deriving sexp, compare, equal]
 
 let option_to_string (opt : option) =
   match opt with
@@ -14,12 +15,15 @@ type callback = option -> string -> unit
 
 let callbacks : (callback list) ref = ref []
 
-let add_callback (cb : option -> string -> unit) =
-  callbacks := cb :: !callbacks
-
 let log (opt : option) (msg : string) : unit =
   List.iter !callbacks ~f:(fun cb -> cb opt (Printf.sprintf "%s\n" msg))
 
+(** Adds a callback that will be called when something is logged *)
+let add_callback (cb : option -> string -> unit) =
+  callbacks := cb :: !callbacks
+
+(** Logs some information *)
 let info (msg : string) : unit = log Info msg
 
+(** Logs a warning *)
 let warn (kind : string) (msg : string) : unit = log (Warn kind) msg

@@ -1,7 +1,7 @@
 open Core_kernel
 open Helpers
 
-let build (fid : Address.t) (module_ : Wasm_module.t) : Cfg.t =
+let build (fid : int) (module_ : Wasm_module.t) : Cfg.t =
   (* true to simplify the CFG, false to disable simplification *)
   let rec check_no_rest (rest : Instr.t list) : unit = match rest with
     | [] -> ()

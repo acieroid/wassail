@@ -1,6 +1,6 @@
 open Core
 open Wasm
-open Wasmtaint
+open Wassail
 
 let apply_to_textual (filename : string) (f : Ast.module_ -> unit) =
   let extract (l : (Script.var option * Script.definition) list) =

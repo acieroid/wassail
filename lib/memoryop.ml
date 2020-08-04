@@ -4,16 +4,16 @@ open Wasm
 (** Description of memory operations (load and store) *)
 module T = struct
   type extension = SX | ZX
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
   type pack_size = Pack8 | Pack16 | Pack32
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
   type t = {
     typ: Type.t;
     offset: int;
     (* The extension part is only use for load operation and should be ignored for store operations *)
     sz: (pack_size * extension) option;
   }
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
 end
 include T
 let to_string (op : t) : string =

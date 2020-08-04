@@ -8,7 +8,7 @@ module T = struct
     | I64 of int64
     | F32 of int64 (* TODO: proper representation *)
     | F64 of int64 (* TODO: proper representation *)
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
 end
 
 include T

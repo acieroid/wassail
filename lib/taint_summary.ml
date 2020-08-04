@@ -5,29 +5,32 @@ open Helpers
 type t = {
   ret : Taint_domain.taint option; (** The taint of the (optional) return value *)
   globals : Taint_domain.taint list; (** The taint of the globals after applying the function *)
-  (* TODO: mem *)
+  mem: Taint_domain.taint;
+  (* TODO: mem is now a single taint, should be one per var maybe *)
 }
 [@@deriving sexp, compare, equal]
 
 type state = Taint_domain.t
 
 let to_string (s : t) : string =
-  Printf.sprintf "stack: [%s], globals: [%s]"
+  Printf.sprintf "stack: [%s], globals: [%s], mem: %s"
     (String.concat ~sep:";"
        (List.map ~f:Taint_domain.taint_to_string
           (Option.to_list s.ret)))
     (String.concat ~sep:";"
        (List.map ~f:Taint_domain.taint_to_string s.globals))
+    (Taint_domain.taint_to_string s.mem)
 
 let of_string (s : string) : t =
-  let stack, globals = Scanf.sscanf s "stack: [%s], globals: [%s]" (fun x y -> (x, y)) in
+  let stack, globals, mem = Scanf.sscanf s "stack: [%s], globals: [%s], mem: %s" (fun x y z -> (x, y, z)) in
   let ret = match String.split stack ~on:';' with
     | [] -> None
     | taint :: [] -> Some (Taint_domain.taint_of_string taint)
     | _ -> failwith "invalid taint summary"
   in
   let globals = List.map (String.split globals ~on:';') ~f:Taint_domain.taint_of_string in
-  { ret; globals }
+  let mem = Taint_domain.taint_of_string mem in
+  { ret; globals; mem }
 
 let bottom (cfg : Cfg.t) (_vars : Var.t list) : t =
   let globals = List.map cfg.global_types ~f:(fun _ -> Taint_domain.taint_bottom) in
@@ -35,7 +38,8 @@ let bottom (cfg : Cfg.t) (_vars : Var.t list) : t =
       | [] -> None
       | _ :: [] -> Some Taint_domain.taint_bottom
       | _ -> failwith "more than one return value" in
-  { ret; globals }
+  let mem = Taint_domain.taint_bottom in
+  { ret; globals; mem }
 
 let top (cfg : Cfg.t) (_vars : Var.t list) : t =
   let globals = List.map cfg.global_types ~f:(fun _ -> Taint_domain.taint_top) in
@@ -43,7 +47,8 @@ let top (cfg : Cfg.t) (_vars : Var.t list) : t =
       | [] -> None
       | _ :: [] -> Some Taint_domain.taint_top
       | _ -> failwith "more than one return value" in
-  { globals; ret }
+  let mem = Taint_domain.taint_top in
+  { globals; ret; mem }
 
 let of_import (_idx : int) (name : string) (nglobals : int) (_args : Type.t list) (ret : Type.t list) : t =
   match name with
@@ -55,7 +60,7 @@ let of_import (_idx : int) (name : string) (nglobals : int) (_args : Type.t list
       | [] -> None
       | _ :: [] -> Some Taint_domain.taint_bottom
       | _ -> failwith "more than one return value" in
-    { globals; ret }
+    { globals; ret; mem = Taint_domain.taint_top } (* XXX: We assume memory does not get tainted, which is definitely not always true (e.g., fd_write) *)
   | _ ->
     (* XXX: We assume globals are unchanged, might not always be the case! *)
     Logging.info (Printf.sprintf "Imported function is not modelled: %s" name);
@@ -65,7 +70,7 @@ let of_import (_idx : int) (name : string) (nglobals : int) (_args : Type.t list
       | [] -> None
       | _ :: [] -> Some Taint_domain.taint_top
       | _ -> failwith "more than one return value" in
-    { globals; ret }
+    { globals; ret; mem = Taint_domain.taint_top }
 
 let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t IntMap.t =
   List.fold_left module_.imported_funcs
@@ -78,11 +83,14 @@ let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [
 
 let make (_cfg : Cfg.t) (state : Taint_domain.t)
     (ret : Var.t option) (globals_post : Var.t list)
-    (_mem_post : Var.t list)
+    (mem_post : Var.t list)
   : t =
   let globals = List.map globals_post ~f:(fun g -> Taint_domain.get_taint state g) in
   let ret = Option.map ret ~f:(fun r -> Taint_domain.get_taint state r) in
-  { globals; ret; }
+  { globals; ret;
+    (* The taint of the memory is the join of all taints of memory variables *)
+    mem = List.fold_left (List.map mem_post ~f:(Taint_domain.get_taint state))
+        ~init:Taint_domain.taint_bottom ~f:Taint_domain.join_taint }
 
 
 (** Apply a summary to a given state, where args are the arguments to apply the summary, globals are the globals after the summary, and ret is the optional return value.
@@ -92,7 +100,7 @@ let make (_cfg : Cfg.t) (state : Taint_domain.t)
     [r: {l0, l1}].
     The process is similar for globals.
  *)
-let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pre : Var.t list) (globals_post : Var.t list) (ret : Var.t option) : Taint_domain.t =
+let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pre : Var.t list) (globals_post : Var.t list) (mem_post : Var.t list) (ret : Var.t option) : Taint_domain.t =
   (* Printf.printf "apply summary, args are %s, globals_pre are: %s, globals_post are: %s, ret is: %s\n"
     (String.concat ~sep:"," (List.map args ~f:Var.to_string))
     (String.concat ~sep:"," (List.map globals_pre ~f:Var.to_string))
@@ -125,5 +133,7 @@ let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pr
           (* g' (the global after the call) is tainted with the taint of g (the global of the summary, representing the global at the end of the execution of the summary *)
           Taint_domain.add_taint acc g' (subst g))
   in
-  (* TODO: memory *)
-  with_globals
+  (* Memory: propagate the join memory taint from the summary to all memory locs in the state *)
+  let with_mem = List.fold_left mem_post ~init:with_globals ~f:(fun acc v ->
+      Taint_domain.add_taint acc v (subst summary.mem)) in
+  with_mem

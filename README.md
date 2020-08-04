@@ -70,6 +70,8 @@ TODO
 The web interface can be used to generate CFGs, call graphs, and run a naive taint analysis.
 It currently cannot perform any relational analysis, as it requires Apron which can't be compiled to JavaScript.
 
+!!! The web interface needs to be refreshed and currently does not work.
+
 ```sh
 make js
 ```

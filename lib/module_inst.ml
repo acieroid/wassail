@@ -3,15 +3,15 @@ open Wasm
 
 module T = struct
   type t = {
-    funcaddrs: Address.t list;
-    globaladdrs: Address.t list;
-    memaddrs: Address.t list;
+    funcaddrs: int list;
+    globaladdrs: int list;
+    memaddrs: int list;
     (* Other fields are not represented because we don't need them. These are:
        - types: function types (this has already been validated so we can ignore it)
        - tableddrs: we don't support tables (yet)
        - exports: we don't take exports into account (yet) *)
   }
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
 end
 include T
 

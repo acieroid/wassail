@@ -1,33 +1,40 @@
 open Core_kernel
 
 module T = struct
+
+  (** A WebAssembly module *)
   type t = {
-    nimports : int;
-    imported_funcs : (int * string * (Type.t list * Type.t list)) list;
-    funcs : Func_inst.t list;
-    global_types : Type.t list;
-    nglobals : int;
-    mems : Memory_inst.t list;
-    tables : Table_inst.t list;
-    types : (Type.t list * Type.t list) list;
-    (* XXX: other fields *)
+    types : (Type.t list * Type.t list) list; (** The types declared in the module *)
+    global_types : Type.t list; (** The types for the globals *)
+    nglobals : int; (** The number of globals *)
+    nimports : int; (** The number of function imported *)
+    imported_funcs : (int * string * (Type.t list * Type.t list)) list; (** The description of the imported function: their id, name, and type *)
+    funcs : Func_inst.t list; (** The functions defined in the module *)
+    mems : Memory_inst.t list; (** The memories specification *)
+    tables : Table_inst.t list; (** The tables specification *)
   }
-  [@@deriving sexp, compare]
+  [@@deriving sexp, compare, equal]
 end
 include T
-let get_funcinst (m : t) (a : Address.t) : Func_inst.t =
-  List.nth_exn m.funcs (a-(List.length m.imported_funcs))
-(*let get_global (m : t) (a : Address.t) : Global_inst.t =
-  List.nth_exn m.globals a *)
-(*let set_global (m : t) (a : Address.t) (v : Value.t) : t =
-  { m with globals = List.mapi m.globals ~f:(fun i g ->
-        if i = a then { g with value = Value.join g.value v } else g) } *)
-let get_meminst (m : t) (a : Address.t) : Memory_inst.t =
-  List.nth_exn m.mems a
-let join (s1 : t) (s2 : t) : t =
-  assert Stdlib.(s1.funcs = s2.funcs);
-  s1 (*with
-         globals = List.map2_exn s1.globals s2.globals ~f:Global_inst.join *)
+
+(** Get the function instance for the function with index fidx *)
+let get_funcinst (m : t) (fidx : int) : Func_inst.t =
+  List.nth_exn m.funcs (fidx-(List.length m.imported_funcs))
+
+(** Get the memory instance for the memory with index idx *)
+let get_meminst (m : t) (idx : int) : Memory_inst.t =
+  List.nth_exn m.mems idx
+
+(** Get the type with index tid *)
+let get_type (m : t) (tid : int) : Type.t list * Type.t list =
+  List.nth_exn m.types tid
+
+(** Get the type of the function with index fidx *)
+let get_func_type (m : t) (fidx : int) : Type.t list * Type.t list =
+  (List.nth_exn m.funcs (fidx-m.nimports)).typ
+
+
+(** Constructs a Wasm_module *)
 let of_wasm (m : Wasm.Ast.module_) : t =
   let minst = Module_inst.of_wasm m in
   let imported_funcs = List.filter_mapi m.it.imports ~f:(fun idx import -> match import.it.idesc.it with
@@ -59,9 +66,3 @@ let of_wasm (m : Wasm.Ast.module_) : t =
         | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
                                          List.map b ~f:Type.of_wasm))
   })
-
-let get_type (m : t) (tid : int) : Type.t list * Type.t list =
-  List.nth_exn m.types tid
-
-let get_func_type (m : t) (fid : int) : Type.t list * Type.t list =
-  (List.nth_exn m.funcs (fid-m.nimports)).typ
