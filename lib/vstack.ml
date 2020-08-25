@@ -2,7 +2,7 @@ open Core_kernel
 
 (* The value stack is abstracted as a stack of values. It cannot grow unbounded so that is safe *)
 type t = Value.t list
-[@@deriving sexp, compare]
+[@@deriving sexp, compare, equal]
 
 let pop (vstack : t) : (Value.t * t) =
   match vstack with
