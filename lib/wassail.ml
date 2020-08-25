@@ -29,8 +29,6 @@ module Taint_domain = Taint_domain
 module Taint_transfer = Taint_transfer
 module Taint_summary = Taint_summary
 
-module Check_support = Check_support
-
 let error at category msg =
   failwith (Printf.sprintf "Error: %s" (Source.string_of_region at ^ ": " ^ category ^ ": " ^ msg))
 

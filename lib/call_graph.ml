@@ -1,12 +1,14 @@
 open Core_kernel
 open Helpers
 
+(** A call graph *)
 type t = {
-  nodes : IntSet.t;
-  edges : IntSet.t IntMap.t;
+  nodes : IntSet.t; (** Nodes or the  call graphs are function indices *)
+  edges : IntSet.t IntMap.t; (** Edges are from one node to multiple nodes *)
 }
 [@@deriving sexp, compare, equal]
 
+(** Builds a call graph for a module *)
 let make (wasm_mod : Wasm_module.t) : t =
   let nodes = IntSet.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> i)) in
   let rec collect_calls (f : int) (instr : Instr.t) (edges : IntSet.t IntMap.t) : IntSet.t IntMap.t = match instr with
@@ -43,6 +45,7 @@ let make (wasm_mod : Wasm_module.t) : t =
             ~f:(fun edges i -> collect_calls f.idx i edges)) in
   { nodes; edges }
 
+(** Convert call graph to its dot representation *)
 let to_dot (cg : t) : string =
   Printf.sprintf "digraph \"Call graph\" {\n%s\n%s\n}"
     (String.concat ~sep:"\n"
@@ -122,5 +125,6 @@ let scc_topological (cg : t) : (int list) list =
       | None -> strong_connect v);
   !sccs
 
+(** Provides a analysis schedule from a call graph, as SCCs in their reverse topological order *)
 let analysis_schedule (cg : t) (nimports : int) : (int list) list =
   List.rev (scc_topological (remove_imports cg nimports))

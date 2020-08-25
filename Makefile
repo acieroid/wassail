@@ -1,4 +1,4 @@
-all: bin js test
+all: bin test
 
 bin:
 	dune build ./bin/main.exe

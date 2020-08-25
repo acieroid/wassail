@@ -212,23 +212,6 @@ let relational_intra =
     (fun summaries fid ->
        Printf.printf "function %d relational: %s\n" fid (Relational_summary.to_string (IntMap.find_exn summaries fid)))
 
-let check =
-  Command.basic
-    ~summary:"Check functions supported by the analysis"
-    Command.Let_syntax.(
-      let%map_open filename = anon ("file" %: string) in
-      fun () ->
-        apply_to_textual filename (fun m ->
-            let wasm_mod = Wasm_module.of_wasm m in
-            let nimports = List.length wasm_mod.imported_funcs in
-            let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
-                let faddr = nimports + i in
-                (faddr, Cfg_builder.build faddr wasm_mod))) in
-            let supported = IntMap.filter cfgs ~f:Check_support.cfg_is_supported in
-            let nsupported = List.length (IntMap.keys supported) in
-            let nfuns = List.length (IntMap.keys cfgs) in
-            Printf.printf "Supported [%d/%d]: %s\n" nsupported nfuns (String.concat ~sep:" " (List.map (IntMap.data supported) ~f:(fun cfg -> Printf.sprintf "%d" cfg.idx)))))
-
 let int_comma_separated_list =
   Command.Arg_type.create (fun ids ->
       List.map (String.split ids ~on:',') ~f:int_of_string)
@@ -314,5 +297,5 @@ let () =
        ; "taint-inter", taint_inter
        ; "reltaint-intra", reltaint_intra
        ; "taint-intra", taint_intra
-       ; "relational-intra", relational_intra
-       ; "check", check])
+       ; "relational-intra", relational_intra])
+

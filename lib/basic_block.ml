@@ -5,7 +5,7 @@ type block_content =
   | Control of Instr.control Instr.labelled
   | Data of Instr.data Instr.labelled list
   | ControlMerge
-[@@deriving sexp, compare]
+[@@deriving sexp, compare, equal]
 
 (** A basic block *)
 type t = {
@@ -13,6 +13,7 @@ type t = {
   content: block_content; (** Its content *)
 } [@@deriving sexp, compare]
 
+(** Convert a block to its string representation *)
 let to_string (b : t) : string = Printf.sprintf "block %d, %s" b.idx (match b.content with
     | Control instr -> Printf.sprintf "control block: %s" (Instr.control_to_string instr.instr)
     | Data instrs -> Printf.sprintf "data block: %s" (String.concat ~sep:"\\l"
@@ -21,6 +22,7 @@ let to_string (b : t) : string = Printf.sprintf "block %d, %s" b.idx (match b.co
                 Printf.sprintf "%s" (Instr.data_to_string instr.instr))))
     | ControlMerge -> Printf.sprintf "control merge")
 
+(** Convert a basic block to its dot representation *)
 let to_dot (b : t) : string =
   match b.content with
   | Data instrs ->

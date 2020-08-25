@@ -1,7 +1,9 @@
 open Core_kernel
 open Helpers
 
+(** Constructs a CFG for function `fid` in a module. *)
 let build (fid : int) (module_ : Wasm_module.t) : Cfg.t =
+  (* TODO: this implementation is really not ideal and should be clean *)
   (* true to simplify the CFG, false to disable simplification *)
   let rec check_no_rest (rest : Instr.t list) : unit = match rest with
     | [] -> ()
