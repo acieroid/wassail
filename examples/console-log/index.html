@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Simple template</title>
+  </head>
+  <body>
+    
+  </body>
+  <script type="text/javascript">
+    var exports = undefined;
+    var wasm = undefined;
+    var importObj = { env: { print_string: function (arg) { console.log(ab2str(arg))  } } };
+    function ab2str(ptr) {
+        /* TODO: see https://stackoverflow.com/questions/41353389/how-can-i-return-a-javascript-string-from-a-webassembly-function */
+        console.log(ptr);
+        return String.fromCharCode.apply(null, new Uint8Array(exports.memory.buffer, ptr, 5));
+    }
+    function str2ab(str) {
+        /* See https://ariya.io/2019/05/basics-of-memory-access-in-webassembly */
+        var encoder = new TextEncoder();
+        var encodedString = encoder.encod(str);
+        var i8 = new Uint8Array(exports.memory.buffer);
+        
+        var buf = new ArrayBuffer(str.length*4); // 4 bytes for each char
+        var bufView = new Uint32Array(buf);
+        for (var i=0, strLen=str.length; i < strLen; i++) {
+            bufView[i] = str.charCodeAt(i);
+        }
+        return buf;
+    }
+
+    function call_wasm_str(f, str) {
+        f(new Uint32Array.from(str))
+    }
+    fetch('console.wasm').then(response =>
+                              response.arrayBuffer()
+                             ).then(bytes =>
+                                    WebAssembly.instantiate(bytes, importObj)
+                                   ).then(results => {
+                                       wasm = results;
+                                       exports = results.instance.exports;
+                                   });
+    // Storing a string at position 0 in the memory
+    // mem = new Uint8Array(exports.memory.buffer)
+    // mem[0] = 1; mem[1] = 2; mem[2] = 3; mem[3] = 0;
+    // Now we can call exported functions
+    // exports.unsafe(5, 0) // this copies string at 0 to position 5
+    // What we'd like as a result of the analysis is a summary:
+    // vstack: [p0, p1] -> [p0]
+    // heap: \exists n. seq(A, p1, p1+n) * seq(B, p0, p0+n)
+    //              --> seq(A, p1, p1+n) * seq(A, p1, p1+n)
+    // Conclusion:
+    //   - The result has the same taint as the first argument
+    //   - If the heap is tainted between p1 and p1+n, then the heap becomes tainted between p0 and p0+n.
+    // 
+  </script>
+</html>

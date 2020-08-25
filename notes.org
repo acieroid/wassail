@@ -1,0 +1,76 @@
+* CFG Generation
+Done.
+
+* Dataflow Analysis
+For each function, we have a CFG with an entry/exit node, and a successor
+relation.
+We can apply any of the fixpoint solving algorithm, but first we need to define
+the domain and the transfer functions.
+
+** Domain
+We have the following kinds of values:
+  1. locals
+  2. globals
+  3. heap-related
+  4. stack
+
+*** Stack
+#+BEGIN_SRC
+          // stack data: []
+const 32  // stack data: [a(32)]
+const 24  // stack data: [a(24), a(32)]
+add       // stack data: [a(add)(a(24),a(32))]
+#+END_SRC
+
+*** Locals
+Locals are initialized at 0 in the beginning of the CFG of a function
+*** Globals
+Globals preserve their values
+*** Heap
+Heap values are like globals, but maybe a bit more complicated
+
+** Transfer function
+The transfer functions are direct applications of the specification.
+For example:
+** Fixpoint
+Consider a CFG
+
+a -> loop entry -> loop body -> loop exit -> end
+           ^               |
+           ----------------´
+
+We need:
+  1. A function that tells us to start the analysis at block a.
+     entry(cfg) = cfg.entry
+  2. A function that applies the transfer function to a basic block
+     transfer(block, vstack, locals, globals, heap) = <vstack',locals',globals',heap'>
+  3. A function that tells us on which nodes to go next
+     successor(node) = nodes connected from node
+
+Then we can easily fixpoint:
+#+BEGIN_SRC
+analyze_function(cfg, globals, heap):
+  worklist = {cfg.entry}
+  while worklist != empty:
+    block = pick and remove block from worklist
+    (vstack_in, locals_in) = join(for all edges (idx, block), get analysis_result(idx))
+    (vstack', locals', globals', heap') = transfer(block, vstack_in, locals_in, globals, heap)
+    (vstack_prev, locals_prev) = analysis_result(block)
+    if (vstack_prev != vstack' || locals_prev != locals'):
+      // TODO: what about globals/heap?
+      // if globals/heap changed, we probably have to reanalyze *everything* right?
+      worklist += all successors
+      analysis_result(block) = (vstack', locals')
+#+END_SRC
+
+
+worklist = {a}
+analyze_block(a), worklist = {loop_entry}
+analaze_block(loop_entry), worklist = {loop_body}
+analyze_block(loop_body), worklist = {loop_entry, loop_exit}
+...
+* Desiderata
+A wasm module exports multiple functions.
+Consider a module that exports a function "safe", taking two strings as argument 
+* emscripten/helloworld
+16 functions:
