@@ -1,14 +1,16 @@
 open Core_kernel
 
+(** A basic block can either be a control block, a data block, or a merge block *)
 type block_content =
   | Control of Instr.control Instr.labelled
   | Data of Instr.data Instr.labelled list
   | ControlMerge
 [@@deriving sexp, compare]
 
+(** A basic block *)
 type t = {
-  idx: int;
-  content: block_content;
+  idx: int; (** Its index *)
+  content: block_content; (** Its content *)
 } [@@deriving sexp, compare]
 
 let to_string (b : t) : string = Printf.sprintf "block %d, %s" b.idx (match b.content with
