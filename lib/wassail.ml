@@ -7,6 +7,7 @@ module Logging = Logging
 
 module Wasm_module = Wasm_module
 module Instr = Instr
+module Var = Var
 
 module Basic_block = Basic_block
 module Cfg = Cfg

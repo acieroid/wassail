@@ -18,6 +18,9 @@ module IntSet = Set.Make(I)
 (** Maps of integers *)
 module IntMap = Map.Make(I)
 
+(** Sets of strings *)
+module StringSet = Set.Make(S)
+
 (** Maps of strings *)
 module StringMap = Map.Make(S)
 

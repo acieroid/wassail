@@ -4,13 +4,17 @@ open Helpers
 module type TRANSFER = sig
   (** The state of the analysis *)
   type state
-  val equal_state : state -> state -> bool
 
+  (** The summaries of the analysis *)
   type summary
 
+  (** Initializes the summaries *)
   val init_summaries : summary IntMap.t -> unit
 
-  (** States should be comparable *)
+  (** Checks equality between two states *)
+  val equal_state : state -> state -> bool
+
+  (** States should be comparable (i.e., ordered) *)
   val compare_state : state -> state -> int
 
   (** The initial state *)

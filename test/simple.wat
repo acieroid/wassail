@@ -18,6 +18,7 @@
     i32.store offset=12
     local.get 0
     ;; summary: ret = l0, memory[g0] = l0
+    ;; or, <ret = l0, mk = g0, mv = l0>
     ;; taint: ret tainted with l0, memory[g0] tainted with l0
     )
   (func (;test-load;) (type 1) (param i32) (result i32) ;; 2
@@ -367,7 +368,6 @@
   (func (;entry-point;) (type 1) (param i32) (result i32) ;; 36
     local.get 0
     call 27)
-
   (func (;taint-global-local;) (type 1) (param i32) (result i32) ;; 37
     (local i32)
     global.get 0
@@ -375,6 +375,29 @@
     global.set 0
     i32.const -1
     local.set 1)
+  (func (;test-loop;) (type 3) (param i32) (result i32) ;; 38
+    ;; loop(pointer, size)
+    (local i32 i32)
+    local.get 0
+    local.set 2 ;; l2 = ptr
+    local.get 1
+    local.set 3 ;; l3 = size
+    loop
+      local.get 2
+      i32.const 0
+      i32.store ;; stores 0 at *ptr
+      local.get 2
+      i32.const 1
+      i32.add
+      local.set 2 ;; increases ptr
+      local.get 3
+      i32.const 1
+      i32.sub ;; decreases size
+      local.tee 2
+      i32.const 0
+      i32.gt_s
+      br_if 0 ;; loops
+    end)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))
