@@ -29,7 +29,7 @@ let to_string (s : t) : string =
     @param cfg the CFG for which the summary approximates the behavior
     @param ret the return value of the function (if there is any)
     @param state the final state of the summarized function *)
-let make (cfg : Cfg.t) (state : Domain.t) (ret : string option)
+let make (cfg : 'a Cfg.t) (state : Domain.t) (ret : string option)
     (mem_pre : string list) (mem_post : string list)
     (globals_post : string list)
   : t =
@@ -52,13 +52,13 @@ let make (cfg : Cfg.t) (state : Domain.t) (ret : string option)
     }
 
 (** Constructs an empty bottom summary given a CFG *)
-let bottom (cfg : Cfg.t) (vars : Var.t list) : t =
+let bottom (cfg : 'a Cfg.t) (vars : Var.t list) : t =
   let ret = if List.length cfg.return_types = 1 then Some "ret" else None in
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.to_string (Var.Local argi)) in
   make cfg (Domain.bottom cfg ((Option.to_list ret) @ params @ (List.map ~f:Var.to_string vars))) ret [] [] []
 
 (** Constructs the top summary given a CFG *)
-let top (cfg : Cfg.t) (vars : Var.t list) : t =
+let top (cfg : 'a Cfg.t) (vars : Var.t list) : t =
   let ret = if List.length cfg.return_types = 1 then Some "ret" else None in
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.to_string (Var.Local argi)) in
   (* TODO: top memory and globals? *)
@@ -132,7 +132,7 @@ let apply (summary : t) (state : Domain.t) (args: string list) (ret : string opt
     failwith (Printf.sprintf "Apron error in Summary.apply: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
 
 (** Constructs all summaries for a given module, including imported functions *)
-let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t IntMap.t =
+let initial_summaries (cfgs : 'a Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t IntMap.t =
   List.fold_left module_.imported_funcs
     (* Summaries for defined functions are all initialized to bottom (or top) *)
     ~init:(IntMap.map cfgs ~f:(fun cfg ->

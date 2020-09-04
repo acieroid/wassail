@@ -32,7 +32,7 @@ let of_string (s : string) : t =
   let mem = Taint_domain.taint_of_string mem in
   { ret; globals; mem }
 
-let bottom (cfg : Cfg.t) (_vars : Var.t list) : t =
+let bottom (cfg : 'a Cfg.t) (_vars : Var.t list) : t =
   let globals = List.map cfg.global_types ~f:(fun _ -> Taint_domain.taint_bottom) in
   let ret = match cfg.return_types with
       | [] -> None
@@ -41,7 +41,7 @@ let bottom (cfg : Cfg.t) (_vars : Var.t list) : t =
   let mem = Taint_domain.taint_bottom in
   { ret; globals; mem }
 
-let top (cfg : Cfg.t) (_vars : Var.t list) : t =
+let top (cfg : 'a Cfg.t) (_vars : Var.t list) : t =
   let globals = List.map cfg.global_types ~f:(fun _ -> Taint_domain.taint_top) in
   let ret = match cfg.return_types with
       | [] -> None
@@ -72,7 +72,7 @@ let of_import (_idx : int) (name : string) (nglobals : int) (_args : Type.t list
       | _ -> failwith "more than one return value" in
     { globals; ret; mem = Taint_domain.taint_top }
 
-let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t IntMap.t =
+let initial_summaries (cfgs : 'a Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t IntMap.t =
   List.fold_left module_.imported_funcs
     ~init:(IntMap.map cfgs ~f:(fun cfg ->
         (match typ with
@@ -81,7 +81,7 @@ let initial_summaries (cfgs : Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [
     ~f:(fun summaries (idx, name, (args, ret)) ->
         IntMap.set summaries ~key:idx ~data:(of_import idx name module_.nglobals args ret))
 
-let make (_cfg : Cfg.t) (state : Taint_domain.t)
+let make (_cfg : 'a Cfg.t) (state : Taint_domain.t)
     (ret : Var.t option) (globals_post : Var.t list)
     (mem_post : Var.t list)
   : t =

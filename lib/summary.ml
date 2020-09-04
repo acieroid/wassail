@@ -7,9 +7,9 @@ module type SUMMARY_T = sig
   type t
   type state
   val to_string : t -> string
-  val bottom : Cfg.t -> Var.t list -> t
-  val top : Cfg.t -> Var.t list -> t
-  val initial_summaries : Cfg.t IntMap.t -> Wasm_module.t -> [`Bottom | `Top ] -> t IntMap.t
+  val bottom : 'a Cfg.t -> Var.t list -> t
+  val top : 'a Cfg.t -> Var.t list -> t
+  val initial_summaries : 'a Cfg.t IntMap.t -> Wasm_module.t -> [`Bottom | `Top ] -> t IntMap.t
 end
 
 module MakeManager = functor (Summary : SUMMARY_T) -> struct

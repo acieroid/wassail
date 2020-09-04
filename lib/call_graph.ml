@@ -11,7 +11,7 @@ type t = {
 (** Builds a call graph for a module *)
 let make (wasm_mod : Wasm_module.t) : t =
   let nodes = IntSet.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> i)) in
-  let rec collect_calls (f : int) (instr : Instr.t) (edges : IntSet.t IntMap.t) : IntSet.t IntMap.t = match instr with
+  let rec collect_calls (f : int) (instr : 'a Instr.t) (edges : IntSet.t IntMap.t) : IntSet.t IntMap.t = match instr with
     | Control { instr = Call (_, f'); _ } ->
       IntMap.update edges f ~f:(function
           | None -> IntSet.singleton f'
@@ -35,7 +35,7 @@ let make (wasm_mod : Wasm_module.t) : t =
     | Control { instr = If (_, instrs1, instrs2); _ } ->
       collect_calls_instrs f (instrs1 @ instrs2) edges
     | _ -> edges
-  and collect_calls_instrs (f : int) (instrs : Instr.t list) (edges : IntSet.t IntMap.t) : IntSet.t IntMap.t =
+  and collect_calls_instrs (f : int) (instrs : 'a Instr.t list) (edges : IntSet.t IntMap.t) : IntSet.t IntMap.t =
     List.fold_left instrs ~init:edges ~f:(fun edges i -> collect_calls f i edges) in
   let edges = List.fold_left wasm_mod.funcs
       ~init:IntMap.empty

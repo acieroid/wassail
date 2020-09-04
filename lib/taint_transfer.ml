@@ -1,6 +1,10 @@
 open Core_kernel
+open Helpers
 
-module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SPEC) -> struct
+module Make (RelSpec : Relational_spec.SPEC) : Transfer.TRANSFER = struct
+  type annot_expected = Spec_inference.state
+
+  module Spec = Spec_inference.State
   (* TODO: 
      1. Taint summaries need to preserve information about memory.
      2. When applied, taint summary should rely on relational results to apply on the memory
@@ -13,14 +17,14 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
   type summary = Taint_summary.t
 
   (** In the initial state, we only set the taint for for parameters and the globals. *)
-  let init_state (cfg : Cfg.t) : state =
+  let init_state (cfg : 'a Cfg.t) : state =
     Var.Map.of_alist_exn
       ((List.mapi cfg.arg_types ~f:(fun i _ -> (Var.Local i,
                                                 Taint_domain.taint (Var.Local i)))) @
        (List.mapi cfg.global_types ~f:(fun i _ -> (Var.Global i,
                                                  Taint_domain.taint (Var.Global i)))))
 
-  let bottom_state (_cfg : Cfg.t) : state = Taint_domain.bottom
+  let bottom_state (_cfg : 'a Cfg.t) : state = Taint_domain.bottom
 
   let state_to_string (s : state) : string = Taint_domain.to_string s
 
@@ -30,39 +34,45 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
 
   let init_summaries s = SummaryManager.init s
 
-  let data_instr_transfer (_module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data Instr.labelled) (state : state) : state =
+  let data_instr_transfer
+      (_module_ : Wasm_module.t)
+      (_cfg : annot_expected Cfg.t)
+      (i : annot_expected Instr.labelled_data)
+      (state : state)
+    : state =
+    let ret (i : annot_expected Instr.labelled_data) : Var.t = List.hd_exn i.annotation_after.vstack in
     match i.instr with
     | Nop | MemorySize | Drop | MemoryGrow -> state
     | Select ->
-      let ret = Spec.ret i.label in
-      let (_c, v2, v1) = Spec.pop3 (Spec.pre i.label).vstack in
+      let ret = ret i in
+      let (_c, v2, v1) = pop3 i.annotation_before.vstack in
       (* TODO: could improve precision by checking the constraints on c: if it is precisely zero/not-zero, we can only include v1 or v2 *)
       Taint_domain.add_taint_v (Taint_domain.add_taint_v state ret v1) ret v2
     | LocalGet l ->
-      Taint_domain.add_taint_v state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).locals l)
+      Taint_domain.add_taint_v state (ret i) (get_nth i.annotation_before.locals l)
     | LocalSet l ->
-      Taint_domain.add_taint_v state (Spec.get_nth (Spec.pre i.label).locals l) (Spec.pop (Spec.pre i.label).vstack)
+      Taint_domain.add_taint_v state (get_nth i.annotation_before.locals l) (pop i.annotation_before.vstack)
     | LocalTee l ->
       Taint_domain.add_taint_v
-        (Taint_domain.add_taint_v state (Spec.get_nth (Spec.pre i.label).locals l) (Spec.pop (Spec.pre i.label).vstack))
-        (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).locals l)
+        (Taint_domain.add_taint_v state (get_nth i.annotation_before.locals l) (pop i.annotation_before.vstack))
+        (ret i) (get_nth i.annotation_before.locals l)
     | GlobalGet g ->
-        Taint_domain.add_taint_v state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).globals g)
+      Taint_domain.add_taint_v state (ret i) (get_nth i.annotation_before.globals g)
     | GlobalSet g ->
-      Taint_domain.add_taint_v state (Spec.get_nth (Spec.pre i.label).globals g) (Spec.pop (Spec.pre i.label).vstack)
+      Taint_domain.add_taint_v state (get_nth i.annotation_before.globals g) (pop i.annotation_before.vstack)
     | Const _ -> state
     | Binary _ | Compare _ ->
-      let v1, v2 = Spec.pop2 (Spec.pre i.label).vstack in
+      let v1, v2 = pop2 i.annotation_before.vstack in
       Taint_domain.add_taint_v
-        (Taint_domain.add_taint_v state (Spec.ret i.label) v1)
-        (Spec.ret i.label) v2
+        (Taint_domain.add_taint_v state (ret i) v1)
+        (ret i) v2
     | Unary _ | Test _ | Convert _ ->
-      Taint_domain.add_taint_v state (Spec.ret i.label) (Spec.pop (Spec.pre i.label).vstack)
+      Taint_domain.add_taint_v state (ret i) (pop i.annotation_before.vstack)
     | Load { offset; _ } ->
       (* Simplest case: get the taint of the entire memory.
          Refined case: get the taint of the memory cells that can pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-      let addr = Spec.pop (Spec.pre i.label).vstack in
-      let mem = (Spec.pre i.label).memory in
+      let addr = pop i.annotation_before.vstack in
+      let mem = i.annotation_before.memory in
       let all_locs = Var.Map.keys mem in
       (* Filter the memory location using results from the relational analysis if possible *)
       let locs = if !Taint_options.use_relational then
@@ -88,14 +98,14 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
       let taints = List.map locs ~f:(fun k -> Taint_domain.join_taint (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Var.Map.find_exn mem k))) in
       Taint_domain.add_taint
         state
-        (Spec.ret i.label)
+        (ret i)
         (* ret is the join of all these taints *)
         (List.fold_left taints ~init:Taint_domain.taint_bottom ~f:Taint_domain.join_taint)
     | Store { offset; _ } ->
       (* Simplest case: set the taint for the entire memory
          Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-      let vval, vaddr = Spec.pop2 (Spec.pre i.label).vstack in
-      let mem = (Spec.post i.label).memory in
+      let vval, vaddr = pop2 i.annotation_before.vstack in
+      let mem = i.annotation_after.memory in
       let all_locs = Var.Map.keys mem in
       (* Refine memory locations using relational innformation, if available *)
       let locs = if !Taint_options.use_relational then
@@ -119,15 +129,15 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
 
   let control_instr_transfer
       (module_ : Wasm_module.t) (* The wasm module (read-only) *)
-      (_cfg : Cfg.t) (* The CFG analyzed *)
-      (i : Instr.control Instr.labelled) (* The instruction *)
+      (_cfg : annot_expected Cfg.t) (* The CFG analyzed *)
+      (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : state) (* The pre state *)
     : [`Simple of state | `Branch of state * state] =
     let apply_summary (f : int) (arity : int * int) (state : state) : state =
       let summary = SummaryManager.get f in
-      let args = List.take (Spec.pre i.label).vstack (fst arity) in
-      let ret = if snd arity = 1 then List.hd (Spec.post i.label).vstack else None in
-      Taint_summary.apply summary state args (Spec.pre i.label).globals (Spec.post i.label).globals (List.concat_map (Var.Map.to_alist (Spec.post i.label).memory)
+      let args = List.take i.annotation_before.vstack (fst arity) in
+      let ret = if snd arity = 1 then List.hd i.annotation_after.vstack else None in
+      Taint_summary.apply summary state args i.annotation_before.globals i.annotation_after.globals (List.concat_map (Var.Map.to_alist i.annotation_after.memory)
          ~f:(fun (a, b) -> [a; b])) ret
     in
     match i.instr with
@@ -145,7 +155,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
             if Stdlib.(ftype = (Wasm_module.get_func_type module_ fa)) then Some (fa, idx) else None
           | _ -> None) in
       let funs_to_apply = if !Taint_options.use_relational then
-          let v = Spec.pop (Spec.pre i.label).vstack in
+          let v = pop i.annotation_before.vstack in
           List.filter funs_with_matching_type ~f:(fun (_, idx) ->
               (* Only keep the functions for which the index may match *)
               (* TODO: instead of fst, we could take the ones that are (true, false) first, and if there's none, take the ones that are (true, true) *)
@@ -164,7 +174,7 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
     | Unreachable -> `Simple state
     | _ -> `Simple state
 
-  let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
+  let merge_flows (_module_ : Wasm_module.t) (cfg : 'a Cfg.t) (block : 'a Basic_block.t) (states : (int * state) list) : state =
     match states with
     | [] -> init_state cfg
     | _ ->
@@ -172,10 +182,10 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
         begin match block.content with
           | ControlMerge ->
             (* block is a control-flow merge *)
-            let spec = Spec.post_block block.idx in
-            let states' = List.map states ~f:(fun (idx, s) ->
+            let spec = failwith "TODO" (* Spec.post_block block.idx TODO: post_block can be defined by looking at the CFG and getting the state of the final instr of the block (or merging all previous nodes if the block is a control merge *) in
+            let states' = List.map states ~f:(fun (_idx, s) ->
                 (* get the spec after that state *)
-                let spec' = Spec.post_block idx in
+                let spec' = failwith "TODO" (* Spec.post_block idx*) in
                 (* equate all different variables in the post-state with the ones in the pre-state *)
                 List.fold_left (Spec_inference.extract_different_vars spec spec')
                   ~init:s
@@ -192,10 +202,11 @@ module Make = functor (Spec : Spec_inference.SPEC) (RelSpec : Relational_spec.SP
             end
         end
 
-  let summary (cfg : Cfg.t) (out_state : state) : summary =
+  let summary (_cfg : 'a Cfg.t) (_out_state : state) : summary =
+    failwith "TODO" (*
     Taint_summary.make cfg out_state
       (if List.length cfg.return_types = 1 then List.hd (Spec.post_block cfg.exit_block).vstack else None)
       (Spec.post_block cfg.exit_block).globals
       (List.concat_map (Var.Map.to_alist (Spec.post_block cfg.exit_block).memory)
-         ~f:(fun (a, b) -> [a; b]))
+         ~f:(fun (a, b) -> [a; b])) *)
 end

@@ -29,7 +29,7 @@ let cfg =
               let cfg = Cfg_builder.build fid wasm_mod in
               Out_channel.with_file file_out
                 ~f:(fun ch ->
-                    Out_channel.output_string ch (Cfg.to_dot cfg))))
+                    Out_channel.output_string ch (Cfg.to_dot cfg (fun () -> "")))))
 
 let cfgs =
   Command.basic
@@ -48,7 +48,7 @@ let cfgs =
                   let cfg = Cfg_builder.build faddr wasm_mod in
                   Out_channel.with_file (Printf.sprintf "%s/%d.dot" out_dir faddr)
                     ~f:(fun ch ->
-                        Out_channel.output_string ch (Cfg.to_dot cfg)))))
+                        Out_channel.output_string ch (Cfg.to_dot cfg (fun () -> ""))))))
 
 let callgraph =
   Command.basic
@@ -85,9 +85,9 @@ let schedule =
 
 let mk_intra
     (desc : string)
-    (init_summaries : Cfg.t IntMap.t -> Wasm_module.t -> 'a)
+    (init_summaries : unit Cfg.t IntMap.t -> Wasm_module.t -> 'a)
     (cb_imported : 'a -> int -> unit)
-    (analysis : 'a -> (Spec_inference.state * Spec_inference.state) IntMap.t -> (Spec_inference.state * Spec_inference.state) IntMap.t -> Wasm_module.t -> Cfg.t -> 'a)
+    (analysis : 'a -> Wasm_module.t -> Spec_inference.state Cfg.t -> 'a)
     (print_result : 'a -> int -> unit)
   =
   Command.basic
@@ -98,7 +98,7 @@ let mk_intra
       Logging.info (Printf.sprintf "Parsing program from file %s..." filename);
       fun () ->
         apply_to_textual filename (fun m ->
-            let module SpecIntra = Intra_fixpoint.Make(Spec_inference) in
+            let module SpecIntra = Intra.Make(Spec_inference) in
             Logging.info "Importing module...";
             let wasm_mod = Wasm_module.of_wasm m in
             Logging.info "Building CFGs";
@@ -116,56 +116,77 @@ let mk_intra
                     end else
                       let cfg = IntMap.find_exn cfgs fid in
                       Logging.info (Printf.sprintf "---------- Spec analysis of function %d ----------" cfg.idx);
-                      let (block_spec, instr_spec) = SpecIntra.analyze wasm_mod cfg in
-                      analysis summaries (SpecIntra.extract_spec instr_spec) (SpecIntra.extract_spec block_spec) wasm_mod cfg) in
+                      let annotated_cfg = SpecIntra.analyze wasm_mod cfg in
+                      analysis summaries wasm_mod annotated_cfg) in
             Logging.info "---------- Analysis done ----------";
             List.iter funs ~f:(fun fid ->
                 print_result summaries fid)))
+
+let spec_inference =
+  mk_intra
+    "Annotate the CFG with the inferred variables"
+    (fun _cfgs _wasm_mod -> ())
+    (fun _summaries _fid -> ())
+    (fun () _wasm_mod annotated_cfg ->
+       let file_out = Printf.sprintf "%d.dot" annotated_cfg.idx in
+       Out_channel.with_file file_out
+         ~f:(fun ch ->
+             Out_channel.output_string ch (Cfg.to_dot annotated_cfg Spec_inference.state_to_dot_string)))
+    (fun () _ -> ())
+
+
+(*
 let count_vars =
   mk_intra
     "Count the number of program variables generated for a function"
     (fun _cfgs _wasm_mod -> IntMap.empty)
     (fun summaries fid ->
-       Printf.printf "Number of variables for %d: %d\n" fid (Var.Set.length (IntMap.find_exn summaries fid)))
+       let summary = IntMap.find_exn summaries fid in
+       Printf.printf "Number of variables for %d: %d, max at the same time: %d\n" fid (Var.Set.length (fst summary)) (snd summary))
     (fun summaries instr_data block_data wasm_mod cfg ->
        let module Spec = Spec_inference.Spec(struct
            let instr_data () = instr_data
            let block_data () = block_data
          end) in
        let module CountVarsIntra = Intra_fixpoint.Make(struct
-         type state = Var.Set.t
+         type state = (Var.Set.t * int)
          [@@deriving equal, compare, sexp]
          type summary = state
          let init_summaries _ = ()
-         let init_state _ = Var.Set.empty
-         let bottom_state _ = Var.Set.empty
+         let init_state _ = (Var.Set.empty, 0)
+         let bottom_state _ = (Var.Set.empty, 0)
          let state_to_string _ = ""
-         let join_state s1 s2 = Var.Set.union s1 s2
+         let join_state (s1, n1) (s2, n2) = (Var.Set.union s1 s2, max n1 n2)
          let widen = join_state
          let extract_vars (st : Spec_inference.state) : Var.Set.t =
-           Var.Set.union (Var.Set.of_list st.vstack)
-             (Var.Set.union (Var.Set.of_list st.locals)
-                (Var.Set.union (Var.Set.of_list st.globals)
-                   (Var.Set.of_list (List.concat_map (Var.Map.to_alist st.memory) ~f:(fun (a, b) -> [a; b])))))
-         let control_instr_transfer _mod _cfg (i : Instr.control Instr.labelled) state =
-           `Simple
-             (Var.Set.union state
-                (Var.Set.union (extract_vars (Spec.pre i.label)) (extract_vars (Spec.post i.label))))
-         let data_instr_transfer _mod _cfg (i : Instr.data Instr.labelled) state =
-           Var.Set.union state
-             (Var.Set.union (extract_vars (Spec.pre i.label)) (extract_vars (Spec.post i.label)))
+           Var.Set.filter ~f:(function
+               | Merge _ -> false
+               | MemoryKey _ | MemoryVal _ | MemoryValNew _ -> false
+               | _ -> true)
+             (Var.Set.union (Var.Set.of_list st.vstack)
+                (Var.Set.union (Var.Set.of_list st.locals)
+                   (Var.Set.union (Var.Set.of_list st.globals)
+                      (Var.Set.of_list (List.concat_map (Var.Map.to_alist st.memory) ~f:(fun (a, b) -> [a; b]))))))
+         let transfer ilabel(vars, n) =
+           ((Var.Set.union vars
+                 (Var.Set.union (extract_vars (Spec.pre ilabel)) (extract_vars (Spec.post ilabel)))),
+              (max n (Var.Set.length (extract_vars (Spec.post ilabel)))))
+         let control_instr_transfer (_mod : Wasm_module.t) (_cfg : 'a Cfg.t) (i : ('a Instr.control, 'a) Instr.labelled) (vars, n) =
+           `Simple (transfer i.label (vars, n))
+         let data_instr_transfer (_mod : Wasm_module.t) (_cfg : 'a Cfg.t) (i : (Instr.data, 'a) Instr.labelled) (vars, n) =
+           transfer i.label (vars, n)
          let merge_flows _mod cfg _block (states : (int * state) list) =
            List.fold_left (List.map states ~f:snd) ~init:(bottom_state cfg) ~f:join_state
          let summary _cfg st = st
        end) in
        let results = CountVarsIntra.analyze wasm_mod cfg in
        let out_state = CountVarsIntra.out_state cfg results in
-       let summary = CountVarsIntra.summary cfg out_state in
-       Printf.printf "Vars: %d\n" (Var.Set.length summary);
-       IntMap.set summaries ~key:cfg.idx ~data:summary)
+       let (vars, n) = CountVarsIntra.summary cfg out_state in
+       Printf.printf "Vars: %d, max: %d\n" (Var.Set.length vars) n;
+       IntMap.set summaries ~key:cfg.idx ~data:(vars, n))
     (fun summaries fid ->
        let summary = IntMap.find_exn summaries fid in
-       Printf.printf "Vars %d: %d\n" fid (Var.Set.length summary))
+       Printf.printf "Vars %d: %d, max: %d\n" fid (Var.Set.length (fst summary)) (snd summary))
 
 let reltaint_intra =
   mk_intra
@@ -301,7 +322,7 @@ let taint_inter =
               type state = TaintIntra.state
               type summary = TaintIntra.summary
               let equal_state = TaintIntra.equal_state
-              let analyze wasm_mod (cfg : Cfg.t) =
+              let analyze wasm_mod (cfg : 'a Cfg.t) =
                 (* TODO: this re-runs a spec analysis for every intra, not really useful... *)
                 let (block_spec, instr_spec) = SpecIntra.analyze wasm_mod cfg in
                 let timer_spec = timer_start () in
@@ -331,7 +352,7 @@ let taint_inter =
                           IntMap.set acc ~key:idx ~data:sum)) in
             IntMap.iteri summaries ~f:(fun ~key:idx ~data:sum ->
                 Printf.printf "function %d taint: %s\n" idx (Taint_summary.to_string sum))))
-
+*)
 let () =
   Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
   Command.run ~version:"0.0"
@@ -340,9 +361,10 @@ let () =
        ; "cfgs", cfgs
        ; "callgraph", callgraph
        ; "schedule", schedule
-       ; "count-vars", count_vars
-       ; "taint-inter", taint_inter
+       (* ; "count-vars", count_vars *)
+       ; "spec-inference", spec_inference
+       (* ; "taint-inter", taint_inter
        ; "reltaint-intra", reltaint_intra
        ; "taint-intra", taint_intra
-       ; "relational-intra", relational_intra])
+          ; "relational-intra", relational_intra *)])
 

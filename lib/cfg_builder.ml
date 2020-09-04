@@ -2,10 +2,10 @@ open Core_kernel
 open Helpers
 
 (** Constructs a CFG for function `fid` in a module. *)
-let build (fid : int) (module_ : Wasm_module.t) : Cfg.t =
+let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
   (* TODO: this implementation is really not ideal and should be clean *)
   (* true to simplify the CFG, false to disable simplification *)
-  let rec check_no_rest (rest : Instr.t list) : unit = match rest with
+  let rec check_no_rest (rest : 'a Instr.t list) : unit = match rest with
     | [] -> ()
     | Control { instr = Unreachable; _ } :: rest -> check_no_rest rest
     | _ -> failwith "Invalid CFG: instructions found where none expected!"
@@ -14,19 +14,19 @@ let build (fid : int) (module_ : Wasm_module.t) : Cfg.t =
   let funcinst = Wasm_module.get_funcinst module_ fid in
   let cur_idx : int ref = ref 0 in
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
-  let mk_data_block (reverse_instrs : Instr.data Instr.labelled list) : Basic_block.t =
+  let mk_data_block (reverse_instrs : (Instr.data, unit) Instr.labelled list) : unit Basic_block.t =
     let instrs = List.rev reverse_instrs in
     Basic_block.{ idx = new_idx (); content = Data instrs } in
-  let mk_control_block (instr : Instr.control Instr.labelled) : Basic_block.t =
+  let mk_control_block (instr : (unit Instr.control, unit) Instr.labelled) : unit Basic_block.t =
     Basic_block.{ idx = new_idx () ; content = Control instr } in
   let mk_merge_block () =
     Basic_block.{ idx = new_idx () ; content = ControlMerge } in
-  let mk_empty_block () : Basic_block.t =
+  let mk_empty_block () : unit Basic_block.t =
     Basic_block.{ idx = new_idx () ; content = Data [] } in
   let loop_heads = ref IntSet.empty in
-  let rec helper (instrs : Instr.data Instr.labelled list) (remaining : Instr.t list) : (
+  let rec helper (instrs : (Instr.data, unit) Instr.labelled list) (remaining : 'a Instr.t list) : (
     (* The blocks created *)
-    Basic_block.t list *
+    'a Basic_block.t list *
     (* The edges within the blocks created *)
     (int * int * (bool option)) list *
     (* The break points as (block_idx, break_level, edge_data) *)

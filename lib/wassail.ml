@@ -15,8 +15,8 @@ module Cfg_builder = Cfg_builder
 
 module Call_graph = Call_graph
 
-module Inter_fixpoint = Inter_fixpoint
-module Intra_fixpoint = Intra_fixpoint
+module Inter = Inter
+module Intra = Intra
 
 module Spec_inference = Spec_inference
 
@@ -66,7 +66,7 @@ let parse_string str run =
       [(var_opt, def)])
     run
 
-let cfgs : (Cfg.t IntMap.t) ref = ref IntMap.empty
+let cfgs : ('a Cfg.t IntMap.t) ref = ref IntMap.empty
 let module_ : (Wasm_module.t option) ref = ref None
 
 (** A map of CFG dependencies. Each entry is of the form idx -> [idx1, idx2, ...] meaning that CFG idx depends on the analysis of CFGs idx1, idx2, etc. *)

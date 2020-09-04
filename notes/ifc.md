@@ -1,13 +1,16 @@
-# Next steps:
+# Done
   - count how many variables per function
+    up to 42000 so definitely way too many
+  - count how many variables per block, and how many "live" variables, i.e. the ones on the stack etc. Maybe projecting on the live ones only can decrease a lot the size of the problem (and maybe keeping the extra ones such as return/args/memory)
+
+# Next steps:
+## Specification inference
+  - output the inference as an annotated program
+  - only have merge variables when needed
+## Other
   - upon memory load/store, apply a backwards analysis or slicing?
   - how to model memory in the summary?
     -> "memory region tainting": this region, starting at x and finishing at y is tainted. x and y can be related from the abstract value (e.g., y = x  ui+5)
-  - identify what is trusted/untrusted, or how can this be derived from the summaries.
-    This could be defined by the user of the analysis, e.g., function 1's first argument is trusted, second argument is not, return value is not.
-    But there is still the question of the memory. Maybe need some notion of trusted/untrusted memory segments.
-    
-
 # Non-interference
 Non-interference is defined for one input to the program.
 In our case, we may need a notion of compositional non-interference?

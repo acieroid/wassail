@@ -30,7 +30,7 @@ let to_string (s : t) : string =
     @param cfg is the CFG under analysis
     @param vars the set of Apron variables to create. It is expected that variables for locals are named l0 to ln, where l0 to li are parameters (there are i params), and li+1 to ln are locals that are initialized to 0.
  *)
-let init (cfg : Cfg.t) (vars : Var.t list) : t =
+let init (cfg : 'a Cfg.t) (vars : Var.t list) : t =
   assert (List.length cfg.return_types <= 1); (* wasm spec does not allow for more than one return type (currently) *)
   let vars_and_vals = List.map vars ~f:(fun v -> (Apron.Var.of_string (Var.to_string v), match v with
     | Var.Local n when n >= List.length cfg.arg_types -> Apron.Interval.of_int 0 0
@@ -43,14 +43,14 @@ let init (cfg : Cfg.t) (vars : Var.t list) : t =
   { env = apron_env; constraints = apron_abs }
 
 (** Creates the bottom value *)
-let bottom (_cfg : Cfg.t) (vars : string list) : t =
+let bottom (_cfg : 'a Cfg.t) (vars : string list) : t =
   let apron_vars = Array.of_list (List.map vars ~f:Apron.Var.of_string) in
   let apron_env = Apron.Environment.make apron_vars [| |] in
   let apron_abs = Apron.Abstract1.bottom manager apron_env in
   { constraints = apron_abs; env = apron_env }
 
 (** Creates the top value *)
-let top (_cfg : Cfg.t) (vars : string list) : t =
+let top (_cfg : 'a Cfg.t) (vars : string list) : t =
   let apron_vars = Array.of_list (List.map vars ~f:Apron.Var.of_string) in
   let apron_env = Apron.Environment.make apron_vars [| |] in
   let apron_abs = Apron.Abstract1.top manager apron_env in

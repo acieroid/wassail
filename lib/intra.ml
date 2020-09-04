@@ -15,12 +15,13 @@ module type INTRA = sig
   (** Analyze a method (represented by its CFG) from the module *)
   val analyze : Wasm_module.t -> annot_expected Cfg.t -> state Cfg.t
 
-  (** [deprecated] the summary *)
+(*  (** [TODO] the summary is a shorter representation of the analysis results for a function*)
   type summary
-  val summary : 'a Cfg.t -> state -> summary
+    val get_summary : state Cfg.t -> summary *)
 end
 
-module Make (Transfer : TRANSFER) : INTRA = struct
+module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
+  (* Include transfer to get a definition for state, equal_state, and annot_expected *)
   include Transfer
 
   (** The result of applying the transfer function. *)
@@ -33,10 +34,21 @@ module Make (Transfer : TRANSFER) : INTRA = struct
   (** The results of an intra analysis are a mapping from indices (block or instructions) to their in and out values *)
   type intra_results = (result * result) IntMap.t
 
+  (** Converts a result to a state. May require joining output states in case of branching *)
+  let result_to_state (cfg : annot_expected Cfg.t) (r : result) : state = match r with
+    | Uninitialized -> bottom_state cfg
+    | Simple s -> s
+    | Branch (s1, s2) -> join_state s1 s2
+
+  let result_to_string (r : result) : string = match r with
+    | Uninitialized -> "uninit"
+    | Simple s -> Printf.sprintf "simple: %s" (state_to_string s)
+    | Branch (s1, s2) -> Printf.sprintf "branch: %s\nand: %s" (state_to_string s1) (state_to_string s2)
+
   (** Analyzes a CFG. Returns the final state after computing the transfer of the entire function. That final state is a pair where the first element are the results per block, and the second element are the results per instructions.
       @param module_ is the overall WebAssembly module, needed to access type information, tables, etc.
       @param cfg is the CFG to analyze *)
-  let analyze (module_ : Wasm_module.t) (cfg : 'a Cfg.t) : intra_results * intra_results =
+  let analyze (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : state Cfg.t =
     let bottom = Uninitialized in
     (* Data of the analysis, per block *)
     let block_data : intra_results ref = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
@@ -79,6 +91,7 @@ module Make (Transfer : TRANSFER) : INTRA = struct
           | Uninitialized, _ -> (idx, Transfer.bottom_state cfg))) in
       let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
+      Printf.printf "state before analysis: %s\n" (state_to_string in_state);
       let result = transfer block in_state in
       (in_state, result)
     in
@@ -108,6 +121,7 @@ module Make (Transfer : TRANSFER) : INTRA = struct
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = IntSet.min_elt_exn worklist in
+        Printf.printf "-----------------------\n Analyzing block %d\n" block_idx;
         let (in_state, out_state) = analyze_block block_idx in
         (* Has out state changed? *)
         let previous_out_state = snd (IntMap.find_exn !block_data block_idx) in
@@ -119,12 +133,15 @@ module Make (Transfer : TRANSFER) : INTRA = struct
           (* Update the out state in the analysis results.
              We join with the previous results *)
           Printf.printf "joining states at block %d\n" block_idx;
+          Printf.printf "previous state was: %s\n" (result_to_string previous_out_state);
+          Printf.printf "current state is: %s\n" (result_to_string out_state);
           let new_out_state =
             if IntSet.mem cfg.loop_heads block_idx then
-              widen_result previous_out_state (join_result out_state previous_out_state)
+              widen_result previous_out_state (join_result previous_out_state out_state)
             else
-              join_result out_state previous_out_state
+              join_result previous_out_state out_state
           in
+          Printf.printf "result: %s\n" (result_to_string new_out_state);
           block_data := IntMap.set !block_data ~key:block_idx ~data:(Simple in_state, new_out_state);
           (* And recurse by adding all successors *)
           let successors = Cfg.successors cfg block_idx in
@@ -140,9 +157,9 @@ module Make (Transfer : TRANSFER) : INTRA = struct
     in
     fixpoint (IntSet.singleton cfg.entry_block) 1;
     (* _narrow (IntMap.keys cfg.basic_blocks); *)
-    (!block_data, !instr_data)
+    Cfg.annotate cfg (IntMap.map !instr_data ~f:(fun (before, after) -> (result_to_state cfg before, result_to_state cfg after)))
 
-  (** Extract the out state from intra-procedural results *)
+(*  (** Extract the out state from intra-procedural results *)
   let out_state (cfg : 'a Cfg.t) (results : intra_results * intra_results) : Transfer.state =
     match snd (IntMap.find_exn (fst results) cfg.exit_block) with
     | Simple s -> s
@@ -154,5 +171,5 @@ module Make (Transfer : TRANSFER) : INTRA = struct
         | Simple s, Simple s' -> Some (s, s')
         | Simple s, Branch (s1, s2) ->
           Some (s, join_state s1 s2)
-        | _ -> failwith "invalid spec")
+        | _ -> failwith "invalid spec") *)
 end

@@ -9,6 +9,7 @@ module T = struct
     | MemoryVal of int * int
     | MemoryValNew of int * int
     | Merge of int * int
+    | Hole
   [@@deriving sexp, compare, equal]
 end
 include T
@@ -21,6 +22,7 @@ let to_string (v : t) : string = match v with
   | MemoryVal (l, v) -> Printf.sprintf "mv%d_%d" l v
   | MemoryValNew (l, v) -> Printf.sprintf "mvnew%d_%d" l v
   | Merge (idx, n) -> Printf.sprintf "merge%d_%d" idx n
+  | Hole -> "_"
 
 module Map = Map.Make(T)
 module Set = Set.Make(T)

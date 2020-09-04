@@ -1,6 +1,8 @@
 open Core_kernel
+open Helpers
 
-module Make = functor (Spec : Spec_inference.SPEC) -> struct
+module Make : Transfer.TRANSFER = struct
+  type annot_expected = Spec_inference.state
 
   type state = Relational_domain.t
   [@@deriving compare, equal]
@@ -12,9 +14,9 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
 
   let init_summaries s = SummaryManager.init s
 
-  let init_state (cfg : Cfg.t) = Domain.init cfg (Spec.vars ())
+  let init_state (cfg : 'a Cfg.t) = Domain.init cfg  (failwith "TODO")(* (Spec.vars ()) *)
 
-  let bottom_state (cfg : Cfg.t) = Domain.bottom cfg (List.map ~f:Var.to_string (Spec.vars ()))
+  let bottom_state (cfg : 'a Cfg.t) = Domain.bottom cfg (failwith "TODO") (* (List.map ~f:Var.to_string (Spec.vars ())) *)
 
   let state_to_string = Domain.to_string
 
@@ -25,7 +27,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
   let ignore_memory = ref true
 
   (** Merges the entry states before analyzing the given block *)
-  let merge_flows (_module_ : Wasm_module.t) (cfg : Cfg.t) (block : Basic_block.t) (states : (int * state) list) : state =
+  let merge_flows (_module_ : Wasm_module.t) (_cfg : 'a Cfg.t) (_block : 'a Basic_block.t) (_states : (int * state) list) : state = failwith "TODO" (*
     match states with
     | [] -> (* no in state, use init *)
       init_state cfg
@@ -50,7 +52,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
             | (_, s) :: [] -> s
             | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
           end
-      end
+      end *)
 
   (** Transfer function for data instructions.
       @param i the instruction for which to compute the transfer function
@@ -58,7 +60,8 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       @param vstack_spec: the specification of what the vstack looks like after execution
       @return the resulting state (poststate).
   *)
-  let data_instr_transfer (module_ : Wasm_module.t) (_cfg : Cfg.t) (i : Instr.data Instr.labelled) (state : state) : state =
+  let data_instr_transfer (module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_data) (state : state) : state =
+    let ret (i : annot_expected Instr.labelled_data) : Var.t = List.hd_exn i.annotation_after.vstack in
     match i.instr with
     | Nop -> state
     | MemorySize ->
@@ -67,7 +70,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       begin match mem.max_size with
       | Some max ->
         (* add ret = [min,max] where min and max are the memory size bounds *)
-        Domain.add_interval_constraint state (Spec.ret i.label) (mem.min_size, max)
+        Domain.add_interval_constraint state (ret i) (mem.min_size, max)
       | None -> (* TODO: add the constraint ret >= min *) state
       end
     | MemoryGrow ->
@@ -75,9 +78,9 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       state
     | Drop -> state
     | Select ->
-      let ret = Spec.ret i.label in
-      let vstack = (Spec.pre i.label).vstack in
-      let (c, v2, v1) = Spec.pop3 vstack in
+      let ret = ret i in
+      let vstack = i.annotation_before.vstack in
+      let (c, v2, v1) = pop3 vstack in
       begin
         match Domain.is_zero state c with
         | (true, false) -> (* definitely 0, add ret = v2 *)
@@ -93,31 +96,31 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       end
     | LocalGet l ->
       (* add ret = ln where ln is the local accessed *)
-      Domain.add_equality_constraint state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).locals l)
+      Domain.add_equality_constraint state (ret i) (get_nth i.annotation_before.locals l)
     | LocalSet l ->
-      let local = Spec.get_nth (Spec.pre i.label).locals l in
+      let local = get_nth i.annotation_before.locals l in
       (* add ln' = v where ln' is the variable for the local set and v is the top of the vstack *)
-      let v = Spec.pop (Spec.pre i.label).vstack in
+      let v = pop i.annotation_before.vstack in
       Domain.add_equality_constraint state local v
     | LocalTee l ->
-      let local = Spec.get_nth (Spec.pre i.label).locals l in
+      let local = get_nth i.annotation_before.locals l in
       (* same as local.set x followed by local.get x *)
-      let v = Spec.pop (Spec.pre i.label).vstack in
-      Domain.add_equality_constraints state [(Spec.ret i.label, v); (local, v)]
+      let v = pop i.annotation_before.vstack in
+      Domain.add_equality_constraints state [(ret i, v); (local, v)]
     | GlobalGet g ->
       (* add v = gn where gn is the local accessed *)
-      Domain.add_equality_constraint state (Spec.ret i.label) (Spec.get_nth (Spec.pre i.label).globals g)
+      Domain.add_equality_constraint state (ret i) (get_nth i.annotation_before.globals g)
     | GlobalSet g ->
-      let global = Spec.get_nth (Spec.pre i.label).globals g in
-      let v = Spec.pop (Spec.pre i.label).vstack in
+      let global = get_nth i.annotation_before.globals g in
+      let v = pop i.annotation_before.vstack in
       Domain.add_equality_constraint state global v
     | Const n ->
       (* add ret = n *)
-      Domain.add_constraint state (Var.to_string (Spec.ret i.label)) (Prim_value.to_string n)
+      Domain.add_constraint state (Var.to_string (ret i)) (Prim_value.to_string n)
     | Compare _ ->
       (* TODO: reflect "rel v1 v2" in the constraints, when possible *)
       (* add ret = [0;1] *)
-      Domain.add_interval_constraint state (Spec.ret i.label) (0, 1)
+      Domain.add_interval_constraint state (ret i) (0, 1)
     | Binary _ ->
       (* TODO: reflect "bin v1 v2" the operation in the constraints, when possible *)
       (* don't add any constraint (for now)  *)
@@ -127,15 +130,15 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     | Test _ ->
       (* TODO: reflect "test v" in the constraints, when possible *)
       (* add ret = [0;1] *)
-      Domain.add_interval_constraint state (Spec.ret i.label) (0, 1)
+      Domain.add_interval_constraint state (ret i) (0, 1)
     | Convert _ ->
       (*    let _v, vstack' = Vstack.Spec.pop state.vstack in *)
       (* Don't add any constraint *)
       state
     | Load {offset; _ } ->
       if !ignore_memory then state else
-      let ret = Spec.ret i.label in
-      let vaddr = Spec.pop (Spec.pre i.label).vstack in
+      let ret = ret i in
+      let vaddr = pop i.annotation_before.vstack in
       let addr = Var.MemoryKey (i.label, 0) in
       (* We are loading from address vaddr (also mk_i.label_0).
          The resulting value is ret (also mv_i.label_0).
@@ -149,7 +152,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       let state' = Domain.add_constraints state [(Var.to_string addr, Printf.sprintf "%s+%d" (Var.to_string vaddr) offset);
                                                  (Var.to_string ret, (Var.to_string (Var.MemoryVal (i.label, 0))))] in
       (* Then, find all addresses that are equal to vaddr *)
-      let mem = (Spec.pre i.label).memory in
+      let mem = i.annotation_before.memory in
       let addrs = List.filter (Var.Map.keys mem)
           ~f:(fun a -> match Domain.are_equal_offset state' a vaddr offset with
               | (true, false) -> true (* definitely equal *)
@@ -180,7 +183,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
                                                (Var.to_string addr0, (Printf.sprintf "%s+%d" vaddr offset))] in
   | Load ({ typ = I32; offset; sz = Some (Pack8, _) }) ->
     Logging.warn "ImpreciseOperation" "load8 returns top, and ignores sx/zx";
-    let vaddr = Var.to_string (Spec.pop (Spec.pre i.label).vstack) in
+    let vaddr = Var.to_string (Spec.pop i.annotation_before.vstack) in
     let addr0 = Spec_inference.MemoryKey (i.label, 0) in
     let state' = Domain.add_constraint state (Var.to_string addr0) (Printf.sprintf "%s+%d" vaddr offset) in
     (* TODO: add constraints on the return value? *)
@@ -190,7 +193,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
        failwith (Printf.sprintf "load not supported with such op argument: %s" (Memoryop.to_string op)) *)
     | Store { offset; _ } ->
       if !ignore_memory then state else
-      let vval, vaddr = Spec.pop2 (Spec.pre i.label).vstack in
+      let vval, vaddr = pop2 i.annotation_before.vstack in
       let addr = Var.MemoryKey (i.label, 0) in
       let v = Var.MemoryValNew (i.label, 0) in
       let state' = Domain.add_constraints state [
@@ -198,7 +201,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
           (Var.to_string v, Var.to_string vval)]
       in
       (* Find all memory keys that are definitely equal to the address *)
-      let mem = (Spec.post i.label).memory in
+      let mem = i.annotation_after.memory in
       let equal_addrs = List.filter (Var.Map.keys mem)
           ~f:(fun a -> match Domain.are_equal_offset state a vaddr offset with
               | (true, false) -> true (* definitely equal *)
@@ -230,7 +233,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
                                         Var.to_string (Spec_inference.MemoryKey (i.label, 1)),
                                         Var.to_string (Spec_inference.MemoryKey (i.label, 2)),
                                         Var.to_string (Spec_inference.MemoryKey (i.label, 3))) in
-    let (_vval, vaddr) = Spec.pop2 (Spec.pre i.label).vstack in
+    let (_vval, vaddr) = Spec.pop2 i.annotation_before.vstack in
     let state' = Domain.add_constraints state [(addr3, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+3)));
                                                (addr2, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+2)));
                                                (addr1, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+1)));
@@ -247,7 +250,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
                                         Var.to_string (Spec_inference.MemoryKey (i.label, 5)),
                                         Var.to_string (Spec_inference.MemoryKey (i.label, 6)),
                                         Var.to_string (Spec_inference.MemoryKey (i.label, 7))) in
-    let (_vval, vaddr) = Spec.pop2 (Spec.pre i.label).vstack in
+    let (_vval, vaddr) = Spec.pop2 i.annotation_before.vstack in
     let state' = Domain.add_constraints state
         [(addr7, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+7)));
          (addr6, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+6)));
@@ -262,7 +265,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
   | Store { typ = I32; offset; sz = Some (Pack8, SX)} ->
     Logging.warn "ImpreciseOperation" "store8 ignores sx/zx";
     let addr0 = Var.to_string (Spec_inference.MemoryKey (i.label, 0)) in
-    let (_vval, vaddr) = Spec.pop2 (Spec.pre i.label).vstack in
+    let (_vval, vaddr) = Spec.pop2 i.annotation_before.vstack in
     let state' = Domain.add_constraint state addr0 (Printf.sprintf "%s+%d" (Var.to_string vaddr) offset) in
     (* TODO: update memory *)
     state'
@@ -272,14 +275,14 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
 
   let control_instr_transfer
       (module_ : Wasm_module.t) (* The wasm module (read-only) *)
-      (_cfg : Cfg.t) (* The CFG analyzed *)
-      (i : Instr.control Instr.labelled) (* The instruction *)
+      (_cfg : annot_expected Cfg.t) (* The CFG analyzed *)
+      (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : Domain.t) (* The pre state *)
     : [`Simple of state | `Branch of state * state] =
     let apply_summary (f : int) (arity : int * int) (state : state) : state =
       let summary = SummaryManager.get f in
-      let args = List.take (Spec.pre i.label).vstack (fst arity) in
-      let ret = if snd arity = 1 then List.hd (Spec.post i.label).vstack else None in
+      let args = List.take i.annotation_before.vstack (fst arity) in
+      let ret = if snd arity = 1 then List.hd i.annotation_after.vstack else None in
       Relational_summary.apply summary state (List.map ~f:Var.to_string args) (Option.map ~f:Var.to_string ret)
     in
     match i.instr with
@@ -289,7 +292,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       `Simple (apply_summary f arity state)
     | CallIndirect (arity, typ) ->
       (* v is the index in the table that points to the called functiion *)
-      let v = Spec.pop (Spec.pre i.label).vstack in
+      let v = pop i.annotation_before.vstack in
       (* Get table 0 *)
       let table = List.nth_exn module_.tables 0 in
       (* Get all indices that v could be equal to *)
@@ -321,7 +324,7 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
       `Simple state
     | BrIf _
     | If _ ->
-      let cond = Var.to_string (Spec.pop (Spec.pre i.label).vstack) in
+      let cond = Var.to_string (pop i.annotation_before.vstack) in
       (* restrict cond = 1 to the constraints of the true branch, cond = 0 to the constrainst of the false branch *)
       `Branch (state (* true branch, cond is non-zero. Can't refine it (would have to meet with ]-inf,-1] union [1, +inf[, which is ]-inf,+inf[ in the current domains *),
                Domain.meet_interval state cond (0, 0) (* false branch, cond is zero *))
@@ -331,12 +334,13 @@ module Make = functor (Spec : Spec_inference.SPEC) -> struct
     | Unreachable ->
       (* Unreachable, so what we return does not really matter *)
       `Simple state
-    | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_string i.instr))
+    | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr))
 
-  let summary (cfg : Cfg.t) (out_state : state) : summary =
+  let summary (_cfg : 'a Cfg.t) (_out_state : state) : summary =
+    failwith "TODO" (*
     Relational_summary.make cfg out_state
       (if List.length cfg.return_types = 1 then Option.map ~f:Var.to_string (List.hd (Spec.post_block cfg.exit_block).vstack) else None)
       (List.map ~f:Var.to_string (Spec_inference.memvars (Spec.pre_block cfg.entry_block)))
       (List.map ~f:Var.to_string (Spec_inference.memvars (Spec.post_block cfg.exit_block)))
-      (List.map ~f:Var.to_string (Spec.post_block cfg.exit_block).globals)
+      (List.map ~f:Var.to_string (Spec.post_block cfg.exit_block).globals) *)
 end
