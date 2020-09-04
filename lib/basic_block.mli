@@ -8,6 +8,8 @@ type 'a block_content =
 type 'a t = {
   idx: int;
   content: 'a block_content;
+  annotation_before: 'a;
+  annotation_after: 'a;
 }
 
 val equal : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
@@ -18,4 +20,6 @@ val to_string : 'a t -> ('a -> string) -> string
 
 val to_dot : 'a t -> ('a -> string) -> string
 
-val annotate : 'a t -> ('b * 'b) IntMap.t -> 'b t
+val all_instruction_labels : 'a t -> IntSet.t
+
+val annotate : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> 'b t

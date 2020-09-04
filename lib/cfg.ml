@@ -81,6 +81,15 @@ let callers (cfgs : 'a t IntMap.t) (cfg : 'a t) : IntSet.t =
       else
         callers)
 
+(** Returns all the indices of the blocks within this CFG *)
+let all_block_indices (cfg : 'a t) : IntSet.t =
+  IntSet.of_list (IntMap.keys cfg.basic_blocks)
+
+(** Returns all the indices of all expressions within this CFG *)
+let all_instruction_labels (cfg : 'a t) : IntSet.t =
+  IntMap.fold cfg.basic_blocks ~init:IntSet.empty ~f:(fun ~key:_ ~data:block l ->
+      IntSet.union (Basic_block.all_instruction_labels block) l)
+
 (** Change the annotations of a CFG *)
-let annotate (cfg : 'a t) (data : ('b * 'b) IntMap.t) : 'b t =
-  { cfg with basic_blocks = IntMap.map ~f:(fun b -> Basic_block.annotate b data) cfg.basic_blocks }
+let annotate (cfg : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b) IntMap.t) : 'b t =
+  { cfg with basic_blocks = IntMap.map ~f:(fun b -> Basic_block.annotate b block_data instr_data) cfg.basic_blocks }

@@ -249,3 +249,16 @@ let annotation_after (i : 'a t) : 'a =
   match i with
   | Data d -> d.annotation_after
   | Control c -> c.annotation_after
+
+let rec all_labels (i : 'a t) : IntSet.t =
+  match i with
+  | Data d -> IntSet.singleton d.label
+  | Control c -> IntSet.add (begin match c.instr with
+      | Block (_, instrs)
+      | Loop (_, instrs) -> List.fold_left instrs ~init:IntSet.empty ~f:(fun acc i ->
+          IntSet.union acc (all_labels i))
+      | If (_, instrs1, instrs2) ->
+        List.fold_left (instrs1 @ instrs2) ~init:IntSet.empty ~f:(fun acc i ->
+          IntSet.union acc (all_labels i))
+      | _ -> IntSet.empty
+    end) c.label

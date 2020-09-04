@@ -51,11 +51,13 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
   let analyze (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : state Cfg.t =
     let bottom = Uninitialized in
     (* Data of the analysis, per block *)
-    let block_data : intra_results ref = ref (IntMap.of_alist_exn (List.map (IntMap.keys cfg.basic_blocks)
+    let block_data : intra_results ref = ref (IntMap.of_alist_exn (List.map (IntSet.to_list (Cfg.all_block_indices cfg))
                                                  ~f:(fun idx ->
                                                       (idx, (bottom, bottom))))) in
     (* Data of the analysis, per instruction *)
-    let instr_data : intra_results ref = ref IntMap.empty (* initially empty *) in
+    Printf.printf "all instruction labels: %s\n" (String.concat ~sep:"," (List.map ~f:string_of_int (IntSet.to_list (Cfg.all_instruction_labels cfg))));
+    let instr_data : intra_results ref = ref (IntMap.of_alist_exn (List.map (IntSet.to_list (Cfg.all_instruction_labels cfg))
+                                                ~f:(fun idx -> (idx, (bottom, bottom))))) in
 
     (* Applies the transfer function to an entire block *)
     let transfer (b : 'a Basic_block.t) (state : Transfer.state) : result =
@@ -157,15 +159,16 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
     in
     fixpoint (IntSet.singleton cfg.entry_block) 1;
     (* _narrow (IntMap.keys cfg.basic_blocks); *)
-    Cfg.annotate cfg (IntMap.map !instr_data ~f:(fun (before, after) -> (result_to_state cfg before, result_to_state cfg after)))
+    Cfg.annotate cfg
+      (IntMap.map !block_data ~f:(fun (before, after) -> (result_to_state cfg before, result_to_state cfg after)))
+      (IntMap.map !instr_data ~f:(fun (before, after) -> (result_to_state cfg before, result_to_state cfg after)))
 
-(*  (** Extract the out state from intra-procedural results *)
-  let out_state (cfg : 'a Cfg.t) (results : intra_results * intra_results) : Transfer.state =
-    match snd (IntMap.find_exn (fst results) cfg.exit_block) with
-    | Simple s -> s
-    | _ -> failwith "Multiple exits for function? This should not happen"
+  (** Extract the out state from intra-procedural results *)
+  let final_state (cfg : state Cfg.t) : state =
+    let final = IntMap.find_exn cfg.basic_blocks cfg.exit_block in
+    final.annotation_after
 
-  let extract_spec (results : intra_results) : (state * state) IntMap.t =
+  (*  let extract_spec (results : intra_results) : (state * state) IntMap.t =
     IntMap.filter_map results ~f:(function
         | Uninitialized, _ -> None
         | Simple s, Simple s' -> Some (s, s')

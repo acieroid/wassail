@@ -134,8 +134,6 @@ let spec_inference =
              Out_channel.output_string ch (Cfg.to_dot annotated_cfg Spec_inference.state_to_dot_string)))
     (fun () _ -> ())
 
-
-(*
 let count_vars =
   mk_intra
     "Count the number of program variables generated for a function"
@@ -143,51 +141,48 @@ let count_vars =
     (fun summaries fid ->
        let summary = IntMap.find_exn summaries fid in
        Printf.printf "Number of variables for %d: %d, max at the same time: %d\n" fid (Var.Set.length (fst summary)) (snd summary))
-    (fun summaries instr_data block_data wasm_mod cfg ->
-       let module Spec = Spec_inference.Spec(struct
-           let instr_data () = instr_data
-           let block_data () = block_data
-         end) in
-       let module CountVarsIntra = Intra_fixpoint.Make(struct
-         type state = (Var.Set.t * int)
-         [@@deriving equal, compare, sexp]
-         type summary = state
-         let init_summaries _ = ()
-         let init_state _ = (Var.Set.empty, 0)
-         let bottom_state _ = (Var.Set.empty, 0)
-         let state_to_string _ = ""
-         let join_state (s1, n1) (s2, n2) = (Var.Set.union s1 s2, max n1 n2)
-         let widen = join_state
-         let extract_vars (st : Spec_inference.state) : Var.Set.t =
-           Var.Set.filter ~f:(function
-               | Merge _ -> false
-               | MemoryKey _ | MemoryVal _ | MemoryValNew _ -> false
-               | _ -> true)
-             (Var.Set.union (Var.Set.of_list st.vstack)
-                (Var.Set.union (Var.Set.of_list st.locals)
-                   (Var.Set.union (Var.Set.of_list st.globals)
-                      (Var.Set.of_list (List.concat_map (Var.Map.to_alist st.memory) ~f:(fun (a, b) -> [a; b]))))))
-         let transfer ilabel(vars, n) =
-           ((Var.Set.union vars
-                 (Var.Set.union (extract_vars (Spec.pre ilabel)) (extract_vars (Spec.post ilabel)))),
-              (max n (Var.Set.length (extract_vars (Spec.post ilabel)))))
-         let control_instr_transfer (_mod : Wasm_module.t) (_cfg : 'a Cfg.t) (i : ('a Instr.control, 'a) Instr.labelled) (vars, n) =
-           `Simple (transfer i.label (vars, n))
-         let data_instr_transfer (_mod : Wasm_module.t) (_cfg : 'a Cfg.t) (i : (Instr.data, 'a) Instr.labelled) (vars, n) =
-           transfer i.label (vars, n)
+    (fun summaries wasm_mod annotated_cfg ->
+       let module CountVarsIntra = Intra.Make(struct
+           type annot_expected = Spec_inference.state
+           type state = (Var.Set.t * int)
+           [@@deriving equal, compare, sexp]
+           type summary = state
+           let init_summaries _ = ()
+           let init_state _ = (Var.Set.empty, 0)
+           let bottom_state _ = (Var.Set.empty, 0)
+           let state_to_string _ = ""
+           let join_state (s1, n1) (s2, n2) = (Var.Set.union s1 s2, max n1 n2)
+           let widen = join_state
+           let extract_vars (st : Spec_inference.state) : Var.Set.t =
+             Var.Set.filter ~f:(function
+                 | Merge _ -> false
+                 | MemoryKey _ | MemoryVal _ | MemoryValNew _ -> false
+                 | _ -> true)
+               (Var.Set.union (Var.Set.of_list st.vstack)
+                  (Var.Set.union (Var.Set.of_list st.locals)
+                     (Var.Set.union (Var.Set.of_list st.globals)
+                        (Var.Set.of_list (List.concat_map (Var.Map.to_alist st.memory) ~f:(fun (a, b) -> [a; b]))))))
+           let transfer before after (vars, n) =
+             ((Var.Set.union vars
+                 (Var.Set.union (extract_vars before) (extract_vars after))),
+              (max n (Var.Set.length (extract_vars after))))
+         let control_instr_transfer (_mod : Wasm_module.t) (_cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_control) (vars, n) =
+           `Simple (transfer i.annotation_before i.annotation_after (vars, n))
+         let data_instr_transfer (_mod : Wasm_module.t) (_cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_data) (vars, n) =
+           transfer i.annotation_before i.annotation_after (vars, n)
          let merge_flows _mod cfg _block (states : (int * state) list) =
            List.fold_left (List.map states ~f:snd) ~init:(bottom_state cfg) ~f:join_state
          let summary _cfg st = st
        end) in
-       let results = CountVarsIntra.analyze wasm_mod cfg in
-       let out_state = CountVarsIntra.out_state cfg results in
-       let (vars, n) = CountVarsIntra.summary cfg out_state in
+       let result = CountVarsIntra.analyze wasm_mod annotated_cfg in
+       let (vars, n) = CountVarsIntra.final_state result in
        Printf.printf "Vars: %d, max: %d\n" (Var.Set.length vars) n;
-       IntMap.set summaries ~key:cfg.idx ~data:(vars, n))
+       IntMap.set summaries ~key:annotated_cfg.idx ~data:(vars, n))
     (fun summaries fid ->
        let summary = IntMap.find_exn summaries fid in
        Printf.printf "Vars %d: %d, max: %d\n" fid (Var.Set.length (fst summary)) (snd summary))
 
+(*
 let reltaint_intra =
   mk_intra
     "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)"
@@ -361,8 +356,8 @@ let () =
        ; "cfgs", cfgs
        ; "callgraph", callgraph
        ; "schedule", schedule
-       (* ; "count-vars", count_vars *)
        ; "spec-inference", spec_inference
+       ; "count-vars", count_vars
        (* ; "taint-inter", taint_inter
        ; "reltaint-intra", reltaint_intra
        ; "taint-intra", taint_intra

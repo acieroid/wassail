@@ -12,6 +12,8 @@ type 'a block_content =
 type 'a t = {
   idx: int; (** Its index *)
   content: 'a block_content; (** Its content *)
+  annotation_before : 'a;
+  annotation_after : 'a;
 }
 [@@deriving sexp, compare, equal]
 
@@ -39,9 +41,21 @@ let to_dot (b : 'a t) (annot_to_string : 'a -> string) : string =
   | ControlMerge ->
     Printf.sprintf "block%d [shape=diamond, label=\"%d\"]" b.idx b.idx
 
+(** Returns all the labels of the instructions contained within this block *)
+let all_instruction_labels (cfg : 'a t) : IntSet.t =
+  match cfg.content with
+  | Control i -> Instr.all_labels (Control i)
+  | Data d -> List.fold_left ~init:IntSet.empty d ~f:(fun acc i ->
+      IntSet.union acc (Instr.all_labels (Data i)))
+  | ControlMerge -> IntSet.empty
+
 (** Change the annotations of a basic block *)
-let annotate (b : 'a t) (data : ('b * 'b) IntMap.t) : 'b t =
-  { b with content = match b.content with
-        | Control c -> Control (Instr.annotate_control c data)
-        | Data instrs -> Data (List.map instrs ~f:(fun i -> Instr.annotate_data i data))
-        | ControlMerge -> ControlMerge }
+let annotate (b : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b) IntMap.t) : 'b t =
+  let (annotation_before, annotation_after) = IntMap.find_exn block_data b.idx in
+  { b with content = begin match b.content with
+        | Control c -> Control (Instr.annotate_control c instr_data)
+        | Data instrs -> Data (List.map instrs ~f:(fun i -> Instr.annotate_data i instr_data))
+        | ControlMerge -> ControlMerge
+      end;
+           annotation_before;
+           annotation_after }

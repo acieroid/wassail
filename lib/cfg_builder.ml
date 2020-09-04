@@ -16,13 +16,13 @@ let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
   let mk_data_block (reverse_instrs : (Instr.data, unit) Instr.labelled list) : unit Basic_block.t =
     let instrs = List.rev reverse_instrs in
-    Basic_block.{ idx = new_idx (); content = Data instrs } in
+    Basic_block.{ idx = new_idx (); content = Data instrs; annotation_before = (); annotation_after = () } in
   let mk_control_block (instr : (unit Instr.control, unit) Instr.labelled) : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Control instr } in
+    Basic_block.{ idx = new_idx () ; content = Control instr; annotation_before = (); annotation_after = () } in
   let mk_merge_block () =
-    Basic_block.{ idx = new_idx () ; content = ControlMerge } in
+    Basic_block.{ idx = new_idx () ; content = ControlMerge; annotation_before = (); annotation_after = () } in
   let mk_empty_block () : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Data [] } in
+    Basic_block.{ idx = new_idx () ; content = Data []; annotation_before = (); annotation_after = () } in
   let loop_heads = ref IntSet.empty in
   let rec helper (instrs : (Instr.data, unit) Instr.labelled list) (remaining : 'a Instr.t list) : (
     (* The blocks created *)
