@@ -7,7 +7,7 @@ module type INTER = sig
   val analyze : Wasm_module.t -> annot_expected Cfg.t IntMap.t -> state Cfg.t IntMap.t
 end
 
-module Make (Intra : Intra.INTRA) : INTER = struct
+module Make (Intra : Intra.INTRA) (*: INTER*) = struct
   type annot_expected = Intra.annot_expected
   type state = Intra.state
 
