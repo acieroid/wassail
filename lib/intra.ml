@@ -113,10 +113,10 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
       | Uninitialized, _ -> r2
       | _, Uninitialized -> r1
       | Simple st1, Simple st2 ->
-        Simple (Transfer.widen st1 st2)
+        Simple (Transfer.widen_state st1 st2)
       | Branch (st1, st2), Branch (st1', st2') ->
-        Branch (Transfer.widen st1 st1',
-                Transfer.widen st2 st2')
+        Branch (Transfer.widen_state st1 st1',
+                Transfer.widen_state st2 st2')
       | _ -> failwith "Cannot widen results" in
     let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =
       if IntSet.is_empty worklist then

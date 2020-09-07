@@ -22,7 +22,7 @@ module Make : Transfer.TRANSFER = struct
 
   let join_state = Domain.join
 
-  let widen = Domain.widen
+  let widen_state = Domain.widen
 
   let ignore_memory = ref true
 

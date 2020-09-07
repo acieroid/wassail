@@ -124,7 +124,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
     s2 (* only keep the "most recent" state, this is safe for this analysis *)
 
   (* No widening *)
-  let widen _ s2 = s2
+  let widen_state _ s2 = s2
 
   (*---- Transfer functions ----*)
 

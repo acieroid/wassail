@@ -24,7 +24,7 @@ module type TRANSFER = sig
   val join_state : state -> state -> state
 
   (** Widening operator *)
-  val widen : state -> state -> state
+  val widen_state : state -> state -> state
 
   (** The annotations expected by the analysis *)
   type annot_expected
@@ -57,7 +57,7 @@ module type TRANSFER = sig
   type summary
 
   (** Builds the summary after the analysis, from the final state *)
-  val summary : state Cfg.t -> state -> summary
+  val summary : annot_expected Cfg.t -> state -> summary
 
   (** Stores the summaries produced by other intra analyses, to be used upon function calls *)
   val init_summaries : summary IntMap.t -> unit

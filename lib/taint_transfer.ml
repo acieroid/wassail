@@ -1,20 +1,14 @@
 open Core_kernel
 open Helpers
 
-module Make (RelSpec : Relational_spec.SPEC) : Transfer.TRANSFER = struct
+module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
+  (** We need the variable names as annotations *)
   type annot_expected = Spec_inference.state
 
-  module Spec = Spec_inference.State
-  (* TODO: 
-     1. Taint summaries need to preserve information about memory.
-     2. When applied, taint summary should rely on relational results to apply on the memory
-*)
 
+  (** The state *)
   type state = Taint_domain.t
   [@@deriving sexp, compare, equal]
-
-  module SummaryManager = Summary.MakeManager(Taint_summary)
-  type summary = Taint_summary.t
 
   (** In the initial state, we only set the taint for for parameters and the globals. *)
   let init_state (cfg : 'a Cfg.t) : state =
@@ -30,7 +24,10 @@ module Make (RelSpec : Relational_spec.SPEC) : Transfer.TRANSFER = struct
 
   let join_state (s1 : state) (s2 : state) : state = Taint_domain.join s1 s2
 
-  let widen (_s1 : state) (s2 : state) : state = s2 (* no widening *)
+  let widen_state (_s1 : state) (s2 : state) : state = s2 (* no widening *)
+
+  module SummaryManager = Summary.MakeManager(Taint_summary)
+  type summary = Taint_summary.t
 
   let init_summaries s = SummaryManager.init s
 
@@ -182,10 +179,10 @@ module Make (RelSpec : Relational_spec.SPEC) : Transfer.TRANSFER = struct
         begin match block.content with
           | ControlMerge ->
             (* block is a control-flow merge *)
-            let spec = failwith "TODO" (* Spec.post_block block.idx TODO: post_block can be defined by looking at the CFG and getting the state of the final instr of the block (or merging all previous nodes if the block is a control merge *) in
-            let states' = List.map states ~f:(fun (_idx, s) ->
+            let spec = block.annotation_after in
+            let states' = List.map states ~f:(fun (idx, s) ->
                 (* get the spec after that state *)
-                let spec' = failwith "TODO" (* Spec.post_block idx*) in
+                let spec' = (IntMap.find_exn cfg.basic_blocks idx).annotation_after in
                 (* equate all different variables in the post-state with the ones in the pre-state *)
                 List.fold_left (Spec_inference.extract_different_vars spec spec')
                   ~init:s
@@ -202,11 +199,11 @@ module Make (RelSpec : Relational_spec.SPEC) : Transfer.TRANSFER = struct
             end
         end
 
-  let summary (_cfg : 'a Cfg.t) (_out_state : state) : summary =
-    failwith "TODO" (*
+  let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
+    let exit_spec = (IntMap.find_exn cfg.basic_blocks cfg.exit_block).annotation_after in
     Taint_summary.make cfg out_state
-      (if List.length cfg.return_types = 1 then List.hd (Spec.post_block cfg.exit_block).vstack else None)
-      (Spec.post_block cfg.exit_block).globals
-      (List.concat_map (Var.Map.to_alist (Spec.post_block cfg.exit_block).memory)
-         ~f:(fun (a, b) -> [a; b])) *)
+      (if List.length cfg.return_types = 1 then List.hd exit_spec.vstack else None)
+      exit_spec.globals
+      (List.concat_map (Var.Map.to_alist exit_spec.memory)
+         ~f:(fun (a, b) -> [a; b]))
 end
