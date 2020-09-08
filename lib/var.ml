@@ -22,7 +22,7 @@ let to_string (v : t) : string = match v with
   | MemoryKey (l, v) -> Printf.sprintf "mk%d_%d" l v
   | MemoryVal (l, v) -> Printf.sprintf "mv%d_%d" l v
   | MemoryValNew (l, v) -> Printf.sprintf "mvnew%d_%d" l v
-  | Merge (idx, n) -> Printf.sprintf "merge%d_%d" idx n
+  | Merge (idx, n) -> Printf.sprintf "m%d_%d" idx n
   | Return -> "ret"
   | Hole -> "_"
 

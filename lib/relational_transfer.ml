@@ -106,12 +106,12 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) 
     (* add ret = ln where ln is the local accessed *)
     Domain.add_equality_constraint state (ret i) (get_nth i.annotation_before.locals l)
   | LocalSet l ->
-    let local = get_nth i.annotation_before.locals l in
+    let local = get_nth i.annotation_after.locals l in
     (* add ln' = v where ln' is the variable for the local set and v is the top of the vstack *)
     let v = pop i.annotation_before.vstack in
     Domain.add_equality_constraint state local v
   | LocalTee l ->
-    let local = get_nth i.annotation_before.locals l in
+    let local = get_nth i.annotation_after.locals l in
     (* same as local.set x followed by local.get x *)
     let v = pop i.annotation_before.vstack in
     Domain.add_equality_constraints state [(ret i, v); (local, v)]
