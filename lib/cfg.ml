@@ -90,6 +90,9 @@ let all_instruction_labels (cfg : 'a t) : IntSet.t =
   IntMap.fold cfg.basic_blocks ~init:IntSet.empty ~f:(fun ~key:_ ~data:block l ->
       IntSet.union (Basic_block.all_instruction_labels block) l)
 
+let all_annots (cfg : 'a t) : 'a list =
+  IntMap.fold cfg.basic_blocks ~init:[] ~f:(fun ~key:_ ~data:block l -> (Basic_block.all_annots block) @ l)
+
 (** Change the annotations of a CFG *)
 let annotate (cfg : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b) IntMap.t) : 'b t =
   { cfg with basic_blocks = IntMap.map ~f:(fun b -> Basic_block.annotate b block_data instr_data) cfg.basic_blocks }

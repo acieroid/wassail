@@ -22,4 +22,6 @@ val to_dot : 'a t -> ('a -> string) -> string
 
 val all_instruction_labels : 'a t -> IntSet.t
 
+val all_annots : 'a t -> 'a list
+
 val annotate : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> 'b t

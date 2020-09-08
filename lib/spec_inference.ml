@@ -211,7 +211,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
             | [] -> failwith "No predecessor of a merge node have been analyzed, should not happen"
             | s :: [] -> (* only one non-bottom predecessor *) s
             | states ->
-              Printf.printf "merge block %s, states: %s\n" (Basic_block.to_string block (fun _ -> "")) (String.concat ~sep:"," (List.map states ~f:state_to_string));
+              (*Printf.printf "merge block %s, states: %s\n" (Basic_block.to_string block (fun _ -> "")) (String.concat ~sep:"," (List.map states ~f:state_to_string)); *)
               (* multiple predecessors to merge *)
               (* First compute the state with holes where we will need to put merge variables *)
               let with_holes = List.fold_left states
@@ -219,7 +219,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                   ~f:(fun acc s ->
                       let f opt v = match opt with
                         | v' when Var.equal v v' -> v'
-                        | _ -> Printf.printf "hole created for %s, %s\n" (Var.to_string opt) (Var.to_string v); Var.Hole (* this is a hole *)
+                        | _ -> (* Printf.printf "hole created for %s, %s\n" (Var.to_string opt) (Var.to_string v); *) Var.Hole (* this is a hole *)
                       in
                       { vstack = List.map2_exn acc.vstack s.vstack ~f:f;
                         locals = List.map2_exn acc.locals s.locals ~f:f;
@@ -263,41 +263,4 @@ end
 
 include Spec_inference
 include State
-
-(*
-module type SPEC_DATA = sig
-  val instr_data : unit -> (State.state * State.state) IntMap.t
-  val block_data : unit -> (State.state * State.state) IntMap.t
-end
-
-module type SPEC = sig
-  val vars : unit -> Var.t list
-  val pre : Instr.label -> state
-  val post : Instr.label -> state
-  val pre_block : int -> state
-  val post_block : int -> state
-  val ret : Instr.label -> Var.t
-
-  val get_nth : Var.t list -> int -> Var.t
-  val pop : Var.t list -> Var.t
-  val pop2 : Var.t list -> Var.t * Var.t
-  val pop3 : Var.t list -> Var.t * Var.t * Var.t
-end
-
-module Spec (Data : SPEC_DATA) : SPEC = struct
-  let vars () : Var.t list = Var.Set.to_list (Var.Set.union
-                                             (State.vars (Data.block_data ()))
-                                             (State.vars (Data.instr_data ())))
-  let pre (label : Instr.label) : State.state = fst (IntMap.find_exn (Data.instr_data ()) label)
-  let post (label : Instr.label) : State.state = snd (IntMap.find_exn (Data.instr_data ()) label)
-
-  let pre_block (idx : int) : State.state = fst (IntMap.find_exn (Data.block_data ()) idx)
-  let post_block (idx : int) : state = snd (IntMap.find_exn (Data.block_data ()) idx)
-
-  let ret (label : Instr.label) : Var.t =
-    let spec = snd (IntMap.find_exn (Data.instr_data ()) label) in
-    List.hd_exn spec.vstack
-
-end
-
-*)
+    

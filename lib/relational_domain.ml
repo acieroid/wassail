@@ -43,15 +43,15 @@ let init (cfg : 'a Cfg.t) (vars : Var.t list) : t =
   { env = apron_env; constraints = apron_abs }
 
 (** Creates the bottom value *)
-let bottom (_cfg : 'a Cfg.t) (vars : string list) : t =
-  let apron_vars = Array.of_list (List.map vars ~f:Apron.Var.of_string) in
+let bottom (_cfg : 'a Cfg.t) (vars : Var.t list) : t =
+  let apron_vars = Array.of_list (List.map vars ~f:(fun v -> (Apron.Var.of_string (Var.to_string v)))) in
   let apron_env = Apron.Environment.make apron_vars [| |] in
   let apron_abs = Apron.Abstract1.bottom manager apron_env in
   { constraints = apron_abs; env = apron_env }
 
 (** Creates the top value *)
-let top (_cfg : 'a Cfg.t) (vars : string list) : t =
-  let apron_vars = Array.of_list (List.map vars ~f:Apron.Var.of_string) in
+let top (_cfg : 'a Cfg.t) (vars : Var.t list) : t =
+  let apron_vars = Array.of_list (List.map vars ~f:(fun v -> (Apron.Var.of_string (Var.to_string v)))) in
   let apron_env = Apron.Environment.make apron_vars [| |] in
   let apron_abs = Apron.Abstract1.top manager apron_env in
   { constraints = apron_abs; env = apron_env }
@@ -86,13 +86,13 @@ let join_opt (s1 : t) (s2 : t option) : t =
   | None -> s1
 
 (** Add multiple constraints *)
-let add_constraints (s : t) (constraints : (string * string) list) : t =
+let add_constraints (s : t) (constraints : (Var.t * string) list) : t =
   try
-    List.iter constraints ~f:(fun (x, y) -> Printf.printf "add constraint: %s = %s\n" x y);
+    List.iter constraints ~f:(fun (x, y) -> Printf.printf "add constraint: %s = %s\n" (Var.to_string x) y);
     { s
       with constraints =
              Apron.Abstract1.assign_linexpr_array manager s.constraints
-               (Array.of_list (List.map constraints ~f:(fun (v, _) -> Apron.Var.of_string v)))
+               (Array.of_list (List.map constraints ~f:(fun (v, _) -> Apron.Var.of_string (Var.to_string v))))
                (Array.of_list (List.map constraints ~f:(fun (_, c) -> Apron.Parser.linexpr1_of_string s.env c)))
                None }
   with
@@ -100,17 +100,17 @@ let add_constraints (s : t) (constraints : (string * string) list) : t =
     failwith (Printf.sprintf "Apron error in add_constraint: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
 
 (** Add one constrait of the form v = linexpr to the state constraints, returns the updated state *)
-let add_constraint (s : t) (v : string) (linexpr : string) : t =
+let add_constraint (s : t) (v : Var.t) (linexpr : string) : t =
   add_constraints s [(v,  linexpr)]
 
 let add_equality_constraints (s : t) (vs : (Var.t * Var.t) list) : t =
-  add_constraints s (List.map vs ~f:(fun (v1, v2) -> (Var.to_string v1, Var.to_string v2)))
+  add_constraints s (List.map vs ~f:(fun (v1, v2) -> (v1, Var.to_string v2)))
 
 let add_equality_constraint (s : t) (v1 : Var.t) (v2 : Var.t) : t =
-  add_constraint s (Var.to_string v1) (Var.to_string v2)
+  add_constraint s v1 (Var.to_string v2)
 
 let add_interval_constraint (s : t) (v : Var.t) (bounds: int * int) : t =
-  add_constraint s (Var.to_string v) (Printf.sprintf "[%d;%d]" (fst bounds) (snd bounds))
+  add_constraint s v (Printf.sprintf "[%d;%d]" (fst bounds) (snd bounds))
 
 let meet_interval (s : t) (v : string) (bounds : int * int) : t =
   let earray = Apron.Lincons1.array_make s.env 1 in
@@ -118,10 +118,11 @@ let meet_interval (s : t) (v : string) (bounds : int * int) : t =
   { s with constraints = Apron.Abstract1.meet_lincons_array manager s.constraints earray }
 
 (** Only keep the given variables in the constraints, returns the updated t *)
-let keep_only (s : t) (vars : string list) : t =
+let keep_only (s : t) (vars : Var.t list) : t =
+  let str_vars = List.map vars ~f:Var.to_string in
   { s with constraints = Apron.Abstract1.forget_array manager s.constraints
                (Array.filter (fst (Apron.Environment.vars s.env)) (* fst because we only have int variables for now *)
-                  ~f:(fun v -> not (List.mem vars (Apron.Var.to_string v) ~equal:Stdlib.(=))))
+                  ~f:(fun v -> not (List.mem str_vars (Apron.Var.to_string v) ~equal:Stdlib.(=))))
                false (* not sure what this means *)
   }
 

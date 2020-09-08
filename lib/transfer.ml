@@ -2,6 +2,9 @@ open Helpers
 
 (** The expected interface for a transfer function *)
 module type TRANSFER = sig
+  (** The annotations expected by the analysis *)
+  type annot_expected
+
   (** The state of the analysis *)
   type state
 
@@ -12,10 +15,10 @@ module type TRANSFER = sig
   val compare_state : state -> state -> int
 
   (** The initial state *)
-  val init_state : 'a Cfg.t -> state
+  val init_state : annot_expected Cfg.t -> state
 
   (** The bottom state *)
-  val bottom_state : 'a Cfg.t -> state
+  val bottom_state : annot_expected Cfg.t -> state
 
   (** Convert a state to its textual representation *)
   val state_to_string : state -> string
@@ -25,9 +28,6 @@ module type TRANSFER = sig
 
   (** Widening operator *)
   val widen_state : state -> state -> state
-
-  (** The annotations expected by the analysis *)
-  type annot_expected
 
   (** Transfer function for control instructions *)
   val control_instr_transfer

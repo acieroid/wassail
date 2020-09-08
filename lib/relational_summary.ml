@@ -8,38 +8,38 @@ type state = Domain.t
 (** A summary is the final state of the function, with some extra informations *)
 type t = {
   in_arity : int; (** The input arity for the function of this summary *)
-  params : string list; (** The name of the parameters  *)
-  return : string option; (** The name of the return value *)
-  mem_pre : string list;
-  mem_post : string list;
-  globals_pre : string list;
-  globals_post : string list;
+  params : Var.t list; (** The name of the parameters  *)
+  return : Var.t option; (** The name of the return value *)
+  mem_pre : Var.t list;
+  mem_post : Var.t list;
+  globals_pre : Var.t list;
+  globals_post : Var.t list;
   state : state; (** The final state *)
 }
 
 let to_string (s : t) : string =
   Printf.sprintf "pre: mem: [%s]\npost: ret: %s, globals: [%s], mem: [%s]\nstate: %s"
-    (String.concat ~sep:"," s.mem_pre) (* TODO: should maybe be a map? *)
-    (Option.value ~default:"none" s.return)
-    (String.concat ~sep:"," s.globals_post)
-    (String.concat ~sep:"," s.mem_post) (* TODO: should maybe be a map? *)
+    (String.concat ~sep:"," (List.map s.mem_pre ~f:Var.to_string)) (* TODO: should maybe be a map? *)
+    (Option.value ~default:"none" (Option.map s.return ~f:Var.to_string))
+    (String.concat ~sep:"," (List.map s.globals_post ~f:Var.to_string))
+    (String.concat ~sep:"," (List.map s.mem_post ~f:Var.to_string)) (* TODO: should maybe be a map? *)
     (Relational_domain.to_string s.state)
 
 (** Constructs a summary.
     @param cfg the CFG for which the summary approximates the behavior
     @param ret the return value of the function (if there is any)
     @param state the final state of the summarized function *)
-let make (cfg : 'a Cfg.t) (state : Domain.t) (ret : string option)
-    (mem_pre : string list) (mem_post : string list)
-    (globals_post : string list)
+let make (cfg : 'a Cfg.t) (state : Domain.t) (ret : Var.t option)
+    (mem_pre : Var.t list) (mem_post : Var.t list)
+    (globals_post : Var.t list)
   : t =
   (* Filter the state to only keep relevant variables:
       - the parameters
       - the return value if there is one (i.e., the top of the stack)
       - any variable bound in the store
       - any variable used by a global *)
-  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.to_string (Var.Local argi)) in
-  let globals_pre = List.mapi cfg.global_types ~f:(fun i _ -> Var.to_string (Var.Global i)) in
+  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.Local argi) in
+  let globals_pre = List.mapi cfg.global_types ~f:(fun i _ -> Var.Global i) in
   let to_keep = params @ globals_pre @ globals_post @ mem_pre @ mem_post @ (Option.to_list ret) in
   { params = params;
     return = ret;
@@ -53,29 +53,29 @@ let make (cfg : 'a Cfg.t) (state : Domain.t) (ret : string option)
 
 (** Constructs an empty bottom summary given a CFG *)
 let bottom (cfg : 'a Cfg.t) (vars : Var.t list) : t =
-  let ret = if List.length cfg.return_types = 1 then Some "ret" else None in
-  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.to_string (Var.Local argi)) in
-  make cfg (Domain.bottom cfg ((Option.to_list ret) @ params @ (List.map ~f:Var.to_string vars))) ret [] [] []
+  let ret = if List.length cfg.return_types = 1 then Some Var.Return else None in
+  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.Local argi) in
+  make cfg (Domain.bottom cfg ((Option.to_list ret) @ params @ vars)) ret [] [] []
 
 (** Constructs the top summary given a CFG *)
 let top (cfg : 'a Cfg.t) (vars : Var.t list) : t =
-  let ret = if List.length cfg.return_types = 1 then Some "ret" else None in
-  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.to_string (Var.Local argi)) in
+  let ret = if List.length cfg.return_types = 1 then Some Var.Return else None in
+  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.Local argi) in
   (* TODO: top memory and globals? *)
-  make cfg (Domain.top cfg ((Option.to_list ret) @ params @ (List.map ~f:Var.to_string vars))) ret [] [] []
+  make cfg (Domain.top cfg ((Option.to_list ret) @ params @ vars)) ret [] [] []
 
 (** Constructs a summary from an imported function *)
 let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t list) : t =
   (* These should be fairly easy to encode: we just list constraints between input and output, no constraint if we don't know anything about that name *)
-  let params = List.mapi args ~f:(fun argi _ -> Var.to_string (Var.Local argi)) in
+  let params = List.mapi args ~f:(fun argi _ -> Var.Local argi) in
   assert (List.length ret <= 1); (* wasm spec does not allow for more than one return type (currently) *)
   Printf.printf "[summary %d]: ret is %d\n" _idx (List.length ret);
   let return = match ret with
     | [] -> None
-    | _ :: [] -> Some "ret"
+    | _ :: [] -> Some (Var.Return)
     | _ -> failwith (Printf.sprintf "more than one return value for %s" name) in
   let params_and_return = params @ (Option.to_list return) in
-  let apron_vars = Array.of_list (List.map params_and_return ~f:Apron.Var.of_string) in
+  let apron_vars = Array.of_list (List.map params_and_return ~f:(fun v -> Apron.Var.of_string (Var.to_string v))) in
   let apron_env = Apron.Environment.make apron_vars [| |] in (* only int variables *)
   (* Everything is set to top *)
   let constraints = Apron.Abstract1.of_box Domain.manager apron_env apron_vars
@@ -84,7 +84,7 @@ let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t li
   let state = match name with
     | "fd_write" ->
       (* returns 0 *)
-      Domain.add_constraint topstate "ret" "0"
+      Domain.add_constraint topstate (Var.Return) "0"
     | "proc_exit" ->
       (* does not return anything, hence no constraint *)
       topstate
@@ -111,7 +111,7 @@ let apply (summary : t) (state : Domain.t) (args: string list) (ret : string opt
        To apply it, we do the following: *)
     let args_and_ret = args @ (Option.to_list ret) in
     (* 1. Rename the parameters and return value in the summary to match the actual arguments and return value *)
-    let rename_from = List.map (summary.params @ (Option.to_list summary.return)) ~f:Apron.Var.of_string in
+    let rename_from = List.map (summary.params @ (Option.to_list summary.return)) ~f:(fun v -> Apron.Var.of_string (Var.to_string v)) in
     let rename_to = List.map args_and_ret ~f:Apron.Var.of_string in
     Printf.printf "vars: %s\n" (String.concat ~sep:","
                                   (List.map (Array.to_list (fst (Apron.Environment.vars summary.state.env)))

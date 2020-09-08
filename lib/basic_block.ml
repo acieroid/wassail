@@ -42,12 +42,18 @@ let to_dot (b : 'a t) (annot_to_string : 'a -> string) : string =
     Printf.sprintf "block%d [shape=diamond, label=\"%d\"]" b.idx b.idx
 
 (** Returns all the labels of the instructions contained within this block *)
-let all_instruction_labels (cfg : 'a t) : IntSet.t =
-  match cfg.content with
+let all_instruction_labels (b : 'a t) : IntSet.t =
+  match b.content with
   | Control i -> Instr.all_labels (Control i)
-  | Data d -> List.fold_left ~init:IntSet.empty d ~f:(fun acc i ->
+  | Data d -> List.fold_left d ~init:IntSet.empty ~f:(fun acc i ->
       IntSet.union acc (Instr.all_labels (Data i)))
   | ControlMerge -> IntSet.empty
+
+let all_annots (b : 'a t) : 'a list =
+  match b.content with
+  | Control i -> [i.annotation_before; i.annotation_after]
+  | Data d -> List.fold_left d ~init:[] ~f:(fun acc i -> [i.annotation_before; i.annotation_after] @ acc)
+  | ControlMerge -> [b.annotation_before; b.annotation_after]
 
 (** Change the annotations of a basic block *)
 let annotate (b : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b) IntMap.t) : 'b t =

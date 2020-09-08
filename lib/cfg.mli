@@ -54,4 +54,7 @@ val all_block_indices : 'a t -> IntSet.t
 
 val all_instruction_labels : 'a t -> IntSet.t
 
+val all_annots : 'a t -> 'a list
+
 val annotate : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> 'b t
+
