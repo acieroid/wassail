@@ -43,11 +43,14 @@ module State = struct
       let min_size = min (List.length l1) (List.length l2) in
       f (List.take l1 min_size) (List.take l2 min_size) in
     let fmap (m1 : Var.t Var.OffsetMap.t) (m2 : Var.t Var.OffsetMap.t) : (Var.t * Var.t) list =
-      assert (Stdlib.(=) (Var.OffsetMap.keys m1) (Var.OffsetMap.keys m2)); (* Memory keys never change (assumption) *)
-      List.filter_map (Var.OffsetMap.keys m1) ~f:(fun k ->
-          let v1 = Var.OffsetMap.find_exn m1 k in
-          let v2 = Var.OffsetMap.find_exn m2 k in
-          if Var.equal v1 v2 then None else Some (v1, v2)) in
+      List.filter_map ((Var.OffsetMap.keys m1) @ (Var.OffsetMap.keys m2)) ~f:(fun k ->
+          match (Var.OffsetMap.find m1 k, Var.OffsetMap.find m2 k) with
+          | Some v1, Some v2 ->
+            (* The key is present in both memories, check if they map to different values *)
+            if Var.equal v1 v2 then None else Some (v1, v2)
+          | _ ->
+            (* The key is only present in one memory, hence the value is not considered different *)
+            None) in
     (fvstack s1.vstack s2.vstack) @ (f s1.locals s2.locals) @ (f s1.globals s2.globals) @ (fmap s1.memory s2.memory)
 
   let ret (i : state Instr.t) : Var.t =
@@ -111,9 +114,9 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
 
   let state_to_dot_string (s : state) : string =
     Printf.sprintf "[%s]"
-      (*(String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
-      (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))*)
-      (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v))))
+      (String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
+  (* (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))*)
+  (* (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v)))) *)
 
   let state_to_string (s : state) : string =
     Printf.sprintf "{\nvstack: [%s]\nlocals: [%s]\nglobals: [%s]\nmemory: [%s]\n}"
@@ -228,7 +231,6 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                         | v' when Var.equal v v' -> v'
                         | _ -> Var.Hole (* this is a hole *)
                       in
-                      Printf.printf "[merge] acc: %s\ns: %s\n" (state_to_string acc) (state_to_string s);
                       { vstack = List.map2_exn acc.vstack s.vstack ~f:f;
                         locals = List.map2_exn acc.locals s.locals ~f:f;
                         globals = List.map2_exn acc.globals s.globals ~f:f;

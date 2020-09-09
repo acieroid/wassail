@@ -70,6 +70,7 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block :
 *)
 let data_instr_transfer (module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_data) (state : state) : state =
   let ret (i : annot_expected Instr.labelled_data) : Var.t = List.hd_exn i.annotation_after.vstack in
+  Printf.printf "--------------------\ninstr: %s\n" (Instr.data_to_string i.instr);
   match i.instr with
   | Nop -> state
   | MemorySize ->
@@ -129,6 +130,13 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) 
     (* TODO: reflect "rel v1 v2" in the constraints, when possible *)
     (* add ret = [0;1] *)
     Domain.add_interval_constraint state (ret i) (0, 1)
+  | Binary { op = Binop.Add; _ } ->
+    (* TODO: this is not sound, as + in the constraints is not a binary + *)
+    let v2, v1 = pop2 i.annotation_before.vstack in
+    Domain.add_constraint state (ret i) (Printf.sprintf "%s+%s" (Var.to_string v1) (Var.to_string v2))
+  | Binary { op = Binop.Sub; _ } ->
+    let v2, v1 = pop2 i.annotation_before.vstack in
+    Domain.add_constraint state (ret i) (Printf.sprintf "%s-%s" (Var.to_string v1) (Var.to_string v2))
   | Binary _ ->
     (* TODO: reflect "bin v1 v2" the operation in the constraints, when possible *)
     (* don't add any constraint (for now)  *)
