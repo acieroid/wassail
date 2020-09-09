@@ -60,6 +60,9 @@ end
 module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
   include State
 
+  (** Allows the use of variables encoding constants *)
+  let use_const : bool ref = ref true
+
   (*---- Types ----*)
   (** Spec inference does not require any annotation *)
   type annot_expected = unit
@@ -83,7 +86,11 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
 
   let init_state (cfg : 'a Cfg.t) : state = {
     vstack = []; (* the vstack is initially empty *)
-    locals = List.mapi (cfg.arg_types @ cfg.local_types) ~f:(fun i _ -> Var.Local i);
+    locals =
+      if !use_const then
+        (List.mapi cfg.arg_types ~f:(fun i _ -> Var.Local i)) @ (List.map cfg.local_types ~f:(fun _ -> Var.Const (Prim_value.I32 0l)))
+      else
+        List.mapi (cfg.arg_types @ cfg.local_types) ~f:(fun i _ -> Var.Local i);
     globals = List.mapi cfg.global_types ~f:(fun i _ -> Var.Global i);
     memory = Var.OffsetMap.empty
       (*begin
@@ -151,7 +158,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
     | LocalTee l -> { state with locals = set l state.locals (List.hd_exn state.vstack) }
     | GlobalGet g -> { state with vstack = get g state.globals :: state.vstack }
     | GlobalSet g -> { state with globals = set g state.globals (List.hd_exn state.vstack) }
-    | Const _ -> { state with vstack = ret :: state.vstack }
+    | Const n -> { state with vstack = (if !use_const then (Var.Const n) else ret) :: state.vstack }
     | Compare _ -> { state with vstack = ret :: (drop 2 state.vstack) }
     | Binary _ -> { state with vstack = ret :: (drop 2 state.vstack) }
     | Unary _ -> { state with vstack = ret :: (drop 1 state.vstack) }

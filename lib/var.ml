@@ -2,12 +2,13 @@ open Core_kernel
 
 module T = struct
   type t =
-    | Var of int
+    | Var of int (* variable resulting from an instruction *)
     | Local of int (* nth local *)
     | Global of int (* nth global *)
-    | Merge of int * int
-    | Return
-    | Hole
+    | Merge of int * int (* merge variable (n, m) meaning from nth function, mth merge variable *)
+    | Return (* return variable *)
+    | Hole (* only temporary holes meant to be replaced by merge variables *)
+    | Const of Prim_value.t
   [@@deriving sexp, compare, equal]
   type with_offset = t * int
   [@@deriving sexp, compare, equal]
@@ -21,6 +22,7 @@ let to_string (v : t) : string = match v with
   | Merge (idx, n) -> Printf.sprintf "m%d_%d" idx n
   | Return -> "ret"
   | Hole -> "_"
+  | Const n ->  Prim_value.to_string n
 
 module OffsetMap = Map.Make(struct
     type t = with_offset
