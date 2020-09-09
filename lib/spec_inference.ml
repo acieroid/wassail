@@ -110,9 +110,10 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
   let bottom_state _ = bottom
 
   let state_to_dot_string (s : state) : string =
-    Printf.sprintf "[%s], [%s]"
-      (String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
-      (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))
+    Printf.sprintf "[%s]"
+      (*(String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
+      (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))*)
+      (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v))))
 
   let state_to_string (s : state) : string =
     Printf.sprintf "{\nvstack: [%s]\nlocals: [%s]\nglobals: [%s]\nmemory: [%s]\n}"
@@ -218,7 +219,6 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
             | [] -> failwith "No predecessor of a merge node have been analyzed, should not happen"
             | s :: [] -> (* only one non-bottom predecessor *) s
             | states ->
-              (*Printf.printf "merge block %s, states: %s\n" (Basic_block.to_string block (fun _ -> "")) (String.concat ~sep:"," (List.map states ~f:state_to_string)); *)
               (* multiple predecessors to merge *)
               (* First compute the state with holes where we will need to put merge variables *)
               let with_holes = List.fold_left states
@@ -226,12 +226,15 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                   ~f:(fun acc s ->
                       let f opt v = match opt with
                         | v' when Var.equal v v' -> v'
-                        | _ -> (* Printf.printf "hole created for %s, %s\n" (Var.to_string opt) (Var.to_string v); *) Var.Hole (* this is a hole *)
+                        | _ -> Var.Hole (* this is a hole *)
                       in
+                      Printf.printf "[merge] acc: %s\ns: %s\n" (state_to_string acc) (state_to_string s);
                       { vstack = List.map2_exn acc.vstack s.vstack ~f:f;
                         locals = List.map2_exn acc.locals s.locals ~f:f;
                         globals = List.map2_exn acc.globals s.globals ~f:f;
-                        memory = (* Var.Map.map2_exn *) acc.memory (* s.memory ~f:f *) }) in (* TODO: deal with memory *)
+                        memory = Var.OffsetMap.merge acc.memory s.memory ~f:(fun ~key:_ v -> match v with
+                            | `Both (v1, v2) -> Some (f v1 v2)
+                            | `Left v | `Right v -> Some v); }) in
               (* Then, add merge variables *)
               let plug_holes = (function
                   | Var.Hole -> (* add a merge variable *) new_var ()
