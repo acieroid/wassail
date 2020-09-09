@@ -22,7 +22,7 @@ let vars (cfg : annot_expected Cfg.t) : Var.Set.t =
              (List.concat [annot.vstack;
                            annot.locals;
                            annot.globals;
-                           List.concat_map (Var.Map.to_alist annot.memory) ~f:(fun (x, y) -> [x; y])])))
+                           List.concat_map (Var.OffsetMap.to_alist annot.memory) ~f:(fun ((x, _), y) -> [x; y])])))
 
 let init_state (cfg : annot_expected Cfg.t) = Domain.init cfg  (Var.Set.to_list (vars cfg))
 
@@ -144,10 +144,10 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) 
     (* Don't add any constraint *)
     state
   | Load {offset; _ } ->
+    Printf.printf "load, state is %s\n" (state_to_string state);
     if !ignore_memory then state else
       let ret = ret i in
       let vaddr = pop i.annotation_before.vstack in
-      let addr = Var.MemoryKey (i.label, 0) in
       (* We are loading from address vaddr (also mk_i.label_0).
          The resulting value is ret (also mv_i.label_0).
          a. If there are addresses that are equal to vaddr, we join all the values they map to and assign ret to it. In case they differ, ret will be top.
@@ -156,130 +156,67 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) 
            a. there is at least one address that is definitely equal to vaddr, then these addresses are definitely loaded
            b. the resulting value is top, hence it is soundly over-approximative *)
       (* We assume load/stores are symmetric, i.e., when a load/store operation is made on an address for a specific type and size, all other operations on the same address are made with the same type and size *)
-      (* First, connect the right variables: vaddr is mk_i.label_0, ret is mv_i.label_0 *)
-      let state' = Domain.add_constraints state [(addr, Printf.sprintf "%s+%d" (Var.to_string vaddr) offset);
-                                                 (ret, (Var.to_string (Var.MemoryVal (i.label, 0))))] in
-      (* Then, find all addresses that are equal to vaddr *)
+      (* First, find all addresses that are equal to vaddr *)
       let mem = i.annotation_before.memory in
-      let addrs = List.filter (Var.Map.keys mem)
-          ~f:(fun a -> match Domain.are_equal_offset state' a vaddr offset with
+      let addrs = List.filter (Var.OffsetMap.keys mem)
+          ~f:(fun a -> match Domain.are_equal_offset state a (vaddr, offset) with
               | (true, false) -> true (* definitely equal *)
               | _ -> false) in
+      Printf.printf "there are %d addresses that are def. equal\n" (List.length addrs);
       if List.is_empty addrs then
         (* Case b: no such addresses, then ret is unconstrained *)
-        state'
+        state
       else
         (* Case a: at least one address: join their value into the state after adding the constraint *)
+        (* TODO: first meet their value?
+           Basically, if we have [mv = 0, mv' = top], and we know that their address (mk and mk') are both definitely equal to the loaded address, then we should have in the post state: [mv = 0, mv' = 0]
+ *)
         let states = List.map addrs ~f:(fun a ->
             (* Get the value *)
-            let v = Var.Map.find_exn mem a in
+            let v = Var.OffsetMap.find_exn mem a in
             (* ret = value *)
             Printf.printf "ret is %s\n" (Var.to_string ret);
-            Domain.add_equality_constraint state' ret v) in
+            Domain.add_equality_constraint state ret v) in
         (* Meet the domains! This is because they should all be equivalent.
            TODO: carefully check that *)
         List.reduce_exn states ~f:Domain.meet
-    (* If we want to model values as bytes, we will have to do the following
-       let (addr0, addr1, addr2, addr3) = (Spec_inference.MemoryKey (i.label, 0),
-                                        Spec_inference.MemoryKey (i.label, 1),
-                                        Spec_inference.MemoryKey (i.label, 2),
-                                        Spec_inference.MemoryKey (i.label, 3)) in
-    (* add the constraints on addresses, i.e., addri = vaddr+offset+i where vaddr is the variable from the stack, addri is the address from which we will load *)
-    let state' = Domain.add_constraints state [(Var.to_string addr3, (Printf.sprintf "%s+%d" vaddr (offset+3)));
-                                               (Var.to_string addr2, (Printf.sprintf "%s+%d" vaddr (offset+2)));
-                                               (Var.to_string addr1, (Printf.sprintf "%s+%d" vaddr (offset+1)));
-                                               (Var.to_string addr0, (Printf.sprintf "%s+%d" vaddr offset))] in
-  | Load ({ typ = I32; offset; sz = Some (Pack8, _) }) ->
-    Logging.warn "ImpreciseOperation" "load8 returns top, and ignores sx/zx";
-    let vaddr = Var.to_string (Spec.pop i.annotation_before.vstack) in
-    let addr0 = Spec_inference.MemoryKey (i.label, 0) in
-    let state' = Domain.add_constraint state (Var.to_string addr0) (Printf.sprintf "%s+%d" vaddr offset) in
-    (* TODO: add constraints on the return value? *)
-    state'
-  | Load op ->
-    (* TODO: load with sz=8,zx (and others, but this is the most important now *)
-       failwith (Printf.sprintf "load not supported with such op argument: %s" (Memoryop.to_string op)) *)
   | Store { offset; _ } ->
-    if !ignore_memory then state else
+    Printf.printf "store\n";
+    let res = if !ignore_memory then state else
       let vval, vaddr = pop2 i.annotation_before.vstack in
-      let addr = Var.MemoryKey (i.label, 0) in
-      let v = Var.MemoryValNew (i.label, 0) in
-      let state' = Domain.add_constraints state [
-          (addr, Printf.sprintf "%s+%d" (Var.to_string vaddr) offset);
-          (v, Var.to_string vval)]
-      in
       (* Find all memory keys that are definitely equal to the address *)
       let mem = i.annotation_after.memory in
-      let equal_addrs = List.filter (Var.Map.keys mem)
-          ~f:(fun a -> match Domain.are_equal_offset state a vaddr offset with
+      let equal_addrs = List.filter (Var.OffsetMap.keys mem)
+          ~f:(fun a -> match Domain.are_equal_offset state a (vaddr, offset) with
               | (true, false) -> true (* definitely equal *)
               | _ -> false) in
+      Printf.printf "there are %d addresses that are def. equal\n" (List.length equal_addrs);
       if not (List.is_empty equal_addrs) then begin
         (* If there are addresses that are definitely equal, update the corresponding value *)
         let states = List.map equal_addrs
             ~f:(fun a ->
-                let v' = Var.Map.find_exn mem a in
-                Domain.add_equality_constraint state' vval v') in
+                let v' = Var.OffsetMap.find_exn mem a in
+                Domain.add_equality_constraint state vval v') in
         List.reduce_exn states ~f:Domain.meet
       end else begin
+        Printf.printf "no addresses definitely equal\n";
         (* Otherwise, do similar for all addresses that may be equal *)
-        let maybe_equal_addrs = List.filter (Var.Map.keys mem)
-            ~f:(fun a -> match Domain.are_equal_offset state a vaddr offset with
+        let maybe_equal_addrs = List.filter (Var.OffsetMap.keys mem)
+            ~f:(fun a -> match Domain.are_equal_offset state a (vaddr, offset) with
                 | (true, true) -> true (* maybe equal *)
                 | _ -> false) in
+        Printf.printf "Addresses maybe equal: %d\n" (List.length maybe_equal_addrs);
         let states = List.map maybe_equal_addrs
             ~f:(fun a ->
-                let v' = Var.Map.find_exn mem a in
+                let v' = Var.OffsetMap.find_exn mem a in
                 (* We need to join with the unmodified state because the addres *may* be equal *)
-                Domain.join state'
-                  (Domain.add_equality_constraint state' v v')) in
+                Domain.join state
+                  (Domain.add_equality_constraint state (failwith "which value here? (was v)") v')) in
+        Printf.printf "before join2\n"; (* TODO: investigate these joins *)
         List.reduce_exn states ~f:Domain.join
-      end
-      (*
-  | Store { typ = I32; offset; sz = None } ->
-    let (addr0, addr1, addr2, addr3) = (Var.to_string (Spec_inference.MemoryKey (i.label, 0)),
-                                        Var.to_string (Spec_inference.MemoryKey (i.label, 1)),
-                                        Var.to_string (Spec_inference.MemoryKey (i.label, 2)),
-                                        Var.to_string (Spec_inference.MemoryKey (i.label, 3))) in
-    let (_vval, vaddr) = Spec.pop2 i.annotation_before.vstack in
-    let state' = Domain.add_constraints state [(addr3, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+3)));
-                                               (addr2, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+2)));
-                                               (addr1, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+1)));
-                                               (addr0, (Printf.sprintf "%s+%d" (Var.to_string vaddr) offset))] in
-    (* TODO: update memory *)
-    state'
-  | Store { typ = I64; offset; sz = None } ->
-    let (addr0, addr1, addr2, addr3,
-         addr4, addr5, addr6, addr7) = (Var.to_string (Spec_inference.MemoryKey (i.label, 0)),
-                                        Var.to_string (Spec_inference.MemoryKey (i.label, 1)),
-                                        Var.to_string (Spec_inference.MemoryKey (i.label, 2)),
-                                        Var.to_string (Spec_inference.MemoryKey (i.label, 3)),
-                                        Var.to_string (Spec_inference.MemoryKey (i.label, 4)),
-                                        Var.to_string (Spec_inference.MemoryKey (i.label, 5)),
-                                        Var.to_string (Spec_inference.MemoryKey (i.label, 6)),
-                                        Var.to_string (Spec_inference.MemoryKey (i.label, 7))) in
-    let (_vval, vaddr) = Spec.pop2 i.annotation_before.vstack in
-    let state' = Domain.add_constraints state
-        [(addr7, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+7)));
-         (addr6, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+6)));
-         (addr5, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+5)));
-         (addr4, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+4)));
-         (addr3, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+3)));
-         (addr2, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+2)));
-         (addr1, (Printf.sprintf "%s+%d" (Var.to_string vaddr) (offset+1)));
-         (addr0, (Printf.sprintf "%s+%d" (Var.to_string vaddr) offset))] in
-    (* TODO: update memory *)
-    state'
-  | Store { typ = I32; offset; sz = Some (Pack8, SX)} ->
-    Logging.warn "ImpreciseOperation" "store8 ignores sx/zx";
-    let addr0 = Var.to_string (Spec_inference.MemoryKey (i.label, 0)) in
-    let (_vval, vaddr) = Spec.pop2 i.annotation_before.vstack in
-    let state' = Domain.add_constraint state addr0 (Printf.sprintf "%s+%d" (Var.to_string vaddr) offset) in
-    (* TODO: update memory *)
-    state'
-  | Store op ->
-    (* TODO: store with i64? *)
-    failwith (Printf.sprintf "store not supported with such op argument: %s" (Memoryop.to_string op)) *)
+      end in
+    Printf.printf "store res: %s\n" (state_to_string res);
+    res
 
 let control_instr_transfer
     (module_ : Wasm_module.t) (* The wasm module (read-only) *)
@@ -345,7 +282,7 @@ let control_instr_transfer
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr))
 
 let memvars (annot : annot_expected) : Var.t list =
-  List.concat_map (Var.Map.to_alist annot.memory) ~f:(fun (x, y) -> [x; y])
+  List.concat_map (Var.OffsetMap.to_alist annot.memory) ~f:(fun ((x, _), y) -> [x; y])
 
 let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
   let entry_block = IntMap.find_exn cfg.basic_blocks cfg.entry_block in

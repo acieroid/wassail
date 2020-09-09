@@ -156,12 +156,11 @@ let count_vars =
            let extract_vars (st : Spec_inference.state) : Var.Set.t =
              Var.Set.filter ~f:(function
                  | Merge _ -> false
-                 | MemoryKey _ | MemoryVal _ | MemoryValNew _ -> false
                  | _ -> true)
                (Var.Set.union (Var.Set.of_list st.vstack)
                   (Var.Set.union (Var.Set.of_list st.locals)
                      (Var.Set.union (Var.Set.of_list st.globals)
-                        (Var.Set.of_list (List.concat_map (Var.Map.to_alist st.memory) ~f:(fun (a, b) -> [a; b]))))))
+                        (Var.Set.of_list (List.concat_map (Var.OffsetMap.to_alist st.memory) ~f:(fun ((a, _), b) -> [a; b]))))))
            let transfer before after (vars, n) =
              ((Var.Set.union vars
                  (Var.Set.union (extract_vars before) (extract_vars after))),
@@ -279,6 +278,7 @@ let reltaint_intra =
     (fun summaries wasm_mod cfg ->
        let module RelationalIntra = Intra.Make(Relational_transfer) in
        RelationalIntra.init_summaries (fst summaries);
+       Relational_transfer.ignore_memory := false;
        Logging.info "---------- Relational analysis ----------";
        let result_cfg = RelationalIntra.analyze wasm_mod cfg in
        let final_state = RelationalIntra.final_state result_cfg in

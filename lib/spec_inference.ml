@@ -7,14 +7,14 @@ module State = struct
     vstack : Var.t list;
     locals : Var.t list;
     globals : Var.t list;
-    memory : Var.t Var.Map.t;
+    memory : Var.t Var.OffsetMap.t;
   }
   [@@deriving compare, equal]
 
   (** Returns all variables contained in the memory of a state *)
   let memvars (s : state) : Var.t list =
-    (List.concat (List.map (Var.Map.to_alist s.memory)
-                    ~f:(fun (k, v) -> [k; v])))
+    (List.concat (List.map (Var.OffsetMap.to_alist s.memory)
+                    ~f:(fun ((k, _offset), v) -> [k; v])))
 
   (** Returns all the variables contained in the state *)
   let vars_of (s : state) : Var.Set.t =
@@ -42,11 +42,11 @@ module State = struct
          Hence, it is safe to treat the first vstack as if it was [x] *)
       let min_size = min (List.length l1) (List.length l2) in
       f (List.take l1 min_size) (List.take l2 min_size) in
-    let fmap (m1 : Var.t Var.Map.t) (m2 : Var.t Var.Map.t) : (Var.t * Var.t) list =
-      assert (Stdlib.(=) (Var.Map.keys m1) (Var.Map.keys m2)); (* Memory keys never change (assumption) *)
-      List.filter_map (Var.Map.keys m1) ~f:(fun k ->
-          let v1 = Var.Map.find_exn m1 k in
-          let v2 = Var.Map.find_exn m2 k in
+    let fmap (m1 : Var.t Var.OffsetMap.t) (m2 : Var.t Var.OffsetMap.t) : (Var.t * Var.t) list =
+      assert (Stdlib.(=) (Var.OffsetMap.keys m1) (Var.OffsetMap.keys m2)); (* Memory keys never change (assumption) *)
+      List.filter_map (Var.OffsetMap.keys m1) ~f:(fun k ->
+          let v1 = Var.OffsetMap.find_exn m1 k in
+          let v2 = Var.OffsetMap.find_exn m2 k in
           if Var.equal v1 v2 then None else Some (v1, v2)) in
     (fvstack s1.vstack s2.vstack) @ (f s1.locals s2.locals) @ (f s1.globals s2.globals) @ (fmap s1.memory s2.memory)
 
@@ -82,7 +82,8 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
     vstack = []; (* the vstack is initially empty *)
     locals = List.mapi (cfg.arg_types @ cfg.local_types) ~f:(fun i _ -> Var.Local i);
     globals = List.mapi cfg.global_types ~f:(fun i _ -> Var.Global i);
-    memory = begin
+    memory = Var.OffsetMap.empty
+      (*begin
       let key (label : Instr.label) (n : int) : Var.t = MemoryKey (label, n) in
       let value (label : Instr.label) (n : int) : Var.t = MemoryVal (label, n) in
       List.fold_left (IntMap.data cfg.basic_blocks)
@@ -96,14 +97,14 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                       Var.Map.add_exn ~key:(key i.label 0) ~data:(value i.label 0) m
                     | _ -> m)
             | Control _ | ControlMerge -> m)
-    end;
+        end*);
   }
 
   let bottom : state = {
     vstack = [];
     locals = [];
     globals = [];
-    memory = Var.Map.empty;
+    memory = Var.OffsetMap.empty;
   }
 
   let bottom_state _ = bottom
@@ -118,7 +119,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
       (String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
       (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))
       (String.concat ~sep:", " (List.map s.globals ~f:Var.to_string))
-      (String.concat ~sep:", " (List.map (Var.Map.to_alist s.memory) ~f:(fun (k, v) -> Printf.sprintf "%s: %s" (Var.to_string k) (Var.to_string v))))
+      (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v))))
 
   let join_state (_s1 : state) (s2 : state) : state =
     s2 (* only keep the "most recent" state, this is safe for this analysis *)
@@ -134,8 +135,6 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
       (i : annot_expected Instr.labelled_data)
       (state : state)
     : state =
-    let key (n : int) : Var.t = MemoryKey (i.label, n) in
-    let value (n : int) : Var.t = MemoryValNew (i.label, n) in
     let ret = Var.Var i.label in
     match i.instr with
     | Nop -> state
@@ -159,9 +158,10 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
       (* TODO: load can load one byte, or more. For now, this is entirely encoded in the constraints *)
       (* let v = Var.Map.find_exn state.memory (key 0) in *)
       { state with vstack = ret :: (drop 1 state.vstack) }
-    | Store _ ->
+    | Store { offset; _} ->
+      let (value, addr) = pop2 state.vstack in
       { state with vstack = drop 2 state.vstack;
-                   memory = Var.Map.update state.memory (key 0) ~f:(fun _ -> (value 0)) }
+                   memory = Var.OffsetMap.update state.memory (addr, offset) ~f:(fun _ -> value) }
 
   let control_instr_transfer (_module_ : Wasm_module.t) (cfg : 'a Cfg.t) (i : ('a Instr.control, 'a) Instr.labelled) (state : state) : [`Simple of state | `Branch of state * state] =
     let ret = Var.Var i.label in
@@ -239,7 +239,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
               { vstack = List.map with_holes.vstack ~f:plug_holes;
                 locals = List.map with_holes.locals ~f:plug_holes;
                 globals = List.map with_holes.globals ~f:plug_holes;
-                memory = Var.Map.map with_holes.memory ~f:plug_holes }
+                memory = Var.OffsetMap.map with_holes.memory ~f:plug_holes }
           end
       end)
     | _ ->

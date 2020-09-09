@@ -70,13 +70,13 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
          Refined case: get the taint of the memory cells that can pointed to, according to the previous analysis stages (i.e., relational analysis) *)
       let addr = pop i.annotation_before.vstack in
       let mem = i.annotation_before.memory in
-      let all_locs = Var.Map.keys mem in
+      let all_locs = Var.OffsetMap.keys mem in
       (* Filter the memory location using results from the relational analysis if possible *)
       let locs = if !Taint_options.use_relational then
           (* We need to filter locs to only have the locs that can be loaded.
              This means for each loc, we can ask the relational domain if are_equal loc v (where v is the top of the stack.
              If some are truly equal, we know we can only keep these. Otherwise, if some maybe equal, then these have to be kept. *)
-          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc addr offset with
+          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc (addr, offset) with
               | (true, false) -> true
               | _ -> false) in
           if not (List.is_empty equal) then
@@ -84,7 +84,7 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
             equal
           else
             (* No address is definitely equal to addr, so we take the ones that may be equal *)
-            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc addr offset with
+            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc (addr, offset) with
                 | (true, _) -> true
                 | _ -> false)
         else
@@ -92,7 +92,9 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
       (* Get the taint of possible memory location and their value.
          In practice, both the memory location and the value have the same taint
       *)
-      let taints = List.map locs ~f:(fun k -> Taint_domain.join_taint (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Var.Map.find_exn mem k))) in
+      let taints = List.map locs ~f:(fun (k, offset) ->
+          Printf.printf "TODO: currently ignoring offsets in taints!!!\n--------------------\n--------------\n"; (* maybe only the values should be tainted, not the keys *)
+          Taint_domain.join_taint (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Var.OffsetMap.find_exn mem (k, offset)))) in
       Taint_domain.add_taint
         state
         (ret i)
@@ -103,10 +105,10 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
          Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
       let vval, vaddr = pop2 i.annotation_before.vstack in
       let mem = i.annotation_after.memory in
-      let all_locs = Var.Map.keys mem in
+      let all_locs = Var.OffsetMap.keys mem in
       (* Refine memory locations using relational innformation, if available *)
       let locs = if !Taint_options.use_relational then
-          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc vaddr offset with
+          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc (vaddr, offset) with
               | (true, false) -> true
               | _ -> false) in
           if not (List.is_empty equal) then
@@ -114,15 +116,16 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
             equal
           else
             (* No address is definitely equal to addr, so we take the ones that may be equal *)
-            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc vaddr offset with
+            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc (vaddr, offset) with
                 | (true, _) -> true
                 | _ -> false)
         else
           all_locs in
       (* Set the taint of memory locations and the value to the taint of vval *)
-      List.fold_left locs ~init:state ~f:(fun s k ->
+      List.fold_left locs ~init:state ~f:(fun s (k, offset) ->
+          Printf.printf "TODO: ignoring offsets!";
           Taint_domain.add_taint_v (Taint_domain.add_taint_v s k vval)
-            (Var.Map.find_exn mem k) vval)
+            (Var.OffsetMap.find_exn mem (k, offset)) vval)
 
   let control_instr_transfer
       (module_ : Wasm_module.t) (* The wasm module (read-only) *)
@@ -134,8 +137,10 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
       let summary = SummaryManager.get f in
       let args = List.take i.annotation_before.vstack (fst arity) in
       let ret = if snd arity = 1 then List.hd i.annotation_after.vstack else None in
-      Taint_summary.apply summary state args i.annotation_before.globals i.annotation_after.globals (List.concat_map (Var.Map.to_alist i.annotation_after.memory)
-         ~f:(fun (a, b) -> [a; b])) ret
+      Taint_summary.apply summary state args i.annotation_before.globals i.annotation_after.globals (List.concat_map (Var.OffsetMap.to_alist i.annotation_after.memory)
+                                                                                                       ~f:(fun ((a, _offset), b) ->
+                                                                                                           Printf.printf "TODO: ignoring offset\n";
+                                                                                                           [a; b])) ret
     in
     match i.instr with
     | Call (arity, f) -> `Simple (apply_summary f arity state)
@@ -204,6 +209,8 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
     Taint_summary.make cfg out_state
       (if List.length cfg.return_types = 1 then List.hd exit_spec.vstack else None)
       exit_spec.globals
-      (List.concat_map (Var.Map.to_alist exit_spec.memory)
-         ~f:(fun (a, b) -> [a; b]))
+      (List.concat_map (Var.OffsetMap.to_alist exit_spec.memory)
+         ~f:(fun ((a, _), b) ->
+             Printf.printf "ignoring offset";
+             [a; b]))
 end

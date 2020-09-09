@@ -122,8 +122,9 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = IntSet.min_elt_exn worklist in
-        (* Printf.printf "-----------------------\n Analyzing block %d\n" block_idx; *)
+        Printf.printf "-----------------------\n Analyzing block %d\n" block_idx;
         let (in_state, out_state) = analyze_block block_idx in
+        Printf.printf "out_state is: %s\n" (result_to_string out_state);
         (* Has out state changed? *)
         let previous_out_state = snd (IntMap.find_exn !block_data block_idx) in
         match previous_out_state with

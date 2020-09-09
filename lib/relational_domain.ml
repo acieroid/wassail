@@ -34,7 +34,7 @@ let init (cfg : 'a Cfg.t) (vars : Var.t list) : t =
   assert (List.length cfg.return_types <= 1); (* wasm spec does not allow for more than one return type (currently) *)
   let vars_and_vals = List.map vars ~f:(fun v -> (Apron.Var.of_string (Var.to_string v), match v with
     | Var.Local n when n >= List.length cfg.arg_types -> Apron.Interval.of_int 0 0
-    | Var.Local _ | Var.Global _ | Var.MemoryKey _ | Var.MemoryVal _ -> Apron.Interval.top
+    | Var.Local _ | Var.Global _ -> Apron.Interval.top
     | _ -> Apron.Interval.bottom))
   in
   let apron_vars = Array.of_list (List.map vars_and_vals  ~f:fst) in
@@ -154,18 +154,23 @@ let are_equal (s : t) (v1 : Var.t) (v2 : Var.t) : bool * bool =
   | -2 | +2 -> (false, true)
   | _ -> failwith "should not happen"
 
-(** Check if v1 = v2+offset, i.e., v1-v2 = offset *)
-let are_equal_offset (s : t) (v1 : Var.t) (v2 : Var.t) (offset : int) : bool * bool =
+(** Check if v1 = v2, where v1 and v2 have offsets.
+    Return value is similar to are_equal *)
+let are_equal_offset (s : t) ((v1, offset1) : Var.with_offset) ((v2, offset2) : Var.with_offset) : bool * bool =
+  Printf.printf "Checking equality of %s+%d and %s+%d\n" (Var.to_string v1) offset1 (Var.to_string v2) offset2;
   if Stdlib.(v1 = v2) then
-    if offset = 0 then (true, false) else (false, true)
+    if offset1 = offset2 then (true, false) else (false, true)
   else
-  let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "%s-%s" (Var.to_string v1) (Var.to_string v2))) in
-  match Apron.Interval.cmp interval (Apron.Interval.of_int offset offset) with
-  | 0 -> (true, false)
-  | -1 -> (true, false)
-  | +1 -> (true, true)
-  | -2 | +2 -> (false, true)
-  | _ -> failwith "should not happen"
+    (* The interval represents v2-v1 *)
+    let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "%s-%s" (Var.to_string v1) (Var.to_string v2))) in
+    (* We compare the interval with offset1-offset2.
+       Basically, we check if v2-v1 = offset2-offset1, i.e. v2+offset2 = v1+offset1 *)
+    match Apron.Interval.cmp interval (Apron.Interval.of_int offset1 offset2) with
+    | 0 -> Printf.printf "tf1\n"; (true, false)
+    | -1 -> Printf.printf "tf2\n"; (true, false)
+    | +1 -> Printf.printf "tt\n"; (true, true)
+    | -2 | +2 -> Printf.printf "ft\n"; (false, true)
+    | _ -> failwith "should not happen"
 
 
 
