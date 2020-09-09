@@ -194,10 +194,17 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
       counter := !counter + 1;
       res in
     let _ : Var.t = new_var() in
+    let rename_exit (s : state) =
+      (* If this is the exit block, rename the top of the stack to a new variable *)
+      if cfg.exit_block = block.idx then
+        { s with vstack = List.mapi s.vstack ~f:(fun i v -> if i = 0 then Var.Return else v) }
+      else
+        s
+    in
     match block.content with
     | ControlMerge ->
       (* Multiple cases: either we have no predecessor, we have unanalyzed predecessors, or we have only analyzed predecessors *)
-      begin match states with
+      rename_exit (begin match states with
         | [] ->
           (* entry node *)
           init_state cfg
@@ -234,7 +241,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                 globals = List.map with_holes.globals ~f:plug_holes;
                 memory = Var.Map.map with_holes.memory ~f:plug_holes }
           end
-      end
+      end)
     | _ ->
       (* not a control-flow merge, should only be one predecessor (or none if it is the entry point) *)
       begin match states with
