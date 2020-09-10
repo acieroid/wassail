@@ -138,6 +138,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
           Printf.printf "previous state was: %s\n" (result_to_string previous_out_state);
              Printf.printf "current state is: %s\n" (result_to_string out_state); *)
           let new_out_state =
+            (* TODO: Join may not be necessary here, as long as out_state is greater than previous_out_state *)
             if IntSet.mem cfg.loop_heads block_idx then
               widen_result previous_out_state (join_result previous_out_state out_state)
             else

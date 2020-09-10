@@ -92,22 +92,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
       else
         List.mapi (cfg.arg_types @ cfg.local_types) ~f:(fun i _ -> Var.Local i);
     globals = List.mapi cfg.global_types ~f:(fun i _ -> Var.Global i);
-    memory = Var.OffsetMap.empty
-      (*begin
-      let key (label : Instr.label) (n : int) : Var.t = MemoryKey (label, n) in
-      let value (label : Instr.label) (n : int) : Var.t = MemoryVal (label, n) in
-      List.fold_left (IntMap.data cfg.basic_blocks)
-        ~init:Var.Map.empty
-        ~f:(fun m block -> match block.content with
-            | Data instrs ->
-              List.fold_left instrs
-                ~init:m
-                ~f:(fun m i -> match i.instr with
-                    | Load _op | Store _op ->
-                      Var.Map.add_exn ~key:(key i.label 0) ~data:(value i.label 0) m
-                    | _ -> m)
-            | Control _ | ControlMerge -> m)
-        end*);
+    memory = Var.OffsetMap.empty;
   }
 
   let bottom : state = {
@@ -120,10 +105,10 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
   let bottom_state _ = bottom
 
   let state_to_dot_string (s : state) : string =
-    Printf.sprintf "[%s]"
+    Printf.sprintf "[%s] [%s]"
       (String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
   (* (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))*)
-  (* (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v)))) *)
+  (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v))))
 
   let state_to_string (s : state) : string =
     Printf.sprintf "{\nvstack: [%s]\nlocals: [%s]\nglobals: [%s]\nmemory: [%s]\n}"
@@ -243,7 +228,14 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                         globals = List.map2_exn acc.globals s.globals ~f:f;
                         memory = Var.OffsetMap.merge acc.memory s.memory ~f:(fun ~key:_ v -> match v with
                             | `Both (v1, v2) -> Some (f v1 v2)
-                            | `Left v | `Right v -> Some v); }) in
+                            | `Left _v | `Right _v ->
+                              (* If a binding is only present in one branch, then it is lost upon join.
+                                 This is necessary to preserve soundness.
+                                 For example, if one branch has memory [m: v], the other has memory [],
+                                 then after the join point of these branches, only [] is a valid memory
+                                 (otherwise we could derive information assuming that m is bound to v,
+                                 which is not always the case)*)
+                              None); }) in
               (* Then, add merge variables *)
               let plug_holes = (function
                   | Var.Hole -> (* add a merge variable *) new_var ()
