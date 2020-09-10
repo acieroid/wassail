@@ -52,17 +52,17 @@ let make (cfg : 'a Cfg.t) (state : Domain.t) (ret : Var.t option)
     }
 
 (** Constructs an empty bottom summary given a CFG *)
-let bottom (cfg : 'a Cfg.t) (vars : Var.t list) : t =
+let bottom (cfg : 'a Cfg.t) (vars : Var.Set.t) : t =
   let ret = if List.length cfg.return_types = 1 then Some Var.Return else None in
-  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.Local argi) in
-  make cfg (Domain.bottom cfg ((Option.to_list ret) @ params @ vars)) ret [] [] []
+  let params = Var.Set.of_list (List.mapi cfg.arg_types ~f:(fun argi _ -> Var.Local argi)) in
+  make cfg (Domain.bottom cfg (Var.Set.union_list [Var.Set.of_option ret; params; vars])) ret [] [] []
 
 (** Constructs the top summary given a CFG *)
-let top (cfg : 'a Cfg.t) (vars : Var.t list) : t =
+let top (cfg : 'a Cfg.t) (vars : Var.Set.t) : t =
   let ret = if List.length cfg.return_types = 1 then Some Var.Return else None in
-  let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.Local argi) in
+  let params = Var.Set.of_list (List.mapi cfg.arg_types ~f:(fun argi _ -> Var.Local argi)) in
   (* TODO: top memory and globals? *)
-  make cfg (Domain.top cfg ((Option.to_list ret) @ params @ vars)) ret [] [] []
+  make cfg (Domain.top cfg (Var.Set.union_list [Var.Set.of_option ret; params; vars])) ret [] [] []
 
 (** Constructs a summary from an imported function *)
 let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t list) : t =
@@ -138,7 +138,7 @@ let initial_summaries (cfgs : 'a Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ 
     ~init:(IntMap.map cfgs ~f:(fun cfg ->
         (match typ with
          | `Bottom -> bottom
-         | `Top -> top) cfg [] (* TODO: vars *)))
+         | `Top -> top) cfg Var.Set.empty (* TODO: vars *)))
     ~f:(fun summaries (idx, name, (args, ret)) ->
         IntMap.set summaries ~key:idx ~data:(of_import idx name args ret))
 

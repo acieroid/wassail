@@ -15,9 +15,8 @@ module type INTRA = sig
   (** Analyze a method (represented by its CFG) from the module *)
   val analyze : Wasm_module.t -> annot_expected Cfg.t -> state Cfg.t
 
-(*  (** [TODO] the summary is a shorter representation of the analysis results for a function*)
-  type summary
-    val get_summary : state Cfg.t -> summary *)
+  (** Similar to analyze, but keep previous annotations *)
+  val analyze_keep : Wasm_module.t -> annot_expected Cfg.t -> (annot_expected * state) Cfg.t
 end
 
 module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
@@ -48,7 +47,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
   (** Analyzes a CFG. Returns the final state after computing the transfer of the entire function. That final state is a pair where the first element are the results per block, and the second element are the results per instructions.
       @param module_ is the overall WebAssembly module, needed to access type information, tables, etc.
       @param cfg is the CFG to analyze *)
-  let analyze (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : state Cfg.t =
+  let analyze_ (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : intra_results * intra_results =
     let bottom = Uninitialized in
     (* Data of the analysis, per block *)
     let block_data : intra_results ref = ref (IntMap.of_alist_exn (List.map (IntSet.to_list (Cfg.all_block_indices cfg))
@@ -160,10 +159,20 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
     in
     fixpoint (IntSet.singleton cfg.entry_block) 1;
     (* _narrow (IntMap.keys cfg.basic_blocks); *)
-    Cfg.annotate cfg
-      (IntMap.map !block_data ~f:(fun (before, after) -> (result_to_state cfg before, result_to_state cfg after)))
-      (IntMap.map !instr_data ~f:(fun (before, after) -> (result_to_state cfg before, result_to_state cfg after)))
+    (!block_data, !instr_data)
 
+  let analyze (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : state Cfg.t =
+    let (block_data, instr_data) = analyze_ module_ cfg in
+    Cfg.annotate cfg
+      (IntMap.map block_data ~f:(fun (before, after) -> (result_to_state cfg before, result_to_state cfg after)))
+      (IntMap.map instr_data ~f:(fun (before, after) -> (result_to_state cfg before, result_to_state cfg after)))
+
+  let analyze_keep (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : (annot_expected * state) Cfg.t =
+    let (block_data, instr_data) = analyze_ module_ cfg in
+    Cfg.add_annotation cfg
+      (IntMap.map block_data ~f:(fun (before, after) -> (result_to_state cfg before, result_to_state cfg after)))
+      (IntMap.map instr_data ~f:(fun (before, after) -> (result_to_state cfg before, result_to_state cfg after)))
+    
   (** Extract the out state from intra-procedural results *)
   let final_state (cfg : state Cfg.t) : state =
     let final = IntMap.find_exn cfg.basic_blocks cfg.exit_block in

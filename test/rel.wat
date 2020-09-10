@@ -78,6 +78,47 @@
     i32.load
     ;; summary: ret = top
   )
+  (func (;polybench-13;) (type 1) (param i32) (result i32)
+    local.get 0
+    i32.eqz
+    if  ;; label = @1
+      memory.size
+      i32.const 16
+      i32.shl
+      return
+    end
+    local.get 0
+    i32.const 65535
+    i32.and
+    local.get 0
+    i32.const -1
+    i32.le_s
+    i32.or
+    i32.eqz
+    if  ;; label = @1
+      local.get 0
+      i32.const 16
+      i32.shr_u
+      memory.grow
+      local.tee 0
+      i32.const -1
+      i32.eq
+      if  ;; label = @2
+        i32.const 1824
+        i32.const 48
+        i32.store
+        i32.const -1
+        return
+      end
+      local.get 0
+      i32.const 16
+      i32.shl
+      return
+    end
+    unreachable
+    ;; Dynamic analysis shows that the return value is not tainted
+    ;; Static analysis however does say that it can be tainted: and it clearly can!
+    )
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560))

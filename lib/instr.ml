@@ -240,6 +240,30 @@ and annotate_control (i : ('a control, 'a) labelled) (data : ('b * 'b) IntMap.t)
              | Return -> Return
              | Unreachable -> Unreachable }
 
+let rec add_annotation (i : 'a t) (data : ('b * 'b) IntMap.t) : ('a * 'b) t =
+  match i with
+  | Data d -> Data (add_annotation_data d data)
+  | Control c -> Control (add_annotation_control c data)
+and add_annotation_data (i : (data, 'a) labelled) (data : ('b * 'b) IntMap.t) : (data, ('a * 'b)) labelled =
+  let annotation_before, annotation_after = IntMap.find_exn data i.label in
+  { i with annotation_before = (i.annotation_before, annotation_before); annotation_after = (i.annotation_after, annotation_after) }
+and add_annotation_control (i : ('a control, 'a) labelled) (data : ('b * 'b) IntMap.t) : (('a * 'b) control, ('a * 'b)) labelled =
+  let annotation_before, annotation_after = IntMap.find_exn data i.label in
+  { i with annotation_before = (i.annotation_before, annotation_before); annotation_after = (i.annotation_after, annotation_after);
+           instr = match i.instr with
+             | Block (arity, instrs) -> Block (arity, List.map instrs ~f:(fun i -> add_annotation i data))
+             | Loop (arity, instrs) -> Loop (arity, List.map instrs ~f:(fun i -> add_annotation i data))
+             | If (arity, then_, else_) -> If (arity,
+                                               List.map then_ ~f:(fun i -> add_annotation i data),
+                                               List.map else_ ~f:(fun i -> add_annotation i data))
+             | Call (arity, f) -> Call (arity, f)
+             | CallIndirect (arity, f) -> CallIndirect (arity, f)
+             | Br n -> Br n
+             | BrIf n -> BrIf n
+             | BrTable (l, n) -> BrTable (l, n)
+             | Return -> Return
+             | Unreachable -> Unreachable }
+
 let annotation_before (i : 'a t) : 'a =
   match i with
   | Data d -> d.annotation_before
@@ -249,6 +273,7 @@ let annotation_after (i : 'a t) : 'a =
   match i with
   | Data d -> d.annotation_after
   | Control c -> c.annotation_after
+
 
 let rec all_labels (i : 'a t) : IntSet.t =
   match i with

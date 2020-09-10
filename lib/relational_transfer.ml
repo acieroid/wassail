@@ -24,9 +24,9 @@ let vars (cfg : annot_expected Cfg.t) : Var.Set.t =
                            annot.globals;
                            List.concat_map (Var.OffsetMap.to_alist annot.memory) ~f:(fun ((x, _), y) -> [x; y])])))
 
-let init_state (cfg : annot_expected Cfg.t) = Domain.init cfg  (Var.Set.to_list (vars cfg))
+let init_state (cfg : annot_expected Cfg.t) = Domain.init cfg (vars cfg)
 
-let bottom_state (cfg : annot_expected Cfg.t) = Domain.bottom cfg (Var.Set.to_list (vars cfg))
+let bottom_state (cfg : annot_expected Cfg.t) = Domain.bottom cfg (vars cfg)
 
 let state_to_string = Domain.to_string
 
@@ -133,10 +133,10 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) 
   | Binary { op = Binop.Add; _ } ->
     (* TODO: this is not sound, as + in the constraints is not a binary + *)
     let v2, v1 = pop2 i.annotation_before.vstack in
-    Domain.add_constraint state (ret i) (Printf.sprintf "%s+%s" (Var.to_string v1) (Var.to_string v2))
+    Domain.add_constraint state (ret i) (Domain.add v1 v2)
   | Binary { op = Binop.Sub; _ } ->
     let v2, v1 = pop2 i.annotation_before.vstack in
-    Domain.add_constraint state (ret i) (Printf.sprintf "%s-%s" (Var.to_string v1) (Var.to_string v2))
+    Domain.add_constraint state (ret i) (Domain.sub v1 v2)
   | Binary _ ->
     (* TODO: reflect "bin v1 v2" the operation in the constraints, when possible *)
     (* don't add any constraint (for now)  *)
@@ -300,3 +300,9 @@ let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
       (memvars entry_block.annotation_before)
       (memvars exit_block.annotation_after)
       exit_block.annotation_after.globals
+
+let dummy_annotate (cfg : 'a Cfg.t) : ('a * state) Cfg.t =
+  let bot = Relational_domain.bottom cfg Var.Set.empty in
+  let annots_instr = IntMap.of_alist_exn (List.map (IntSet.to_list (Cfg.all_instruction_labels cfg)) ~f:(fun i -> (i, (bot, bot)))) in
+  let annots_block = IntMap.of_alist_exn (List.map (IntSet.to_list (Cfg.all_block_indices cfg)) ~f:(fun i -> (i, (bot, bot)))) in
+  Cfg.add_annotation cfg annots_block annots_instr

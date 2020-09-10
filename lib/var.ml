@@ -29,4 +29,10 @@ module OffsetMap = Map.Make(struct
     [@@deriving sexp, compare, equal]
   end)
 module Map = Map.Make(T)
-module Set = Set.Make(T)
+module Set = struct
+  include Set.Make(T)
+  let of_option (v : T.t option) : t =
+    match v with
+    | Some v -> singleton v
+    | None -> empty
+end

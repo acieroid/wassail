@@ -65,3 +65,14 @@ let annotate (b : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b
       end;
            annotation_before;
            annotation_after }
+
+(** Add more annotations to an already-annotated CFG *)
+let add_annotation (b : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b) IntMap.t) : ('a * 'b) t =
+  let (annotation_before, annotation_after) = IntMap.find_exn block_data b.idx in
+  { b with content = begin match b.content with
+        | Control c -> Control (Instr.add_annotation_control c instr_data)
+        | Data instrs -> Data (List.map instrs ~f:(fun i -> Instr.add_annotation_data i instr_data))
+        | ControlMerge -> ControlMerge
+      end;
+           annotation_before = (b.annotation_before, annotation_before);
+           annotation_after = (b.annotation_after, annotation_after) }

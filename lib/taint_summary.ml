@@ -32,7 +32,7 @@ let of_string (s : string) : t =
   let mem = Taint_domain.taint_of_string mem in
   { ret; globals; mem }
 
-let bottom (cfg : 'a Cfg.t) (_vars : Var.t list) : t =
+let bottom (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
   let globals = List.map cfg.global_types ~f:(fun _ -> Taint_domain.taint_bottom) in
   let ret = match cfg.return_types with
       | [] -> None
@@ -41,7 +41,7 @@ let bottom (cfg : 'a Cfg.t) (_vars : Var.t list) : t =
   let mem = Taint_domain.taint_bottom in
   { ret; globals; mem }
 
-let top (cfg : 'a Cfg.t) (_vars : Var.t list) : t =
+let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
   let globals = List.map cfg.global_types ~f:(fun _ -> Taint_domain.taint_top) in
   let ret = match cfg.return_types with
       | [] -> None
@@ -77,7 +77,7 @@ let initial_summaries (cfgs : 'a Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ 
     ~init:(IntMap.map cfgs ~f:(fun cfg ->
         (match typ with
          | `Bottom -> bottom
-         | `Top -> top) cfg []))
+         | `Top -> top) cfg Var.Set.empty))
     ~f:(fun summaries (idx, name, (args, ret)) ->
         IntMap.set summaries ~key:idx ~data:(of_import idx name module_.nglobals args ret))
 

@@ -96,3 +96,7 @@ let all_annots (cfg : 'a t) : 'a list =
 (** Change the annotations of a CFG *)
 let annotate (cfg : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b) IntMap.t) : 'b t =
   { cfg with basic_blocks = IntMap.map ~f:(fun b -> Basic_block.annotate b block_data instr_data) cfg.basic_blocks }
+
+(** Add more annotations to an already-annotated CFG *)
+let add_annotation (cfg : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b) IntMap.t) : ('a * 'b) t =
+  { cfg with basic_blocks = IntMap.map ~f:(fun b -> Basic_block.add_annotation b block_data instr_data) cfg.basic_blocks }

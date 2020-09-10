@@ -1,10 +1,9 @@
 open Core_kernel
 open Helpers
 
-module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
+module Make (* : Transfer.TRANSFER *) = struct
   (** We need the variable names as annotations *)
-  type annot_expected = Spec_inference.state
-
+  type annot_expected = (Spec_inference.state * Relational_domain.t)
 
   (** The state *)
   type state = Taint_domain.t
@@ -37,46 +36,46 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
       (i : annot_expected Instr.labelled_data)
       (state : state)
     : state =
-    let ret (i : annot_expected Instr.labelled_data) : Var.t = List.hd_exn i.annotation_after.vstack in
+    let ret (i : annot_expected Instr.labelled_data) : Var.t = List.hd_exn (fst i.annotation_after).vstack in
     match i.instr with
     | Nop | MemorySize | Drop | MemoryGrow -> state
     | Select ->
       let ret = ret i in
-      let (_c, v2, v1) = pop3 i.annotation_before.vstack in
+      let (_c, v2, v1) = pop3 (fst i.annotation_before).vstack in
       (* TODO: could improve precision by checking the constraints on c: if it is precisely zero/not-zero, we can only include v1 or v2 *)
       Taint_domain.add_taint_v (Taint_domain.add_taint_v state ret v1) ret v2
     | LocalGet l ->
-      Taint_domain.add_taint_v state (ret i) (get_nth i.annotation_before.locals l)
+      Taint_domain.add_taint_v state (ret i) (get_nth (fst i.annotation_before).locals l)
     | LocalSet l ->
-      Taint_domain.add_taint_v state (get_nth i.annotation_before.locals l) (pop i.annotation_before.vstack)
+      Taint_domain.add_taint_v state (get_nth (fst i.annotation_before).locals l) (pop (fst i.annotation_before).vstack)
     | LocalTee l ->
       Taint_domain.add_taint_v
-        (Taint_domain.add_taint_v state (get_nth i.annotation_before.locals l) (pop i.annotation_before.vstack))
-        (ret i) (get_nth i.annotation_before.locals l)
+        (Taint_domain.add_taint_v state (get_nth (fst i.annotation_before).locals l) (pop (fst i.annotation_before).vstack))
+        (ret i) (get_nth (fst i.annotation_before).locals l)
     | GlobalGet g ->
-      Taint_domain.add_taint_v state (ret i) (get_nth i.annotation_before.globals g)
+      Taint_domain.add_taint_v state (ret i) (get_nth (fst i.annotation_before).globals g)
     | GlobalSet g ->
-      Taint_domain.add_taint_v state (get_nth i.annotation_before.globals g) (pop i.annotation_before.vstack)
+      Taint_domain.add_taint_v state (get_nth (fst i.annotation_before).globals g) (pop (fst i.annotation_before).vstack)
     | Const _ -> state
     | Binary _ | Compare _ ->
-      let v1, v2 = pop2 i.annotation_before.vstack in
+      let v1, v2 = pop2 (fst i.annotation_before).vstack in
       Taint_domain.add_taint_v
         (Taint_domain.add_taint_v state (ret i) v1)
         (ret i) v2
     | Unary _ | Test _ | Convert _ ->
-      Taint_domain.add_taint_v state (ret i) (pop i.annotation_before.vstack)
+      Taint_domain.add_taint_v state (ret i) (pop (fst i.annotation_before).vstack)
     | Load { offset; _ } ->
       (* Simplest case: get the taint of the entire memory.
          Refined case: get the taint of the memory cells that can pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-      let addr = pop i.annotation_before.vstack in
-      let mem = i.annotation_before.memory in
+      let addr = pop (fst i.annotation_before).vstack in
+      let mem = (fst i.annotation_before).memory in
       let all_locs = Var.OffsetMap.keys mem in
       (* Filter the memory location using results from the relational analysis if possible *)
       let locs = if !Taint_options.use_relational then
           (* We need to filter locs to only have the locs that can be loaded.
              This means for each loc, we can ask the relational domain if are_equal loc v (where v is the top of the stack.
              If some are truly equal, we know we can only keep these. Otherwise, if some maybe equal, then these have to be kept. *)
-          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc (addr, offset) with
+          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (snd i.annotation_before) loc (addr, offset) with
               | (true, false) -> true
               | _ -> false) in
           if not (List.is_empty equal) then
@@ -84,7 +83,7 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
             equal
           else
             (* No address is definitely equal to addr, so we take the ones that may be equal *)
-            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc (addr, offset) with
+            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (snd i.annotation_before) loc (addr, offset) with
                 | (true, _) -> true
                 | _ -> false)
         else
@@ -103,12 +102,12 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
     | Store { offset; _ } ->
       (* Simplest case: set the taint for the entire memory
          Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-      let vval, vaddr = pop2 i.annotation_before.vstack in
-      let mem = i.annotation_after.memory in
+      let vval, vaddr = pop2 (fst i.annotation_before).vstack in
+      let mem = (fst i.annotation_after).memory in
       let all_locs = Var.OffsetMap.keys mem in
       (* Refine memory locations using relational innformation, if available *)
       let locs = if !Taint_options.use_relational then
-          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc (vaddr, offset) with
+          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (snd i.annotation_before) loc (vaddr, offset) with
               | (true, false) -> true
               | _ -> false) in
           if not (List.is_empty equal) then
@@ -116,7 +115,7 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
             equal
           else
             (* No address is definitely equal to addr, so we take the ones that may be equal *)
-            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (RelSpec.pre i.label) loc (vaddr, offset) with
+            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (snd i.annotation_before) loc (vaddr, offset) with
                 | (true, _) -> true
                 | _ -> false)
         else
@@ -135,9 +134,9 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
     : [`Simple of state | `Branch of state * state] =
     let apply_summary (f : int) (arity : int * int) (state : state) : state =
       let summary = SummaryManager.get f in
-      let args = List.take i.annotation_before.vstack (fst arity) in
-      let ret = if snd arity = 1 then List.hd i.annotation_after.vstack else None in
-      Taint_summary.apply summary state args i.annotation_before.globals i.annotation_after.globals (List.concat_map (Var.OffsetMap.to_alist i.annotation_after.memory)
+      let args = List.take (fst i.annotation_before).vstack (fst arity) in
+      let ret = if snd arity = 1 then List.hd (fst i.annotation_after).vstack else None in
+      Taint_summary.apply summary state args (fst i.annotation_before).globals (fst i.annotation_after).globals (List.concat_map (Var.OffsetMap.to_alist (fst i.annotation_after).memory)
                                                                                                        ~f:(fun ((a, _offset), b) ->
                                                                                                            Printf.printf "TODO: ignoring offset\n";
                                                                                                            [a; b])) ret
@@ -157,11 +156,11 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
             if Stdlib.(ftype = (Wasm_module.get_func_type module_ fa)) then Some (fa, idx) else None
           | _ -> None) in
       let funs_to_apply = if !Taint_options.use_relational then
-          let v = pop i.annotation_before.vstack in
+          let v = pop (fst i.annotation_before).vstack in
           List.filter funs_with_matching_type ~f:(fun (_, idx) ->
               (* Only keep the functions for which the index may match *)
               (* TODO: instead of fst, we could take the ones that are (true, false) first, and if there's none, take the ones that are (true, true) *)
-              fst (Relational_domain.is_equal (RelSpec.pre i.label) v idx))
+              fst (Relational_domain.is_equal (snd i.annotation_before) v idx))
           else
             (* All functions with a matching types are applicable *)
             funs_with_matching_type in
@@ -176,7 +175,7 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
     | Unreachable -> `Simple state
     | _ -> `Simple state
 
-  let merge_flows (_module_ : Wasm_module.t) (cfg : 'a Cfg.t) (block : 'a Basic_block.t) (states : (int * state) list) : state =
+  let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * state) list) : state =
     match states with
     | [] -> init_state cfg
     | _ ->
@@ -184,10 +183,10 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
         begin match block.content with
           | ControlMerge ->
             (* block is a control-flow merge *)
-            let spec = block.annotation_after in
+            let spec = fst block.annotation_after in
             let states' = List.map states ~f:(fun (idx, s) ->
                 (* get the spec after that state *)
-                let spec' = (IntMap.find_exn cfg.basic_blocks idx).annotation_after in
+                let spec' = fst (IntMap.find_exn cfg.basic_blocks idx).annotation_after in
                 (* equate all different variables in the post-state with the ones in the pre-state *)
                 List.fold_left (Spec_inference.extract_different_vars spec spec')
                   ~init:s
@@ -205,7 +204,7 @@ module Make (RelSpec : Relational_spec.SPEC) (* : Transfer.TRANSFER *) = struct
         end
 
   let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
-    let exit_spec = (IntMap.find_exn cfg.basic_blocks cfg.exit_block).annotation_after in
+    let exit_spec = fst (IntMap.find_exn cfg.basic_blocks cfg.exit_block).annotation_after in
     Taint_summary.make cfg out_state
       (if List.length cfg.return_types = 1 then List.hd exit_spec.vstack else None)
       exit_spec.globals
