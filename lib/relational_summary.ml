@@ -48,7 +48,7 @@ let make (cfg : 'a Cfg.t) (state : Domain.t) (ret : Var.t option)
     globals_pre = globals_pre;
     globals_post = globals_post;
     in_arity = List.length cfg.arg_types;
-    state = Domain.keep_only state to_keep;
+    state = Domain.keep_only state (Var.Set.of_list to_keep);
     }
 
 (** Constructs an empty bottom summary given a CFG *)

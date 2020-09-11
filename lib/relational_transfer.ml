@@ -13,16 +13,27 @@ type summary = Relational_summary.t
 
 let init_summaries s = SummaryManager.init s
 
+let annot_vars (annot : annot_expected) : Var.Set.t =
+  Var.Set.of_list
+             (List.concat [annot.vstack;
+                           annot.locals;
+                           annot.globals;
+                           List.concat_map (Var.OffsetMap.to_alist annot.memory) ~f:(fun ((x, _), y) -> [x; y])])
+
 let vars (cfg : annot_expected Cfg.t) : Var.Set.t =
   List.fold_left (Cfg.all_annots cfg)
     ~init:Var.Set.empty
     ~f:(fun acc annot ->
-        Var.Set.union acc
-          (Var.Set.of_list
-             (List.concat [annot.vstack;
-                           annot.locals;
-                           annot.globals;
-                           List.concat_map (Var.OffsetMap.to_alist annot.memory) ~f:(fun ((x, _), y) -> [x; y])])))
+        Var.Set.union acc (annot_vars annot))
+
+let entry_vars (cfg : annot_expected Cfg.t) : Var.Set.t =
+  annot_vars (Cfg.find_block_exn cfg cfg.entry_block).annotation_before
+
+let exit_vars (cfg : annot_expected Cfg.t) : Var.Set.t =
+  annot_vars (Cfg.find_block_exn cfg cfg.exit_block).annotation_after
+
+let reachable_vars (instr : annot_expected Instr.t) : Var.Set.t =
+  Var.Set.union (annot_vars (Instr.annotation_before instr)) (annot_vars (Instr.annotation_after instr))
 
 let init_state (cfg : annot_expected Cfg.t) = Domain.init cfg (vars cfg)
 
@@ -68,9 +79,10 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block :
       @param vstack_spec: the specification of what the vstack looks like after execution
       @return the resulting state (poststate).
 *)
-let data_instr_transfer (module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_data) (state : state) : state =
+let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_data) (state : state) : state =
   let ret (i : annot_expected Instr.labelled_data) : Var.t = List.hd_exn i.annotation_after.vstack in
   Printf.printf "--------------------\ninstr: %s\n" (Instr.data_to_string i.instr);
+  let state = Domain.keep_only state (Var.Set.union_list [reachable_vars (Data i); entry_vars cfg; exit_vars cfg]) in
   match i.instr with
   | Nop -> state
   | MemorySize ->
@@ -228,10 +240,11 @@ let data_instr_transfer (module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) 
 
 let control_instr_transfer
     (module_ : Wasm_module.t) (* The wasm module (read-only) *)
-    (_cfg : annot_expected Cfg.t) (* The CFG analyzed *)
+    (cfg : annot_expected Cfg.t) (* The CFG analyzed *)
     (i : annot_expected Instr.labelled_control) (* The instruction *)
     (state : Domain.t) (* The pre state *)
   : [`Simple of state | `Branch of state * state] =
+  let state = Domain.keep_only state (Var.Set.union_list [reachable_vars (Control i); entry_vars cfg; exit_vars cfg]) in
   let apply_summary (f : int) (arity : int * int) (state : state) : state =
     let summary = SummaryManager.get f in
     let args = List.take i.annotation_before.vstack (fst arity) in

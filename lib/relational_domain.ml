@@ -151,8 +151,8 @@ let meet_interval (s : t) (v : string) (bounds : int * int) : t =
   { s with constraints = Apron.Abstract1.meet_lincons_array manager s.constraints earray }
 
 (** Only keep the given variables in the constraints, returns the updated t *)
-let keep_only (s : t) (vars : Var.t list) : t =
-  let str_vars = List.map vars ~f:Var.to_string in
+let keep_only (s : t) (vars : Var.Set.t) : t =
+  let str_vars = List.map (Var.Set.to_list vars) ~f:Var.to_string in
   { s with constraints = Apron.Abstract1.forget_array manager s.constraints
                (Array.filter (fst (Apron.Environment.vars s.env)) (* fst because we only have int variables for now *)
                   ~f:(fun v -> not (List.mem str_vars (Apron.Var.to_string v) ~equal:Stdlib.(=))))
