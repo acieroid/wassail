@@ -3,24 +3,21 @@ Wassail is a static analyzer for WebAssembly.
 # Setup
 ## Installing the dependencies
 
-0. Install opam
+0. Install [opam](https://opam.ocaml.org/)
 
-1. Get the right version of the wasm spec:
-
-```sh
-git clone https://github.com/WebAssembly/spec
-cd spec/
-git checkout 92b9ce
-opam pin add wasm .
-```
-
-2. Install dependencies for this project
+1. Install dependencies for this project
 
 ```sh
 opam install core core_kernel ppx_compare ppx_inline_test ppx_jane wasm sexplib apron
 ```
 
 (This list of dependencies may be outdated, you can find it by running `dune external-lib-deps ./bin/main.exe`)
+
+## Building
+
+```sh
+make
+```
 
 ## Running the tests
 
@@ -30,13 +27,9 @@ make test
 
 If there is no output, this means all tests successfully passed.
 
-## Building
+# Constructing Control-Flow Graphs and Call-Graphs of WebAssembly Programs
 
-```sh
-make
-```
-
-# Constructing Control-Flow Graphs and Call-Graphs
+Wassail works on the textual representation of WebAssembly, i.e., `.wat` files.
 
 ## Generating Control Flow Graphs
 You can either generate a single CFG, for example to generate the CFG of function 1 from file `foo.wat` into `foo.dot`:
@@ -65,15 +58,7 @@ To generate the call graph for a module `foo.wat` into `foo.dot`:
 TODO
 
 
-# Web interface
+# References
 
-The web interface can be used to generate CFGs, call graphs, and run a naive taint analysis.
-It currently cannot perform any relational analysis, as it requires Apron which can't be compiled to JavaScript.
-
-!!! The web interface needs to be refreshed and currently does not work.
-
-```sh
-make js
-```
-
-Then you can open `interface/cfg-viz.html`.
+Wassail has been described in the following publication:
+  - [Compositional Information Flow Analysis for WebAssembly Programs](http://soft.vub.ac.be/~qstieven/scam2020wasm/), SCAM 2020. ([pdf](http://soft.vub.ac.be/Publications/2020/vub-tr-soft-20-11.pdf])
