@@ -1,6 +1,6 @@
 language: c
 install: test -e .travis-ocaml.sh || wget https://raw.githubusercontent.com/ocaml/ocaml-ci-scripts/master/.travis-ocaml.sh
-script: bash -ex .travis-ocaml.sh && opam install -y core core_kernel ppx_compare ppx_inline_test ppx_jane wasm sexplib apron && make test
+script: bash -ex .travis-ocaml.sh && opam install -y core core_kernel ppx_compare ppx_inline_test ppx_jane wasm sexplib apron && eval $(opam env) && make test
 env:
   - OCAML_VERSION=4.10
 os:
@@ -14,4 +14,4 @@ jobs:
   include:
     - stage: test
       name: Tests
-      script: bash -ex .travis-ocaml.sh && opam install -y core core_kernel ppx_compare ppx_inline_test ppx_jane wasm sexplib apron && make test
+      script: bash -ex .travis-ocaml.sh && opam install -y core core_kernel ppx_compare ppx_inline_test ppx_jane wasm sexplib apron && eval $(opam env) && make test
