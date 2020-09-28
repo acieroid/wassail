@@ -270,13 +270,14 @@ let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
 
 
 module Tests_builder_tests = struct
+  (** Check that building the CFG for each function of a .wat file succeeds.
+      Does not actually check that the CFG is correct. *)
   let test_cfgs file_in =
     apply_to_textual file_in (fun m ->
         let wasm_mod = Wasm_module.of_wasm m in
         List.iteri wasm_mod.funcs
           ~f:(fun i _ ->
               let faddr = wasm_mod.nimports + i in
-              (* Check that building the CFG does not fail *)
               let _ : unit Cfg.t = build faddr wasm_mod in
             ()))
 
