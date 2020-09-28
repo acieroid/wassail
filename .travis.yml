@@ -14,4 +14,4 @@ jobs:
   include:
     - stage: test
       name: Tests
-      script: make test
+      script: opam install core core_kernel ppx_compare ppx_inline_test ppx_jane wasm sexplib apron && make test
