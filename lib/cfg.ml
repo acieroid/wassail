@@ -100,3 +100,4 @@ let annotate (cfg : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 
 (** Add more annotations to an already-annotated CFG *)
 let add_annotation (cfg : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b) IntMap.t) : ('a * 'b) t =
   { cfg with basic_blocks = IntMap.map ~f:(fun b -> Basic_block.add_annotation b block_data instr_data) cfg.basic_blocks }
+

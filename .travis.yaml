@@ -1,0 +1,17 @@
+language: c
+install: test -e .travis-ocaml.sh || wget https://raw.githubusercontent.com/ocaml/ocaml-ci-scripts/master/.travis-ocaml.sh
+script: bash -ex .travis-ocaml.sh
+env:
+  - OCAML_VERSION=4.10
+os:
+  - freebsd
+  - linux
+  - osx
+arch:
+  - amd64
+
+jobs:
+  include:
+    - stage: test
+      name: Tests
+      script: make test

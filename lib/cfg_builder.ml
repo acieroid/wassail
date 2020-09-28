@@ -267,3 +267,24 @@ let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
     (* The loop heads *)
     loop_heads = !loop_heads;
   }
+
+
+module Tests_builder_tests = struct
+  let test_cfgs file_in =
+    apply_to_textual file_in (fun m ->
+        let wasm_mod = Wasm_module.of_wasm m in
+        List.iteri wasm_mod.funcs
+          ~f:(fun i _ ->
+              let faddr = wasm_mod.nimports + i in
+              (* Check that building the CFG does not fail *)
+              let _ : unit Cfg.t = build faddr wasm_mod in
+            ()))
+
+  let%test_unit _ = test_cfgs "../../../test/simple.wat"
+  let%test_unit _ = test_cfgs "../../../test/if-loop.wat"
+  let%test_unit _ = test_cfgs "../../../test/rel.wat"
+  let%test_unit _ = test_cfgs "../../../test/memcpy.wat"
+  let%test_unit _ = test_cfgs "../../../test/loop.wat"
+  let%test_unit _ = test_cfgs "../../../test/loop-brif.wat"
+end
+

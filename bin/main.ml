@@ -1,16 +1,5 @@
 open Core
-open Wasm
 open Wassail
-
-let apply_to_textual (filename : string) (f : Ast.module_ -> unit) =
-  let extract (l : (Script.var option * Script.definition) list) =
-    List.iter l ~f:(fun (_var_opt, def) ->
-        match def.it with
-        | Script.Textual m -> f m
-        | Script.Encoded _ -> failwith "unsupported"
-        | Script.Quoted _ -> failwith "unsupported"
-      ) in
-  parse_file filename extract
 
 let cfg =
   Command.basic
@@ -41,10 +30,9 @@ let cfgs =
         apply_to_textual file_in (fun m ->
             let wasm_mod = Wasm_module.of_wasm m in
             Core.Unix.mkdir_p out_dir;
-            let nimports = List.length wasm_mod.imported_funcs in
             List.iteri wasm_mod.funcs
               ~f:(fun i _ ->
-                  let faddr = nimports + i in
+                  let faddr = wasm_mod.nimports + i in
                   let cfg = Cfg_builder.build faddr wasm_mod in
                   Out_channel.with_file (Printf.sprintf "%s/%d.dot" out_dir faddr)
                     ~f:(fun ch ->

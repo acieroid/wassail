@@ -15,4 +15,4 @@ clean:
 	dune clean
 
 
-.PHONY: bin js tests clean all
+.PHONY: bin js test clean all

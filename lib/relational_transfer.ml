@@ -82,7 +82,7 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block :
 let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_data) (state : state) : state =
   let ret (i : annot_expected Instr.labelled_data) : Var.t = List.hd_exn i.annotation_after.vstack in
   Printf.printf "--------------------\ninstr: %s\n" (Instr.data_to_string i.instr);
-  let state = Domain.keep_only state (Var.Set.union_list [reachable_vars (Data i); entry_vars cfg; exit_vars cfg]) in
+  let state = Domain.change_vars state (Var.Set.union_list [reachable_vars (Data i); entry_vars cfg; exit_vars cfg]) in
   match i.instr with
   | Nop -> state
   | MemorySize ->
@@ -244,7 +244,7 @@ let control_instr_transfer
     (i : annot_expected Instr.labelled_control) (* The instruction *)
     (state : Domain.t) (* The pre state *)
   : [`Simple of state | `Branch of state * state] =
-  let state = Domain.keep_only state (Var.Set.union_list [reachable_vars (Control i); entry_vars cfg; exit_vars cfg]) in
+  let state = Domain.change_vars state (Var.Set.union_list [reachable_vars (Control i); entry_vars cfg; exit_vars cfg]) in
   let apply_summary (f : int) (arity : int * int) (state : state) : state =
     let summary = SummaryManager.get f in
     let args = List.take i.annotation_before.vstack (fst arity) in

@@ -30,42 +30,6 @@ module Taint_domain = Taint_domain
 module Taint_transfer = Taint_transfer
 module Taint_summary = Taint_summary
 
-let error at category msg =
-  failwith (Printf.sprintf "Error: %s" (Source.string_of_region at ^ ": " ^ category ^ ": " ^ msg))
-
-let input_from get_script run =
-  try
-    let script = get_script () in
-    run script;
-  with
-  | Decode.Code (at, msg) -> error at "decoding error" msg
-  | Parse.Syntax (at, msg) -> error at "syntax error" msg
-  | Valid.Invalid (at, msg) -> error at "invalid module" msg
-  | Import.Unknown (at, msg) -> error at "link failure" msg
-  | Eval.Link (at, msg) -> error at "link failure" msg
-  | Eval.Trap (at, msg) -> error at "runtime trap" msg
-  | Eval.Exhaustion (at, msg) -> error at "resource exhaustion" msg
-  | Eval.Crash (at, msg) -> error at "runtime crash" msg
-  | Encode.Code (at, msg) -> error at "encoding error" msg
-
-let parse_file name run =
-  let ic = In_channel.create name in
-  try
-    let lexbuf = Lexing.from_channel ic in
-    let success = input_from (fun _ ->
-        let var_opt, def = Parse.parse name lexbuf Parse.Module in
-        [(var_opt, def)]) run in
-    In_channel.close ic;
-    success
-  with exn -> In_channel.close ic; raise exn
-
-let parse_string str run =
-  let lexbuf = Lexing.from_string str in
-  input_from (fun _ ->
-      let var_opt, def = Parse.parse "foo.wat" lexbuf Parse.Module in
-      [(var_opt, def)])
-    run
-
 let cfgs : ('a Cfg.t IntMap.t) ref = ref IntMap.empty
 let module_ : (Wasm_module.t option) ref = ref None
 

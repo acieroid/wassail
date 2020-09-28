@@ -159,6 +159,13 @@ let keep_only (s : t) (vars : Var.Set.t) : t =
                false (* not sure what this means *)
   }
 
+let change_vars (s : t) (vars : Var.Set.t) : t =
+  let apron_vars = List.map (Var.Set.to_list vars) ~f:(fun v -> Apron.Var.of_string (Var.to_string v)) in
+  let new_env = Apron.Environment.make (Array.of_list apron_vars) [||] in
+  { s with constraints = Apron.Abstract1.change_environment manager s.constraints new_env
+               true (* "projects new variables to the 0-plane", which I guess means they are bottom. TODO: check that this is the case! *)
+  }
+
 (** Checks if the value of variable v may be equal to a given number.
     Returns two booleans: the first one indicates if v can be equal to n, and the second if it can be different than n *)
 let is_equal (s : t) (v : Var.t) (n : int) : bool * bool =

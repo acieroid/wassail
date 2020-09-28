@@ -375,7 +375,7 @@
     global.set 0
     i32.const -1
     local.set 1)
-  (func (;test-loop;) (type 3) (param i32) (result i32) ;; 38
+  (func (;test-loop;) (type 1) (param i32) (result i32) ;; 38
     ;; loop(pointer, size)
     (local i32 i32)
     local.get 0
