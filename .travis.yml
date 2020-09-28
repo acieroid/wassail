@@ -1,6 +1,18 @@
 language: c
-install: test -e .travis-ocaml.sh || wget https://raw.githubusercontent.com/ocaml/ocaml-ci-scripts/master/.travis-ocaml.sh
-script: bash -ex .travis-ocaml.sh && opam install -y core core_kernel ppx_compare ppx_inline_test ppx_jane wasm sexplib apron && eval $(opam env) && make test
+before_install:
+  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then
+        sudo apt-get -y install libmpfr-dev
+        export GIMME_ARCH=amd64;
+    fi
+
+install:
+  - test -e .travis-ocaml.sh || wget https://raw.githubusercontent.com/ocaml/ocaml-ci-scripts/master/.travis-ocaml.sh
+  - bash -ex .travis-ocaml.sh
+  - opam install -y core core_kernel ppx_compare ppx_inline_test ppx_jane wasm sexplib apron
+  - eval $(opam env)
+
+script: make test
+
 env:
   - OCAML_VERSION=4.10
 os:
@@ -10,11 +22,8 @@ os:
 arch:
   - amd64
 
-before_install:
-  - sudo apt-get -y install libmpfr-dev
-
 jobs:
   include:
     - stage: test
       name: Tests
-      script: bash -ex .travis-ocaml.sh && opam install -y core core_kernel ppx_compare ppx_inline_test ppx_jane wasm sexplib apron && eval $(opam env) && make test
+      script: make test
