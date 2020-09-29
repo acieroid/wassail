@@ -240,6 +240,11 @@ and annotate_control (i : ('a control, 'a) labelled) (data : ('b * 'b) IntMap.t)
              | Return -> Return
              | Unreachable -> Unreachable }
 
+let%test "Instr.annotate" =
+  let i = Data { instr = Nop; label = 0; annotation_before = (); annotation_after = () } in
+  let i_annotated = Data { instr = Nop; label = 0; annotation_before = 1; annotation_after = 2 } in
+  equal (fun a b -> a = b) (annotate i (IntMap.of_alist_exn [(0, (1, 2))])) i_annotated
+
 let rec add_annotation (i : 'a t) (data : ('b * 'b) IntMap.t) : ('a * 'b) t =
   match i with
   | Data d -> Data (add_annotation_data d data)
@@ -273,7 +278,6 @@ let annotation_after (i : 'a t) : 'a =
   match i with
   | Data d -> d.annotation_after
   | Control c -> c.annotation_after
-
 
 let rec all_labels (i : 'a t) : IntSet.t =
   match i with
