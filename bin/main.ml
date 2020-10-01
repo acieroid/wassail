@@ -172,24 +172,24 @@ let count_vars =
 let taint_intra =
   mk_intra
     "Just like `intra`, but only performs the taint analysis"
-    (fun cfgs wasm_mod -> Taint_summary.initial_summaries cfgs wasm_mod `Bottom)
+    (fun cfgs wasm_mod -> Taint.Summary.initial_summaries cfgs wasm_mod `Bottom)
     (fun summaries fid ->
-       Printf.printf "Taint summary is:\n%s\n" (Taint_summary.to_string (IntMap.find_exn summaries fid));)
+       Printf.printf "Taint summary is:\n%s\n" (Taint.Summary.to_string (IntMap.find_exn summaries fid));)
     (fun summaries wasm_mod cfg ->
        Logging.info (Printf.sprintf "---------- Taint analysis of function %d ----------" cfg.idx);
        (* Run the taint analysis *)
-       let module TaintTransfer = Taint_transfer.Make in
-       Taint_options.use_relational := false;
+       let module TaintTransfer = Taint.Transfer.Make in
+       Taint.Options.use_relational := false;
        let module TaintIntra = Intra.Make(TaintTransfer) in
        TaintIntra.init_summaries summaries;
-       let annotated_cfg = Relational_transfer.dummy_annotate cfg in
+       let annotated_cfg = Relational.Transfer.dummy_annotate cfg in
        let result_cfg = TaintIntra.analyze wasm_mod annotated_cfg in
        let final_state = TaintIntra.final_state result_cfg in
        let taint_summary = TaintIntra.summary annotated_cfg final_state in
        IntMap.set summaries ~key:cfg.idx ~data:taint_summary)
     (fun summaries fid ->
        let summary = IntMap.find_exn summaries fid in
-       Printf.printf "function %d: %s\n" fid (Taint_summary.to_string summary))
+       Printf.printf "function %d: %s\n" fid (Taint.Summary.to_string summary))
 
 let int_comma_separated_list =
   Command.Arg_type.create (fun ids ->
@@ -202,7 +202,7 @@ let timer_value t0 =
 
 let taint_inter =
   let desc = "Performs inter analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target." in
-  let init_summaries cfgs wasm_mod = Taint_summary.initial_summaries cfgs wasm_mod `Bottom in
+  let init_summaries cfgs wasm_mod = Taint.Summary.initial_summaries cfgs wasm_mod `Bottom in
   Command.basic
     ~summary:desc
     Command.Let_syntax.(
@@ -216,9 +216,9 @@ let taint_inter =
                 let faddr = wasm_mod.nimports + i in
                 (faddr, Cfg_builder.build faddr wasm_mod))) in
             let module SpecIntra = Intra.Make(Spec_inference) in
-            let annotated_cfgs = IntMap.map cfgs ~f:(fun cfg -> Relational_transfer.dummy_annotate (SpecIntra.analyze wasm_mod cfg)) in
-            let module TaintTransfer = Taint_transfer.Make in
-            Taint_options.use_relational := false;
+            let annotated_cfgs = IntMap.map cfgs ~f:(fun cfg -> Relational.Transfer.dummy_annotate (SpecIntra.analyze wasm_mod cfg)) in
+            let module TaintTransfer = Taint.Transfer.Make in
+            Taint.Options.use_relational := false;
             let module TaintIntra = Intra.Make(TaintTransfer) in
             let module Intra = struct
               type annot_expected = TaintIntra.annot_expected
@@ -249,30 +249,30 @@ let taint_inter =
                       ~f:(fun ~key:idx ~data:sum acc ->
                           IntMap.set acc ~key:idx ~data:(TaintTransfer.summary (IntMap.find_exn annotated_cfgs idx) (TaintIntra.final_state sum)))) in
             IntMap.iteri summaries ~f:(fun ~key:idx ~data:sum ->
-                Printf.printf "function %d taint: %s\n" idx (Taint_summary.to_string sum))))
+                Printf.printf "function %d taint: %s\n" idx (Taint.Summary.to_string sum))))
 
 let reltaint_intra =
   mk_intra
     "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)"
-    (fun cfgs wasm_mod -> (Relational_summary.initial_summaries cfgs wasm_mod `Top,
-                           Taint_summary.initial_summaries cfgs wasm_mod `Top))
+    (fun cfgs wasm_mod -> (Relational.Summary.initial_summaries cfgs wasm_mod `Top,
+                           Taint.Summary.initial_summaries cfgs wasm_mod `Top))
     (fun summaries fid ->
-       Printf.printf "Relational summary is:\n%s\n" (Relational_summary.to_string (IntMap.find_exn (fst summaries) fid));
-       Printf.printf "Taint summary is:\n%s\n" (Taint_summary.to_string (IntMap.find_exn (snd summaries) fid));)
+       Printf.printf "Relational summary is:\n%s\n" (Relational.Summary.to_string (IntMap.find_exn (fst summaries) fid));
+       Printf.printf "Taint summary is:\n%s\n" (Taint.Summary.to_string (IntMap.find_exn (snd summaries) fid));)
     (fun summaries wasm_mod cfg ->
-       let module RelationalIntra = Intra.Make(Relational_transfer) in
+       let module RelationalIntra = Intra.Make(Relational.Transfer) in
        RelationalIntra.init_summaries (fst summaries);
-       Relational_transfer.ignore_memory := false;
+       Relational.Transfer.ignore_memory := false;
        Logging.info "---------- Relational analysis ----------";
        let relational_cfg = RelationalIntra.analyze_keep wasm_mod cfg in
        (* let final_state = RelationalIntra.final_state relational_cfg in
        (* Printf.printf "%d: %s\n" cfg.idx (RelationalIntra.state_to_string out_state); *)
        let relational_summary = RelationalIntra.summary cfg final_state in
-          Printf.printf "Relational summary is:\n%s\n" (Relational_summary.to_string relational_summary); *)
+          Printf.printf "Relational summary is:\n%s\n" (Relational.Summary.to_string relational_summary); *)
        (* Run the taint analysis *)
        Logging.info "---------- Taint analysis ----------";
-       let module TaintTransfer = Taint_transfer.Make in
-       Taint_options.use_relational := true;
+       let module TaintTransfer = Taint.Transfer.Make in
+       Taint.Options.use_relational := true;
        let module TaintIntra = Intra.Make(TaintTransfer) in
        TaintIntra.init_summaries (snd summaries);
        let result_cfg = TaintIntra.analyze wasm_mod relational_cfg in
@@ -281,8 +281,8 @@ let reltaint_intra =
        (fst summaries, (* IntMap.set (fst summaries) ~key:cfg.idx ~data:relational_summary, TODO *)
         IntMap.set (snd summaries) ~key:cfg.idx ~data:taint_summary))
     (fun summaries fid ->
-       Printf.printf "function %d relational: %s\n" fid (Relational_summary.to_string (IntMap.find_exn (fst summaries) fid));
-       Printf.printf "function %d taint: %s\n" fid (Taint_summary.to_string (IntMap.find_exn (snd summaries) fid)))
+       Printf.printf "function %d relational: %s\n" fid (Relational.Summary.to_string (IntMap.find_exn (fst summaries) fid));
+       Printf.printf "function %d taint: %s\n" fid (Taint.Summary.to_string (IntMap.find_exn (snd summaries) fid)))
 
 (*
 let relational_intra =

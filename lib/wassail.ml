@@ -20,15 +20,9 @@ module Intra = Intra
 
 module Spec_inference = Spec_inference
 
-module Relational_domain = Relational_domain
-module Relational_transfer = Relational_transfer
-module Relational_summary = Relational_summary
-module Relational_spec = Relational_spec
+module Relational = Relational
 
-module Taint_options = Taint_options
-module Taint_domain = Taint_domain
-module Taint_transfer = Taint_transfer
-module Taint_summary = Taint_summary
+module Taint = Taint
 
 let cfgs : ('a Cfg.t IntMap.t) ref = ref IntMap.empty
 let module_ : (Wasm_module.t option) ref = ref None
