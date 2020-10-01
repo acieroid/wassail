@@ -240,10 +240,19 @@ and annotate_control (i : ('a control, 'a) labelled) (data : ('b * 'b) IntMap.t)
              | Return -> Return
              | Unreachable -> Unreachable }
 
-let%test "Instr.annotate" =
+let%test "Instr.annotate nop" =
   let i = Data { instr = Nop; label = 0; annotation_before = (); annotation_after = () } in
   let i_annotated = Data { instr = Nop; label = 0; annotation_before = 1; annotation_after = 2 } in
-  equal (fun a b -> a = b) (annotate i (IntMap.of_alist_exn [(0, (1, 2))])) i_annotated
+  let annotation_map = (IntMap.of_alist_exn [(0, (1, 2))]) in
+  equal (=) (annotate i annotation_map) i_annotated
+
+let%test "Instr.annotate block" =
+  let i = Data { instr = Nop; label = 0; annotation_before = (); annotation_after = () } in
+  let i_annotated = Data { instr = Nop; label = 0; annotation_before = 1; annotation_after = 2 } in
+  let b = Control { instr = Block ((0, 0), [i]) ; label = 1; annotation_before = (); annotation_after = () } in
+  let b_annotated = Control { instr = Block ((0, 0), [i_annotated]); label = 1; annotation_before = 3; annotation_after = 4 } in
+  let annotation_map = IntMap.of_alist_exn [(0, (1, 2)); (1, (3, 4))] in
+  equal (=) (annotate b annotation_map) b_annotated
 
 let rec add_annotation (i : 'a t) (data : ('b * 'b) IntMap.t) : ('a * 'b) t =
   match i with
@@ -268,6 +277,22 @@ and add_annotation_control (i : ('a control, 'a) labelled) (data : ('b * 'b) Int
              | BrTable (l, n) -> BrTable (l, n)
              | Return -> Return
              | Unreachable -> Unreachable }
+
+let%test "Instr.add_annotation nop" =
+  let i = Data { instr = Nop; label = 0; annotation_before = 1; annotation_after = 2 } in
+  let i_annotated = Data { instr = Nop; label = 0; annotation_before = (1, 'a'); annotation_after = (2, 'b') } in
+  let annotation_map = IntMap.of_alist_exn [(0, ('a', 'b'))] in
+  let eq = (fun (n1, c1) (n2, c2) -> n1 = n2 && Char.equal c1 c2) in
+  equal eq  (add_annotation i annotation_map) i_annotated
+
+let%test "Instr.add_annotation block" =
+  let i = Data { instr = Nop; label = 0; annotation_before = 1; annotation_after = 2 } in
+  let i_annotated = Data { instr = Nop; label = 0; annotation_before = (1, 'a'); annotation_after = (2, 'b') } in
+  let b = Control { instr = Block ((0, 0), [i]) ; label = 1; annotation_before = 3; annotation_after = 4 } in
+  let b_annotated = Control { instr = Block ((0, 0), [i_annotated]); label = 1; annotation_before = (3, 'c'); annotation_after = (4, 'd') } in
+  let annotation_map = IntMap.of_alist_exn [(0, ('a', 'b')); (1, ('c', 'd'))] in
+  let eq = (fun (n1, c1) (n2, c2) -> n1 = n2 && Char.equal c1 c2) in
+  equal eq (add_annotation b annotation_map) b_annotated
 
 let annotation_before (i : 'a t) : 'a =
   match i with
