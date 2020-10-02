@@ -71,7 +71,8 @@ let parse_file name run =
     let lexbuf = Lexing.from_channel ic in
     let success = input_from (fun _ ->
         let var_opt, def = Wasm.Parse.parse name lexbuf Wasm.Parse.Module in
-        [(var_opt, def)]) run in
+        [(var_opt, def)])
+        run in
     In_channel.close ic;
     success
   with exn -> In_channel.close ic; raise exn
@@ -83,13 +84,9 @@ let parse_string str run =
       [(var_opt, def)])
     run
 
-let apply_to_textual (filename : string) (f : Wasm.Ast.module_ -> unit) =
+let apply_to_textual (filename : string) (f : Wasm.Ast.module_ -> 'a) =
   let extract (l : (Wasm.Script.var option * Wasm.Script.definition) list) =
-    List.iter l ~f:(fun (_var_opt, def) ->
-        match def.it with
-        | Wasm.Script.Textual m -> f m
-        | Wasm.Script.Encoded _ -> failwith "unsupported"
-        | Wasm.Script.Quoted _ -> failwith "unsupported"
-      ) in
+    match l with
+    | (_, { it = Wasm.Script.Textual m; _ }) :: _ -> f m
+    | _ -> failwith "unsupported format" in
   parse_file filename extract
-

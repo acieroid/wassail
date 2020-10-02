@@ -71,244 +71,102 @@ let schedule =
                 Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:string_of_int)));
             Printf.printf "\n"))
 
-let mk_intra
-    (desc : string)
-    (init_summaries : unit Cfg.t IntMap.t -> Wasm_module.t -> 'a)
-    (cb_imported : 'a -> int -> unit)
-    (analysis : 'a -> Wasm_module.t -> Spec_inference.state Cfg.t -> 'a)
-    (print_result : 'a -> int -> unit)
-  =
+
+let mk_intra (desc : string) (analysis : string -> int list -> 'a IntMap.t) (print : int -> 'a -> unit) =
   Command.basic
     ~summary:desc
     Command.Let_syntax.(
-      let%map_open filename = anon ("file" %: string)
-      and funs = anon (sequence ("funs" %: int)) in
-      Logging.info (Printf.sprintf "Parsing program from file %s..." filename);
-      fun () ->
-        apply_to_textual filename (fun m ->
-            let module SpecIntra = Intra.Make(Spec_inference) in
-            Logging.info "Importing module...";
-            let wasm_mod = Wasm_module.of_wasm m in
-            Logging.info "Building CFGs";
-            let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
-                let faddr = wasm_mod.nimports + i in
-                (faddr, Cfg_builder.build faddr wasm_mod))) in
-            Logging.info "Initializing summaries";
-            let summaries = List.fold_left funs
-                ~init:(init_summaries cfgs wasm_mod)
-                ~f:(fun summaries fid ->
-                    if fid < wasm_mod.nimports then begin
-                      Printf.printf "This is an imported function, it does not have to be analyzed.\n";
-                      cb_imported summaries fid;
-                      summaries
-                    end else
-                      let cfg = IntMap.find_exn cfgs fid in
-                      Logging.info (Printf.sprintf "---------- Spec analysis of function %d ----------" cfg.idx);
-                      let annotated_cfg = SpecIntra.analyze wasm_mod cfg in
-                      analysis summaries wasm_mod annotated_cfg) in
-            Logging.info "---------- Analysis done ----------";
-            List.iter funs ~f:(fun fid ->
-                print_result summaries fid)))
+    let%map_open filename = anon ("file" %: string)
+    and funs = anon (sequence ("funs" %: int)) in
+    fun () ->
+      let results = analysis filename funs in
+      IntMap.iteri results ~f:(fun ~key:id ~data:summary -> print id summary))
 
 let spec_inference =
-  mk_intra
-    "Annotate the CFG with the inferred variables"
-    (fun _cfgs _wasm_mod -> ())
-    (fun _summaries _fid -> ())
-    (fun () _wasm_mod annotated_cfg ->
-       let file_out = Printf.sprintf "%d.dot" annotated_cfg.idx in
+  mk_intra "Annotate the CFG with the inferred variables"
+    (Analysis_helpers.mk_intra (fun _ _ -> IntMap.empty) (fun _ _ annotated_cfg -> annotated_cfg))
+    (fun fid annotated_cfg ->
+       let file_out = Printf.sprintf "%d.dot" fid in
        Out_channel.with_file file_out
          ~f:(fun ch ->
              Out_channel.output_string ch (Cfg.to_dot annotated_cfg Spec_inference.state_to_dot_string)))
-    (fun () _ -> ())
 
 let count_vars =
-  mk_intra
-    "Count the number of program variables generated for a function"
-    (fun _cfgs _wasm_mod -> IntMap.empty)
-    (fun summaries fid ->
-       let summary = IntMap.find_exn summaries fid in
-       Printf.printf "Number of variables for %d: %d, max at the same time: %d\n" fid (Var.Set.length (fst summary)) (snd summary))
-    (fun summaries wasm_mod annotated_cfg ->
-       let module CountVarsIntra = Intra.Make(struct
-           type annot_expected = Spec_inference.state
-           type state = (Var.Set.t * int)
-           [@@deriving equal, compare, sexp]
-           type summary = state
-           let init_summaries _ = ()
-           let init_state _ = (Var.Set.empty, 0)
-           let bottom_state _ = (Var.Set.empty, 0)
-           let state_to_string _ = ""
-           let join_state (s1, n1) (s2, n2) = (Var.Set.union s1 s2, max n1 n2)
-           let widen_state = join_state
-           let extract_vars (st : Spec_inference.state) : Var.Set.t =
-             Var.Set.filter ~f:(function
-                 | Merge _ -> false
-                 | _ -> true)
-               (Var.Set.union (Var.Set.of_list st.vstack)
-                  (Var.Set.union (Var.Set.of_list st.locals)
-                     (Var.Set.union (Var.Set.of_list st.globals)
-                        (Var.Set.of_list (List.concat_map (Var.OffsetMap.to_alist st.memory) ~f:(fun ((a, _), b) -> [a; b]))))))
-           let transfer before after (vars, n) =
-             ((Var.Set.union vars
-                 (Var.Set.union (extract_vars before) (extract_vars after))),
-              (max n (Var.Set.length (extract_vars after))))
-         let control_instr_transfer (_mod : Wasm_module.t) (_cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_control) (vars, n) =
-           `Simple (transfer i.annotation_before i.annotation_after (vars, n))
-         let data_instr_transfer (_mod : Wasm_module.t) (_cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_data) (vars, n) =
-           transfer i.annotation_before i.annotation_after (vars, n)
-         let merge_flows _mod cfg _block (states : (int * state) list) =
-           List.fold_left (List.map states ~f:snd) ~init:(bottom_state cfg) ~f:join_state
-         let summary _cfg st = st
-       end) in
-       let result = CountVarsIntra.analyze wasm_mod annotated_cfg in
-       let (vars, n) = CountVarsIntra.final_state result in
-       Printf.printf "Vars: %d, max: %d\n" (Var.Set.length vars) n;
-       IntMap.set summaries ~key:annotated_cfg.idx ~data:(vars, n))
-    (fun summaries fid ->
-       let summary = IntMap.find_exn summaries fid in
+  mk_intra "Count the number of program variables generated for a function"
+    (Analysis_helpers.mk_intra (fun _ _ -> IntMap.empty)
+       (fun _ wasm_mod annotated_cfg ->
+          let module CountVarsIntra = Intra.Make(struct
+              type annot_expected = Spec_inference.state
+              type state = (Var.Set.t * int)
+              [@@deriving equal, compare, sexp]
+              type summary = state
+              let init_summaries _ = ()
+              let init_state _ = (Var.Set.empty, 0)
+              let bottom_state _ = (Var.Set.empty, 0)
+              let state_to_string _ = ""
+              let join_state (s1, n1) (s2, n2) = (Var.Set.union s1 s2, max n1 n2)
+              let widen_state = join_state
+              let extract_vars (st : Spec_inference.state) : Var.Set.t =
+                Var.Set.filter ~f:(function
+                    | Merge _ -> false
+                    | _ -> true)
+                  (Var.Set.union (Var.Set.of_list st.vstack)
+                     (Var.Set.union (Var.Set.of_list st.locals)
+                        (Var.Set.union (Var.Set.of_list st.globals)
+                           (Var.Set.of_list (List.concat_map (Var.OffsetMap.to_alist st.memory) ~f:(fun ((a, _), b) -> [a; b]))))))
+              let transfer before after (vars, n) =
+                ((Var.Set.union vars
+                    (Var.Set.union (extract_vars before) (extract_vars after))),
+                 (max n (Var.Set.length (extract_vars after))))
+              let control_instr_transfer (_mod : Wasm_module.t) (_cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_control) (vars, n) =
+                `Simple (transfer i.annotation_before i.annotation_after (vars, n))
+              let data_instr_transfer (_mod : Wasm_module.t) (_cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_data) (vars, n) =
+                transfer i.annotation_before i.annotation_after (vars, n)
+              let merge_flows _mod cfg _block (states : (int * state) list) =
+                List.fold_left (List.map states ~f:snd) ~init:(bottom_state cfg) ~f:join_state
+              let summary _cfg st = st
+            end) in
+          let result = CountVarsIntra.analyze wasm_mod annotated_cfg in
+          let (vars, n) = CountVarsIntra.final_state result in
+          Printf.printf "Vars: %d, max: %d\n" (Var.Set.length vars) n;
+          (vars, n)))
+    (fun fid summary ->
        Printf.printf "Vars %d: %d, max: %d\n" fid (Var.Set.length (fst summary)) (snd summary))
 
 let taint_intra =
-  mk_intra
-    "Just like `intra`, but only performs the taint analysis"
-    (fun cfgs wasm_mod -> Taint.Summary.initial_summaries cfgs wasm_mod `Bottom)
-    (fun summaries fid ->
-       Printf.printf "Taint summary is:\n%s\n" (Taint.Summary.to_string (IntMap.find_exn summaries fid));)
-    (fun summaries wasm_mod cfg ->
-       Logging.info (Printf.sprintf "---------- Taint analysis of function %d ----------" cfg.idx);
-       (* Run the taint analysis *)
-       let module TaintTransfer = Taint.Transfer.Make in
-       Taint.Options.use_relational := false;
-       let module TaintIntra = Intra.Make(TaintTransfer) in
-       TaintIntra.init_summaries summaries;
-       let annotated_cfg = Relational.Transfer.dummy_annotate cfg in
-       let result_cfg = TaintIntra.analyze wasm_mod annotated_cfg in
-       let final_state = TaintIntra.final_state result_cfg in
-       let taint_summary = TaintIntra.summary annotated_cfg final_state in
-       IntMap.set summaries ~key:cfg.idx ~data:taint_summary)
-    (fun summaries fid ->
-       let summary = IntMap.find_exn summaries fid in
+  mk_intra "Just like `intra`, but only performs the taint analysis" Taint.analyze_intra
+    (fun fid summary ->
        Printf.printf "function %d: %s\n" fid (Taint.Summary.to_string summary))
+
+let relational_intra =
+  mk_intra "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)" Relational.analyze_intra
+    (fun fid summary ->
+       Printf.printf "function %d: %s" fid (Relational.Summary.to_string summary))
+
+let reltaint_intra =
+  mk_intra "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)" Reltaint.analyze_intra
+    (fun fid summary ->
+       Printf.printf "function %d: %s, %s" fid (Relational.Summary.to_string (fst summary)) (Taint.Summary.to_string (snd summary)))
 
 let int_comma_separated_list =
   Command.Arg_type.create (fun ids ->
       List.map (String.split ids ~on:',') ~f:int_of_string)
 
-let timer_start () = Unix.gettimeofday ()
-let timer_value t0 =
-  let t1 = Unix.gettimeofday () in
-  t1 -. t0
-
-let taint_inter =
-  let desc = "Performs inter analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target." in
-  let init_summaries cfgs wasm_mod = Taint.Summary.initial_summaries cfgs wasm_mod `Bottom in
+let mk_inter (desc : string) (analysis : string -> int list list -> 'a IntMap.t) (print : int -> 'a -> unit) =
   Command.basic
     ~summary:desc
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string)
       and sccs = anon (sequence ("funs" %: int_comma_separated_list)) in
       fun () ->
-        apply_to_textual filename (fun m ->
-            let timer_init = timer_start () in
-            let wasm_mod = Wasm_module.of_wasm m in
-            let cfgs = IntMap.of_alist_exn (List.mapi wasm_mod.funcs ~f:(fun i _ ->
-                let faddr = wasm_mod.nimports + i in
-                (faddr, Cfg_builder.build faddr wasm_mod))) in
-            let module SpecIntra = Intra.Make(Spec_inference) in
-            let annotated_cfgs = IntMap.map cfgs ~f:(fun cfg -> Relational.Transfer.dummy_annotate (SpecIntra.analyze wasm_mod cfg)) in
-            let module TaintTransfer = Taint.Transfer.Make in
-            Taint.Options.use_relational := false;
-            let module TaintIntra = Intra.Make(TaintTransfer) in
-            let module Intra = struct
-              type annot_expected = TaintIntra.annot_expected
-              type state = TaintIntra.state
-              let equal_state = TaintIntra.equal_state
-              let analyze wasm_mod (cfg : annot_expected Cfg.t) =
-                (* TODO: this re-runs a spec analysis for every intra, not really useful... *)
-                let timer_spec = timer_start () in
-                Printf.printf "Spec of %d: %.3f\n" cfg.idx (timer_value timer_spec);
-                Gc.compact ();
-                let timer_inter = timer_start () in
-                Printf.printf "Performing taint intra of %d\n" cfg.idx;
-                let res = TaintIntra.analyze wasm_mod cfg in
-                Logging.info (Printf.sprintf "Inter-step time: %.3f" (timer_value timer_inter));
-                res
-              let analyze_keep wasm_mod cfg = TaintIntra.analyze_keep wasm_mod cfg
-            end in
-            let module TaintInter = Inter.Make(Intra) in
-            Logging.info (Printf.sprintf "Initialization time: %.3f" (timer_value timer_init));
-            let summaries = List.fold_left sccs
-                ~init:(init_summaries cfgs wasm_mod)
-                ~f:(fun summaries funs ->
-                    let scc_cfgs = IntMap.filter_keys annotated_cfgs ~f:(fun idx -> List.mem funs idx ~equal:Stdlib.(=)) in
-                    TaintIntra.init_summaries summaries;
-                    let sums = TaintInter.analyze wasm_mod scc_cfgs in
-                    IntMap.fold sums
-                      ~init:summaries
-                      ~f:(fun ~key:idx ~data:sum acc ->
-                          IntMap.set acc ~key:idx ~data:(TaintTransfer.summary (IntMap.find_exn annotated_cfgs idx) (TaintIntra.final_state sum)))) in
-            IntMap.iteri summaries ~f:(fun ~key:idx ~data:sum ->
-                Printf.printf "function %d taint: %s\n" idx (Taint.Summary.to_string sum))))
+        let results = analysis filename sccs in
+        IntMap.iteri results ~f:(fun ~key:id ~data: summary -> print id summary))
 
-let reltaint_intra =
-  mk_intra
-    "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)"
-    (fun cfgs wasm_mod -> (Relational.Summary.initial_summaries cfgs wasm_mod `Top,
-                           Taint.Summary.initial_summaries cfgs wasm_mod `Top))
-    (fun summaries fid ->
-       Printf.printf "Relational summary is:\n%s\n" (Relational.Summary.to_string (IntMap.find_exn (fst summaries) fid));
-       Printf.printf "Taint summary is:\n%s\n" (Taint.Summary.to_string (IntMap.find_exn (snd summaries) fid));)
-    (fun summaries wasm_mod cfg ->
-       let module RelationalIntra = Intra.Make(Relational.Transfer) in
-       RelationalIntra.init_summaries (fst summaries);
-       Relational.Transfer.ignore_memory := false;
-       Logging.info "---------- Relational analysis ----------";
-       let relational_cfg = RelationalIntra.analyze_keep wasm_mod cfg in
-       (* let final_state = RelationalIntra.final_state relational_cfg in
-       (* Printf.printf "%d: %s\n" cfg.idx (RelationalIntra.state_to_string out_state); *)
-       let relational_summary = RelationalIntra.summary cfg final_state in
-          Printf.printf "Relational summary is:\n%s\n" (Relational.Summary.to_string relational_summary); *)
-       (* Run the taint analysis *)
-       Logging.info "---------- Taint analysis ----------";
-       let module TaintTransfer = Taint.Transfer.Make in
-       Taint.Options.use_relational := true;
-       let module TaintIntra = Intra.Make(TaintTransfer) in
-       TaintIntra.init_summaries (snd summaries);
-       let result_cfg = TaintIntra.analyze wasm_mod relational_cfg in
-       let out_state = TaintIntra.final_state result_cfg in
-       let taint_summary = TaintIntra.summary relational_cfg out_state in
-       (fst summaries, (* IntMap.set (fst summaries) ~key:cfg.idx ~data:relational_summary, TODO *)
-        IntMap.set (snd summaries) ~key:cfg.idx ~data:taint_summary))
-    (fun summaries fid ->
-       Printf.printf "function %d relational: %s\n" fid (Relational.Summary.to_string (IntMap.find_exn (fst summaries) fid));
-       Printf.printf "function %d taint: %s\n" fid (Taint.Summary.to_string (IntMap.find_exn (snd summaries) fid)))
+let taint_inter =
+  mk_inter "Performs inter analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target."
+    Taint.analyze_inter
+    (fun fid summary -> Printf.printf "function %d: %s\n" fid (Taint.Summary.to_string summary))
 
-(*
-let relational_intra =
-  mk_intra
-    "Just like `intra`, but only performs relational analysis"
-    (fun cfgs wasm_mod -> Relational_summary.initial_summaries cfgs wasm_mod `Top)
-    (fun summaries fid ->
-       Printf.printf "Relational summary is:\n%s\n" (Relational_summary.to_string (IntMap.find_exn summaries fid)))
-    (fun summaries instr_data block_data wasm_mod cfg ->
-       let module Spec = Spec_inference.Spec(struct
-           let instr_data () = instr_data
-           let block_data () = block_data
-         end) in
-       let module RelationalIntra = Intra_fixpoint.Make(Relational_transfer.Make(Spec)) in
-       RelationalIntra.init_summaries summaries;
-       Logging.info (Printf.sprintf "---------- Relational analysis of function %d ----------" cfg.idx);
-       let results = RelationalIntra.analyze wasm_mod cfg in
-       let out_state = RelationalIntra.out_state cfg results in
-       let relational_summary = RelationalIntra.summary cfg out_state in
-       let module RelSpec = Relational_spec.Spec(struct
-           let instr_data = RelationalIntra.extract_spec (snd results)
-         end) in
-       IntMap.set summaries ~key:cfg.idx ~data:relational_summary)
-    (fun summaries fid ->
-       Printf.printf "function %d relational: %s\n" fid (Relational_summary.to_string (IntMap.find_exn summaries fid)))
-*)
 let () =
   Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
   Command.run ~version:"0.0"

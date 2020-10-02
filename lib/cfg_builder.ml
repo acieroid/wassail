@@ -268,8 +268,12 @@ let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
     loop_heads = !loop_heads;
   }
 
+let build_all (mod_ : Wasm_module.t) : unit Cfg.t IntMap.t =
+  IntMap.of_alist_exn (List.mapi mod_.funcs ~f:(fun i _ ->
+      let faddr = mod_.nimports + i in
+      (faddr, build faddr mod_)))
 
-module Tests_builder_tests = struct
+module Cfg_builder_tests = struct
   (** Check that building the CFG for each function of a .wat file succeeds.
       Does not actually check that the CFG is correct. *)
   let test_cfgs file_in =

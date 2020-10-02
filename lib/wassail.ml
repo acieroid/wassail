@@ -3,6 +3,8 @@ open Wasm
 
 include Helpers
 
+module Analysis_helpers = Analysis_helpers
+
 module Logging = Logging
 
 module Wasm_module = Wasm_module
@@ -21,8 +23,8 @@ module Intra = Intra
 module Spec_inference = Spec_inference
 
 module Relational = Relational
-
 module Taint = Taint
+module Reltaint = Reltaint
 
 let cfgs : ('a Cfg.t IntMap.t) ref = ref IntMap.empty
 let module_ : (Wasm_module.t option) ref = ref None

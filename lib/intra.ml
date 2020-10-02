@@ -172,11 +172,15 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
     Cfg.add_annotation cfg
       (IntMap.map block_data ~f:(fun (before, after) -> (result_to_state cfg before, result_to_state cfg after)))
       (IntMap.map instr_data ~f:(fun (before, after) -> (result_to_state cfg before, result_to_state cfg after)))
-    
+
   (** Extract the out state from intra-procedural results *)
   let final_state (cfg : state Cfg.t) : state =
     let final = IntMap.find_exn cfg.basic_blocks cfg.exit_block in
     final.annotation_after
+
+  let final_state_kept (cfg : (annot_expected * state) Cfg.t) : state =
+    let final = IntMap.find_exn cfg.basic_blocks cfg.exit_block in
+    snd (final.annotation_after)
 
   (*  let extract_spec (results : intra_results) : (state * state) IntMap.t =
     IntMap.filter_map results ~f:(function
