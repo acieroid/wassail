@@ -65,17 +65,16 @@ let input_from get_script run =
   | Wasm.Eval.Crash (at, msg) -> error at "runtime crash" msg
   | Wasm.Encode.Code (at, msg) -> error at "encoding error" msg
 
-let parse_file name run =
-  let ic = In_channel.create name in
-  try
-    let lexbuf = Lexing.from_channel ic in
-    let success = input_from (fun _ ->
+let parse_from_lexbuf name lexbuf run =
+  let extract (l : (Wasm.Script.var option * Wasm.Script.definition) list) =
+    match l with
+    | (_, { it = Wasm.Script.Textual m; _ }) :: _ -> run m
+    | _ -> failwith "unsupported format" in
+    input_from (fun _ ->
         let var_opt, def = Wasm.Parse.parse name lexbuf Wasm.Parse.Module in
         [(var_opt, def)])
-        run in
-    In_channel.close ic;
-    success
-  with exn -> In_channel.close ic; raise exn
+        extract
+
 
 let parse_string str run =
   let lexbuf = Lexing.from_string str in
@@ -84,9 +83,11 @@ let parse_string str run =
       [(var_opt, def)])
     run
 
-let apply_to_textual (filename : string) (f : Wasm.Ast.module_ -> 'a) =
-  let extract (l : (Wasm.Script.var option * Wasm.Script.definition) list) =
-    match l with
-    | (_, { it = Wasm.Script.Textual m; _ }) :: _ -> f m
-    | _ -> failwith "unsupported format" in
-  parse_file filename extract
+let apply_to_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
+  In_channel.with_file filename ~f:(fun ic ->
+      let lexbuf = Lexing.from_channel ic in
+      parse_from_lexbuf filename lexbuf f)
+
+let apply_to_string (string : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
+  let lexbuf = Lexing.from_string string in
+  parse_from_lexbuf "no-file" lexbuf f

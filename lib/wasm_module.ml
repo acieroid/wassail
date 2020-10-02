@@ -1,4 +1,5 @@
 open Core_kernel
+open Helpers
 
 module T = struct
 
@@ -66,3 +67,10 @@ let of_wasm (m : Wasm.Ast.module_) : t =
         | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
                                          List.map b ~f:Type.of_wasm))
   })
+
+let of_file (file : string) : t =
+  apply_to_file file of_wasm
+
+let of_string (string : string) : t =
+  apply_to_string string of_wasm
+

@@ -9,16 +9,15 @@ let cfg =
       and fid = anon ("fid" %: int)
       and file_out = anon ("out" %: string) in
       fun () ->
-        apply_to_textual file_in (fun m ->
-            let wasm_mod = Wasm_module.of_wasm m in
-            let nimports = List.length wasm_mod.imported_funcs in
-            if fid < nimports then
-              Printf.printf "Can't build CFG for function %d: it is an imported function" fid
-            else
-              let cfg = Cfg_builder.build fid wasm_mod in
-              Out_channel.with_file file_out
-                ~f:(fun ch ->
-                    Out_channel.output_string ch (Cfg.to_dot cfg (fun () -> "")))))
+        let wasm_mod = Wasm_module.of_file file_in in
+        let nimports = List.length wasm_mod.imported_funcs in
+        if fid < nimports then
+          Printf.printf "Can't build CFG for function %d: it is an imported function" fid
+        else
+          let cfg = Cfg_builder.build fid wasm_mod in
+          Out_channel.with_file file_out
+            ~f:(fun ch ->
+                Out_channel.output_string ch (Cfg.to_dot cfg (fun () -> ""))))
 
 let cfgs =
   Command.basic
@@ -27,16 +26,15 @@ let cfgs =
       let%map_open file_in = anon ("in" %: string)
       and out_dir = anon ("out_dir" %: string) in
       fun () ->
-        apply_to_textual file_in (fun m ->
-            let wasm_mod = Wasm_module.of_wasm m in
-            Core.Unix.mkdir_p out_dir;
-            List.iteri wasm_mod.funcs
-              ~f:(fun i _ ->
-                  let faddr = wasm_mod.nimports + i in
-                  let cfg = Cfg_builder.build faddr wasm_mod in
-                  Out_channel.with_file (Printf.sprintf "%s/%d.dot" out_dir faddr)
-                    ~f:(fun ch ->
-                        Out_channel.output_string ch (Cfg.to_dot cfg (fun () -> ""))))))
+        let wasm_mod = Wasm_module.of_file file_in in
+        Core.Unix.mkdir_p out_dir;
+        List.iteri wasm_mod.funcs
+          ~f:(fun i _ ->
+              let faddr = wasm_mod.nimports + i in
+              let cfg = Cfg_builder.build faddr wasm_mod in
+              Out_channel.with_file (Printf.sprintf "%s/%d.dot" out_dir faddr)
+                ~f:(fun ch ->
+                    Out_channel.output_string ch (Cfg.to_dot cfg (fun () -> "")))))
 
 let callgraph =
   Command.basic
@@ -45,16 +43,15 @@ let callgraph =
       let%map_open file_in = anon ("in" %: string)
       and file_out = anon ("out" %: string) in
       fun () ->
-        apply_to_textual file_in (fun m ->
-            let wasm_mod = Wasm_module.of_wasm m in
-            let cg = Call_graph.make wasm_mod in
-            let nimports = List.length wasm_mod.imported_funcs in
-            let schedule = Call_graph.analysis_schedule cg nimports in
-            List.iter schedule ~f:(fun elems ->
-                Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:string_of_int)));
-            Out_channel.with_file file_out
-              ~f:(fun ch ->
-                  Out_channel.output_string ch (Call_graph.to_dot cg))))
+        let wasm_mod = Wasm_module.of_file file_in in
+        let cg = Call_graph.make wasm_mod in
+        let nimports = List.length wasm_mod.imported_funcs in
+        let schedule = Call_graph.analysis_schedule cg nimports in
+        List.iter schedule ~f:(fun elems ->
+            Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:string_of_int)));
+        Out_channel.with_file file_out
+          ~f:(fun ch ->
+              Out_channel.output_string ch (Call_graph.to_dot cg)))
 
 let schedule =
   Command.basic
@@ -62,24 +59,23 @@ let schedule =
     Command.Let_syntax.(
       let%map_open file_in = anon ("in" %: string) in
       fun () ->
-        apply_to_textual file_in (fun m ->
-            let wasm_mod = Wasm_module.of_wasm m in
-            let cg = Call_graph.make wasm_mod in
-            let nimports = List.length wasm_mod.imported_funcs in
-            let schedule = Call_graph.analysis_schedule cg nimports in
-            List.iter schedule ~f:(fun elems ->
-                Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:string_of_int)));
-            Printf.printf "\n"))
+        let wasm_mod = Wasm_module.of_file file_in in
+        let cg = Call_graph.make wasm_mod in
+        let nimports = List.length wasm_mod.imported_funcs in
+        let schedule = Call_graph.analysis_schedule cg nimports in
+        List.iter schedule ~f:(fun elems ->
+            Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:string_of_int)));
+        Printf.printf "\n")
 
 
-let mk_intra (desc : string) (analysis : string -> int list -> 'a IntMap.t) (print : int -> 'a -> unit) =
+let mk_intra (desc : string) (analysis : Wasm_module.t -> int list -> 'a IntMap.t) (print : int -> 'a -> unit) =
   Command.basic
     ~summary:desc
     Command.Let_syntax.(
     let%map_open filename = anon ("file" %: string)
     and funs = anon (sequence ("funs" %: int)) in
     fun () ->
-      let results = analysis filename funs in
+      let results = analysis (Wasm_module.of_file filename) funs in
       IntMap.iteri results ~f:(fun ~key:id ~data:summary -> print id summary))
 
 let spec_inference =
@@ -152,14 +148,14 @@ let int_comma_separated_list =
   Command.Arg_type.create (fun ids ->
       List.map (String.split ids ~on:',') ~f:int_of_string)
 
-let mk_inter (desc : string) (analysis : string -> int list list -> 'a IntMap.t) (print : int -> 'a -> unit) =
+let mk_inter (desc : string) (analysis : Wasm_module.t -> int list list -> 'a IntMap.t) (print : int -> 'a -> unit) =
   Command.basic
     ~summary:desc
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string)
       and sccs = anon (sequence ("funs" %: int_comma_separated_list)) in
       fun () ->
-        let results = analysis filename sccs in
+        let results = analysis (Wasm_module.of_file filename) sccs in
         IntMap.iteri results ~f:(fun ~key:id ~data: summary -> print id summary))
 
 let taint_inter =

@@ -1,7 +1,7 @@
 open Core_kernel
 open Helpers
 
-let analyze_intra : string -> int list -> (Relational.Summary.t * Taint.Summary.t) IntMap.t =
+let analyze_intra : Wasm_module.t -> int list -> (Relational.Summary.t * Taint.Summary.t) IntMap.t =
   Analysis_helpers.mk_intra
     (fun cfgs wasm_mod ->
        IntMap.merge

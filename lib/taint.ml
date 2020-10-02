@@ -8,7 +8,7 @@ module Summary = Taint_summary
 module Intra = Intra.Make(Transfer)
 module Inter = Inter.Make(Intra)
 
-let analyze_intra : string -> int list -> Summary.t IntMap.t =
+let analyze_intra : Wasm_module.t -> int list -> Summary.t IntMap.t =
   Analysis_helpers.mk_intra
     (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Bottom)
     (fun summaries wasm_mod cfg ->
@@ -23,12 +23,22 @@ let analyze_intra : string -> int list -> Summary.t IntMap.t =
        taint_summary)
 
 
-let%test _ =
-  let result = IntMap.find_exn (analyze_intra "../../../test/simple.wat" [0]) 0 in
+let%test "simple function has no taint" =
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    i32.const 256
+    i32.const 512
+    i32.const 0
+    select)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let result = IntMap.find_exn (analyze_intra module_ [0]) 0 in
   let expected = Summary.{ ret = Some Domain.taint_bottom; mem = Domain.taint_bottom; globals = [Domain.taint (Var.Global 0)] } in
   Summary.equal result expected
 
-let analyze_inter : string -> int list list -> Summary.t IntMap.t =
+let analyze_inter : Wasm_module.t -> int list list -> Summary.t IntMap.t =
   Analysis_helpers.mk_inter
     (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Bottom)
     (fun wasm_mod scc ->

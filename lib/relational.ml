@@ -7,7 +7,7 @@ module Spec = Relational_spec
 
 module Intra = Intra.Make(Transfer)
 
-let analyze_intra : string -> int list -> Summary.t IntMap.t =
+let analyze_intra : Wasm_module.t -> int list -> Summary.t IntMap.t =
   Analysis_helpers.mk_intra
     (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Top)
     (fun summaries wasm_mod cfg ->
