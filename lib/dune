@@ -13,5 +13,5 @@
       Relational Relational_domain Relational_transfer Relational_summary  Relational_spec
       Reltaint)
    (libraries core_kernel wasm  apron apron.polkaMPQ apron.octD sexplib)
-   (inline_tests)
+   (inline_tests (flags -verbose))
    (preprocess (pps ppx_jane ppx_compare ppx_inline_test)))

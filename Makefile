@@ -1,3 +1,5 @@
+TEST_EXECUTABLE=./_build/default/lib/.wassail.inline-tests/inline_test_runner_wassail.exe
+
 all: bin test
 
 bin:
