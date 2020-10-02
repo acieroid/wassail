@@ -22,6 +22,12 @@ let analyze_intra : string -> int list -> Summary.t IntMap.t =
        let taint_summary = Intra.summary annotated_cfg final_state in
        taint_summary)
 
+
+let%test _ =
+  let result = IntMap.find_exn (analyze_intra "../../../test/simple.wat" [0]) 0 in
+  let expected = Summary.{ ret = Some Domain.taint_bottom; mem = Domain.taint_bottom; globals = [Domain.taint (Var.Global 0)] } in
+  Summary.equal result expected
+
 let analyze_inter : string -> int list list -> Summary.t IntMap.t =
   Analysis_helpers.mk_inter
     (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Bottom)

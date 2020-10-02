@@ -179,6 +179,6 @@ let () =
        ; "count-vars", count_vars
        ; "taint-intra", taint_intra
        ; "taint-inter", taint_inter
-       ; "reltaint-intra", reltaint_intra (*
-          ; "relational-intra", relational_intra *)])
+       ; "reltaint-intra", reltaint_intra
+       ; "relational-intra", relational_intra])
 
