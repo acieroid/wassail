@@ -64,7 +64,6 @@ module Make (Transfer : TRANSFER) : INTRA = struct
 
     (* Analyzes one block, returning the pre and post states *)
     let analyze_block (block_idx : int) : Transfer.state * result =
-      (* Printf.printf "Analyzing block %d\n" block_idx; *)
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
       let predecessors = Cfg.predecessors cfg block_idx in
@@ -118,7 +117,8 @@ module Make (Transfer : TRANSFER) : INTRA = struct
         | _ ->
           (* Update the out state in the analysis results.
              We join with the previous results *)
-          Printf.printf "joining states at block %d\n" block_idx;
+          Logging.info !verbose
+            (Printf.sprintf "joining states at block %d\n" block_idx);
           let new_out_state =
             if IntSet.mem cfg.loop_heads block_idx then
               widen_result previous_out_state (join_result out_state previous_out_state)

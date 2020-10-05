@@ -1,6 +1,8 @@
 open Core_kernel
 open Helpers
 
+let verbose = ref false
+
 (** The interface of an intra analysis *)
 module type INTRA = sig
   (** The state of the analysis *)
@@ -76,7 +78,6 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
 
     (* Analyzes one block, returning the pre and post states *)
     let analyze_block (block_idx : int) : Transfer.state * result =
-      (* Printf.printf "Analyzing block %d\n" block_idx; *)
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
       let predecessors = Cfg.predecessors cfg block_idx in
@@ -91,7 +92,6 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
           | Uninitialized, _ -> (idx, Transfer.bottom_state cfg))) in
       let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
-      (* Printf.printf "state before analysis: %s\n" (state_to_string in_state); *)
       let result = transfer block in_state in
       (in_state, result)
     in
@@ -121,9 +121,11 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = IntSet.min_elt_exn worklist in
-        Printf.printf "-----------------------\n Analyzing block %d\n" block_idx;
+        Logging.info !verbose
+          (Printf.sprintf "-----------------------\n Analyzing block %d\n" block_idx);
         let (in_state, out_state) = analyze_block block_idx in
-        Printf.printf "out_state is: %s\n" (result_to_string out_state);
+        Logging.info !verbose
+          (Printf.sprintf "out_state is: %s\n" (result_to_string out_state));
         (* Has out state changed? *)
         let previous_out_state = snd (IntMap.find_exn !block_data block_idx) in
         match previous_out_state with
@@ -133,9 +135,6 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
         | _ ->
           (* Update the out state in the analysis results.
              We join with the previous results *)
-          (* Printf.printf "joining states at block %d\n" block_idx;
-          Printf.printf "previous state was: %s\n" (result_to_string previous_out_state);
-             Printf.printf "current state is: %s\n" (result_to_string out_state); *)
           let new_out_state =
             (* TODO: Join may not be necessary here, as long as out_state is greater than previous_out_state *)
             if IntSet.mem cfg.loop_heads block_idx then
@@ -143,7 +142,6 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
             else
               join_result previous_out_state out_state
           in
-          (* Printf.printf "result: %s\n" (result_to_string new_out_state); *)
           block_data := IntMap.set !block_data ~key:block_idx ~data:(Simple in_state, new_out_state);
           (* And recurse by adding all successors *)
           let successors = Cfg.successors cfg block_idx in

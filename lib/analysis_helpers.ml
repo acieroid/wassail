@@ -10,11 +10,9 @@ let mk_intra
     ~init:(init_summaries cfgs wasm_mod)
     ~f:(fun summaries fid ->
         if fid < wasm_mod.nimports then begin
-          Logging.info "This is an imported function, it does not have to be analyzed.\n";
           summaries
         end else
           let cfg = IntMap.find_exn cfgs fid in
-          Logging.info (Printf.sprintf "---------- Spec analysis of function %d ----------" cfg.idx);
           let annotated_cfg = Spec.Intra.analyze wasm_mod cfg in
           let (summary : 'a) = analysis summaries wasm_mod annotated_cfg in
           IntMap.update summaries fid ~f:(fun _ -> summary))

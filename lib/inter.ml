@@ -7,6 +7,8 @@ module type INTER = sig
   val analyze : Wasm_module.t -> annot_expected Cfg.t IntMap.t -> state Cfg.t IntMap.t
 end
 
+let verbose = ref false
+
 module Make (Intra : Intra.INTRA) (*: INTER*) = struct
   type annot_expected = Intra.annot_expected
   type state = Intra.state
@@ -33,11 +35,13 @@ module Make (Intra : Intra.INTRA) (*: INTER*) = struct
         let cfg_idx = IntSet.min_elt_exn worklist in
         if cfg_idx < module_.nimports then begin
           (* Should not happen *)
-          Printf.printf "Not analyzing cfg %d (it is an imported function)" cfg_idx;
+          Logging.info !verbose
+            (Printf.sprintf "Not analyzing cfg %d (it is an imported function)" cfg_idx);
           fixpoint (IntSet.remove worklist cfg_idx) acc
         end else begin
           let cfg = IntMap.find_exn cfgs cfg_idx in
-          Printf.printf "Analyzing cfg %d (name: %s)\n" cfg_idx cfg.name;
+          Logging.info !verbose
+            (Printf.sprintf "Analyzing cfg %d (name: %s)\n" cfg_idx cfg.name);
           (* Perform intra-procedural analysis *)
           let results = Intra.analyze module_ cfg (* !summaries *) in
           (* Check difference with previous state, if there was any *)

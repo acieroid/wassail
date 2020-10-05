@@ -63,7 +63,7 @@ let of_import (_idx : int) (name : string) (nglobals : int) (_args : Type.t list
     { globals; ret; mem = Taint_domain.taint_top } (* XXX: We assume memory does not get tainted, which is definitely not always true (e.g., fd_write) *)
   | _ ->
     (* XXX: We assume globals are unchanged, might not always be the case! *)
-    Logging.info (Printf.sprintf "Imported function is not modelled: %s" name);
+    Logging.info !Taint_options.verbose (Printf.sprintf "Imported function is not modelled: %s" name);
     let globals = List.init nglobals ~f:(fun i -> Taint_domain.taint (Var.Global i)) in
     (* Ret is tainted *)
     let ret = match ret with

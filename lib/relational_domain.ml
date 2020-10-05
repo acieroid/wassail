@@ -77,7 +77,8 @@ let join (s1 : t) (s2 : t) : t =
   constraints = Apron.Abstract1.join manager s1.constraints s2.constraints;
   env = (assert Stdlib.(s1.env = s2.env); s1.env);
 } in
-  Printf.printf "join %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res);
+  Logging.info !Relational_options.verbose
+    (Printf.sprintf "join %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
   res
 
 let widen (s1 : t) (s2 : t) : t =
@@ -85,7 +86,8 @@ let widen (s1 : t) (s2 : t) : t =
     constraints = Apron.Abstract1.widening manager s1.constraints s2.constraints;
     env = (assert Stdlib.(s1.env = s2.env); s1.env);
   } in
-  Printf.printf "widening %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res);
+  Logging.info !Relational_options.verbose
+    (Printf.sprintf "widening %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
   res
 
 let meet (s1 : t) (s2 : t) : t =
@@ -93,7 +95,8 @@ let meet (s1 : t) (s2 : t) : t =
     constraints = Apron.Abstract1.meet manager s1.constraints s2.constraints;
     env = (assert Stdlib.(s1.env = s2.env); s1.env);
   } in
-  Printf.printf "meet %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res);
+  Logging.info !Relational_options.verbose
+    (Printf.sprintf "meet %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
   res
 
 let join_opt (s1 : t) (s2 : t option) : t =
@@ -121,7 +124,9 @@ let add_constraints (s : t) (constraints : (Var.t * string) list) : t =
         false
       | _ -> true) in
   try
-    List.iter filtered_constraints ~f:(fun (x, y) -> Printf.printf "add constraint: %s = %s\n" (Var.to_string x) y);
+    List.iter filtered_constraints ~f:(fun (x, y) ->
+        (Logging.info !Relational_options.verbose
+           (Printf.sprintf "add constraint: %s = %s\n" (Var.to_string x) y)));
     { s
       with constraints =
              Apron.Abstract1.assign_linexpr_array manager s.constraints
@@ -203,13 +208,12 @@ let are_equal_offset (s : t) ((v1, offset1) : Var.with_offset) ((v2, offset2) : 
   let to_eq itv =
     (* Convert an interval that results from a equality check (performed by checking equality of x and y by computing the interval of x-y, hence [0,0] indicates equality) into the two necessary booleans *)
     match Apron.Interval.cmp itv (Apron.Interval.of_int 0 0) with
-    | 0 -> Printf.printf "tf1\n"; (true, false)
-    | -1 -> Printf.printf "tf2\n"; (true, false)
-    | +1 -> Printf.printf "tt\n"; (true, true)
-    | -2 | +2 -> Printf.printf "ft\n"; (false, true)
+    | 0 -> (true, false)
+    | -1 -> (true, false)
+    | +1 -> (true, true)
+    | -2 | +2 -> (false, true)
     | _ -> failwith "should not happen"
   in
-             Printf.printf "Checking equality of %s+%d and %s+%d\n" (Var.to_string v1) offset1 (Var.to_string v2) offset2;
   if Stdlib.(v1 = v2) then
     if offset1 = offset2 then (true, false) else (false, true)
   else

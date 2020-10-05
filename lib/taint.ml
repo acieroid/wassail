@@ -12,7 +12,8 @@ let analyze_intra : Wasm_module.t -> int list -> Summary.t IntMap.t =
   Analysis_helpers.mk_intra
     (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Bottom)
     (fun summaries wasm_mod cfg ->
-       Logging.info (Printf.sprintf "---------- Taint analysis of function %d ----------" cfg.idx);
+       Logging.info !Taint_options.verbose
+         (Printf.sprintf "---------- Taint analysis of function %d ----------" cfg.idx);
        (* Run the taint analysis *)
        Options.use_relational := false;
        Intra.init_summaries summaries;
@@ -22,6 +23,13 @@ let analyze_intra : Wasm_module.t -> int list -> Summary.t IntMap.t =
        let taint_summary = Intra.summary annotated_cfg final_state in
        taint_summary)
 
+let check (expected : Summary.t) (actual : Summary.t) : bool =
+  if Summary.equal expected actual then
+    true
+  else begin
+    Printf.printf "summaries not equal:\nexpected: %s\nactual: %s\n" (Summary.to_string expected) (Summary.to_string actual);
+    false
+  end
 
 let%test "simple function has no taint" =
   let module_ = Wasm_module.of_string "(module
@@ -34,16 +42,32 @@ let%test "simple function has no taint" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let result = IntMap.find_exn (analyze_intra module_ [0]) 0 in
+  let actual = IntMap.find_exn (analyze_intra module_ [0]) 0 in
   let expected = Summary.{ ret = Some Domain.taint_bottom; mem = Domain.taint_bottom; globals = [Domain.taint (Var.Global 0)] } in
-  Summary.equal result expected
+  check expected actual
+
+let%test "test store" =
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    global.get 0
+    local.get 0
+    i32.store
+    local.get 0)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let actual = IntMap.find_exn (analyze_intra module_ [0]) 0 in
+  let expected = Summary.{ ret = Some (Domain.taint (Var.Local 0)); mem = Domain.taint (Var.Local 0); globals = [Domain.taint (Var.Global 0)] } in
+  check expected actual
 
 let analyze_inter : Wasm_module.t -> int list list -> Summary.t IntMap.t =
   Analysis_helpers.mk_inter
     (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Bottom)
     (fun wasm_mod scc ->
-       Logging.info (Printf.sprintf "---------- Taint analysis of SCC {%s} ----------"
-                       (String.concat ~sep:"," (List.map (IntMap.keys scc) ~f:string_of_int)));
+       Logging.info !Taint_options.verbose
+         (Printf.sprintf "---------- Taint analysis of SCC {%s} ----------"
+            (String.concat ~sep:"," (List.map (IntMap.keys scc) ~f:string_of_int)));
        (* Run the taint analysis *)
        Options.use_relational := false;
        let annotated_scc = IntMap.map scc ~f:Relational.Transfer.dummy_annotate in

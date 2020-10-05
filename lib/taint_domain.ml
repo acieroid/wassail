@@ -85,7 +85,6 @@ let replace_taint (s : t) (from : Var.t) (to_ : taint) : t =
 
 (** Add taint to a variable *)
 let add_taint (s : t) (v : Var.t) (taint : taint) : t =
-  (* Printf.printf "update taint: %s -> %s\n" (Var.to_string v) (taint_to_string taint); *)
   Var.Map.update s v ~f:(function
       | None -> taint
       | Some t -> join_taint t taint)
@@ -96,7 +95,6 @@ let add_taint_v (s : t) (v : Var.t) (taint : Var.t) : t =
 
 (** Sets the taint of a variable to top *)
 let set_top_taint (s : t) (v : Var.t) : t =
-  (* Printf.printf "add taint: %s -> top\n" (Var.to_string v); *)
   Var.Map.set s ~key:v ~data:TopTaint
 
 (** The bottom state does not contain any taint *)

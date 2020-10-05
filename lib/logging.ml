@@ -15,15 +15,16 @@ type callback = option -> string -> unit
 
 let callbacks : (callback list) ref = ref []
 
-let log (opt : option) (msg : string) : unit =
-  List.iter !callbacks ~f:(fun cb -> cb opt (Printf.sprintf "%s\n" msg))
+let log (opt : option) (enabled: bool) (msg : string) : unit =
+  if enabled then
+    List.iter !callbacks ~f:(fun cb -> cb opt (Printf.sprintf "%s\n" msg))
 
 (** Adds a callback that will be called when something is logged *)
 let add_callback (cb : option -> string -> unit) =
   callbacks := cb :: !callbacks
 
 (** Logs some information *)
-let info (msg : string) : unit = log Info msg
+let info (enabled : bool) (msg : string) : unit = log Info enabled msg
 
 (** Logs a warning *)
-let warn (kind : string) (msg : string) : unit = log (Warn kind) msg
+let warn (kind : string) (enabled : bool) (msg : string) : unit = log (Warn kind) enabled msg

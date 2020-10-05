@@ -45,8 +45,6 @@ let join_state = Domain.join
 
 let widen_state = Domain.widen
 
-let ignore_memory = ref true
-
 (** Merges the entry states before analyzing the given block *)
 let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * state) list) : state =
     match states with
@@ -81,7 +79,6 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block :
 *)
 let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_data) (state : state) : state =
   let ret (i : annot_expected Instr.labelled_data) : Var.t = List.hd_exn i.annotation_after.vstack in
-  Printf.printf "--------------------\ninstr: %s\n" (Instr.data_to_string i.instr);
   let state = Domain.change_vars state (Var.Set.union_list [reachable_vars (Data i); entry_vars cfg; exit_vars cfg]) in
   match i.instr with
   | Nop -> state
@@ -164,8 +161,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
     (* Don't add any constraint *)
     state
   | Load {offset; _ } ->
-    Printf.printf "load, state is %s\n" (state_to_string state);
-    if !ignore_memory then state else
+    if !Relational_options.ignore_memory then state else
       let ret = ret i in
       let vaddr = pop i.annotation_before.vstack in
       (* We are loading from address vaddr (also mk_i.label_0).
@@ -182,7 +178,6 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
           ~f:(fun a -> match Domain.are_equal_offset state a (vaddr, offset) with
               | (true, false) -> true (* definitely equal *)
               | _ -> false) in
-      Printf.printf "there are %d addresses that are def. equal\n" (List.length addrs);
       if List.is_empty addrs then
         (* Case b: no such addresses, then ret is unconstrained *)
         state
@@ -195,14 +190,12 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
             (* Get the value *)
             let v = Var.OffsetMap.find_exn mem a in
             (* ret = value *)
-            Printf.printf "ret is %s\n" (Var.to_string ret);
             Domain.add_equality_constraint state ret v) in
         (* Meet the domains! This is because they should all be equivalent.
            TODO: carefully check that *)
         List.reduce_exn states ~f:Domain.meet
   | Store { offset; _ } ->
-    Printf.printf "store\n";
-    let res = if !ignore_memory then state else
+    let res = if !Relational_options.ignore_memory then state else
       let vval, vaddr = pop2 i.annotation_before.vstack in
       (* Find all memory keys that are definitely equal to the address *)
       let mem = i.annotation_after.memory in
@@ -210,7 +203,6 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
           ~f:(fun a -> match Domain.are_equal_offset state a (vaddr, offset) with
               | (true, false) -> true (* definitely equal *)
               | _ -> false) in
-      Printf.printf "there are %d addresses that are def. equal\n" (List.length equal_addrs);
       if not (List.is_empty equal_addrs) then begin
         (* If there are addresses that are definitely equal, update the corresponding value *)
         let states = List.map equal_addrs
@@ -219,23 +211,19 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
                 Domain.add_equality_constraint state vval v') in
         List.reduce_exn states ~f:Domain.meet
       end else begin
-        Printf.printf "no addresses definitely equal\n";
         (* Otherwise, do similar for all addresses that may be equal *)
         let maybe_equal_addrs = List.filter (Var.OffsetMap.keys mem)
             ~f:(fun a -> match Domain.are_equal_offset state a (vaddr, offset) with
                 | (true, true) -> true (* maybe equal *)
                 | _ -> false) in
-        Printf.printf "Addresses maybe equal: %d\n" (List.length maybe_equal_addrs);
         let states = List.map maybe_equal_addrs
             ~f:(fun a ->
                 let v' = Var.OffsetMap.find_exn mem a in
                 (* We need to join with the unmodified state because the addres *may* be equal *)
                 Domain.join state
                   (Domain.add_equality_constraint state (failwith "which value here? (was v)") v')) in
-        Printf.printf "before join2\n"; (* TODO: investigate these joins *)
         List.reduce_exn states ~f:Domain.join
       end in
-    Printf.printf "store res: %s\n" (state_to_string res);
     res
 
 let control_instr_transfer
@@ -273,7 +261,8 @@ let control_instr_transfer
         match f with
         | Some fa ->
           if Stdlib.(ftype = (Wasm_module.get_func_type module_ fa)) then begin
-            Logging.info (Printf.sprintf "call_indirect applies function %d (type: %s)" fa (Type.funtype_to_string ftype));
+            Logging.info !Relational_options.verbose
+              (Printf.sprintf "call_indirect applies function %d (type: %s)" fa (Type.funtype_to_string ftype));
             (* Types match, apply the summary *)
             Some (Domain.join_opt (apply_summary fa arity state) acc)
           end else
