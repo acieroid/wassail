@@ -37,7 +37,7 @@ let reachable_vars (instr : annot_expected Instr.t) : Var.Set.t =
 
 let init_state (cfg : annot_expected Cfg.t) = Domain.init cfg (vars cfg)
 
-let bottom_state (cfg : annot_expected Cfg.t) = Domain.bottom cfg (vars cfg)
+let bottom_state (cfg : annot_expected Cfg.t) = Domain.bottom (vars cfg)
 
 let state_to_string = Domain.to_string
 
@@ -304,7 +304,7 @@ let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
       exit_block.annotation_after.globals
 
 let dummy_annotate (cfg : 'a Cfg.t) : ('a * state) Cfg.t =
-  let bot = Relational_domain.bottom cfg Var.Set.empty in
+  let bot = Relational_domain.bottom Var.Set.empty in
   let annots_instr = IntMap.of_alist_exn (List.map (IntSet.to_list (Cfg.all_instruction_labels cfg)) ~f:(fun i -> (i, (bot, bot)))) in
   let annots_block = IntMap.of_alist_exn (List.map (IntSet.to_list (Cfg.all_block_indices cfg)) ~f:(fun i -> (i, (bot, bot)))) in
   Cfg.add_annotation cfg annots_block annots_instr

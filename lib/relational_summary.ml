@@ -16,6 +16,10 @@ type t = {
   globals_post : Var.t list;
   state : state; (** The final state *)
 }
+[@@derive compare, equal]
+
+let equal (s1 : t) (s2 : t) : bool =
+  Domain.equal s1.state s2.state
 
 let to_string (s : t) : string =
   Printf.sprintf "pre: mem: [%s]\npost: ret: %s, globals: [%s], mem: [%s]\nstate: %s"
@@ -55,14 +59,14 @@ let make (cfg : 'a Cfg.t) (state : Domain.t) (ret : Var.t option)
 let bottom (cfg : 'a Cfg.t) (vars : Var.Set.t) : t =
   let ret = if List.length cfg.return_types = 1 then Some Var.Return else None in
   let params = Var.Set.of_list (List.mapi cfg.arg_types ~f:(fun argi _ -> Var.Local argi)) in
-  make cfg (Domain.bottom cfg (Var.Set.union_list [Var.Set.of_option ret; params; vars])) ret [] [] []
+  make cfg (Domain.bottom (Var.Set.union_list [Var.Set.of_option ret; params; vars])) ret [] [] []
 
 (** Constructs the top summary given a CFG *)
 let top (cfg : 'a Cfg.t) (vars : Var.Set.t) : t =
   let ret = if List.length cfg.return_types = 1 then Some Var.Return else None in
   let params = Var.Set.of_list (List.mapi cfg.arg_types ~f:(fun argi _ -> Var.Local argi)) in
   (* TODO: top memory and globals? *)
-  make cfg (Domain.top cfg (Var.Set.union_list [Var.Set.of_option ret; params; vars])) ret [] [] []
+  make cfg (Domain.top (Var.Set.union_list [Var.Set.of_option ret; params; vars])) ret [] [] []
 
 (** Constructs a summary from an imported function *)
 let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t list) : t =
