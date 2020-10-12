@@ -35,4 +35,6 @@ module Set = struct
     match v with
     | Some v -> singleton v
     | None -> empty
+  let to_string (v : t) : string =
+    String.concat ~sep:"," (List.map ~f:to_string (to_list v))
 end

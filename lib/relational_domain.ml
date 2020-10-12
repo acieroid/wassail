@@ -51,7 +51,6 @@ let compare (s1 : t) (s2 : t) : int =
 let equal (s1 : t) (s2 : t) : bool =
   compare s1 s2 = 0
 
-
 (** Initializes the state for the analysis of CFG cfg. All variables are unconstrained, except for locals with have 0 as initial value
     @param cfg is the CFG under analysis
     @param vars the set of Apron variables to create. It is expected that variables for locals are named l0 to ln, where l0 to li are parameters (there are i params), and li+1 to ln are locals that are initialized to 0.
@@ -105,6 +104,7 @@ let bottom (vars : Var.Set.t) : t =
       let apron_env = Apron.Environment.make apron_vars [| |] in
       let apron_abs = Apron.Abstract1.bottom manager apron_env in
       { constraints = apron_abs })
+
 
 let%test_unit "bottom should not result in an error" =
   let _: t = bottom Var.Set.empty in
@@ -174,10 +174,10 @@ let sub (v1 : Var.t) (v2 : Var.t) : string =
 
 (** Add multiple constraints *)
 let add_constraints (s : t) (constraints : (Var.t * string) list) : t =
-  Printf.printf "add_constraints to %s: [%s]\n"
-    (to_full_string s)
-    (String.concat ~sep:", "
-       (List.map constraints ~f:(fun (left, right) -> Printf.sprintf "%s = %s" (Var.to_string left) right)));
+  (* (Printf.printf "add_constraints to %s: [%s]\n"
+       (to_full_string s)
+       (String.concat ~sep:", "
+          (List.map constraints ~f:(fun (left, right) -> Printf.sprintf "%s = %s" (Var.to_string left) right)))); *)
   let filtered_constraints = List.filter constraints ~f:(fun (l, _r) -> match l with
       | Const _ ->
         (* Const are not Apron variables, hence these are filtered out when adding constraints *)
@@ -189,17 +189,8 @@ let add_constraints (s : t) (constraints : (Var.t * string) list) : t =
           (Logging.info !Relational_options.verbose
              (Printf.sprintf "add constraint: %s = %s\n" (Var.to_string x) y)));
       let lhs = List.map filtered_constraints ~f:(fun (v, _) -> Apron.Var.of_string (Var.to_string v)) in
-      Printf.printf "lhs: %s\n" (String.concat ~sep:"," (List.map lhs ~f:Apron.Var.to_string));
       let rhs = List.map filtered_constraints ~f:(fun (_, c) -> Apron.Parser.linexpr1_of_string s.constraints.env c) in
-      Printf.printf "rhs env: %s\n" (String.concat ~sep:"," (List.map rhs ~f:(fun v ->
-          Apron.Environment.print Stdlib.Format.str_formatter (Apron.Linexpr1.get_env v);
-          Stdlib.Format.flush_str_formatter ())));
-          (* Apron.Linexpr1.print Stdlib.Format.str_formatter v; Stdlib.Format.flush_str_formatter () *)
-      let res = { constraints =
-                         (* Fails in this call?! *)
-               Apron.Abstract1.assign_linexpr_array manager s.constraints (Array.of_list lhs)  (Array.of_list rhs) None } in
-          Printf.printf "success?!!!\n";
-          res)
+      { constraints = Apron.Abstract1.assign_linexpr_array manager s.constraints (Array.of_list lhs)  (Array.of_list rhs) None })
 
 let%test "add_constraints top (l0 = l0) results in top" =
   let top: t = top (Var.Set.of_list [Var.Local 0; Var.Var 609; Var.Return; Var.Global 0]) in
@@ -228,23 +219,25 @@ let meet_interval (s : t) (v : string) (bounds : int * int) : t =
       Apron.Lincons1.array_set earray 0 (Apron.Parser.lincons1_of_string s.constraints.env (Printf.sprintf "%s=[%d;%d]" v (fst bounds) (snd bounds)));
       { constraints = Apron.Abstract1.meet_lincons_array manager s.constraints earray })
 
-(** Only keep the given variables in the constraints, returns the updated t *)
-let keep_only (s : t) (vars : Var.Set.t) : t =
-  rethrow_apron_error "Relational.keep_only" (fun () ->
-      let str_vars = List.map (Var.Set.to_list vars) ~f:Var.to_string in
-      { constraints = Apron.Abstract1.forget_array manager s.constraints
-            (Array.filter (fst (Apron.Environment.vars s.constraints.env)) (* fst because we only have int variables for now *)
-               ~f:(fun v -> not (List.mem str_vars (Apron.Var.to_string v) ~equal:Stdlib.(=))))
-            false (* not sure what this means *)
-      })
 
 let change_vars (s : t) (vars : Var.Set.t) : t =
   rethrow_apron_error "Relational.change_vars" (fun () ->
       let apron_vars = List.map (Var.Set.to_list vars) ~f:(fun v -> Apron.Var.of_string (Var.to_string v)) in
       let new_env = Apron.Environment.make (Array.of_list apron_vars) [||] in
       { constraints = Apron.Abstract1.change_environment manager s.constraints new_env
-            true (* "projects new variables to the 0-plane", which I guess means they are bottom. TODO: check that this is the case! *)
+            false (* "projects new variables to the 0-plane", i.e., they have a value of 0. That's not what we want here.*)
       })
+
+
+(** Only keep the given variables in the constraints, returns the updated t *)
+let keep_only (s : t) (vars : Var.Set.t) : t =
+  rethrow_apron_error "Relational.keep_only" (fun () ->
+      let str_vars = List.map (Var.Set.to_list vars) ~f:Var.to_string in
+      let arr_vars = (Array.filter (fst (Apron.Environment.vars s.constraints.env)) (* fst because we only have int variables for now *)
+                        ~f:(fun v -> not (List.mem str_vars (Apron.Var.to_string v) ~equal:Stdlib.(=)))) in
+      change_vars { constraints = Apron.Abstract1.forget_array manager s.constraints arr_vars
+                                     false (* not sure what this means *) }
+        vars)
 
 (** Checks if the value of variable v may be equal to a given number.
     Returns two booleans: the first one indicates if v can be equal to n, and the second if it can be different than n *)
