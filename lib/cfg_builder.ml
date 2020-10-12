@@ -284,11 +284,11 @@ module Cfg_builder_tests = struct
           let _ : unit Cfg.t = build faddr wasm_mod in
           ())
 
-  let%test_unit _ = test_cfgs "../../../test/simple.wat"
-  let%test_unit _ = test_cfgs "../../../test/if-loop.wat"
-  let%test_unit _ = test_cfgs "../../../test/rel.wat"
-  let%test_unit _ = test_cfgs "../../../test/memcpy.wat"
-  let%test_unit _ = test_cfgs "../../../test/loop.wat"
-  let%test_unit _ = test_cfgs "../../../test/loop-brif.wat"
+  let%test_unit "CFG for simple.wat can be built" = test_cfgs "../../../test/simple.wat"
+  let%test_unit "CFG for if-loop.wat can be built" = test_cfgs "../../../test/if-loop.wat"
+  let%test_unit "CFG for rel.wat can be built"  = test_cfgs "../../../test/rel.wat"
+  let%test_unit "CFG for memcpy.wat can be built" = test_cfgs "../../../test/memcpy.wat"
+  let%test_unit "CFG for loop.wat can be built" = test_cfgs "../../../test/loop.wat"
+  let%test_unit "CFG for loop-brif.wat can be built" = test_cfgs "../../../test/loop-brif.wat"
 end
 

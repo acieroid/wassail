@@ -6,7 +6,6 @@ let manager = Polka.manager_alloc_equalities ()
 (** A state that contains the constraints *)
 type t = {
   constraints : apron_domain Apron.Abstract1.t; (** The relational constraints *)
-  env : Apron.Environment.t; (** The relational environment *)
 }
 
 let catch_apron_error (name : string) (f : unit -> 'a) (default : 'a) : 'a =
@@ -36,14 +35,14 @@ let to_string (s : t) : string =
   Printf.sprintf "constraints: %s" (constraints_to_string s.constraints)
 
 let to_full_string (s : t) : string =
-  Printf.sprintf "env: %s, constraints: %s" (env_to_string s.env) (constraints_to_string s.constraints)
+  Printf.sprintf "env: %s, constraints: %s" (env_to_string s.constraints.env) (constraints_to_string s.constraints)
 
 
 let bind_compare (res : int) (cmp : 'a -> 'a -> int) (x : 'a) (y : 'a) : int =
   if res = 0 then cmp x y else res
 let compare (s1 : t) (s2 : t) : int =
   rethrow_apron_error "Relational_domain.compare" (fun () ->
-      bind_compare (Apron.Environment.compare s1.env s2.env)
+      bind_compare (Apron.Environment.compare s1.constraints.env s2.constraints.env)
         (fun c1 c2 ->
            if Apron.Abstract1.is_eq manager c1 c2 then 0
            else if Apron.Abstract1.is_leq manager c1 c2 then -1
@@ -77,7 +76,24 @@ let init (cfg : 'a Cfg.t) (vars : Var.Set.t) : t =
       let apron_vars = Array.of_list (List.map vars_and_vals  ~f:fst) in
       let apron_env = Apron.Environment.make apron_vars [| |] in
       let apron_abs = Apron.Abstract1.of_box manager apron_env apron_vars (Array.of_list (List.map vars_and_vals ~f:(fun (_, v) -> v))) in
-      { env = apron_env; constraints = apron_abs })
+      { constraints = apron_abs })
+
+let%test_unit "init should not result in an error" =
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    local.get 0)
+  (func (;test-call;) (type 0) (param i32) (result i32)
+    local.get 0
+    call 0)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let cfg0 = Cfg_builder.build 0 module_ in
+  let cfg1 = Cfg_builder.build 1 module_ in
+  let _: t = init cfg0 (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
+  let _: t = init cfg1 (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
+  ()
 
 (** Creates the bottom value *)
 let bottom (vars : Var.Set.t) : t =
@@ -88,7 +104,12 @@ let bottom (vars : Var.Set.t) : t =
           | _ -> Some (Apron.Var.of_string (Var.to_string v)))) in
       let apron_env = Apron.Environment.make apron_vars [| |] in
       let apron_abs = Apron.Abstract1.bottom manager apron_env in
-      { constraints = apron_abs; env = apron_env })
+      { constraints = apron_abs })
+
+let%test_unit "bottom should not result in an error" =
+  let _: t = bottom Var.Set.empty in
+  let _: t = bottom (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
+  ()
 
 (** Creates the top value *)
 let top (vars : Var.Set.t) : t =
@@ -100,13 +121,17 @@ let top (vars : Var.Set.t) : t =
           | _ -> Some (Apron.Var.of_string (Var.to_string v)))) in
       let apron_env = Apron.Environment.make apron_vars [| |] in
       let apron_abs = Apron.Abstract1.top manager apron_env in
-      { constraints = apron_abs; env = apron_env })
+      { constraints = apron_abs })
+
+let%test_unit "top should not result in an error" =
+  let _: t = top Var.Set.empty in
+  let _: t = top (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
+  ()
 
 let join (s1 : t) (s2 : t) : t =
   rethrow_apron_error "Relational_domain.join" (fun () ->
       let res = {
         constraints = Apron.Abstract1.join manager s1.constraints s2.constraints;
-        env = (assert Stdlib.(s1.env = s2.env); s1.env);
       } in
       Logging.info !Relational_options.verbose
         (Printf.sprintf "join %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
@@ -116,7 +141,6 @@ let widen (s1 : t) (s2 : t) : t =
   rethrow_apron_error "Relational_domain.widen" (fun () ->
       let res = {
         constraints = Apron.Abstract1.widening manager s1.constraints s2.constraints;
-        env = (assert Stdlib.(s1.env = s2.env); s1.env);
       } in
       Logging.info !Relational_options.verbose
         (Printf.sprintf "widening %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
@@ -126,7 +150,6 @@ let meet (s1 : t) (s2 : t) : t =
   rethrow_apron_error "Relational_domain.meet" (fun () ->
       let res = {
         constraints = Apron.Abstract1.meet manager s1.constraints s2.constraints;
-        env = (assert Stdlib.(s1.env = s2.env); s1.env);
       } in
       Logging.info !Relational_options.verbose
         (Printf.sprintf "meet %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
@@ -151,21 +174,37 @@ let sub (v1 : Var.t) (v2 : Var.t) : string =
 
 (** Add multiple constraints *)
 let add_constraints (s : t) (constraints : (Var.t * string) list) : t =
+  Printf.printf "add_constraints to %s: [%s]\n"
+    (to_full_string s)
+    (String.concat ~sep:", "
+       (List.map constraints ~f:(fun (left, right) -> Printf.sprintf "%s = %s" (Var.to_string left) right)));
   let filtered_constraints = List.filter constraints ~f:(fun (l, _r) -> match l with
       | Const _ ->
         (* Const are not Apron variables, hence these are filtered out when adding constraints *)
         false
-      | _ -> true) in
+      (* | _ when String.equal (Var.to_string l) r -> false *)
+      |_  -> true) in
   rethrow_apron_error "Relational_domain.add_constraints" (fun () ->
       List.iter filtered_constraints ~f:(fun (x, y) ->
           (Logging.info !Relational_options.verbose
              (Printf.sprintf "add constraint: %s = %s\n" (Var.to_string x) y)));
-      { s
-        with constraints =
-               Apron.Abstract1.assign_linexpr_array manager s.constraints
-                 (Array.of_list (List.map filtered_constraints ~f:(fun (v, _) -> Apron.Var.of_string (Var.to_string v))))
-                 (Array.of_list (List.map filtered_constraints ~f:(fun (_, c) -> Apron.Parser.linexpr1_of_string s.env c)))
-                 None })
+      let lhs = List.map filtered_constraints ~f:(fun (v, _) -> Apron.Var.of_string (Var.to_string v)) in
+      Printf.printf "lhs: %s\n" (String.concat ~sep:"," (List.map lhs ~f:Apron.Var.to_string));
+      let rhs = List.map filtered_constraints ~f:(fun (_, c) -> Apron.Parser.linexpr1_of_string s.constraints.env c) in
+      Printf.printf "rhs env: %s\n" (String.concat ~sep:"," (List.map rhs ~f:(fun v ->
+          Apron.Environment.print Stdlib.Format.str_formatter (Apron.Linexpr1.get_env v);
+          Stdlib.Format.flush_str_formatter ())));
+          (* Apron.Linexpr1.print Stdlib.Format.str_formatter v; Stdlib.Format.flush_str_formatter () *)
+      let res = { constraints =
+                         (* Fails in this call?! *)
+               Apron.Abstract1.assign_linexpr_array manager s.constraints (Array.of_list lhs)  (Array.of_list rhs) None } in
+          Printf.printf "success?!!!\n";
+          res)
+
+let%test "add_constraints top (l0 = l0) results in top" =
+  let top: t = top (Var.Set.of_list [Var.Local 0; Var.Var 609; Var.Return; Var.Global 0]) in
+  let top2 = add_constraints top [(Var.Local 0, "l0")] in
+  equal top top2
 
 (** Add one constrait of the form v = linexpr to the state constraints, returns the updated state *)
 let add_constraint (s : t) (v : Var.t) (linexpr : string) : t =
@@ -185,26 +224,26 @@ let add_interval_constraint (s : t) (v : Var.t) (bounds: int * int) : t =
 
 let meet_interval (s : t) (v : string) (bounds : int * int) : t =
   rethrow_apron_error "Relational_domain.meet_interval" (fun () ->
-      let earray = Apron.Lincons1.array_make s.env 1 in
-      Apron.Lincons1.array_set earray 0 (Apron.Parser.lincons1_of_string s.env (Printf.sprintf "%s=[%d;%d]" v (fst bounds) (snd bounds)));
-      { s with constraints = Apron.Abstract1.meet_lincons_array manager s.constraints earray })
+      let earray = Apron.Lincons1.array_make s.constraints.env 1 in
+      Apron.Lincons1.array_set earray 0 (Apron.Parser.lincons1_of_string s.constraints.env (Printf.sprintf "%s=[%d;%d]" v (fst bounds) (snd bounds)));
+      { constraints = Apron.Abstract1.meet_lincons_array manager s.constraints earray })
 
 (** Only keep the given variables in the constraints, returns the updated t *)
 let keep_only (s : t) (vars : Var.Set.t) : t =
   rethrow_apron_error "Relational.keep_only" (fun () ->
       let str_vars = List.map (Var.Set.to_list vars) ~f:Var.to_string in
-      { s with constraints = Apron.Abstract1.forget_array manager s.constraints
-                   (Array.filter (fst (Apron.Environment.vars s.env)) (* fst because we only have int variables for now *)
-                      ~f:(fun v -> not (List.mem str_vars (Apron.Var.to_string v) ~equal:Stdlib.(=))))
-                   false (* not sure what this means *)
+      { constraints = Apron.Abstract1.forget_array manager s.constraints
+            (Array.filter (fst (Apron.Environment.vars s.constraints.env)) (* fst because we only have int variables for now *)
+               ~f:(fun v -> not (List.mem str_vars (Apron.Var.to_string v) ~equal:Stdlib.(=))))
+            false (* not sure what this means *)
       })
 
 let change_vars (s : t) (vars : Var.Set.t) : t =
   rethrow_apron_error "Relational.change_vars" (fun () ->
       let apron_vars = List.map (Var.Set.to_list vars) ~f:(fun v -> Apron.Var.of_string (Var.to_string v)) in
       let new_env = Apron.Environment.make (Array.of_list apron_vars) [||] in
-      { s with constraints = Apron.Abstract1.change_environment manager s.constraints new_env
-                   true (* "projects new variables to the 0-plane", which I guess means they are bottom. TODO: check that this is the case! *)
+      { constraints = Apron.Abstract1.change_environment manager s.constraints new_env
+            true (* "projects new variables to the 0-plane", which I guess means they are bottom. TODO: check that this is the case! *)
       })
 
 (** Checks if the value of variable v may be equal to a given number.
@@ -232,7 +271,7 @@ let are_equal (s : t) (v1 : Var.t) (v2 : Var.t) : bool * bool =
         match v1, v2 with
         | Const _, Const _ -> (false, true) (* if this could be true, it would have ben caught by the previous if *)
         | _ ->
-          let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.env (Printf.sprintf "%s-%s" (Var.to_string v1) (Var.to_string v2))) in
+          let interval = Apron.Abstract1.bound_linexpr manager s.constraints (Apron.Parser.linexpr1_of_string s.constraints.env (Printf.sprintf "%s-%s" (Var.to_string v1) (Var.to_string v2))) in
           match Apron.Interval.cmp interval (Apron.Interval.of_int 0 0) with
           | 0 -> (true, false)
           | -1 -> (true, false)
@@ -269,21 +308,21 @@ let are_equal_offset (s : t) ((v1, offset1) : Var.with_offset) ((v2, offset2) : 
         | Const v1, _ ->
           (* (v1+offset1-offset2)-v2 =? [0,0] *)
           to_eq (Apron.Abstract1.bound_linexpr manager s.constraints
-                   (Apron.Parser.linexpr1_of_string s.env
+                   (Apron.Parser.linexpr1_of_string s.constraints.env
                       (Printf.sprintf "%s-%s"
                          (Prim_value.to_string (Prim_value.add_int v1 (offset1-offset2)))
                          (Var.to_string v2))))
         | _, Const v2 ->
           (* (v2+offset2-offset1)-v1 =? [0,0] *)
           to_eq (Apron.Abstract1.bound_linexpr manager s.constraints
-                   (Apron.Parser.linexpr1_of_string s.env
+                   (Apron.Parser.linexpr1_of_string s.constraints.env
                       (Printf.sprintf "%s-%s"
                          (Prim_value.to_string (Prim_value.add_int v2 (offset2-offset1)))
                          (Var.to_string v1))))
         | _, _ ->
           (* (offset2-offset1)+(v2-v1) =? [0,0] *)
           to_eq (Apron.Abstract1.bound_linexpr manager s.constraints
-                   (Apron.Parser.linexpr1_of_string s.env
+                   (Apron.Parser.linexpr1_of_string s.constraints.env
                       (Printf.sprintf "%d+%s-%s"
                          (offset1 + offset2)
                          (Var.to_string v2) (Var.to_string v1)))))

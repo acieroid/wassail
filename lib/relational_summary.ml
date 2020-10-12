@@ -83,7 +83,7 @@ let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t li
   (* Everything is set to top *)
   let constraints = Apron.Abstract1.of_box Domain.manager apron_env apron_vars
       (Array.of_list (List.map params_and_return ~f:(fun _ -> Apron.Interval.top))) in
-  let topstate = Domain.{ env = apron_env; constraints = constraints } in
+  let topstate = Domain.{ constraints = constraints } in
   let state = match name with
     | "fd_write" ->
       (* returns 0 *)
@@ -119,7 +119,7 @@ let apply (summary : t) (state : Domain.t) (args: string list) (ret : string opt
     let rename_to = List.map args_and_ret ~f:Apron.Var.of_string in
     Logging.info !Relational_options.verbose
       (Printf.sprintf "vars: %s\n" (String.concat ~sep:","
-                                    (List.map (Array.to_list (fst (Apron.Environment.vars summary.state.env)))
+                                    (List.map (Array.to_list (fst (Apron.Environment.vars summary.state.constraints.env)))
                                        ~f:Apron.Var.to_string)));
     Logging.info !Relational_options.verbose
       (Printf.sprintf "renaming in state %s\nFrom %s to %s\n" (Domain.to_string summary.state) (String.concat ~sep:"," (List.map rename_from ~f:Apron.Var.to_string )) (String.concat ~sep:"," (List.map rename_to ~f:Apron.Var.to_string)));
@@ -128,11 +128,11 @@ let apply (summary : t) (state : Domain.t) (args: string list) (ret : string opt
         (Array.of_list rename_to) in
     (* 2. Change the environment of the constraints to match the current environment in which we apply the summary.
         Apron's doc says: "variables that are introduced are unconstrained"*)
-    let changed = Apron.Abstract1.change_environment Domain.manager renamed state.env false in
+    let changed = Apron.Abstract1.change_environment Domain.manager renamed state.constraints.env false in
     (* 3. Finally, meet the summary with the current state *)
     let final = Apron.Abstract1.meet Domain.manager state.constraints changed in
     (* TODO: memory and globals *)
-    { state with constraints = final }
+    { constraints = final }
   with
   | Apron.Manager.Error { exn; funid; msg } ->
     failwith (Printf.sprintf "Apron error in Summary.apply: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
