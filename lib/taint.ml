@@ -48,7 +48,7 @@ let%test "simple function has no taint" =
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let actual = IntMap.find_exn (analyze_intra module_ [0]) 0 in
-  let expected = Summary.{ ret = Some Domain.taint_bottom; mem = Domain.taint_bottom; globals = [Domain.taint (Var.Global 0)] } in
+  let expected = Summary.{ ret = Some Domain.Taint.bottom; mem = Domain.Taint.bottom; globals = [Domain.Taint.taint (Var.Global 0)] } in
   check expected actual
 
 let%test "test store" =
@@ -63,7 +63,7 @@ let%test "test store" =
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let actual = IntMap.find_exn (analyze_intra module_ [0]) 0 in
-  let expected = Summary.{ ret = Some (Domain.taint (Var.Local 0)); mem = Domain.taint (Var.Local 0); globals = [Domain.taint (Var.Global 0)] } in
+  let expected = Summary.{ ret = Some (Domain.Taint.taint (Var.Local 0)); mem = Domain.Taint.taint (Var.Local 0); globals = [Domain.Taint.taint (Var.Global 0)] } in
   check expected actual
 
 let analyze_inter : Wasm_module.t -> int list list -> Summary.t IntMap.t =

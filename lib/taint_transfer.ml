@@ -13,9 +13,9 @@ module Make (* : Transfer.TRANSFER *) = struct
   let init_state (cfg : 'a Cfg.t) : state =
     Var.Map.of_alist_exn
       ((List.mapi cfg.arg_types ~f:(fun i _ -> (Var.Local i,
-                                                Taint_domain.taint (Var.Local i)))) @
+                                                Taint_domain.Taint.taint (Var.Local i)))) @
        (List.mapi cfg.global_types ~f:(fun i _ -> (Var.Global i,
-                                                 Taint_domain.taint (Var.Global i)))))
+                                                 Taint_domain.Taint.taint (Var.Global i)))))
 
   let bottom_state (_cfg : 'a Cfg.t) : state = Taint_domain.bottom
 
@@ -94,12 +94,12 @@ module Make (* : Transfer.TRANSFER *) = struct
       let taints = List.map locs ~f:(fun (k, offset) ->
           Logging.info !Taint_options.verbose
             (Printf.sprintf "TODO: currently ignoring offsets in taints!!!\n--------------------\n--------------\n"); (* maybe only the values should be tainted, not the keys *)
-          Taint_domain.join_taint (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Var.OffsetMap.find_exn mem (k, offset)))) in
+          Taint_domain.Taint.join (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Var.OffsetMap.find_exn mem (k, offset)))) in
       Taint_domain.add_taint
         state
         (ret i)
         (* ret is the join of all these taints *)
-        (List.fold_left taints ~init:Taint_domain.taint_bottom ~f:Taint_domain.join_taint)
+        (List.fold_left taints ~init:Taint_domain.Taint.bottom ~f:Taint_domain.Taint.join)
     | Store { offset; _ } ->
       (* Simplest case: set the taint for the entire memory
          Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
