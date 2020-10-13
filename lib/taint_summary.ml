@@ -10,6 +10,19 @@ type t = {
 }
 [@@deriving sexp, compare, equal]
 
+(** Check if s1 subsumes s2 *)
+let subsumes (s1 : t) (s2 : t) : bool =
+  if List.length s1.globals = List.length s2.globals then
+    let ret_subsumes = match s1.ret, s2.ret with
+      | Some v1, Some v2 -> Taint_domain.taint_subsumes v1 v2
+      | None, None -> true
+      | _ -> false in
+    let globals_subsumes = ret_subsumes && (List.fold2_exn s1.globals s2.globals ~init:true ~f:(fun acc t1 t2 -> acc && Taint_domain.taint_subsumes t1 t2)) in
+    let mem_subsumes = globals_subsumes && (Taint_domain.taint_subsumes s1.mem s2.mem) in
+    mem_subsumes
+  else
+    false
+
 type state = Taint_domain.t
 
 let to_string (s : t) : string =

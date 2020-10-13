@@ -24,10 +24,15 @@ let analyze_intra : Wasm_module.t -> int list -> Summary.t IntMap.t =
        taint_summary)
 
 let check (expected : Summary.t) (actual : Summary.t) : bool =
-  if Summary.equal expected actual then
-    true
+  if Summary.subsumes actual expected then
+    if Summary.equal actual expected then
+      true
+    else begin
+      Printf.printf "\n[IMPRECISION] summaries not equal:\nexpected: %s\nactual: %s\n" (Summary.to_string expected) (Summary.to_string actual);
+      true (* not equal, but it does subsume so the test does not fail *)
+    end
   else begin
-    Printf.printf "summaries not equal:\nexpected: %s\nactual: %s\n" (Summary.to_string expected) (Summary.to_string actual);
+    Printf.printf "\nsummaries does not subsume:\nexpected: %s\nactual: %s\n" (Summary.to_string expected) (Summary.to_string actual);
     false
   end
 

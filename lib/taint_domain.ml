@@ -6,6 +6,12 @@ type taint =
   | TopTaint
 [@@deriving sexp, compare, equal]
 
+(** Checks that t1 subsumes t2 *)
+let taint_subsumes (t1 : taint) (t2 : taint) : bool = match t1, t2 with
+  | TopTaint, _ -> true
+  | _, TopTaint -> false
+  | Taints v1, Taints v2 -> Var.Set.is_subset v2 ~of_:v1
+
 let taint_bottom : taint = Taints Var.Set.empty
 let taint_top : taint = TopTaint
 let taint (v : Var.t) : taint = Taints (Var.Set.singleton v)
@@ -53,6 +59,17 @@ let taint_substitute (t : taint) (subst : (Var.t * taint) list) : taint = match 
     If a variable is not bound in the state, it is assumed that its taint is bottom *)
 type t = taint Var.Map.t
 [@@deriving sexp, compare, equal]
+
+(** Check if t1 subsumes t2 *)
+let subsumes (t1 : t) (t2 : t) : bool =
+  (* For each variable in t2, its taint should be subsumed by its taint in t1 *)
+  Var.Map.fold t2 ~init:true ~f:(fun ~key:k ~data:v1 sub ->
+      if sub then
+        match Var.Map.find t1 k with
+        | Some v2 -> taint_subsumes v1 v2
+        | None -> false
+      else
+        false)
 
 let to_string (s : t) : string =
   Printf.sprintf "[%s]" (String.concat ~sep:", "
