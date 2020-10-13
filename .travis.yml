@@ -15,7 +15,6 @@ script: make test
 env:
   - OCAML_VERSION=4.10
 os:
-  - freebsd
   - linux
   - osx
 arch:
