@@ -1,13 +1,17 @@
 open Core_kernel
 
+(** The apron domain used *)
 type apron_domain = Polka.equalities Polka.t
+
+(** Apron requires a "manager" *)
 let manager = Polka.manager_alloc_equalities ()
 
 (** A state that contains the constraints *)
 type t = {
-  constraints : apron_domain Apron.Abstract1.t; (** The relational constraints *)
+  constraints : apron_domain Apron.Abstract1.t; (** The relational constraints (also contains the environment) *)
 }
 
+(** Catch apron errors when executing function `f`, print it (uses `name` as the source from the error), and returns `default` in case of error *)
 let catch_apron_error (name : string) (f : unit -> 'a) (default : 'a) : 'a =
   try
     f ()
@@ -16,6 +20,7 @@ let catch_apron_error (name : string) (f : unit -> 'a) (default : 'a) : 'a =
     Printf.printf "Apron error in function %s: %s, funid: %s, msg: %s" name (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg;
     default
 
+(** Catch apron errors and rethrow them using failwith. This is required to have helpful error messages *)
 let rethrow_apron_error (name : string) (f : unit -> 'a) : 'a =
   try
     f ()
@@ -23,24 +28,28 @@ let rethrow_apron_error (name : string) (f : unit -> 'a) : 'a =
   | Apron.Manager.Error { exn; funid; msg } ->
     failwith (Printf.sprintf "Apron error in function %s: %s, funid: %s, msg: %s" name (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
 
+(** Converts an Apron environment to its string representation *)
 let env_to_string (env : Apron.Environment.t) : string =
   rethrow_apron_error "Relational_domain.env_to_string" (fun () ->
       Apron.Environment.print Stdlib.Format.str_formatter env; Stdlib.Format.flush_str_formatter ())
 
+(** Converts an Apron set of constraints to its string representation *)
 let constraints_to_string (c : apron_domain Apron.Abstract1.t) : string =
   rethrow_apron_error "Relational_domain.constraints_to_string" (fun () ->
       (Apron.Abstract1.print Stdlib.Format.str_formatter c; Stdlib.Format.flush_str_formatter ()))
 
+(** Converts a state to its string representation *)
 let to_string (s : t) : string =
   Printf.sprintf "constraints: %s" (constraints_to_string s.constraints)
 
+(** Converts a state to its string representation, also showing the environment *)
 let to_full_string (s : t) : string =
   Printf.sprintf "env: %s, constraints: %s" (env_to_string s.constraints.env) (constraints_to_string s.constraints)
 
-
-let bind_compare (res : int) (cmp : 'a -> 'a -> int) (x : 'a) (y : 'a) : int =
-  if res = 0 then cmp x y else res
+(** Compares two states *)
 let compare (s1 : t) (s2 : t) : int =
+  let bind_compare (res : int) (cmp : 'a -> 'a -> int) (x : 'a) (y : 'a) : int =
+    if res = 0 then cmp x y else res in
   rethrow_apron_error "Relational_domain.compare" (fun () ->
       bind_compare (Apron.Environment.compare s1.constraints.env s2.constraints.env)
         (fun c1 c2 ->
@@ -48,6 +57,7 @@ let compare (s1 : t) (s2 : t) : int =
            else if Apron.Abstract1.is_leq manager c1 c2 then -1
            else 1) s1.constraints s2.constraints)
 
+(** Checks equality between two states *)
 let equal (s1 : t) (s2 : t) : bool =
   compare s1 s2 = 0
 
@@ -128,37 +138,6 @@ let%test_unit "top should not result in an error" =
   let _: t = top (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
   ()
 
-let join (s1 : t) (s2 : t) : t =
-  rethrow_apron_error "Relational_domain.join" (fun () ->
-      let res = {
-        constraints = Apron.Abstract1.join manager s1.constraints s2.constraints;
-      } in
-      Logging.info !Relational_options.verbose
-        (Printf.sprintf "join %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
-      res)
-
-let widen (s1 : t) (s2 : t) : t =
-  rethrow_apron_error "Relational_domain.widen" (fun () ->
-      let res = {
-        constraints = Apron.Abstract1.widening manager s1.constraints s2.constraints;
-      } in
-      Logging.info !Relational_options.verbose
-        (Printf.sprintf "widening %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
-      res)
-
-let meet (s1 : t) (s2 : t) : t =
-  rethrow_apron_error "Relational_domain.meet" (fun () ->
-      let res = {
-        constraints = Apron.Abstract1.meet manager s1.constraints s2.constraints;
-      } in
-      Logging.info !Relational_options.verbose
-        (Printf.sprintf "meet %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
-      res)
-
-let join_opt (s1 : t) (s2 : t option) : t =
-  match s2 with
-  | Some s -> join s1 s
-  | None -> s1
 
 (** Constructs the rhs of a constraint as v1+v2 *)
 let add (v1 : Var.t) (v2 : Var.t) : string =
@@ -197,29 +176,57 @@ let%test "add_constraints top (l0 = l0) results in top" =
   let top2 = add_constraints top [(Var.Local 0, "l0")] in
   equal top top2
 
-(** Add one constrait of the form v = linexpr to the state constraints, returns the updated state *)
+(** Add one constraint of the form v = linexpr to the state constraints, returns the updated state *)
 let add_constraint (s : t) (v : Var.t) (linexpr : string) : t =
   add_constraints s [(v,  linexpr)]
 
+(** Add an equality constraint between pairs of variable, i.e., v1 = v2 *)
 let add_equality_constraints (s : t) (vs : (Var.t * Var.t) list) : t =
   add_constraints s (List.map vs ~f:(fun (v1, v2) -> (v1, Var.to_string v2)))
 
+(** Creates a new state from equality constraints, starting from the top abstract value *)
 let of_equality_constraints (vars : Var.Set.t) (constraints : (Var.t * Var.t) list) : t =
   add_equality_constraints (top vars) constraints
 
+let%test "of_equality_constraints is the same as top with adding constraints" =
+  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1; Var.Local 2] in
+  (* l0 = l1 and l1 = l2 *)
+  let v1 = add_equality_constraints (top vars) [(Var.Local 0, Var.Local 1); (Var.Local 1, Var.Local 2)] in
+  let v2 = of_equality_constraints vars [(Var.Local 0, Var.Local 1); (Var.Local 1, Var.Local 2)] in
+  equal v1 v2
+
+(** Like add_equality_constraints, but adds a single constraint *)
 let add_equality_constraint (s : t) (v1 : Var.t) (v2 : Var.t) : t =
   add_constraint s v1 (Var.to_string v2)
 
+(** Constraints one variable to a given interval *)
 let add_interval_constraint (s : t) (v : Var.t) (bounds: int * int) : t =
   add_constraint s v (Printf.sprintf "[%d;%d]" (fst bounds) (snd bounds))
 
+let%test "adding an interval constraint should apply to all equal variables" =
+  (* That may not be actually true. *)
+  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1; Var.Local 2] in
+  (* l0 = l1 and l1 = l2 *)
+  let v0 = of_equality_constraints vars [(Var.Local 0, Var.Local 1); (Var.Local 1, Var.Local 2)] in
+  let v1 = add_interval_constraint v0 (Var.Local 0) (0, 10) in
+  let v2 = add_interval_constraint v0 (Var.Local 1) (0, 10) in
+  let v3 = add_interval_constraint v0 (Var.Local 2) (20, 30) in
+  not (equal v0 v1) && equal v1 v2 && equal v2 v1 && not (equal v1 v3) && not (equal v0 v3)
+
+(** Meets an expression with the given interval *)
 let meet_interval (s : t) (v : string) (bounds : int * int) : t =
   rethrow_apron_error "Relational_domain.meet_interval" (fun () ->
       let earray = Apron.Lincons1.array_make s.constraints.env 1 in
       Apron.Lincons1.array_set earray 0 (Apron.Parser.lincons1_of_string s.constraints.env (Printf.sprintf "%s=[%d;%d]" v (fst bounds) (snd bounds)));
       { constraints = Apron.Abstract1.meet_lincons_array manager s.constraints earray })
+let%test "meet_interval restricts the variable domain" =
+  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1; Var.Local 2] in
+  let v0 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1); (Var.Local 1, Var.Local 2)]) (Var.Local 0) (0, 100) in
+  let v1 = meet_interval v0 "l0+l1" (0, 10) in
+  let v1' = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1); (Var.Local 1, Var.Local 2)]) (Var.Local 0) (0, 10) in
+  equal v1 v1'
 
-
+(** Change the variables used in a state: new variables are unconstrained, variables that exist in s but not in vars are removed *)
 let change_vars (s : t) (vars : Var.Set.t) : t =
   rethrow_apron_error "Relational.change_vars" (fun () ->
       let apron_vars = List.map (Var.Set.to_list vars) ~f:(fun v -> Apron.Var.of_string (Var.to_string v)) in
@@ -228,6 +235,14 @@ let change_vars (s : t) (vars : Var.Set.t) : t =
             false (* "projects new variables to the 0-plane", i.e., they have a value of 0. That's not what we want here.*)
       })
 
+let%test "change_vars works as expected" =
+  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1; Var.Local 2] in
+  let vars_restricted = Var.Set.of_list [Var.Local 0; Var.Local 1] in
+  (* l0 = l1 and l1 = l2 *)
+  let v0 = of_equality_constraints vars [(Var.Local 0, Var.Local 1); (Var.Local 1, Var.Local 2)] in
+  let v1 = change_vars v0 vars_restricted in
+  let v1' = of_equality_constraints vars_restricted [(Var.Local 0, Var.Local 1)] in
+  equal v1 v1'
 
 (** Only keep the given variables in the constraints, returns the updated t *)
 let keep_only (s : t) (vars : Var.Set.t) : t =
@@ -238,6 +253,15 @@ let keep_only (s : t) (vars : Var.Set.t) : t =
       change_vars { constraints = Apron.Abstract1.forget_array manager s.constraints arr_vars
                                      false (* not sure what this means *) }
         vars)
+
+let%test "keep_only works as expected" =
+  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1; Var.Local 2] in
+  let vars_restricted = Var.Set.of_list [Var.Local 0; Var.Local 1] in
+  (* l0 = l1 and l1 = l2 *)
+  let v0 = of_equality_constraints vars [(Var.Local 0, Var.Local 1); (Var.Local 1, Var.Local 2)] in
+  let v1 = keep_only v0 vars_restricted in
+  let v1' = of_equality_constraints vars_restricted [(Var.Local 0, Var.Local 1)] in
+  equal v1 v1'
 
 (** Checks if the value of variable v may be equal to a given number.
     Returns two booleans: the first one indicates if v can be equal to n, and the second if it can be different than n *)
@@ -325,3 +349,53 @@ let are_precisely_equal (s : t) (v1 : Var.t) (v2 : Var.t) =
   match are_equal s v1 v2 with
   | true, false -> true
   | _ -> false
+
+
+(** Joins two states *)
+let join (s1 : t) (s2 : t) : t =
+  rethrow_apron_error "Relational_domain.join" (fun () ->
+      let res = {
+        constraints = Apron.Abstract1.join manager s1.constraints s2.constraints;
+      } in
+      Logging.info !Relational_options.verbose
+        (Printf.sprintf "join %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
+      res)
+
+let%test "join should correctly join" =
+  let top = top Var.Set.empty in
+  let bottom = bottom Var.Set.empty in
+  equal (join top bottom) top &&
+  equal (join top top) top &&
+  equal (join bottom bottom) bottom
+
+(** Like join, but the second argument is an option: if it is None, it is treated as bottom *)
+let join_opt (s1 : t) (s2 : t option) : t =
+  match s2 with
+  | Some s -> join s1 s
+  | None -> s1
+
+(** Widen two states *)
+let widen (s1 : t) (s2 : t) : t =
+  rethrow_apron_error "Relational_domain.widen" (fun () ->
+      let res = {
+        constraints = Apron.Abstract1.widening manager s1.constraints s2.constraints;
+      } in
+      Logging.info !Relational_options.verbose
+        (Printf.sprintf "widening %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
+      res)
+
+let%test "widen should correctly widen" =
+  let top = top Var.Set.empty in
+  let bottom = bottom Var.Set.empty in
+  equal (widen top bottom) top &&
+  equal (widen top top) top &&
+  equal (widen bottom bottom) bottom
+
+let meet (s1 : t) (s2 : t) : t =
+  rethrow_apron_error "Relational_domain.meet" (fun () ->
+      let res = {
+        constraints = Apron.Abstract1.meet manager s1.constraints s2.constraints;
+      } in
+      Logging.info !Relational_options.verbose
+        (Printf.sprintf "meet %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
+      res)
