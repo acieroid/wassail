@@ -175,7 +175,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
       (* First, find all addresses that are equal to vaddr *)
       let mem = i.annotation_before.memory in
       let addrs = List.filter (Var.OffsetMap.keys mem)
-          ~f:(fun a -> match Domain.are_equal_offset state a (vaddr, offset) with
+          ~f:(fun a -> match Domain.are_equal_with_offset state a (vaddr, offset) with
               | (true, false) -> true (* definitely equal *)
               | _ -> false) in
       if List.is_empty addrs then
@@ -200,7 +200,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
       (* Find all memory keys that are definitely equal to the address *)
       let mem = i.annotation_after.memory in
       let equal_addrs = List.filter (Var.OffsetMap.keys mem)
-          ~f:(fun a -> match Domain.are_equal_offset state a (vaddr, offset) with
+          ~f:(fun a -> match Domain.are_equal_with_offset state a (vaddr, offset) with
               | (true, false) -> true (* definitely equal *)
               | _ -> false) in
       if not (List.is_empty equal_addrs) then begin
@@ -213,7 +213,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
       end else begin
         (* Otherwise, do similar for all addresses that may be equal *)
         let maybe_equal_addrs = List.filter (Var.OffsetMap.keys mem)
-            ~f:(fun a -> match Domain.are_equal_offset state a (vaddr, offset) with
+            ~f:(fun a -> match Domain.are_equal_with_offset state a (vaddr, offset) with
                 | (true, true) -> true (* maybe equal *)
                 | _ -> false) in
         let states = List.map maybe_equal_addrs

@@ -75,7 +75,7 @@ module Make (* : Transfer.TRANSFER *) = struct
           (* We need to filter locs to only have the locs that can be loaded.
              This means for each loc, we can ask the relational domain if are_equal loc v (where v is the top of the stack.
              If some are truly equal, we know we can only keep these. Otherwise, if some maybe equal, then these have to be kept. *)
-          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (snd i.annotation_before) loc (addr, offset) with
+          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (addr, offset) with
               | (true, false) -> true
               | _ -> false) in
           if not (List.is_empty equal) then
@@ -83,7 +83,7 @@ module Make (* : Transfer.TRANSFER *) = struct
             equal
           else
             (* No address is definitely equal to addr, so we take the ones that may be equal *)
-            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (snd i.annotation_before) loc (addr, offset) with
+            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (addr, offset) with
                 | (true, _) -> true
                 | _ -> false)
         else
@@ -108,7 +108,7 @@ module Make (* : Transfer.TRANSFER *) = struct
       let all_locs = Var.OffsetMap.keys mem in
       (* Refine memory locations using relational innformation, if available *)
       let locs = if !Taint_options.use_relational then
-          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (snd i.annotation_before) loc (vaddr, offset) with
+          let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (vaddr, offset) with
               | (true, false) -> true
               | _ -> false) in
           if not (List.is_empty equal) then
@@ -116,7 +116,7 @@ module Make (* : Transfer.TRANSFER *) = struct
             equal
           else
             (* No address is definitely equal to addr, so we take the ones that may be equal *)
-            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_offset (snd i.annotation_before) loc (vaddr, offset) with
+            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (vaddr, offset) with
                 | (true, _) -> true
                 | _ -> false)
         else

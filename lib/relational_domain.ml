@@ -219,6 +219,7 @@ let meet_interval (s : t) (v : string) (bounds : int * int) : t =
       let earray = Apron.Lincons1.array_make s.constraints.env 1 in
       Apron.Lincons1.array_set earray 0 (Apron.Parser.lincons1_of_string s.constraints.env (Printf.sprintf "%s=[%d;%d]" v (fst bounds) (snd bounds)));
       { constraints = Apron.Abstract1.meet_lincons_array manager s.constraints earray })
+
 let%test "meet_interval restricts the variable domain" =
   let vars = Var.Set.of_list [Var.Local 0; Var.Local 1; Var.Local 2] in
   let v0 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1); (Var.Local 1, Var.Local 2)]) (Var.Local 0) (0, 100) in
@@ -278,6 +279,20 @@ let is_equal (s : t) (v : Var.t) (n : int) : bool * bool =
       | -2 | +2 -> (false, true) (* definitely not n *)
       | _ -> failwith "should not happen")
 
+let%test "is_equal works as expected" =
+  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1] in
+  (* l0 = l1, l0 = [0,100] *)
+  let v0 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (0, 100) in
+  (* l0 = l1, l0 = [0,0] *)
+  let v1 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (0, 0) in
+  (* in v0, l0 =? 0, could be true, could be false *)
+  Stdlib.(=) (is_equal v0 (Var.Local 0) 0) (true, true) &&
+  (* in v0, l0 =? 0, false *)
+  Stdlib.(=) (is_equal v0 (Var.Local 0) 200) (false, true) &&
+  (* in v0, l0 =? 0, true *)
+  Stdlib.(=) (is_equal v1 (Var.Local 0) 200) (true, false)
+
+(** Shortcut for is_equal s v 0 *)
 let is_zero (s : t) (v : Var.t) : bool * bool = is_equal s v 0
 
 (** Checks if two variables may be equal.
@@ -296,9 +311,24 @@ let are_equal (s : t) (v1 : Var.t) (v2 : Var.t) : bool * bool =
           | -2 | +2 -> (false, true)
           | _ -> failwith "should not happen")
 
+let%test "are_equal works as expected" =
+  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1] in
+  (* l0 = l1, l0 = [0,100] *)
+  let v0 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (0, 100) in
+  (* top *)
+  let v1 = top vars in
+  (* l0 = [0,100], l1 = [200, 300] *)
+  let v2 = add_interval_constraint (add_interval_constraint (top vars) (Var.Local 0) (0, 100)) (Var.Local 1) (200, 300) in
+  (* in v0, l0 =? l1, true *)
+  Stdlib.(=) (are_equal v0 (Var.Local 0) (Var.Local 1)) (true, false) &&
+  (* in v1, l0 =? l1, could be true, could be false *)
+  Stdlib.(=) (are_equal v1 (Var.Local 0) (Var.Local 1)) (true, true) &&
+  (* in v2, l0 =? l1, false *)
+  Stdlib.(=) (are_equal v2 (Var.Local 0) (Var.Local 1)) (false, true)
+
 (** Check if v1 = v2, where v1 and v2 have offsets.
     Return value is similar to are_equal *)
-let are_equal_offset (s : t) ((v1, offset1) : Var.with_offset) ((v2, offset2) : Var.with_offset) : bool * bool =
+let are_equal_with_offset (s : t) ((v1, offset1) : Var.with_offset) ((v2, offset2) : Var.with_offset) : bool * bool =
   rethrow_apron_error "Relational_domain.are_equal_offset" (fun () ->
       let to_eq itv =
         (* Convert an interval that results from a equality check (performed by checking equality of x and y by computing the interval of x-y, hence [0,0] indicates equality) into the two necessary booleans *)
@@ -344,12 +374,24 @@ let are_equal_offset (s : t) ((v1, offset1) : Var.with_offset) ((v2, offset2) : 
                          (offset1 + offset2)
                          (Var.to_string v2) (Var.to_string v1)))))
 
-
-let are_precisely_equal (s : t) (v1 : Var.t) (v2 : Var.t) =
-  match are_equal s v1 v2 with
-  | true, false -> true
-  | _ -> false
-
+let%test "are_equal_with_offset works as expected" =
+  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1] in
+  (* l0 = l1, l0 = [0,100] *)
+  let v0 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (0, 100) in
+  (* top *)
+  let v1 = top vars in
+  (* l0 = [0,100], l1 = [200, 300] *)
+  let v2 = add_interval_constraint (add_interval_constraint (top vars) (Var.Local 0) (0, 100)) (Var.Local 1) (200, 300) in
+  (* l1 = l0+5 *)
+  let v3 = add_constraint (top vars) (Var.Local 1) ("l0+5") in
+  (* in v0, l0+5 =? l1+5, true *)
+  Stdlib.(=) (are_equal_with_offset v0 (Var.Local 0, 5) (Var.Local 1, 5)) (true, false) &&
+  (* in v1, l0+5 =? l1+5, could be true, could be false *)
+  Stdlib.(=) (are_equal_with_offset v1 (Var.Local 0, 5) (Var.Local 1, 5)) (true, true) &&
+  (* in v2, l0+5 =? l1+5, false *)
+  Stdlib.(=) (are_equal_with_offset v2 (Var.Local 0, 5) (Var.Local 1, 5)) (false, true) &&
+  (* in v3, l1+0 =? l0+5, true *)
+  Stdlib.(=) (are_equal_with_offset v3 (Var.Local 1, 0) (Var.Local 0, 5)) (false, true)
 
 (** Joins two states *)
 let join (s1 : t) (s2 : t) : t =
