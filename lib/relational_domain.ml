@@ -404,11 +404,26 @@ let join (s1 : t) (s2 : t) : t =
       res)
 
 let%test "join should correctly join" =
-  let top = top Var.Set.empty in
-  let bottom = bottom Var.Set.empty in
+  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1] in
+  (* l0 = l1, l0 = [0,100] *)
+  let v0 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (0, 100) in
+  (* l0 = [0,100], l1 = [200, 300] *)
+  let v1 = add_interval_constraint (add_interval_constraint (top vars) (Var.Local 0) (0, 100)) (Var.Local 1) (200, 300) in
+  (* l0 = l1, l0 = [50, 200] *)
+  let v2 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (50, 200) in
+  (* l0 = l1, l0 = [0, 200] *)
+  let v3 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (0, 200) in
+  let top = top vars in
+  let bottom = bottom vars  in
   equal (join top bottom) top &&
   equal (join top top) top &&
-  equal (join bottom bottom) bottom
+  equal (join bottom bottom) bottom &&
+  equal (join v0 v1) v1 &&
+  equal (join v0 v2) v3 &&
+  equal (join v0 top) top &&
+  equal (join top v0) top &&
+  equal (join v0 bottom) v0 && equal (join bottom v0) v0 &&
+  equal (join v1 bottom) v1 && equal (join bottom v1) v1
 
 (** Like join, but the second argument is an option: if it is None, it is treated as bottom *)
 let join_opt (s1 : t) (s2 : t option) : t =
@@ -433,6 +448,7 @@ let%test "widen should correctly widen" =
   equal (widen top top) top &&
   equal (widen bottom bottom) bottom
 
+(** Meet two states *)
 let meet (s1 : t) (s2 : t) : t =
   rethrow_apron_error "Relational_domain.meet" (fun () ->
       let res = {
@@ -441,3 +457,20 @@ let meet (s1 : t) (s2 : t) : t =
       Logging.info !Relational_options.verbose
         (Printf.sprintf "meet %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
       res)
+
+let%test "meet should correctly meet" =
+  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1] in
+  (* l0 = l1, l0 = [0,100] *)
+  let v0 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (0, 100) in
+  (* l0 = [0,100], l1 = [200, 300] *)
+  let v1 = add_interval_constraint (add_interval_constraint (top vars) (Var.Local 0) (0, 100)) (Var.Local 1) (200, 300) in
+  (* l0 = l1, l0 = [50, 200] *)
+  let v2 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (50, 200) in
+  (* l0 = l1, l0 = [50, 100] *)
+  let v3 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (50, 100) in
+  let top = top vars in
+  let bottom = bottom vars in
+  equal (meet v0 v0) v0 &&
+  equal (meet top bottom) bottom && equal (meet bottom top) bottom &&
+  equal (meet v0 v1) bottom && equal (meet v1 v0) bottom &&
+  equal (meet v0 v2) v3 && equal (meet v2 v0) v3
