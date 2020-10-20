@@ -13,7 +13,7 @@ let option_to_string (opt : option) =
 
 type callback = option -> string -> unit
 
-let callbacks : (callback list) ref = ref []
+let callbacks : (callback list) ref = ref [(fun _ msg -> Printf.printf "[LOG] %s\n" msg)]
 
 let log (opt : option) (enabled: bool) (msg : string) : unit =
   if enabled then
