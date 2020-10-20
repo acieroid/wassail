@@ -78,7 +78,7 @@ let subsumes (s1 : t) (s2 : t) : bool =
    would want two things to be equal, the imprecision in the abstract domain
    makes it so that they are not equal. But they should still preserve the
    subsumption *)
-let should_equal_or_subsume (v1 : t) (v2 : t) : bool =
+let should_subsume_or_equal (v1 : t) (v2 : t) : bool =
   if subsumes v1 v2 then begin
     if not (equal v1 v2) then
       Printf.printf "[IMPRECISION] %s not equal to %s\n" (to_string v1) (to_string v2);
@@ -461,21 +461,21 @@ let join (s1 : t) (s2 : t) : t =
       res)
 
 let%test "join should correctly join" =
-  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1] in
+  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1; Var.Local 2] in
   (* l0 = l1, l0 = [0,100] *)
   let v0 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (0, 100) in
   (* l0 = [0,100], l1 = [200, 300] *)
   let v1 = add_interval_constraint (add_interval_constraint (top vars) (Var.Local 0) (0, 100)) (Var.Local 1) (200, 300) in
-  (* l0 = l1, l0 = [50, 200] *)
+  (* l0 = l1, l2 = [50, 200] *)
   let v2 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (50, 200) in
-  (* l0 = l1, l0 = [0, 200] *)
+  (* l0 = l1, l2 = [0, 200] *)
   let v3 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (0, 200) in
   let top = top vars in
   let bottom = bottom vars  in
   should_equal (join top bottom) top &&
   should_equal (join top top) top &&
   should_equal (join bottom bottom) bottom &&
-  should_equal (join v0 v1) v1 &&
+  should_subsume_or_equal (join v0 v1) v1 &&
   should_equal (join v0 v2) v3 &&
   should_equal (join v0 top) top &&
   should_equal (join top v0) top &&
@@ -516,18 +516,21 @@ let meet (s1 : t) (s2 : t) : t =
       res)
 
 let%test "meet should correctly meet" =
-  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1] in
-  (* l0 = l1, l0 = [0,100] *)
-  let v0 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (0, 100) in
+  let vars = Var.Set.of_list [Var.Local 0; Var.Local 1; Var.Local 2] in
+  (* l0 = l1, l2 = [0,100] *)
+  let v0 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 2) (0, 100) in
   (* l0 = [0,100], l1 = [200, 300] *)
   let v1 = add_interval_constraint (add_interval_constraint (top vars) (Var.Local 0) (0, 100)) (Var.Local 1) (200, 300) in
-  (* l0 = l1, l0 = [50, 200] *)
-  let v2 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (50, 200) in
-  (* l0 = l1, l0 = [50, 100] *)
-  let v3 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (50, 100) in
+  (* l0 = l1, l2 = [50, 200] *)
+  let v2 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 2) (50, 200) in
+  (* l0 = l1, l2 = [50, 100] *)
+  let v3 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 2) (50, 100) in
   let top = top vars in
   let bottom = bottom vars in
-  equal (meet v0 v0) v0 &&
-  equal (meet top bottom) bottom && equal (meet bottom top) bottom &&
-  equal (meet v0 v1) bottom && equal (meet v1 v0) bottom &&
-  equal (meet v0 v2) v3 && equal (meet v2 v0) v3
+  should_equal (meet v0 v0) v0 &&
+  should_equal (meet top bottom) bottom &&
+  should_equal (meet bottom top) bottom &&
+  should_equal (meet v0 v1) bottom &&
+  should_equal (meet v1 v0) bottom &&
+  should_equal (meet v0 v2) v3 &&
+  should_equal (meet v2 v0) v3
