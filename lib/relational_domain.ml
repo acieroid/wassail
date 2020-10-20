@@ -2,7 +2,7 @@ open Core_kernel
 
 (** The apron domain used.
     We use octagon here, but simpler domains could be good enough.
-    However, with a simpler domain (e.g., Polka.strict_equality), many inline tests will likely fail
+    However, with a simpler domain (e.g., Polka.equalities Polka.t), many inline tests will likely fail
   *)
 type apron_domain = Oct.t
 
@@ -30,6 +30,11 @@ let rethrow_apron_error (name : string) (f : unit -> 'a) : 'a =
   with
   | Apron.Manager.Error { exn; funid; msg } ->
     failwith (Printf.sprintf "Apron error in function %s: %s, funid: %s, msg: %s" name (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
+
+(** Converts an Apron environment to its string representation *)
+let itv_to_string (itv : Apron.Interval.t) : string =
+  rethrow_apron_error "Relational_domain.env_to_string" (fun () ->
+      Apron.Interval.print Stdlib.Format.str_formatter itv; Stdlib.Format.flush_str_formatter ())
 
 (** Converts an Apron environment to its string representation *)
 let env_to_string (env : Apron.Environment.t) : string =
@@ -94,49 +99,6 @@ let should_equal (v1 : t) (v2 : t) : bool =
   end else
     true
 
-(** Initializes the state for the analysis of CFG cfg. All variables are unconstrained, except for locals with have 0 as initial value
-    @param cfg is the CFG under analysis
-    @param vars the set of Apron variables to create. It is expected that variables for locals are named l0 to ln, where l0 to li are parameters (there are i params), and li+1 to ln are locals that are initialized to 0.
- *)
-let init (cfg : 'a Cfg.t) (vars : Var.Set.t) : t =
-  rethrow_apron_error "Relational_domain.init" (fun () ->
-      assert (List.length cfg.return_types <= 1); (* wasm spec does not allow for more than one return type (currently) *)
-      let vars_and_vals = List.filter_map (Var.Set.to_list vars) ~f:(fun v -> match v with
-          | Var.Local n when n >= List.length cfg.arg_types ->
-        (* Locals that are not arguments are mapped to 0 *)
-            Some (Apron.Var.of_string (Var.to_string v), Apron.Interval.of_int 0 0)
-          | Var.Local _ | Var.Global _ ->
-            (* Other locals (arguments), and globals are top *)
-            Some (Apron.Var.of_string (Var.to_string v), Apron.Interval.top)
-          | Var.Const _ ->
-            (* Const are not used in the relational domain *)
-            None
-          | _ ->
-            (* Other variables are mapped to bottom *)
-            Some (Apron.Var.of_string (Var.to_string v), Apron.Interval.bottom))
-      in
-      let apron_vars = Array.of_list (List.map vars_and_vals  ~f:fst) in
-      let apron_env = Apron.Environment.make apron_vars [| |] in
-      let apron_abs = Apron.Abstract1.of_box manager apron_env apron_vars (Array.of_list (List.map vars_and_vals ~f:(fun (_, v) -> v))) in
-      { constraints = apron_abs })
-
-let%test_unit "init should not result in an error" =
-  let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;test;) (type 0) (param i32) (result i32)
-    local.get 0)
-  (func (;test-call;) (type 0) (param i32) (result i32)
-    local.get 0
-    call 0)
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg0 = Cfg_builder.build 0 module_ in
-  let cfg1 = Cfg_builder.build 1 module_ in
-  let _: t = init cfg0 (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
-  let _: t = init cfg1 (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
-  ()
-
 (** Creates the bottom value *)
 let bottom (vars : Var.Set.t) : t =
   rethrow_apron_error "Relational_domain.bottom" (fun () ->
@@ -171,7 +133,6 @@ let%test_unit "top should not result in an error" =
   let _: t = top (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
   ()
 
-
 (** Constructs the rhs of a constraint as v1+v2 *)
 let add (v1 : Var.t) (v2 : Var.t) : string =
   match v1, v2 with
@@ -199,7 +160,7 @@ let add_constraints (s : t) (constraints : (Var.t * string) list) : t =
   rethrow_apron_error "Relational_domain.add_constraints" (fun () ->
       List.iter filtered_constraints ~f:(fun (x, y) ->
           (Logging.info !Relational_options.verbose
-             (Printf.sprintf "add constraint: %s = %s\n" (Var.to_string x) y)));
+             (Printf.sprintf "add constraint: %s = %s" (Var.to_string x) y)));
       let lhs = List.map filtered_constraints ~f:(fun (v, _) -> Apron.Var.of_string (Var.to_string v)) in
       let rhs = List.map filtered_constraints ~f:(fun (_, c) -> Apron.Parser.linexpr1_of_string s.constraints.env c) in
       { constraints = Apron.Abstract1.assign_linexpr_array manager s.constraints (Array.of_list lhs)  (Array.of_list rhs) None })
@@ -261,7 +222,6 @@ let%test "adding an interval constraint should apply to all equal variables" =
   let v1 = add_interval_constraint v0 (Var.Local 0) (0, 10) in
   let _v2 = add_interval_constraint v0 (Var.Local 1) (0, 10) in
   let _v3 = add_interval_constraint v0 (Var.Local 2) (20, 30) in
-  Printf.printf "\nv0: %s\nv1: %s\n" (to_string v0) (to_string v1);
   not (equal v0 v1) (* && equal v1 v2 && equal v2 v1 && not (equal v1 v3) && not (equal v0 v3) *)
 
 (** Meets an expression with the given interval *)
@@ -534,3 +494,46 @@ let%test "meet should correctly meet" =
   should_equal (meet v1 v0) bottom &&
   should_equal (meet v0 v2) v3 &&
   should_equal (meet v2 v0) v3
+
+
+(** Initializes the state for the analysis of CFG cfg. All variables are unconstrained, except for locals with have 0 as initial value
+    @param cfg is the CFG under analysis
+    @param vars the set of Apron variables to create. It is expected that variables for locals are named l0 to ln, where l0 to li are parameters (there are i params), and li+1 to ln are locals that are initialized to 0.
+ *)
+let init (cfg : 'a Cfg.t) (vars : Var.Set.t) : t =
+  rethrow_apron_error "Relational_domain.init" (fun () ->
+      assert (List.length cfg.return_types <= 1); (* wasm spec does not allow for more than one return type (currently) *)
+      let zeros = List.filter (Var.Set.to_list vars) ~f:(function
+          | Var.Local n when n >= List.length cfg.arg_types ->
+            (* Locals that are not argments are mapped to 0 *)
+            true
+          | _ -> false) in
+      let bottoms = List.filter (Var.Set.to_list vars) ~f:(function
+          | Var.Local _ | Var.Global _ ->
+            (* Locals are either top (arguments) or 0 (non-arguments.
+               Globals are always top *)
+            false
+          | _ -> true) in
+      let abs = top vars in (* start with top *)
+      (* Restrict some vars to bottom (i.e., forgets them) *)
+      let abs' = { constraints = Apron.Abstract1.forget_array manager abs.constraints (Array.of_list (List.map bottoms ~f:(fun v -> Apron.Var.of_string (Var.to_string v)))) false }in
+      (* Restricts other vars to 0 *)
+      let abs'' = add_constraints abs' (List.map zeros ~f:(fun v -> (v, "0"))) in
+      abs'')
+
+let%test_unit "init should not result in an error" =
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    local.get 0)
+  (func (;test-call;) (type 0) (param i32) (result i32)
+    local.get 0
+    call 0)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let cfg0 = Cfg_builder.build 0 module_ in
+  let cfg1 = Cfg_builder.build 1 module_ in
+  let _: t = init cfg0 (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
+  let _: t = init cfg1 (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
+  ()

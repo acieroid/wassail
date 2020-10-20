@@ -61,7 +61,6 @@ let%test "call correctly propagates summaries" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  Relational_options.verbose := true;
     let actual = IntMap.find_exn (analyze_intra module_ [0; 1]) 1 in
     let expected = Summary.{
         in_arity = 1;
