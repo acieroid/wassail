@@ -4,6 +4,7 @@ open Helpers
 module Domain = Relational_domain
 
 type state = Domain.t
+[@@deriving compare, equal]
 
 (** A summary is the final state of the function, with some extra informations *)
 type t = {
@@ -16,10 +17,7 @@ type t = {
   globals_post : Var.t list;
   state : state; (** The final state *)
 }
-[@@derive compare, equal]
-
-let equal (s1 : t) (s2 : t) : bool =
-  Domain.equal s1.state s2.state
+[@@deriving compare, equal]
 
 let to_string (s : t) : string =
   Printf.sprintf "pre: mem: [%s]\npost: ret: %s, globals: [%s], mem: [%s]\nstate: %s"
@@ -41,7 +39,8 @@ let make (cfg : 'a Cfg.t) (state : Domain.t) (ret : Var.t option)
       - the parameters
       - the return value if there is one (i.e., the top of the stack)
       - any variable bound in the store
-      - any variable used by a global *)
+     - any variable used by a global *)
+  Printf.printf "making summary with mempost: %s\n" (String.concat ~sep:"," (List.map ~f:Var.to_string mem_post));
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.Local argi) in
   let globals_pre = List.mapi cfg.global_types ~f:(fun i _ -> Var.Global i) in
   let to_keep = params @ globals_pre @ globals_post @ mem_pre @ mem_post @ (Option.to_list ret) in
