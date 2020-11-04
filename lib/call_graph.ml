@@ -3,7 +3,7 @@ open Helpers
 
 (** A call graph *)
 type t = {
-  nodes : IntSet.t; (** Nodes or the  call graphs are function indices *)
+  nodes : IntSet.t; (** Nodes of the call graphs are function indices *)
   edges : IntSet.t IntMap.t; (** Edges are from one node to multiple nodes *)
 }
 [@@deriving sexp, compare, equal]

@@ -132,6 +132,10 @@ let new_label () : label =
   counter := !counter + 1;
   v
 
+(** Reset the instruction counter. (Only to use in the tests to have stable labels) *)
+let reset_counter () : unit =
+  counter := 0
+
 (** Adds a label to a data instruction *)
 let data_labelled (d : data) (annotation_before : 'a) (annotation_after : 'a) : 'a t =
   Data { instr = d; label = new_label (); annotation_before; annotation_after; }

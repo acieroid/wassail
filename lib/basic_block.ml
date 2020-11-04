@@ -41,6 +41,13 @@ let to_dot (b : 'a t) (annot_to_string : 'a -> string) : string =
   | ControlMerge ->
     Printf.sprintf "block%d [shape=diamond, label=\"%d\"]" b.idx b.idx
 
+(** Returns all the instructions contained within this block (in no particular order) *)
+let all_instructions (b : 'a t) : 'a Instr.t list =
+  match b.content with
+  | Control i -> [Instr.Control i]
+  | Data d -> List.map d ~f:(fun i -> Instr.Data i)
+  | ControlMerge -> []
+
 (** Returns all the labels of the instructions contained within this block *)
 let all_instruction_labels (b : 'a t) : IntSet.t =
   match b.content with

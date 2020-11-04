@@ -52,6 +52,10 @@ val callers : 'a t IntMap.t -> 'a t -> IntSet.t
 
 val all_block_indices : 'a t -> IntSet.t
 
+val all_instructions : 'a t -> 'a Instr.t list
+
+val all_merge_blocks : 'a t -> 'a Basic_block.t list
+
 val all_instruction_labels : 'a t -> IntSet.t
 
 val all_annots : 'a t -> 'a list

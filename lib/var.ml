@@ -24,6 +24,8 @@ let to_string (v : t) : string = match v with
   | Hole -> "_"
   | Const n ->  Prim_value.to_string n
 
+let list_to_string (vs : t list) : string = String.concat ~sep: ", " (List.map vs ~f:to_string)
+
 module OffsetMap = Map.Make(struct
     type t = with_offset
     [@@deriving sexp, compare, equal]

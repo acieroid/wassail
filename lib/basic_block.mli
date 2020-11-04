@@ -20,6 +20,8 @@ val to_string : 'a t -> ('a -> string) -> string
 
 val to_dot : 'a t -> ('a -> string) -> string
 
+val all_instructions : 'a t -> 'a Instr.t list
+
 val all_instruction_labels : 'a t -> IntSet.t
 
 val all_annots : 'a t -> 'a list

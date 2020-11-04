@@ -274,4 +274,3 @@ end
 
 include Spec_inference
 include State
-    

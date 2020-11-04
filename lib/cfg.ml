@@ -81,6 +81,18 @@ let callers (cfgs : 'a t IntMap.t) (cfg : 'a t) : IntSet.t =
       else
         callers)
 
+(** Returns all the instructions within this CFG (in no particular order) *)
+let all_instructions (cfg : 'a t) : 'a Instr.t list =
+  IntMap.fold cfg.basic_blocks ~init:[] ~f:(fun ~key:_ ~data:block l ->
+      (Basic_block.all_instructions block) @ l)
+
+(** Returns all merge blocks *)
+let all_merge_blocks (cfg : 'a t) : 'a Basic_block.t list =
+  IntMap.fold cfg.basic_blocks ~init:[] ~f:(fun ~key:_ ~data:block l ->
+      match block.content with
+      | ControlMerge -> block :: l
+      | _ -> l)
+
 (** Returns all the indices of the blocks within this CFG *)
 let all_block_indices (cfg : 'a t) : IntSet.t =
   IntSet.of_list (IntMap.keys cfg.basic_blocks)
