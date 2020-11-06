@@ -13,10 +13,16 @@ module S = struct
 end
 
 (** Sets of integers *)
-module IntSet = Set.Make(I)
+module IntSet = struct
+  include Set.Make(I)
+  let to_string (s : t) : string = String.concat ~sep:"," (List.map (to_list s) ~f:string_of_int)
+end
 
 (** Maps of integers *)
-module IntMap = Map.Make(I)
+module IntMap = struct
+  include Map.Make(I)
+  let to_string (m : 'a t) (f : 'a -> string) : string = String.concat ~sep:", " (List.map (to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%d -> %s" k (f v)))
+end
 
 (** Sets of strings *)
 module StringSet = Set.Make(S)
