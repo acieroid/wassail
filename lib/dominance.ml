@@ -65,7 +65,6 @@ module Tree = struct
         let tree_with_children_connected = IntMap.add_exn tree ~key:node ~data:unvisited_children in
         List.fold_left children ~init:tree_with_children_connected ~f:dfs
     in
-    Printf.printf "call of_children_map\n";
     of_children_map entry (IntMap.to_alist (dfs IntMap.empty entry))
 
   let%test "spanning tree computation" =
@@ -87,6 +86,16 @@ module Tree = struct
       | None -> [] in
     let actual = spanning_tree_from_graph entry succs in
     let expected = of_children_map entry [(1, [2]); (2, [3; 4; 6]); (3, [5]); (4, []); (5, []); (6, [])] in
+    equal actual expected
+
+  let%test "spanning tree computation - reverse example" =
+    let entry = 6 in
+    let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(6, [2]); (5, [4; 3]); (4, [2]); (3, [2]); (2, [1; 5])] in
+    let preds (n : int) : int list = match IntMap.find rev_graph n with
+      | Some ns -> ns
+      | None -> [] in
+    let actual = spanning_tree_from_graph entry preds in
+    let expected = of_children_map entry [(6, [2]); (2, [1; 5]); (5, [3; 4]); (3, []); (4, []); (1, [])] in
     equal actual expected
 
   (** Extract the parent of a node in constant time *)
@@ -118,7 +127,7 @@ module Tree = struct
       match parent tree node with
       | Some p -> loop p (f acc p)
       | None when node = tree.entry -> acc
-      | None -> failwith "missing parent link in tree?" in
+      | None -> failwith (Printf.sprintf "fold_ancestors: missing parent link in tree? node %d has no parent" node) in
     loop node init
 
   (** Computes the nearest common ancestor of two nodes in a tree *)
@@ -148,39 +157,9 @@ module Tree = struct
     (match nca tree 0 4 with Some 0 -> true | _ -> false)
 end
 
-
-(*
-let revert_rtree_representation (entry : int) (rtree : int IntMap.t) : int list IntMap.t =
-  let add_parent_children (tree : int list IntMap.t) (node : int) =
-    if node = entry then
-      tree
-    else
-      let parent = IntMap.find_exn rtree node in
-      IntMap.update tree parent ~f:(function
-          | Some children -> node :: children
-          | None -> [node]) in
-  List.fold_left (IntMap.keys rtree) ~init:IntMap.empty ~f:add_parent_children
-
-
-let%test "revert rtree computation"=
-  let entry : int = 0 in
-  let rtree : int IntMap.t = IntMap.of_alist_exn [(1, 0); (3, 1); (4, 1); (2, 0); (5, 2)] in
-  let actual = revert_rtree_representation entry rtree in
-  let expected : int list IntMap.t = IntMap.of_alist_exn [(0, [1; 2]); (1, [3; 4]); (2, [5])] in
-  IntMap.equal (fun a b -> IntSet.equal (IntSet.of_list a) (IntSet.of_list b)) actual expected
-
-(** Extracts th parent of a node from a rtree *)
-let rtree_parent (rtree : int IntMap.t) (node : int) : int =
-  IntMap.find_exn rtree node
-
-(** Changes the paraent of a node in an rtree *)
-let rtree_set_parent (rtree : int IntMap.t) (node : int) (parent : int) : int IntMap.t =
-  IntMap.update rtree node ~f:(fun _ -> parent)
-*)
-
- (** Computation of the dominator tree using the algorithm from Cooper, Harvey
-   and Kennedy (2001), based on the description made here:
-   https://www.cs.au.dk/~gerth/advising/thesis/henrik-knakkegaard-christensen.pdf. *)
+(** Computation of the dominator tree using the algorithm from Cooper, Harvey
+    and Kennedy (2001), based on the description made here:
+    https://www.cs.au.dk/~gerth/advising/thesis/henrik-knakkegaard-christensen.pdf. *)
 let dominator_tree (entry : int) (nodes : int list) (succs : int -> int list) (preds : int -> int list) : Tree.t =
   let rec loop (tree : Tree.t) : Tree.t =
     let (tree, changed) = List.fold_left nodes ~init:(tree, false) ~f:(fun (tree, changed) node1 ->
@@ -205,32 +184,28 @@ let%test "dominator tree is correctly computed - wikipedia example" =
   let succs (n : int) : int list = match IntMap.find graph n with
     | Some ns -> ns
     | None -> [] in
-  let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(6, [2]); (5, [4; 3]); (4, [2]); (3, [2]); (2, [1])] in
+  let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(6, [2]); (5, [4; 3]); (4, [2]); (3, [2]); (2, [1; 5])] in
   let preds (n : int) : int list = match IntMap.find rev_graph n with
     | Some ns -> ns
     | None -> [] in
-  Printf.printf "spanning\n";
-  let spanning = Tree.spanning_tree_from_graph entry succs in
-  Printf.printf "spanning: %s\n" (Tree.to_string spanning);
   let actual : Tree.t = dominator_tree entry [1; 2; 3; 4; 5; 6] succs preds in
   let expected : Tree.t = Tree.of_children_map 1 [(1, [2]); (2, [3; 4; 5; 6]); (3, []); (4, []); (5, []); (6, [])] in
   Tree.equal actual expected
 
-(*
 let%test "post-dominator tree is correctly computed by reversing the order of the graph - wikipedia example" =
   let graph : int list IntMap.t = IntMap.of_alist_exn [(1, [2]); (2, [3; 4; 6]); (3, [5]); (4, [5]); (5, [2])] in
   let succs (n : int) : int list = match IntMap.find graph n with
     | Some ns -> ns
     | None -> [] in
-  let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(6, [2]); (5, [4; 3]); (4, [2]); (3, [2]); (2, [1])] in
+  let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(6, [2]); (5, [4; 3]); (4, [2]); (3, [2]); (2, [1; 5])] in
   let preds (n : int) : int list = match IntMap.find rev_graph n with
     | Some ns -> ns
     | None -> [] in
   (* Note the reverse succs/preds argument, as well as the entry point being 6 *)
   let actual = dominator_tree 6 [1; 2; 3; 4; 5; 6] preds succs in
-  Printf.printf "%s\n" (Tree.to_string actual);
-  false
-*)
+  let expected = Tree.of_children_map 6 [(6, [2]); (2, [1; 5]); (5, [3; 4]); (1, []); (3, []); (4, [])] in
+  Tree.equal actual expected
+
 (*
 
 (** A dominance tree *)
