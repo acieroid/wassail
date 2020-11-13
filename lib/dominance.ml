@@ -14,6 +14,10 @@ module Tree = struct
   let to_string (tree : t) : string =
     (IntMap.to_string tree.children IntSet.to_string)
 
+  (** Return the children of a node in the tree *)
+  let children (tree : t) (node : int) : IntSet.t =
+    IntMap.find_exn tree.children node
+
   (** Compute the reverse representation of a tree, from a map of nodes to their children to a map of nodes to their (only) parent *)
   let revert_tree_representation (entry : int) (tree : IntSet.t IntMap.t) : int IntMap.t =
     let rec visit (rtree : int IntMap.t) (node : int) =
@@ -206,9 +210,7 @@ let%test "post-dominator tree is correctly computed by reversing the order of th
   let expected = Tree.of_children_map 6 [(6, [2]); (2, [1; 5]); (5, [3; 4]); (1, []); (3, []); (4, [])] in
   Tree.equal actual expected
 
-(*
-
-(** A dominance tree *)
+(** A dominator tree *)
 type t =
   | Branch of Spec_inference.state Basic_block.t * Var.t * t list
   | Jump of Spec_inference.state Basic_block.t * t list
@@ -216,70 +218,100 @@ type t =
 let branch_condition (_block : Spec_inference.state Basic_block.t) : Var.t option =
   failwith "TODO"
 
-(** Computes the dominance tree of a CFG. *)
-let dominance (cfg : Spec_inference.state Cfg.t) : t =
-  let exit : int = cfg.exit_block in
-  let nodes : int list = IntMap.keys cfg.basic_blocks in
-  let preds (node : int) : int list =
-    let back_edges = IntMap.find_exn cfg.back_edges node in
-    List.map back_edges ~f:fst
-  in
-  let edges : IntSet.t IntMap.t = dominator_tree entry nodes preds in
-  let rec build_tree (node : int) : t =
-    let successors : t list = match IntMap.find edges node with
-      | Some ns -> List.map (IntSet.to_list ns) ~f:build_tree
-      | None -> [] in
-    let block = Cfg.find_block_exn cfg node in
-    match branch_condition block with
-    | Some v -> Branch (block, v, successors)
-    | None -> Jump (block, successors) in
-  build_tree entry
-
-(** Computes the post-dominance tree of a CFG *)
-let post_dominance (cfg : Spec_inference.state Cfg.t) : IntSet.t IntMap.t =
+(** Computes the dominator tree of a CFG . *)
+let cfg_dominator (cfg : Spec_inference.state Cfg.t) : t =
   let entry : int = cfg.entry_block in
   let nodes : int list = IntMap.keys cfg.basic_blocks in
   let succs (node : int) : int list =
     let edges = IntMap.find_exn cfg.edges node in
     List.map edges ~f:fst
   in
-  let edges : IntSet.t IntMap.t = dominator_tree entry nodes succs in (* Note that we pass succs rather than pred here, in order to have the post-dominator tree *)
-  edges
+  let preds (node : int) : int list =
+    let back_edges = IntMap.find_exn cfg.back_edges node in
+    List.map back_edges ~f:fst
+  in
+  let tree : Tree.t = dominator_tree entry nodes succs preds in
+  let rec build_tree (node : int) : t =
+    let successors : t list = List.map (IntSet.to_list (Tree.children tree node)) ~f:build_tree in
+    let block = Cfg.find_block_exn cfg node in
+    match branch_condition block with
+    | Some v -> Branch (block, v, successors)
+    | None -> Jump (block, successors) in
+  build_tree entry
 
+(** Computes the post-dominator tree of a CFG *)
+let cfg_post_dominator (cfg : Spec_inference.state Cfg.t) : Tree.t =
+  let exit : int = cfg.exit_block in
+  let nodes : int list = IntMap.keys cfg.basic_blocks in
+  let succs (node : int) : int list =
+    let edges = IntMap.find_exn cfg.edges node in
+    List.map edges ~f:fst
+  in
+  let preds (node : int) : int list =
+    let back_edges = IntMap.find_exn cfg.back_edges node in
+    List.map back_edges ~f:fst
+  in
+  (* Note that we invert succs and preds here, and start from exit, in order to have the post-dominator tree *)
+  dominator_tree exit nodes preds succs
 
-(* TODO: compute immediate post-dominators *)
-
-(* Analogous to the definition of dominance above, a node z is said to post-dominate a node n if all paths to the exit node of the graph starting at n must go through z. Similarly, the immediate post-dominator of a node n is the postdominator of n that doesn't strictly postdominate any other strict postdominators of n. *)
-(*
-(* Algorithm adapted from https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/ProgramSlicing.pdf *)
-let control_dep (root : t) (is_immediate_post_dom : t -> Var.t -> bool) =
+(** Algorithm for control dependencies, adapted from https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/ProgramSlicing.pdf *)
+let control_dep (root : t) (is_immediate_post_dom : t -> Var.t -> bool) : (Var.t * Var.t) list =
   let push (tree : t) (preds : Var.t list) : Var.t list = match tree with
     | Branch (_, p,_) -> p :: preds
     | Jump (_, _) -> preds in
-  (* Creates the edges from a given block, where each edge links a block index to a control variable it depends on *)
-  let link (block : Spec_inference.state Basic_block.t) (pred : Var.t) : (Var.t * Var.t) list = match block.content with
-    | ControlMerge -> failwith "TODO"
-    | Control instr -> begin match instr.instr with
-        | Block _ | Loop _ -> []
-        | If _ -> failwith "top of the stack depends on pred"
-        | Call _ -> failwith "n arguments from the stack dpend on pred"
-        | CallIndirect _ -> failwith "n+1 arguments from the stack depend on pred"
-        | Br _ -> []
-        | BrIf _ -> failwith "top of the stack depends on pred"
-        | BrTable _ -> failwith "top of the stack depends on pred"
-        | Return -> failwith "arity of the block from the stack depend on pred"
-        | Unreachable -> []
-      end
-    | Data instrs -> List.fold_left instrs ~init:[] ~f:(fun acc instr ->
-        let to_add = match  instr.instr with
-          | _ -> TODO
+  (* Creates the edges from a given block, where each edge links a defined variabl to a control variable it depends on *)
+  let link (block : Spec_inference.state Basic_block.t) (pred : Var.t) : (Var.t * Var.t) list =
+    (* TODO: extract defined in Spec_inference.defined, this is a useful construct that we may need somewhere else *)
+    let defined = match block.content with
+      | ControlMerge ->
+        let defined_vstack = List.filter_opt (List.map2_exn
+                                                block.annotation_before.vstack
+                                                block.annotation_after.vstack
+                                                ~f:(fun v1 v2 -> if Var.equal v1 v2 then None else Some v2)) in
+        let defined_local =  List.filter_opt (List.map2_exn
+                                                block.annotation_before.locals
+                                                block.annotation_after.locals
+                                                ~f:(fun v1 v2 -> if Var.equal v1 v2 then None else Some v2)) in
+        let defined_globals = List.filter_opt (List.map2_exn
+                                                 block.annotation_before.globals
+                                                 block.annotation_after.globals
+                                                 ~f:(fun v1 v2 -> if Var.equal v1 v2 then None else Some v2)) in
+        (* TODO: memory
+           let defined_mem = List.filter_opt (List.map2_exn
+                                       block.annotation_before.memory
+                                       block.annotation_after.memory
+                                       ~f:(fun v1 v2 -> if Var.equal v1 v2 then None else Some v2)) in *)
+        defined_vstack @ defined_local @ defined_globals
+      | Control instr ->
+        let n_top_of_stack (n : int) : Var.t list = List.take instr.annotation_after.vstack n in
+        begin match instr.instr with
+          | Call ((arity_out, _), _) -> n_top_of_stack arity_out
+          | CallIndirect ((arity_out, _), _) -> n_top_of_stack arity_out
+          | Block _ | Loop _ | If _ | Br _ | BrIf _ | BrTable _ | Return | Unreachable -> []
+        end
+      | Data instrs -> List.fold_left instrs ~init:[] ~f:(fun acc instr ->
+          let to_add =
+            let n_top_of_stack (n : int) : Var.t list = List.take instr.annotation_after.vstack n in
+            match instr.instr with
+          | Nop | Drop | MemoryGrow -> []
+          | Select | MemorySize | Const _ | Unary _ | Binary _
+          | Compare _ | Test _ | Convert _ | LocalGet _ | GlobalGet _ -> n_top_of_stack 1
+          | LocalSet l | LocalTee l -> [List.nth_exn instr.annotation_after.locals l]
+          | GlobalSet g -> [List.nth_exn instr.annotation_after.globals g]
+          | Load _ -> n_top_of_stack 1
+          | Store {offset; _} ->
+            let addr = List.hd_exn instr.annotation_before.vstack in
+            [match Var.OffsetMap.find instr.annotation_after.memory (addr, offset) with
+             | Some v -> v
+             | None -> failwith (Printf.sprintf "Wrong memory annotation while looking for %s+%d in memory" (Var.to_string addr) offset)]
         in to_add @ acc) in
+    List.map defined ~f:(fun d -> (d, pred)) in
   (* vchildren simply recurses down the tree *)
-  let rec vchildren (blocks : t list) (preds : Var.t list)  = match blocks with
+  let rec vchildren (blocks : t list) (preds : Var.t list) : (Var.t * Var.t) list = match blocks with
     | [] -> []
     | (n :: ns) -> vnode n preds @ vchildren ns preds
   (* vnode visits a tree node *)
-  and vnode (tree : t) (preds : Var.t list) =
+  and vnode (tree : t) (preds : Var.t list) : (Var.t * Var.t) list =
     (* Extract the block and its children from the root of the tree *)
     let (block, children) = match tree with
     | Branch (block, _, children) -> (block, children)
@@ -291,5 +323,21 @@ let control_dep (root : t) (is_immediate_post_dom : t -> Var.t -> bool) =
     | h :: _ ->
       link block h @ vchildren children (push tree preds) in
   vnode root []
-*)
-*)
+
+(** Construct a map from predicates at the end of a block (according to `branch_condition`), to the corrsponding block index *)
+let extract_preds (cfg : Spec_inference.state Cfg.t) : int Var.Map.t =
+  IntMap.fold cfg.basic_blocks ~init:Var.Map.empty ~f:(fun ~key:idx ~data:block acc ->
+      match branch_condition block with
+      | Some pred -> Var.Map.add_exn acc ~key:pred ~data:idx
+      | None -> acc)
+
+(** Computes the control dependencies of a CFG (as a list of edges from variables to the control variables they depend upon) *)
+let cdep (cfg : Spec_inference.state Cfg.t) : (Var.t * Var.t) list =
+  let pdom = cfg_post_dominator cfg in
+  let preds : int Var.Map.t = extract_preds cfg in
+  control_dep (cfg_dominator cfg) (fun tree pred ->
+      (* Check if tree is the post-dominator of pred: look in pdom if (the node that contains) pred is a child of tree  *)
+      let tree_idx : int = match tree with Branch (b, _, _) | Jump (b, _) -> b.idx in
+      let children : IntSet.t = Tree.children pdom tree_idx in
+      let children_idx : int = Var.Map.find_exn preds pred in
+      IntSet.mem children children_idx)

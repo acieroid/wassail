@@ -76,7 +76,7 @@ let make (cfg : Spec_inference.state Cfg.t) : t =
             | LocalTee l -> (def [List.nth_exn i.annotation_after.locals l], use (top_n_before 1)) (* def local l *)
             | GlobalGet g -> (defs, use [List.nth_exn i.annotation_before.globals g]) (* use global g *)
             | GlobalSet g -> (def [List.nth_exn i.annotation_after.globals g], use (top_n_before 1)) (* def global g *)
-            | Load _ -> (defs, use (top_n_before 1)) (* use memory address *)
+            | Load _ -> (defs, use (top_n_before 1)) (* use memory address. TODO: also defines top of the stack? *)
             | Store {offset; _} ->
               let addr = List.hd_exn i.annotation_before.vstack in
               (def [match Var.OffsetMap.find i.annotation_after.memory (addr, offset) with
