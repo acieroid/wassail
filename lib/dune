@@ -12,7 +12,7 @@
       Taint Taint_options Taint_domain Taint_transfer Taint_summary
       Relational Relational_domain Relational_transfer Relational_summary Relational_spec Relational_options
       Reltaint
-      Use_def Dominance)
+      Use_def Dominance Control_deps)
    (libraries core_kernel wasm  apron apron.polkaMPQ apron.octD sexplib)
    (inline_tests (flags))
    (preprocess (pps ppx_jane ppx_compare ppx_inline_test)))
