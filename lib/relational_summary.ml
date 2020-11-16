@@ -40,7 +40,6 @@ let make (cfg : 'a Cfg.t) (state : Domain.t) (ret : Var.t option)
       - the return value if there is one (i.e., the top of the stack)
       - any variable bound in the store
      - any variable used by a global *)
-  Printf.printf "making summary with mempost: %s\n" (String.concat ~sep:"," (List.map ~f:Var.to_string mem_post));
   let params = List.mapi cfg.arg_types ~f:(fun argi _ -> Var.Local argi) in
   let globals_pre = List.mapi cfg.global_types ~f:(fun i _ -> Var.Global i) in
   let to_keep = params @ globals_pre @ globals_post @ mem_pre @ mem_post @ (Option.to_list ret) in

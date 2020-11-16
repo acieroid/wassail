@@ -30,7 +30,11 @@ module OffsetMap = Map.Make(struct
     type t = with_offset
     [@@deriving sexp, compare, equal]
   end)
-module Map = Map.Make(T)
+module Map = struct
+  include Map.Make(T)
+  let to_string (m : 'a t) (f : 'a -> string) : string =
+    String.concat ~sep:", " (List.map (to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s -> %s" (to_string k) (f v)))
+end
 module Set = struct
   include Set.Make(T)
   let of_option (v : T.t option) : t =

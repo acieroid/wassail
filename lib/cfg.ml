@@ -113,3 +113,13 @@ let annotate (cfg : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 
 let add_annotation (cfg : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b) IntMap.t) : ('a * 'b) t =
   { cfg with basic_blocks = IntMap.map ~f:(fun b -> Basic_block.add_annotation b block_data instr_data) cfg.basic_blocks }
 
+let forward_edges_from_node (cfg : 'a t) (node_idx : int) : (int * bool option) list =
+  match IntMap.find cfg.edges node_idx with
+  | Some e -> e
+  | None -> []
+
+let backward_edges_from_node (cfg : 'a t) (node_idx : int) : (int * bool option) list =
+  match IntMap.find cfg.back_edges node_idx with
+  | Some e -> e
+  | None -> []
+

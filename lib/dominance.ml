@@ -16,12 +16,14 @@ module Tree = struct
 
   (** Return the children of a node in the tree *)
   let children (tree : t) (node : int) : IntSet.t =
-    IntMap.find_exn tree.children node
+    match IntMap.find tree.children node with
+    | Some c -> c
+    | None -> failwith (Printf.sprintf "No children found in tree %s, node %d" (to_string tree) node)
 
   (** Compute the reverse representation of a tree, from a map of nodes to their children to a map of nodes to their (only) parent *)
   let revert_tree_representation (entry : int) (tree : IntSet.t IntMap.t) : int IntMap.t =
     let rec visit (rtree : int IntMap.t) (node : int) =
-      let children = IntMap.find_exn tree node in
+      let children = match IntMap.find tree node with Some c -> c | None -> failwith "no children found when reverting tree computation" in
       let rtree_with_children = IntSet.fold children ~init:rtree ~f:(fun rtree child ->
           IntMap.add_exn rtree ~key:child ~data:node) in
       IntSet.fold children ~init:rtree_with_children ~f:visit
@@ -44,12 +46,12 @@ module Tree = struct
       let all_keys = IntSet.of_list (List.map children_map ~f:fst) in
       let all_children = List.fold_left children_map ~init:IntSet.empty ~f:(fun acc (_, cs) -> IntSet.union acc (IntSet.of_list cs)) in
       if not (IntSet.for_all all_children ~f:(fun c -> IntSet.mem all_keys c)) then
-        failwith (Printf.sprintf "of_children_map: invalid tree spec where not all nodes are specified: %s" (String.concat ~sep:" | " (List.map children_map ~f:(fun (p, cs) -> Printf.sprintf "%d -> %s" p (String.concat ~sep:"," (List.map cs ~f:string_of_int))))));
+        failwith (Printf.sprintf "of_children_map: invalid tree spec  where not all nodes are specified: %s" (String.concat ~sep:" | " (List.map children_map ~f:(fun (p, cs) -> Printf.sprintf "%d -> %s" p (String.concat ~sep:"," (List.map cs ~f:string_of_int))))));
       (* - Every node is the children of only one node. We actually check that when concatenating all children, every element is unique. *)
       let all_children_l = List.fold_left children_map ~init:[] ~f:(fun acc (_, cs) -> cs @ acc) in
       if not ((IntSet.length all_children) = List.length all_children_l) then
         (* if both sizes are the same, then the list only contains unique elements *)
-        failwith "of_children_map: invalid tree spec where some children have multiple parents"
+        failwith (Printf.sprintf "of_children_map: invalid tree spec where some children have multiple parents: %s" (String.concat ~sep:" | " (List.map children_map ~f:(fun (p, cs) -> Printf.sprintf "%d -> %s" p (String.concat ~sep:"," (List.map cs ~f:string_of_int))))));
     end;
     let children = IntMap.map (IntMap.of_alist_exn children_map) ~f:IntSet.of_list in
     { children;
@@ -59,17 +61,18 @@ module Tree = struct
 
   (** Computes a spanning tree of a given graph *)
   let spanning_tree_from_graph (entry : int) (succs : int -> int list) : t =
-    let rec dfs (tree : int list IntMap.t) (node : int) : int list IntMap.t =
+    let rec dfs (tree : int list IntMap.t) (added : IntSet.t) (node : int) : (int list IntMap.t * IntSet.t) =
       if IntMap.mem tree node then
-        (* already visited *)
-        tree
+        (* node already visited, ignore it *)
+        (tree, added)
       else
         let children = succs node in
-        let unvisited_children = List.filter children ~f:(fun child -> not (IntMap.mem tree child)) in
-        let tree_with_children_connected = IntMap.add_exn tree ~key:node ~data:unvisited_children in
-        List.fold_left children ~init:tree_with_children_connected ~f:dfs
+        let new_children = List.filter children ~f:(fun child -> not (IntSet.mem added child)) in
+        let tree_with_children_connected = IntMap.add_exn tree ~key:node ~data:new_children in
+        let added' = IntSet.union added (IntSet.of_list new_children) in
+        List.fold_left children ~init:(tree_with_children_connected, added') ~f:(fun (tree, added) node -> dfs tree added node)
     in
-    of_children_map entry (IntMap.to_alist (dfs IntMap.empty entry))
+    of_children_map entry (IntMap.to_alist (fst (dfs IntMap.empty IntSet.empty entry)))
 
   let%test "spanning tree computation" =
     let graph : int list IntMap.t = IntMap.of_alist_exn [(0, [4; 2]); (4, [5; 3]); (2, [5; 1]); (3, [1])] in
@@ -100,6 +103,16 @@ module Tree = struct
       | None -> [] in
     let actual = spanning_tree_from_graph entry preds in
     let expected = of_children_map entry [(6, [2]); (2, [1; 5]); (5, [3; 4]); (3, []); (4, []); (1, [])] in
+    equal actual expected
+
+  let%test "spanning tree computation - other reverse example" =
+    let entry = 7 in
+    let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(7, [6]); (6, [5]); (5, [4; 3]); (4, [3]); (3, [2]); (2, [])] in
+    let preds (n : int) : int list = match IntMap.find rev_graph n with
+      | Some ns -> ns
+      | None -> [] in
+    let actual = spanning_tree_from_graph entry preds in
+    let expected = of_children_map entry [(2, []); (3, [2]); (4, []); (5, [3; 4]); (6, [5]); (7, [6])] in
     equal actual expected
 
   (** Extract the parent of a node in constant time *)
@@ -215,19 +228,28 @@ type t =
   | Branch of Spec_inference.state Basic_block.t * Var.t * t list
   | Jump of Spec_inference.state Basic_block.t * t list
 
-let branch_condition (_block : Spec_inference.state Basic_block.t) : Var.t option =
-  failwith "TODO"
+(** Extract the final branch condition of a block, if there is any *)
+let branch_condition (block : Spec_inference.state Basic_block.t) : Var.t option =
+  match block.content with
+  | Control c -> begin match c.instr with
+      | BrIf _ | BrTable _ | If _ ->
+        (* These are the only conditionals in the language, and they all depend
+           on the top stack variable before their execution *)
+        List.hd block.annotation_before.vstack
+      | _ -> None
+    end
+  | Data _ | ControlMerge -> None
 
 (** Computes the dominator tree of a CFG . *)
 let cfg_dominator (cfg : Spec_inference.state Cfg.t) : t =
   let entry : int = cfg.entry_block in
   let nodes : int list = IntMap.keys cfg.basic_blocks in
   let succs (node : int) : int list =
-    let edges = IntMap.find_exn cfg.edges node in
+    let edges = Cfg.forward_edges_from_node cfg node in
     List.map edges ~f:fst
   in
   let preds (node : int) : int list =
-    let back_edges = IntMap.find_exn cfg.back_edges node in
+    let back_edges = Cfg.backward_edges_from_node cfg node in
     List.map back_edges ~f:fst
   in
   let tree : Tree.t = dominator_tree entry nodes succs preds in
@@ -244,15 +266,36 @@ let cfg_post_dominator (cfg : Spec_inference.state Cfg.t) : Tree.t =
   let exit : int = cfg.exit_block in
   let nodes : int list = IntMap.keys cfg.basic_blocks in
   let succs (node : int) : int list =
-    let edges = IntMap.find_exn cfg.edges node in
+    let edges = match IntMap.find cfg.edges node with Some es -> es | None -> [] in
     List.map edges ~f:fst
   in
   let preds (node : int) : int list =
-    let back_edges = IntMap.find_exn cfg.back_edges node in
+    let back_edges = match IntMap.find cfg.back_edges node with Some es -> es | None -> [] in
     List.map back_edges ~f:fst
   in
   (* Note that we invert succs and preds here, and start from exit, in order to have the post-dominator tree *)
   dominator_tree exit nodes preds succs
+
+let%test "post dominator computation" =
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    block
+      i32.const 1 ;; This is a branch condition
+      br_if 0     ;; The condition depends on var 'Const 1', and this block has index 3
+      i32.const 2
+      local.get 0
+      i32.add
+      drop
+    end
+    local.get 0)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let actual = cfg_post_dominator cfg in
+  let expected = Tree.of_children_map 7 [(2, []); (3, [2]); (4, []); (5, [3; 4]); (6, [5]); (7, [6])] in
+  Tree.equal actual expected
 
 (** Algorithm for control dependencies, adapted from https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/ProgramSlicing.pdf *)
 let control_dep (root : t) (is_immediate_post_dom : t -> Var.t -> bool) : (Var.t * Var.t) list =
@@ -295,7 +338,8 @@ let control_dep (root : t) (is_immediate_post_dom : t -> Var.t -> bool) : (Var.t
             match instr.instr with
           | Nop | Drop | MemoryGrow -> []
           | Select | MemorySize | Const _ | Unary _ | Binary _
-          | Compare _ | Test _ | Convert _ | LocalGet _ | GlobalGet _ -> n_top_of_stack 1
+          | Compare _ | Test _ | Convert _ -> n_top_of_stack 1
+          | LocalGet _ | GlobalGet _ -> [] (* these actually don't define new variables *)
           | LocalSet l | LocalTee l -> [List.nth_exn instr.annotation_after.locals l]
           | GlobalSet g -> [List.nth_exn instr.annotation_after.globals g]
           | Load _ -> n_top_of_stack 1
@@ -331,13 +375,81 @@ let extract_preds (cfg : Spec_inference.state Cfg.t) : int Var.Map.t =
       | Some pred -> Var.Map.add_exn acc ~key:pred ~data:idx
       | None -> acc)
 
-(** Computes the control dependencies of a CFG (as a list of edges from variables to the control variables they depend upon) *)
-let cdep (cfg : Spec_inference.state Cfg.t) : (Var.t * Var.t) list =
+let%test "extract_preds when there is no pred" =
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    i32.const 256
+    i32.const 512
+    i32.const 0
+    select)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let preds = extract_preds cfg in
+  Var.Map.is_empty preds
+
+let%test "extract_preds when there are preds" =
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    block
+      i32.const 1 ;; This is a branch condition
+      br_if 0     ;; The condition depends on var 'Const 1', and this block has index 3
+      i32.const 2
+      local.get 0
+      i32.add
+      drop
+    end
+    local.get 0)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let actual = extract_preds cfg in
+  let expected = Var.Map.of_alist_exn [(Var.Const (Prim_value.of_int 1), 3)] in
+  Var.Map.equal (Int.(=)) actual expected
+
+(** Computes the control dependencies of a CFG (as a map from variables to the control variables they depend upon) *)
+let cdeps (cfg : Spec_inference.state Cfg.t) : Var.Set.t Var.Map.t =
   let pdom = cfg_post_dominator cfg in
   let preds : int Var.Map.t = extract_preds cfg in
-  control_dep (cfg_dominator cfg) (fun tree pred ->
-      (* Check if tree is the post-dominator of pred: look in pdom if (the node that contains) pred is a child of tree  *)
+  let deps = control_dep (cfg_dominator cfg) (fun tree pred ->
+      (* Check if tree is the post-dominator of pred: look in pdom if (the node that contains) pred is a child of tree *)
       let tree_idx : int = match tree with Branch (b, _, _) | Jump (b, _) -> b.idx in
       let children : IntSet.t = Tree.children pdom tree_idx in
-      let children_idx : int = Var.Map.find_exn preds pred in
-      IntSet.mem children children_idx)
+      let children_idx : int = match Var.Map.find preds pred with Some idx -> idx | None -> failwith "cdeps failed when accessing children index" in
+      IntSet.mem children children_idx) in
+  Var.Map.map (Var.Map.of_alist_multi deps) ~f:Var.Set.of_list
+
+let%test "control dependencies computation" =
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    block
+      i32.const 1
+      br_if 0
+      i32.const 2 ;; This variable clearly depends on 1
+      block
+        i32.const 3 ;; This one too
+        br_if 0
+        i32.const 4 ;; This one depends on 3 (also on 1 transitively, but here we compute direct control dependencies)
+        drop
+      end
+      drop
+      i32.const 5 ;; This one depends on 1
+      drop
+    end
+    i32.const 6)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let actual = cdeps cfg in
+  let var n = Var.Const (Prim_value.of_int n) in
+  let vars n = Var.Set.of_list [var n] in
+  let expected = Var.Map.of_alist_exn [(var 2, vars 1); (var 3, vars 1); (var 4, vars 3); (var 5, vars 1)] in
+  Var.Map.equal Var.Set.equal actual expected
+
+

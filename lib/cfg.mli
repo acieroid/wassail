@@ -1,6 +1,6 @@
 open Helpers
 
-type edge = (int * bool option) list
+type edge = (int * bool option) list (* TODO: change this to a set? *)
 type 'a t = {
   (* Is this function exported or not? *)
   exported: bool;
@@ -63,3 +63,7 @@ val all_annots : 'a t -> 'a list
 val annotate : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> 'b t
 
 val add_annotation : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> ('a * 'b) t
+
+val forward_edges_from_node : 'a t -> int -> (int * bool option) list
+
+val backward_edges_from_node : 'a t -> int -> (int * bool option) list
