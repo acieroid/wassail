@@ -30,6 +30,9 @@ module State = struct
       ~f:(fun acc (_, (pre, post)) ->
           Var.Set.union acc (Var.Set.union (vars_of pre) (vars_of post)))
 
+  (** Extract vars that have changed between two states.
+      Represent these changes as a list of pairs, where the first element is the original variable,
+      and the second element is the new variable *)
   let extract_different_vars (s1 : state) (s2 : state) : (Var.t * Var.t) list =
     let f (l1 : Var.t list) (l2 : Var.t list) : (Var.t * Var.t) list =
       assert (List.length l1 = List.length l2);

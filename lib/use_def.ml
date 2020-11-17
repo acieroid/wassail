@@ -1,24 +1,44 @@
 open Core_kernel
 open Helpers
 
-module UseDefMap = struct
-  module IntVarMap = Map.Make(struct
-      (* TODO: deal with merge blocks: they don't have an "instruction index"
-         Also, maybe use full instruction rather than only its index? *)
-      type t = int * Var.t
+module DefUseChains = struct
+  (** Definitions can occur in multiple places
+      - As a result from an instruction (e.g., i32.add defines a new variable)
+      - In merge nodes
+      - At the entry of a function (e.g., for local, global, and memory variables) *)
+  type definition =
+    | InstructionDefine of int * Var.t (* Label of the instruction and variable defined *)
+    | MergeDefine of int * Var.t (* Label of the merge node and variable defined *)
+    | Entry of Var.t (* Only the variable defined (because use-def is intraprocedural, we know the function) *)
+  [@@deriving equal, compare]
+
+  (** Uses can either occur from:
+      - instruction: they are represented by the index of the instruction that uses the variable, as well as the variable name
+      - merge blocks: they are represented by the index of the merge bloc, as well as the variable name *)
+  type use =
+    | Instruction of int * Var.t
+    | Merge of int * Var.t
+  [@@deriving sexp, equal, compare]
+
+  module UseMap = Map.Make(struct
+      type t = use
       [@@deriving sexp, compare, equal]
     end)
 
   (** Use-definition chains, as a mapping from uses (as the index of the instruction that uses the variable, and the variable name) to their definition (as the index of the instruction that defines the variable)*)
-  type t = int IntVarMap.t
-  [@@deriving sexp, compare, equal]
-  let empty : t = IntVarMap.empty
-  let add (m : t) (use : int * Var.t) (def : int) =
-    IntVarMap.add_exn m ~key:use ~data:def
+  type t = definition UseMap.t
+  [@@deriving compare, equal]
+
+  (** The empty use-def map *)
+  let empty : t = UseMap.empty
+  let add (m : t) (use : use) (def : definition) =
+    match UseMap.add m ~key:use ~data:def with
+    | `Duplicate -> failwith "Cannot have more than one definition for a use in def-use chains"
+    | `Ok r -> r
 end
 
-type t = UseDefMap.t
-[@@deriving sexp, compare, equal]
+type t = DefUseChains.t
+[@@deriving compare, equal]
 
 (** Constructs a data dependence from the CFG of a function *)
 let make (cfg : Spec_inference.state Cfg.t) : t =
@@ -26,7 +46,10 @@ let make (cfg : Spec_inference.state Cfg.t) : t =
      There is exactly one define per variable.
      e.g., [] i32.const 0 [x] defines x
            [x, y] i32.add [z] defines z, uses x, y
-     There may be more than one use!
+     On top of being defined by instructions, variable may be defined in merge nodes, and may be
+     defined at the entry node of a function.
+
+     However, there can be more than one use for a variable!
 
      We compute the following maps while walking over the instructions:
        uses: (int list) Var.Map.t (* The list of instructions that use a given variable *)
@@ -34,15 +57,34 @@ let make (cfg : Spec_inference.state Cfg.t) : t =
 
      From this, it is a matter of folding over use to construct the DefUseMap:
        Given a use of v at instruction lab, add key:(lab, v) data:(lookup defs v) *)
-  (* The uses map will map variables to the indices of instructions that use them *)
-  let uses_empty: (int list) Var.Map.t = Var.Map.empty in
-  (* The defs map will map variables to the index of the instruciton that defines them.
+  (* The defs map will map variables to their definition.
      Because we are in SSA, there can only be one instruction that define a variable *)
-  let defs_empty: int Var.Map.t = Var.Map.empty in
-  let all_instrs : Spec_inference.state Instr.t list = Cfg.all_instructions cfg in
+  let defs: DefUseChains.definition Var.Map.t = Var.Map.empty in
+  (* The uses map will map variables to all of its uses *)
+  let uses: DefUseChains.use list Var.Map.t = Var.Map.empty in
+  (* Add definitions for all locals, globals, and memory variables *)
+  let defs =
+    let entry_spec = (Cfg.find_block_exn cfg cfg.entry_block).annotation_before in
+    let vars = Spec_inference.vars_of entry_spec in
+    Var.Set.fold vars ~init:defs ~f:(fun defs var ->
+        match Var.Map.add defs ~key:var ~data:(DefUseChains.Entry var) with
+        | `Duplicate -> failwith "use_def: more than one entry definition for a variable"
+        | `Ok r -> r) in
+  (* For each merge block, update the defs and uses map *)
+  let (defs, uses) = List.fold_left (Cfg.all_merge_blocks cfg)
+      ~init:(defs, uses)
+      ~f:(fun (defs, uses) block ->
+          List.fold_left (Spec_inference.extract_different_vars block.annotation_before block.annotation_after)
+            ~init:(defs, uses)
+            ~f:(fun (defs, uses) (old_var, new_var) ->
+                (begin match Var.Map.add defs ~key:new_var ~data:(DefUseChains.MergeDefine (block.idx, new_var)) with
+                 | `Duplicate -> failwith "use_def: duplicate define in merge block"
+                 | `Ok r -> r
+                 end,
+                 Var.Map.add_multi uses ~key:old_var ~data:(DefUseChains.Merge (block.idx, old_var))))) in
   (* For each instruction, update the defs and uses map *)
-  let (defs, uses) = List.fold_left all_instrs
-    ~init:(defs_empty, uses_empty)
+  let (defs, uses) = List.fold_left (Cfg.all_instructions cfg)
+    ~init:(defs, uses)
     ~f:(fun (defs, uses) instr -> match instr with
         | Instr.Data i ->
           let top_n_before n = List.take i.annotation_before.vstack n in
