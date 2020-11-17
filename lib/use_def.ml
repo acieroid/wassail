@@ -51,6 +51,8 @@ module UseDefChains = struct
 
   (** The empty use-def map *)
   let empty : t = Use.Map.empty
+
+  (** Add an element to the use-def map *)
   let add (m : t) (use : Use.t) (def : Def.t) =
     match Use.Map.add m ~key:use ~data:def with
     | `Duplicate -> failwith (Printf.sprintf "Cannot have more than one definition for a use in use-def chains, when adding %s ->%s to %s" (Use.to_string use) (Def.to_string def) (to_string m))
@@ -167,7 +169,6 @@ let make (cfg : Spec_inference.state Cfg.t) : t =
   let (defs, uses) = List.fold_left (Cfg.all_instructions cfg)
     ~init:(defs, uses)
     ~f:(fun (defs, uses) instr ->
-        Printf.printf "looking at instr: %d\n" (Instr.label instr);
         let defs = List.fold_left (instr_def instr) ~init:defs ~f:(fun defs var ->
             match Var.Map.add defs ~key:var ~data:(Def.Instruction (Instr.label instr, var)) with
             | `Duplicate -> failwith "use_def: duplicate define in instruction"
@@ -184,26 +185,12 @@ let make (cfg : Spec_inference.state Cfg.t) : t =
           UseDefChains.add map use (match Var.Map.find defs var with
               | Some v -> v
               | None -> failwith (Printf.sprintf "Use-def chain incorrect: could not find def of variable %s" (Var.to_string var)))))
-  (* Derive a graph from def-use chains.
-     The problem is simpler than for high-level languages, because we know there can only be one definition
-     (and no other assignment!) to a program variable.
-     Merge nodes just introduce longer chains. *)
-
-
-   (* For backward slicing, we can jump from the slicing criterion (i, v) (i is the instruction, v is the variable) to the instruction i' that defines v. Continue slicing from the uses of i' until we have an empty queue.
-
-See https://www.sts.tuhh.de/pw-and-m-theses/2013/oehlm13.pdf, Algo. 2 p. 30
-   (This only takes care of data dependences though!!!) *)
 
 module UseDefTest = struct
   let analyze_intra =
     Analysis_helpers.mk_intra
       (fun _ _ -> IntMap.empty)
-      (fun _ _ cfg ->
-         Printf.printf "--------------------\n";
-         Printf.printf "%s\n" (Cfg.to_dot cfg Spec_inference.state_to_dot_string);
-         Printf.printf "--------------------\n";
-         make cfg)
+      (fun _ _ cfg -> make cfg)
 
   let%test "simplest ud chain" =
     Instr.reset_counter ();
