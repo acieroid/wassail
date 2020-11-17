@@ -65,10 +65,16 @@ module T = struct
     | Data of 'a labelled_data
     | Control of 'a labelled_control
   [@@deriving sexp, compare, equal]
+
 end
 include T
 
-(** Converts a data instruction to its string representation *)
+(** Return the label of an instruction *)
+let label (instr : 'a t) : label = match instr with
+  | Data i -> i.label
+  | Control i -> i.label
+
+(** Convert a data instruction to its string representation *)
 let data_to_string (instr : data) : string =
   match instr with
      | Nop -> "nop"

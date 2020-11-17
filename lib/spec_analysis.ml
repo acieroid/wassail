@@ -22,9 +22,3 @@ let%test_unit "spec analysis does not error" =
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let _ : Spec_inference.state Cfg.t = analyze_intra1 module_ 0 in
   ()
-
-(** Returns the variables that have changed between two states.
-    Makes the assumption that states have the same "shape", i.e., the number of stack, local, global, and memory variablesis the same *)
-let changed_vars (s1 : Spec_inference.state) (s2 : Spec_inference.state) : Var.t list =
-  let 
-  
