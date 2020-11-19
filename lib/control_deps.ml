@@ -91,16 +91,22 @@ let%test "extract_preds when there are preds" =
   Var.Map.equal (Int.(=)) actual expected
 
 (** Computes the control dependencies of a CFG (as a map from variables to the control variables they depend upon) *)
-let cdeps (cfg : Spec_inference.state Cfg.t) : Pred.Set.t Var.Map.t =
+let make (cfg : Spec_inference.state Cfg.t) : Pred.Set.t Var.Map.t =
   let pdom = Dominance.cfg_post_dominator cfg in
   let preds : int Var.Map.t = extract_preds cfg in
   let deps = control_dep (Dominance.cfg_dominator cfg) (fun tree pred ->
       (* Check if tree is the post-dominator of pred: look in pdom if (the node that contains) pred is a child of tree *)
       let tree_idx : int = match tree with Branch (b, _, _) | Jump (b, _) -> b.idx in
       let children : IntSet.t = Dominance.Tree.children pdom tree_idx in
-      let children_idx : int = match Var.Map.find preds pred with Some idx -> idx | None -> failwith "cdeps failed when accessing children index" in
+      let children_idx : int = match Var.Map.find preds pred with Some idx -> idx | None -> failwith "make failed when accessing children index" in
       IntSet.mem children children_idx) in
   Var.Map.map (Var.Map.of_alist_multi deps) ~f:Pred.Set.of_list
+
+(** Return the control dependencies for a variable *)
+let find (cdeps : Pred.Set.t Var.Map.t) (var : Var.t) : Pred.Set.t =
+  match Var.Map.find cdeps var with
+  | Some preds -> preds
+  | None -> Pred.Set.empty
 
 let%test "control dependencies computation" =
   let module_ = Wasm_module.of_string "(module
@@ -125,7 +131,7 @@ let%test "control dependencies computation" =
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
-  let actual = Var.Map.map (cdeps cfg) ~f:(fun p -> Var.Set.of_list (List.map (Pred.Set.to_list p) ~f:fst)) in
+  let actual = Var.Map.map (make cfg) ~f:(fun p -> Var.Set.of_list (List.map (Pred.Set.to_list p) ~f:fst)) in
   let var n = Var.Const (Prim_value.of_int n) in
   let vars n = Var.Set.of_list [var n] in
   let expected = Var.Map.of_alist_exn [(var 2, vars 1); (var 3, vars 1); (var 4, vars 3); (var 5, vars 1)] in

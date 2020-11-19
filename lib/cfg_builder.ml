@@ -239,6 +239,7 @@ let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
     | Some _ ->
       let block = mk_empty_block () in
       block.idx, block :: actual_blocks, (block.idx, first_block, None) :: actual_edges in
+  let basic_blocks = IntMap.of_alist_exn (List.map actual_blocks' ~f:(fun b -> (b.idx, b))) in
   Cfg.{
     (* Exported functions have names, non-exported don't *)
     exported = Option.is_some funcinst.name;
@@ -254,8 +255,15 @@ let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
     return_types = snd funcinst.typ;
     (* Types of the locals *)
     local_types = funcinst.code.locals;
-    (*The basic blocks *)
-    basic_blocks = IntMap.of_alist_exn (List.map actual_blocks' ~f:(fun b -> (b.idx, b)));
+    (* The basic blocks *)
+    basic_blocks = basic_blocks;
+    (* All the instructions *)
+    instructions = IntMap.fold basic_blocks ~init:IntMap.empty ~f:(fun ~key:_ ~data:block acc ->
+        match block.content with
+        | Control i -> IntMap.add_exn acc ~key:i.label ~data:(Instr.Control i)
+        | Data d -> List.fold_left d ~init:acc ~f:(fun acc i ->
+            IntMap.add_exn acc ~key:i.label ~data:(Instr.Data i))
+        | ControlMerge -> acc);
     (* The forward edges *)
     edges = IntMap.of_alist_multi (List.map actual_edges' ~f:(fun (src, dst, data) -> (src, (dst, data))));
     (* The backward edges *)

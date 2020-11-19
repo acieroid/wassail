@@ -1,5 +1,4 @@
 open Core_kernel
-open Helpers
 
 module Use = struct
   module T = struct
@@ -53,10 +52,16 @@ module UseDefChains = struct
   let empty : t = Use.Map.empty
 
   (** Add an element to the use-def map *)
-  let add (m : t) (use : Use.t) (def : Def.t) =
+  let add (m : t) (use : Use.t) (def : Def.t) : t =
     match Use.Map.add m ~key:use ~data:def with
     | `Duplicate -> failwith (Printf.sprintf "Cannot have more than one definition for a use in use-def chains, when adding %s ->%s to %s" (Use.to_string use) (Def.to_string def) (to_string m))
     | `Ok r -> r
+
+  (** Gets an element from the use-def map *)
+  let get (m : t) (use : Use.t) : Def.t =
+    match Use.Map.find m use with
+    | Some def -> def
+    | None -> failwith "use-def lookup did not find a definition for a use"
 end
 
 (** Return the list of variables defined by an instruction *)
@@ -187,16 +192,9 @@ let make (cfg : Spec_inference.state Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.M
               | None -> failwith (Printf.sprintf "Use-def chain incorrect: could not find def of variable %s" (Var.to_string var))))) in
   (defs, uses, udchains)
 
-module UseDefTest = struct
-  let analyze_intra =
-    Analysis_helpers.mk_intra
-      (fun _ _ -> IntMap.empty)
-      (fun _ _ cfg ->
-         let _, _, ud = make cfg in ud)
-
-  let%test "simplest ud chain" =
-    Instr.reset_counter ();
-    let module_ = Wasm_module.of_string "(module
+let%test "simplest ud chain" =
+  Instr.reset_counter ();
+  let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     i32.const 0 ;; Instr 0
@@ -205,15 +203,16 @@ module UseDefTest = struct
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-    let actual = IntMap.find_exn (analyze_intra module_ [0]) 0 in
-    let var n = Var.Const (Prim_value.of_int n) in
-    let expected = Use.Map.of_alist_exn [(Use.Instruction (2, var 0), Def.Instruction (0, var 0));
-                                         (Use.Instruction (2, var 1), Def.Instruction (1, var 1))] in
-    UseDefChains.equal actual expected
+  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let _, _, actual = make cfg in
+  let var n = Var.Const (Prim_value.of_int n) in
+  let expected = Use.Map.of_alist_exn [(Use.Instruction (2, var 0), Def.Instruction (0, var 0));
+                                       (Use.Instruction (2, var 1), Def.Instruction (1, var 1))] in
+  UseDefChains.equal actual expected
 
-  let%test "ud-chain with locals" =
-    Instr.reset_counter ();
-    let module_ = Wasm_module.of_string "(module
+let%test "ud-chain with locals" =
+  Instr.reset_counter ();
+  let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32 i32) (result i32)))
   (func (;test;) (type 0) (param i32 i32) (result i32)
     local.get 0 ;; Instr 0
@@ -222,10 +221,11 @@ module UseDefTest = struct
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-    let actual = IntMap.find_exn (analyze_intra module_ [0]) 0 in
-    let expected = Use.Map.of_alist_exn [(Use.Instruction (0, Var.Local 0), Def.Entry (Var.Local 0));
-                                         (Use.Instruction (1, Var.Local 1), Def.Entry (Var.Local 1));
-                                         (Use.Instruction (2, Var.Local 0), Def.Entry (Var.Local 0));
-                                         (Use.Instruction (2, Var.Local 1), Def.Entry (Var.Local 1))] in
-    UseDefChains.equal actual expected
-end
+  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let _, _, actual = make cfg in
+  let expected = Use.Map.of_alist_exn [(Use.Instruction (0, Var.Local 0), Def.Entry (Var.Local 0));
+                                       (Use.Instruction (1, Var.Local 1), Def.Entry (Var.Local 1));
+                                       (Use.Instruction (2, Var.Local 0), Def.Entry (Var.Local 0));
+                                       (Use.Instruction (2, Var.Local 1), Def.Entry (Var.Local 1))] in
+  UseDefChains.equal actual expected
+
