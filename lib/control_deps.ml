@@ -1,71 +1,46 @@
 open Core_kernel
 open Helpers
 
+(** A predicate is represented as the variable used in the predicate as well as the label of the control instruction using it *)
+module Pred = struct
+  module T = struct
+    type t = Var.t * Instr.label
+    [@@deriving sexp, compare, equal]
+  end
+  include T
+  module Set = Set.Make(T)
+end
+
+
 (** Algorithm for control dependencies, adapted from https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/ProgramSlicing.pdf *)
-let control_dep (root : Dominance.domtree) (is_immediate_post_dom : Dominance.domtree -> Var.t -> bool) : (Var.t * Var.t) list =
-  let push (tree : Dominance.domtree) (preds : Var.t list) : Var.t list = match tree with
-    | Branch (_, p,_) -> p :: preds
+let control_dep (root : Dominance.domtree) (is_immediate_post_dom : Dominance.domtree -> Var.t -> bool) : (Var.t * Pred.t) list =
+  let push (tree : Dominance.domtree) (preds : Pred.t list) : Pred.t list = match tree with
+    | Branch (b, p,_) -> begin match b.content with
+        | Control i -> (p, i.label) :: preds
+        | _ -> failwith "control_dep: pushing a non-control block predicate"
+      end
     | Jump (_, _) -> preds in
   (* Creates the edges from a given block, where each edge links a defined variabl to a control variable it depends on *)
-  let link (block : Spec_inference.state Basic_block.t) (pred : Var.t) : (Var.t * Var.t) list =
-    (* TODO: extract defined in Spec_inference.defined, this is a useful construct that we may need somewhere else *)
+  let link (block : Spec_inference.state Basic_block.t) (pred : Pred.t) : (Var.t * Pred.t) list =
     let defined = match block.content with
       | ControlMerge ->
-        let defined_vstack = List.filter_opt (List.map2_exn
-                                                block.annotation_before.vstack
-                                                block.annotation_after.vstack
-                                                ~f:(fun v1 v2 -> if Var.equal v1 v2 then None else Some v2)) in
-        let defined_local =  List.filter_opt (List.map2_exn
-                                                block.annotation_before.locals
-                                                block.annotation_after.locals
-                                                ~f:(fun v1 v2 -> if Var.equal v1 v2 then None else Some v2)) in
-        let defined_globals = List.filter_opt (List.map2_exn
-                                                 block.annotation_before.globals
-                                                 block.annotation_after.globals
-                                                 ~f:(fun v1 v2 -> if Var.equal v1 v2 then None else Some v2)) in
-        (* TODO: memory
-           let defined_mem = List.filter_opt (List.map2_exn
-                                       block.annotation_before.memory
-                                       block.annotation_after.memory
-                                       ~f:(fun v1 v2 -> if Var.equal v1 v2 then None else Some v2)) in *)
-        defined_vstack @ defined_local @ defined_globals
-      | Control instr ->
-        let n_top_of_stack (n : int) : Var.t list = List.take instr.annotation_after.vstack n in
-        begin match instr.instr with
-          | Call ((arity_out, _), _) -> n_top_of_stack arity_out
-          | CallIndirect ((arity_out, _), _) -> n_top_of_stack arity_out
-          | Block _ | Loop _ | If _ | Br _ | BrIf _ | BrTable _ | Return | Unreachable -> []
-        end
+        List.map (Spec_inference.extract_different_vars block.annotation_before block.annotation_after) ~f:snd
+      | Control instr -> Use_def.instr_def (Instr.Control instr)
       | Data instrs -> List.fold_left instrs ~init:[] ~f:(fun acc instr ->
-          let to_add =
-            let n_top_of_stack (n : int) : Var.t list = List.take instr.annotation_after.vstack n in
-            match instr.instr with
-          | Nop | Drop | MemoryGrow -> []
-          | Select | MemorySize | Const _ | Unary _ | Binary _
-          | Compare _ | Test _ | Convert _ -> n_top_of_stack 1
-          | LocalGet _ | GlobalGet _ -> [] (* these actually don't define new variables *)
-          | LocalSet l | LocalTee l -> [List.nth_exn instr.annotation_after.locals l]
-          | GlobalSet g -> [List.nth_exn instr.annotation_after.globals g]
-          | Load _ -> n_top_of_stack 1
-          | Store {offset; _} ->
-            let addr = List.hd_exn instr.annotation_before.vstack in
-            [match Var.OffsetMap.find instr.annotation_after.memory (addr, offset) with
-             | Some v -> v
-             | None -> failwith (Printf.sprintf "Wrong memory annotation while looking for %s+%d in memory" (Var.to_string addr) offset)]
-        in to_add @ acc) in
+          (Use_def.instr_def (Instr.Data instr)) @ acc) in
     List.map defined ~f:(fun d -> (d, pred)) in
   (* vchildren simply recurses down the tree *)
-  let rec vchildren (blocks : Dominance.domtree list) (preds : Var.t list) : (Var.t * Var.t) list = match blocks with
+  let rec vchildren (blocks : Dominance.domtree list) (preds : Pred.t list) : (Var.t * Pred.t) list = match blocks with
     | [] -> []
     | (n :: ns) -> vnode n preds @ vchildren ns preds
   (* vnode visits a tree node *)
-  and vnode (tree : Dominance.domtree) (preds : Var.t list) : (Var.t * Var.t) list =
+  and vnode (tree : Dominance.domtree) (preds : Pred.t list) : (Var.t * Pred.t) list =
     (* Extract the block and its children from the root of the tree *)
     let (block, children) = match tree with
     | Branch (block, _, children) -> (block, children)
-    | Jump (block, children) -> (block, children)  in
+    | Jump (block, children) -> (block, children) in
     match preds with
-    | h :: t when is_immediate_post_dom tree h ->
+    | h :: t when is_immediate_post_dom tree (fst h) ->
       vnode tree t
     | [] -> vchildren children (push tree preds)
     | h :: _ ->
@@ -116,7 +91,7 @@ let%test "extract_preds when there are preds" =
   Var.Map.equal (Int.(=)) actual expected
 
 (** Computes the control dependencies of a CFG (as a map from variables to the control variables they depend upon) *)
-let cdeps (cfg : Spec_inference.state Cfg.t) : Var.Set.t Var.Map.t =
+let cdeps (cfg : Spec_inference.state Cfg.t) : Pred.Set.t Var.Map.t =
   let pdom = Dominance.cfg_post_dominator cfg in
   let preds : int Var.Map.t = extract_preds cfg in
   let deps = control_dep (Dominance.cfg_dominator cfg) (fun tree pred ->
@@ -125,7 +100,7 @@ let cdeps (cfg : Spec_inference.state Cfg.t) : Var.Set.t Var.Map.t =
       let children : IntSet.t = Dominance.Tree.children pdom tree_idx in
       let children_idx : int = match Var.Map.find preds pred with Some idx -> idx | None -> failwith "cdeps failed when accessing children index" in
       IntSet.mem children children_idx) in
-  Var.Map.map (Var.Map.of_alist_multi deps) ~f:Var.Set.of_list
+  Var.Map.map (Var.Map.of_alist_multi deps) ~f:Pred.Set.of_list
 
 let%test "control dependencies computation" =
   let module_ = Wasm_module.of_string "(module
@@ -150,7 +125,7 @@ let%test "control dependencies computation" =
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
-  let actual = cdeps cfg in
+  let actual = Var.Map.map (cdeps cfg) ~f:(fun p -> Var.Set.of_list (List.map (Pred.Set.to_list p) ~f:fst)) in
   let var n = Var.Const (Prim_value.of_int n) in
   let vars n = Var.Set.of_list [var n] in
   let expected = Var.Map.of_alist_exn [(var 2, vars 1); (var 3, vars 1); (var 4, vars 3); (var 5, vars 1)] in

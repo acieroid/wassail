@@ -59,9 +59,6 @@ module UseDefChains = struct
     | `Ok r -> r
 end
 
-type t = UseDefChains.t
-[@@deriving compare, equal]
-
 (** Return the list of variables defined by an instruction *)
 let instr_def (instr : Spec_inference.state Instr.t) : Var.t list = match instr with
   | Instr.Data i ->
@@ -121,8 +118,11 @@ let instr_use (instr : Spec_inference.state Instr.t) : Var.t list = match instr 
       | Br _ | Return | Unreachable -> []
     end
 
-(** Construct a data dependence from the CFG of a function *)
-let make (cfg : Spec_inference.state Cfg.t) : t =
+(** Compute data dependence from the CFG of a function, and return the following elements:
+    1. A map from variables to their definitions
+    2. A map from variables to their uses
+    3. A map of use-def chains *)
+let make (cfg : Spec_inference.state Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefChains.t) =
   (* To construct the use-def map, we walk over each instruction, and collect uses and defines.
      There is exactly one define per variable.
      e.g., [] i32.const 0 [x] defines x
@@ -180,17 +180,19 @@ let make (cfg : Spec_inference.state Cfg.t) : t =
         (defs, uses)) in
   (* From this, it is a matter of folding over use to construct the DefUseMap:
      Given a use of v at instruction lab, add key:(lab, v) data:(lookup defs v) *)
-  Var.Map.fold uses ~init:UseDefChains.empty ~f:(fun ~key:var ~data:uses map ->
+  let udchains = Var.Map.fold uses ~init:UseDefChains.empty ~f:(fun ~key:var ~data:uses map ->
       Use.Set.fold uses ~init:map ~f:(fun map use ->
           UseDefChains.add map use (match Var.Map.find defs var with
               | Some v -> v
-              | None -> failwith (Printf.sprintf "Use-def chain incorrect: could not find def of variable %s" (Var.to_string var)))))
+              | None -> failwith (Printf.sprintf "Use-def chain incorrect: could not find def of variable %s" (Var.to_string var))))) in
+  (defs, uses, udchains)
 
 module UseDefTest = struct
   let analyze_intra =
     Analysis_helpers.mk_intra
       (fun _ _ -> IntMap.empty)
-      (fun _ _ cfg -> make cfg)
+      (fun _ _ cfg ->
+         let _, _, ud = make cfg in ud)
 
   let%test "simplest ud chain" =
     Instr.reset_counter ();
