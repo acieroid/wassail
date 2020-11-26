@@ -9,7 +9,6 @@
        for _, instr' in cdeps(use.var):
          add instr to W
 *)
-
 open Core_kernel
 open Helpers
 
@@ -69,6 +68,12 @@ let%test "simple slicing - first slicing criterion, only const" =
   let expected = IntSet.of_list [0; 1; 2] in
   IntSet.equal actual expected
 
+(* This test is failing because we need access to local l0.
+    It makes sense because it is not local.get 0 that defines l0 (it is defined at the entry point of the code.
+    But maybe it would make more sense if use-defs would connect uses of locals to the most recent local.get? 
+    Or that would be part of the slicing algorithm: 
+      - if the definition is a local l, then add the most recent instruction (walk backwards in the CFG to find it) that is a local.get l
+*)
 let%test "simple slicing - second slicing criterion, with locals" =
   Instr.reset_counter ();
   let module_ = Wasm_module.of_string "(module
@@ -103,11 +108,35 @@ let%test "slicing with block and br_if" =
     end
     local.get 0)   ;; Instr 5
   (table (;0;) 1 1 funcref)
+
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
   let actual = slicing cfg 3 in
   let expected = IntSet.of_list [0; 1; 2; 3] in
+  Printf.printf "slice: %s\n" (IntSet.to_string actual);
+  IntSet.equal actual expected
+
+let%test "slicing with merge blocks" =
+  Instr.reset_counter ();
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    i32.const 0     ;; Instr 0
+    if (result i32) ;; Instr 1
+      i32.const 1   ;; Instr 2
+    else
+      i32.const 2   ;; Instr 3
+    end
+    i32.const 3     ;; Instr 4
+    i32.add)        ;; Instr 5
+  (table (;0;) 1 1 funcref)
+
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let actual = slicing cfg 5 in
+  let expected = IntSet.of_list [0; 1; 2; 3; 4; 5] in
   Printf.printf "slice: %s\n" (IntSet.to_string actual);
   IntSet.equal actual expected
 
