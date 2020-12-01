@@ -114,7 +114,7 @@ let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (inst
 
 (** Converts an instruction to its string representation *)
 and to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : 'a t) (annot_to_string : 'a -> string): string =
-  Printf.sprintf "%s%s" (String.make i ' ')
+  Printf.sprintf "%d:%s%s" (label instr) (String.make i ' ')
     (match instr with
      | Data instr -> data_to_string instr.instr
      | Control instr -> control_to_string instr.instr  annot_to_string ~sep:sep ~indent:i)

@@ -56,6 +56,14 @@ module State = struct
             None) in
     (fvstack s1.vstack s2.vstack) @ (f s1.locals s2.locals) @ (f s1.globals s2.globals) @ (fmap s1.memory s2.memory)
 
+  (** Extract vars that have been redefined in a merge block *)
+  let new_merge_variables (cfg : state Cfg.t) (merge_block : state Basic_block.t) : (Var.t * Var.t) list =
+    (* The predecessors of merge_block *)
+    let preds = List.map ~f:fst (Cfg.predecessors cfg merge_block.idx) in
+    List.fold_left preds ~init:[] ~f:(fun acc pred_idx ->
+        let pred_block = Cfg.find_block_exn cfg pred_idx in
+        (extract_different_vars pred_block.annotation_after merge_block.annotation_after) @ acc)
+
   let ret (i : state Instr.t) : Var.t =
     List.hd_exn (Instr.annotation_after i).vstack
 end

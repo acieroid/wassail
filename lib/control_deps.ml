@@ -13,7 +13,7 @@ end
 
 
 (** Algorithm for control dependencies, adapted from https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/ProgramSlicing.pdf *)
-let control_dep (root : Dominance.domtree) (is_immediate_post_dom : Dominance.domtree -> Var.t -> bool) : (Var.t * Pred.t) list =
+let control_dep (cfg : Spec_inference.state Cfg.t) (root : Dominance.domtree) (is_immediate_post_dom : Dominance.domtree -> Var.t -> bool) : (Var.t * Pred.t) list =
   let push (tree : Dominance.domtree) (preds : Pred.t list) : Pred.t list = match tree with
     | Branch (b, p,_) -> begin match b.content with
         | Control i -> (p, i.label) :: preds
@@ -24,7 +24,7 @@ let control_dep (root : Dominance.domtree) (is_immediate_post_dom : Dominance.do
   let link (block : Spec_inference.state Basic_block.t) (pred : Pred.t) : (Var.t * Pred.t) list =
     let defined = match block.content with
       | ControlMerge ->
-        List.map (Spec_inference.extract_different_vars block.annotation_before block.annotation_after) ~f:snd
+        List.map (Spec_inference.new_merge_variables cfg block) ~f:snd
       | Control instr -> Use_def.instr_def (Instr.Control instr)
       | Data instrs -> List.fold_left instrs ~init:[] ~f:(fun acc instr ->
           (Use_def.instr_def (Instr.Data instr)) @ acc) in
@@ -94,7 +94,7 @@ let%test "extract_preds when there are preds" =
 let make (cfg : Spec_inference.state Cfg.t) : Pred.Set.t Var.Map.t =
   let pdom = Dominance.cfg_post_dominator cfg in
   let preds : int Var.Map.t = extract_preds cfg in
-  let deps = control_dep (Dominance.cfg_dominator cfg) (fun tree pred ->
+  let deps = control_dep cfg (Dominance.cfg_dominator cfg) (fun tree pred ->
       (* Check if tree is the post-dominator of pred: look in pdom if (the node that contains) pred is a child of tree *)
       let tree_idx : int = match tree with Branch (b, _, _) | Jump (b, _) -> b.idx in
       let children : IntSet.t = Dominance.Tree.children pdom tree_idx in

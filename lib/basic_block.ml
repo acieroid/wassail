@@ -35,9 +35,9 @@ let to_dot (b : 'a t) (annot_to_string : 'a -> string) : string =
       (String.concat ~sep:"\\l"
          (List.map instrs
             ~f:(fun instr ->
-                Printf.sprintf "%s ;; %s → %s" (Instr.data_to_string instr.instr) (annot_to_string instr.annotation_before) (annot_to_string instr.annotation_after))))
+                Printf.sprintf "%d:%s ;; %s → %s" instr.label (Instr.data_to_string instr.instr) (annot_to_string instr.annotation_before) (annot_to_string instr.annotation_after))))
   | Control instr ->
-    Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d:\\l\\l%s ;; %s → %s\"];" b.idx b.idx (Instr.control_to_short_string instr.instr) (annot_to_string instr.annotation_before) (annot_to_string instr.annotation_after)
+    Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d:\\l\\l%d:%s ;; %s → %s\"];" b.idx b.idx instr.label (Instr.control_to_short_string instr.instr) (annot_to_string instr.annotation_before) (annot_to_string instr.annotation_after)
   | ControlMerge ->
     Printf.sprintf "block%d [shape=diamond, label=\"%d\"]" b.idx b.idx
 

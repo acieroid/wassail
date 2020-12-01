@@ -1,52 +1,74 @@
-(* Perform backward slicing as follows:
-   Given an instruction as the slicing criterion (we can derive variable uses from instructions),
-   perform the following fixpoint algorithm, starting with W = instr
-     let instr = pop(W)
-     add instr to the current slice
-     for use in instr_uses(instr):
-       for def in usedef(use):
-         if def contains an istruction, add def.instr to W
-       for _, instr' in cdeps(use.var):
-         add instr to W
-*)
 open Core_kernel
-open Helpers
 
-module VarInstr = struct
+module SlicePart = struct
   module T = struct
-    type t = Var.t * Instr.label
+    type t =
+      | Instruction of Instr.label
+      | Merge of int
     [@@deriving sexp, compare, equal]
+    let to_string (t : t) : string = match t with
+      | Instruction l -> Printf.sprintf "instr(%d)" l
+      | Merge idx -> Printf.sprintf "merge(%d)" idx
   end
   include T
-  module Set = Set.Make(T)
+  module Set = struct
+    include Set.Make(T)
+    let to_string (s : t) : string = String.concat ~sep:"," (List.map (to_list s) ~f:T.to_string)
+  end
 end
-
 
 (** Performs backwards slicing on `cfg`, using the slicing criterion
    `criterion`, encoded as an instruction index. Returns the set
    of instructions that are part of the slice, as a list of instruction
     indices. *)
-let slicing (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : IntSet.t =
+let slicing (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : SlicePart.Set.t =
   let control_dependencies = Control_deps.make cfg in
   let (_, _, data_dependencies) = Use_def.make cfg in
-  let rec loop (worklist : IntSet.t) (slice : IntSet.t) =
-    match IntSet.choose worklist with
+  let rec loop (worklist : SlicePart.Set.t) (slice : SlicePart.Set.t) : SlicePart.Set.t =
+    (* Perform backward slicing as follows:
+       Given an instruction as the slicing criterion (we can derive variable uses from instructions),
+       perform the following fixpoint algorithm, starting with W = instr
+         let instr = pop(W)
+         add instr to the current slice
+         for use in instr_uses(instr):
+           for def in usedef(use):
+             if def contains an istruction, add def.instr to W
+           for _, instr' in cdeps(use.var):
+             add instr to W *)
+    match SlicePart.Set.choose worklist with
     | None -> (* worklist is empty *)
       slice
-    | Some instr ->
-      let uses_of_instr = Use_def.instr_use (Cfg.find_instr_exn cfg instr) in
-      let worklist' = List.fold_left uses_of_instr ~init:worklist
+    | Some slicepart ->
+      let uses = match slicepart with
+        | Instruction instr -> Use_def.instr_use (Cfg.find_instr_exn cfg instr)
+        | Merge block_idx ->
+          (* to find uses of a merge block, we look at variables that are
+             redefined: all such initial variables are then considered to be
+             used *)
+          let vars = Spec_inference.new_merge_variables cfg (Cfg.find_block_exn cfg block_idx) in
+          List.map vars ~f:fst in
+      let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
-              let def = Use_def.UseDefChains.get data_dependencies (Use_def.Use.Instruction (instr, use)) in
+              let def = Use_def.UseDefChains.get data_dependencies (match slicepart with
+                  | Instruction instr -> Use_def.Use.Instruction (instr, use)
+                  | Merge blockidx -> Use_def.Use.Merge (blockidx, use)) in
               let to_add_from_def = match def with
-                | Use_def.Def.Instruction (instr', _) -> IntSet.singleton instr'
-                | _ -> IntSet.empty in
-              let preds = Control_deps.find control_dependencies use in
+                | Use_def.Def.Instruction (instr', _) -> SlicePart.Set.singleton (Instruction instr')
+                | Use_def.Def.Merge (blockidx, _) -> SlicePart.Set.singleton (Merge blockidx)
+                | Use_def.Def.Entry _ -> SlicePart.Set.empty in
+              let preds = Control_deps.find control_dependencies use in (* the control dependencies for the current use *)
               Control_deps.Pred.Set.fold preds
-                ~init:(IntSet.union w to_add_from_def)
-                ~f:(fun w (_, instr') -> IntSet.add w instr')) in
-      loop (IntSet.remove worklist' instr) (IntSet.add slice instr) in
-  loop (IntSet.singleton criterion) IntSet.empty
+                ~init:(SlicePart.Set.union w to_add_from_def)
+                ~f:(fun w (_, instr') ->
+                    (* TODO: can't merge block also have control dependencies? Maybe not relevant, as they will have data dependencies on what they redefine *)
+                    SlicePart.Set.add w (Instruction instr'))) in
+      loop (SlicePart.Set.remove worklist' slicepart) (SlicePart.Set.add slice slicepart) in
+  loop (SlicePart.Set.singleton (Instruction criterion)) SlicePart.Set.empty
+
+(** Performs backwards slicing on `cfg`, relying on `slicing` defined above.
+    Returns the slice as a modified CFG *)
+let slice (_cfg : Spec_inference.state Cfg.t) (_criterion : Instr.label) : Spec_inference.state Cfg.t =
+  failwith "TODO"
 
 let%test "simple slicing - first slicing criterion, only const" =
   Instr.reset_counter ();
@@ -65,15 +87,9 @@ let%test "simple slicing - first slicing criterion, only const" =
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
   let actual = slicing cfg 2 in
-  let expected = IntSet.of_list [0; 1; 2] in
-  IntSet.equal actual expected
+  let expected = SlicePart.Set.of_list [Instruction 0; Instruction 1; Instruction 2] in
+  SlicePart.Set.equal actual expected
 
-(* This test is failing because we need access to local l0.
-    It makes sense because it is not local.get 0 that defines l0 (it is defined at the entry point of the code.
-    But maybe it would make more sense if use-defs would connect uses of locals to the most recent local.get? 
-    Or that would be part of the slicing algorithm: 
-      - if the definition is a local l, then add the most recent instruction (walk backwards in the CFG to find it) that is a local.get l
-*)
 let%test "simple slicing - second slicing criterion, with locals" =
   Instr.reset_counter ();
   let module_ = Wasm_module.of_string "(module
@@ -91,9 +107,11 @@ let%test "simple slicing - second slicing criterion, with locals" =
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
   let actual = slicing cfg 6 in
-  let expected = IntSet.of_list [4; 5; 6] in
-  Printf.printf "slice: %s\n" (IntSet.to_string actual);
-  IntSet.equal actual expected
+  (* Why is Instruction 4 not part of the slice?
+     Because this is not the instruction that *defines* l0, l0 is defined at the entry point of the function.
+     Instead, what will happen is that when we see that we need l0 in the slice, we can easily add a local.get 0 instruction to the slice, not matter what the input program was *)
+  let expected = SlicePart.Set.of_list [Instruction 5; Instruction 6] in
+  SlicePart.Set.equal actual expected
 
 let%test "slicing with block and br_if" =
   Instr.reset_counter ();
@@ -113,9 +131,8 @@ let%test "slicing with block and br_if" =
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
   let actual = slicing cfg 3 in
-  let expected = IntSet.of_list [0; 1; 2; 3] in
-  Printf.printf "slice: %s\n" (IntSet.to_string actual);
-  IntSet.equal actual expected
+  let expected = SlicePart.Set.of_list [Instruction 0; Instruction 1; Instruction 2; Instruction 3] in
+  SlicePart.Set.equal actual expected
 
 let%test "slicing with merge blocks" =
   Instr.reset_counter ();
@@ -128,17 +145,22 @@ let%test "slicing with merge blocks" =
     else
       i32.const 2   ;; Instr 3
     end
-    i32.const 3     ;; Instr 4
-    i32.add)        ;; Instr 5
+    ;; Merge block 4 here
+    ;; ----
+    i32.const 4     ;; Instr 4
+    i32.const 5     ;; Instr 5
+    i32.add         ;; Instr 6
+    drop            ;; Instr 7
+    ;; ---- this previous part should not be part of the slice
+    i32.const 3     ;; Instr 8
+    i32.add)        ;; Instr 9
   (table (;0;) 1 1 funcref)
-
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
-  let actual = slicing cfg 5 in
-  let expected = IntSet.of_list [0; 1; 2; 3; 4; 5] in
-  Printf.printf "slice: %s\n" (IntSet.to_string actual);
-  IntSet.equal actual expected
+  let actual = slicing cfg 9 in
+  let expected = SlicePart.Set.of_list [Instruction 0; Instruction 1; Instruction 2; Instruction 3; Merge 4; Instruction 8; Instruction 9] in
+  SlicePart.Set.equal actual expected
 
 (* 
 Challenges:

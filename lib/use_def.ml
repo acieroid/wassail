@@ -4,7 +4,7 @@ module Use = struct
   module T = struct
   (** Uses can either occur from:
       - instruction: they are represented by the index of the instruction that uses the variable, as well as the variable name
-      - merge blocks: they are represented by the index of the merge bloc, as well as the variable name *)
+      - merge blocks: they are represented by the index of the merge block, as well as the variable name *)
     type t =
       | Instruction of int * Var.t
       | Merge of int * Var.t
@@ -29,6 +29,7 @@ module Def = struct
       | Instruction of int * Var.t (* Label of the instruction and variable defined *)
       | Merge of int * Var.t (* Label of the merge node and variable defined *)
       | Entry of Var.t (* Only the variable defined (because use-def is intraprocedural, we know the function) *)
+    (* TODO: constant variables can also be considered as not being defined in an instruction *) 
     [@@deriving equal, compare]
 
     let to_string (def : t) : string = match def with
@@ -160,11 +161,16 @@ let make (cfg : Spec_inference.state Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.M
   let (defs, uses) = List.fold_left (Cfg.all_merge_blocks cfg)
       ~init:(defs, uses)
       ~f:(fun (defs, uses) block ->
-          List.fold_left (Spec_inference.extract_different_vars block.annotation_before block.annotation_after)
+          List.fold_left (Spec_inference.new_merge_variables cfg block)
             ~init:(defs, uses)
             ~f:(fun (defs, uses) (old_var, new_var) ->
                 (begin match Var.Map.add defs ~key:new_var ~data:(Def.Merge (block.idx, new_var)) with
-                 | `Duplicate -> failwith "use_def: duplicate define in merge block"
+                   | `Duplicate ->
+                     (* Duplicate definitions are allowed in merge blocks, e.g.,
+                        on one branch, var i1 is on the top of the stack
+                        on another branch, var i2 is on the top of the stack
+                        as new merge variable, we get m1, which is return as (i1, m1), (i2, m1) by `new_merge_variables` *)
+                     defs
                  | `Ok r -> r
                  end,
                  Var.Map.update uses old_var ~f:(function
@@ -207,7 +213,8 @@ let%test "simplest ud chain" =
   let _, _, actual = make cfg in
   let var n = Var.Const (Prim_value.of_int n) in
   let expected = Use.Map.of_alist_exn [(Use.Instruction (2, var 0), Def.Instruction (0, var 0));
-                                       (Use.Instruction (2, var 1), Def.Instruction (1, var 1))] in
+                                       (Use.Instruction (2, var 1), Def.Instruction (1, var 1));
+                                       (Use.Merge (1, Var.Var 2), Def.Instruction (2, Var.Var 2))] in
   UseDefChains.equal actual expected
 
 let%test "ud-chain with locals" =
@@ -226,6 +233,35 @@ let%test "ud-chain with locals" =
   let expected = Use.Map.of_alist_exn [(Use.Instruction (0, Var.Local 0), Def.Entry (Var.Local 0));
                                        (Use.Instruction (1, Var.Local 1), Def.Entry (Var.Local 1));
                                        (Use.Instruction (2, Var.Local 0), Def.Entry (Var.Local 0));
-                                       (Use.Instruction (2, Var.Local 1), Def.Entry (Var.Local 1))] in
+                                       (Use.Instruction (2, Var.Local 1), Def.Entry (Var.Local 1));
+                                       (Use.Merge (1, Var.Var 2), Def.Instruction (2, Var.Var 2))] in
   UseDefChains.equal actual expected
 
+let%test "use-def with merge blocks" =
+  Instr.reset_counter ();
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    i32.const 0     ;; Instr 0
+    if (result i32) ;; Instr 3
+      i32.const 1   ;; Instr 1
+    else
+      i32.const 2   ;; Instr 2
+    end
+    ;; At this point we have a merge block, merging var 1 and var 2 into m4_1
+    i32.const 3     ;; Instr 4
+    i32.add)        ;; Instr 5
+    ;; Final merge block: i5 -> ret
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let _, _, actual = make cfg in
+  let var n = Var.Const (Prim_value.of_int n) in
+  let expected = Use.Map.of_alist_exn [(Use.Instruction (3, var 0), Def.Instruction (0, var 0));
+                                       (Use.Instruction (5, var 3), Def.Instruction (4, var 3));
+                                       (Use.Instruction (5, Var.Merge (4, 1)), Def.Merge (4, Var.Merge (4, 1)));
+                                       (Use.Merge (4, var 1), Def.Instruction (1, var 1));
+                                       (Use.Merge (4, var 2), Def.Instruction (2, var 2));
+                                       (Use.Merge (6, Var.Var 5), Def.Instruction(5, Var.Var 5))] in
+  UseDefChains.equal actual expected
