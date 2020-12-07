@@ -304,6 +304,28 @@ let%test "Instr.add_annotation block" =
   let eq = (fun (n1, c1) (n2, c2) -> n1 = n2 && Char.equal c1 c2) in
   equal eq (add_annotation b annotation_map) b_annotated
 
+let rec clear_annotation (i : 'a t) : unit t =
+  match i with
+  | Data d -> Data (clear_annotation_data d)
+  | Control c -> Control (clear_annotation_control c)
+and clear_annotation_data (i : (data, 'a) labelled) : (data, unit) labelled =
+  { i with annotation_before = (); annotation_after = () }
+and clear_annotation_control (i : ('a control, 'a) labelled) : (unit control, unit) labelled =
+  { i with annotation_before = (); annotation_after = ();
+           instr = match i.instr with
+             | Block (arity, instrs) -> Block (arity, List.map instrs ~f:clear_annotation)
+             | Loop (arity, instrs) -> Loop (arity, List.map instrs ~f:clear_annotation)
+             | If (arity, then_, else_) -> If (arity,
+                                               List.map then_ ~f:clear_annotation,
+                                               List.map else_ ~f:clear_annotation)
+             | Call (arity, f) -> Call (arity, f)
+             | CallIndirect (arity, f) -> CallIndirect (arity, f)
+             | Br n -> Br n
+             | BrIf n -> BrIf n
+             | BrTable (l, n) -> BrTable (l, n)
+             | Return -> Return
+             | Unreachable -> Unreachable }
+
 let annotation_before (i : 'a t) : 'a =
   match i with
   | Data d -> d.annotation_before

@@ -80,11 +80,11 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
     let analyze_block (block_idx : int) : Transfer.state * result =
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
-      let predecessors = Cfg.predecessors cfg block_idx in
+      let incoming = Cfg.incoming_edges cfg block_idx in
       (* in_state is the join of all the the out_state of the predecessors.
          Special case: if the out_state of a predecessor is not a simple one, that means we are the target of a break.
          If this is the case, we pick the right branch, according to the edge data *)
-      let pred_states = (List.map predecessors ~f:(fun (idx, d) -> match (snd (IntMap.find_exn !block_data idx), d) with
+      let pred_states = (List.map incoming ~f:(fun (idx, d) -> match (snd (IntMap.find_exn !block_data idx), d) with
           | Simple s, _ -> (idx, s)
           | Branch (t, _), Some true -> (idx, t)
           | Branch (_, f), Some false -> (idx, f)

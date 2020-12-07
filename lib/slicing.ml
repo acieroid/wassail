@@ -1,4 +1,5 @@
 open Core_kernel
+open Helpers
 
 module SlicePart = struct
   module T = struct
@@ -64,11 +65,6 @@ let slicing (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : Slice
                     SlicePart.Set.add w (Instruction instr'))) in
       loop (SlicePart.Set.remove worklist' slicepart) (SlicePart.Set.add slice slicepart) in
   loop (SlicePart.Set.singleton (Instruction criterion)) SlicePart.Set.empty
-
-(** Performs backwards slicing on `cfg`, relying on `slicing` defined above.
-    Returns the slice as a modified CFG *)
-let slice (_cfg : Spec_inference.state Cfg.t) (_criterion : Instr.label) : Spec_inference.state Cfg.t =
-  failwith "TODO"
 
 let%test "simple slicing - first slicing criterion, only const" =
   Instr.reset_counter ();
@@ -162,10 +158,156 @@ let%test "slicing with merge blocks" =
   let expected = SlicePart.Set.of_list [Instruction 0; Instruction 1; Instruction 2; Instruction 3; Merge 4; Instruction 8; Instruction 9] in
   SlicePart.Set.equal actual expected
 
-(* 
-Challenges:
-  - should we include breaks as part of the slice? It seems so -> need control deps that contain instructions
-  - how to deal with blocks as part of the slice? -> work on a block-per-block basis?
-  - how to construct slices that adhere to the stack convention? -> should be doable to add dummy drop or pushes to fill in the blank
+(** Performs backwards slicing on `cfg`, relying on `slicing` defined above.
+    Returns the slice as a modified CFG *)
+let slice (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : unit Cfg.t =
+  let sliceparts = slicing cfg criterion in
+  let slice_instructions = IntSet.of_list (List.filter_map (SlicePart.Set.to_list sliceparts) ~f:(function
+      | Instruction i -> Some i
+      | _ -> None)) in
+  let slice_merge_blocks = IntSet.of_list (List.filter_map (SlicePart.Set.to_list sliceparts) ~f:(function
+      | Merge block_idx -> Some block_idx
+      | _ -> None)) in
+  let instructions = IntMap.map (IntMap.filteri cfg.instructions ~f:(fun ~key:idx ~data:_ -> IntSet.mem slice_instructions idx)) ~f:Instr.clear_annotation in
+  let (basic_blocks, edges, back_edges) =
+    IntMap.fold cfg.basic_blocks ~init:(IntMap.empty, cfg.edges, cfg.back_edges) ~f:(fun ~key:block_idx ~data:block (basic_blocks, edges, back_edges) ->
+        (* Remove any annotation of the block *)
+        let block = Basic_block.clear_annotation block in
+        (* The block could be empty after slicing and not to keep,
+           EXCEPT if it is the entry block or if it is the exit block.
+        NOTE: this could be refined to remove entry/exit block only if
+           it has one successor (which becomes the new entry  block)
+           or one predecessor (which becomes the new exit block) *)
+        let keep_due_to_entry_or_exit = if block_idx = cfg.entry_block then
+            List.length (Cfg.successors cfg block_idx) > 1
+          else if block_idx = cfg.exit_block then
+            List.length (Cfg.predecessors cfg block_idx) > 1
+          else
+            false in
+        (* A block that is empty may also need to be kept if rewiring its edge
+           would introduce inconsinstency in the graph. *)
+        let keep_due_to_edges =
+          (* The only safe way to rewrite edges of a block is if either:
+             - all its incoming edges are "sequential" (i.e., are not the result of branches), or
+             - all its outgoing edges are "sequential"
+             Otherwise, this would introduces edges that would be the results of multiple conditionals *)
+          List.for_all (Cfg.outgoing_edges cfg block_idx) ~f:(function (_, None) -> true | _ -> false) ||
+          List.for_all (Cfg.incoming_edges cfg block_idx) ~f:(function (_, None) -> true | _ -> false)
+        in
+        let keep_anyway = keep_due_to_entry_or_exit || keep_due_to_edges in
+        (* The new block, if it is kept *)
+        let new_block : unit Basic_block.t option = match block.content with
+          | ControlMerge ->
+            (* Keep merge block if it is part of the slice *)
+            if keep_anyway || IntSet.mem slice_merge_blocks block.idx then
+              Some block
+            else
+              None
+          | Control i ->
+            (* Keep control block if its instruction is part of the slice *)
+            if IntSet.mem slice_instructions i.label then
+              Some block
+            else if keep_anyway then
+              (* Block needs to be kept but not its content, change it to a data block *)
+              Some { block with content = Basic_block.Data [] }
+            else
+              None
+          | Data instrs ->
+            (* Only keep instructions that are part of the slice.
+               All annotations are removed. *)
+            let instrs = List.filter_map instrs ~f:(fun instr ->
+                if IntSet.mem slice_instructions instr.label then
+                  (* Instruction is part of the slice, annotation is emptied *)
+                  Some {instr with annotation_before = (); annotation_after = () }
+                else
+                  (* INstruction is not part of the slice, drop it *)
+                  None) in
+            if keep_anyway || not (List.is_empty instrs) then
+              (* Otherwise, keep it and clear its annotation *)
+              Some { block with content = (Basic_block.Data instrs);
+                                annotation_before = (); annotation_after = () }
+            else
+              (* If there are no such instructions, don't keep the block *)
+              None
+        in
+        (* Merge two edge conditions *)
+        let merge_conds c1 c2 = match (c1, c2) with
+          | None, None -> None
+          | Some x, None | None, Some x -> Some x
+          | Some _, Some _ -> failwith "incorrect invariant in slicing" in
+        match new_block with
+        | Some block ->
+          (* Block is kept *)
+          (IntMap.add_exn basic_blocks ~key:block.idx ~data:block,
+           edges, back_edges (* Edges are kept *)
+          )
+        | None ->
+          (* Block is not kept because it is empty *)
+          (basic_blocks, (* Don't add it *)
+           (* Edges for that block need to be rewritten:
+              - for each incoming edge, merge it to each outgoing edge
+              - in case there is a branching edge, keep the branching information
+           *)
+           begin
+             let without_edges =
+               let edges' = IntMap.remove edges block_idx in (* Remove all edges starting from the current block *)
+               let srcs = IntMap.find_multi back_edges block_idx in (* Find all edges that go to this node *)
+               List.fold_left srcs ~init:edges' ~f:(fun edges (src, _) ->
+                   (* and remove them *)
+                   IntMap.update edges src ~f:(function
+                       | None -> []
+                       | Some es -> List.filter es ~f:(fun (target, _) -> target = block_idx))) in
+             let outgoing_edges = IntMap.find_multi edges block_idx in
+             let incoming_edges = IntMap.find_multi back_edges block_idx in
+             (* Connect each incoming edge to each outgoing edge *)
+             List.fold_left incoming_edges ~init:without_edges ~f:(fun edges (src, cond) ->
+                 List.fold_left outgoing_edges ~init:edges ~f:(fun edges (dst, cond') ->
+                     IntMap.add_multi edges ~key:src ~data:(dst, merge_conds cond cond')))
+         end,
+           (* Mimic what's done for edges, this time for back edges *)
+           begin
+             let without_back_edges =
+               let back_edges' = IntMap.remove back_edges block_idx in
+               let dsts = IntMap.find_multi edges block_idx in
+               List.fold_left dsts ~init:back_edges' ~f:(fun back_edges (dst, _) ->
+                   IntMap.update back_edges dst ~f:(function
+                       | None -> []
+                       | Some es -> List.filter es ~f:(fun (src, _) -> src = block_idx))) in
+             let outgoing_edges = IntMap.find_multi edges block_idx in
+             let incoming_edges = IntMap.find_multi back_edges block_idx in
+             List.fold_left incoming_edges ~init:without_back_edges ~f:(fun back_edges (src, cond) ->
+                 List.fold_left outgoing_edges ~init:back_edges ~f:(fun back_edges (dst, cond') ->
+                     IntMap.add_multi back_edges ~key:dst ~data:(src, merge_conds cond cond')))
+           end)) in
+  { cfg with basic_blocks; instructions; edges; back_edges }
 
-*)
+let%test "slicing with merge blocks" =
+  Instr.reset_counter ();
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    i32.const 0     ;; Instr 0
+    if (result i32) ;; Instr 1
+      i32.const 1   ;; Instr 2
+    else
+      i32.const 2   ;; Instr 3
+    end
+    ;; Merge block 4 here
+    ;; ----
+    i32.const 4     ;; Instr 4
+    i32.const 5     ;; Instr 5
+    i32.add         ;; Instr 6
+    drop            ;; Instr 7
+    ;; ---- this previous part should not be part of the slice
+    i32.const 3     ;; Instr 8
+    i32.add)        ;; Instr 9
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let sliced_cfg = slice cfg 9 in
+  let _annotated_sliced_cfg = Spec.Intra.analyze module_ sliced_cfg in
+  (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
+  true
+
+

@@ -1,6 +1,6 @@
 open Helpers
 
-type edge = (int * bool option) list (* TODO: change this to a set? *)
+type edges = (int * bool option) list (* TODO: change this to a set? *)
 type 'a t = {
   (* Is this function exported or not? *)
   exported: bool;
@@ -21,9 +21,9 @@ type 'a t = {
   (* All instructions contained in this CFG, indexed in a map by their label *)
   instructions : 'a Instr.t IntMap.t;
   (* The edges between basic blocks (forward direction) *)
-  edges: edge IntMap.t;
+  edges: edges IntMap.t;
   (* The edges between basic blocks (backward direction) *)
-  back_edges: edge IntMap.t;
+  back_edges: edges IntMap.t;
   (* The entry block *)
   entry_block: int;
   (* The exit block *)
@@ -57,7 +57,13 @@ val successors : 'a t -> int -> int list
 
 (** Extract the predecessors of a block in the CFG, given its index.
     Return the predecessors as a list of their indices *)
-val predecessors : 'a t -> int -> (int * bool option) list
+val predecessors : 'a t -> int -> int list
+
+(** Extract the outgoing edges of a block *)
+val outgoing_edges : 'a t -> int -> edges
+
+(** Extract the incoming edges of a block *)
+val incoming_edges : 'a t -> int -> edges
 
 (** Find the functions called in this CFG *)
 val callees : 'a t -> IntSet.t

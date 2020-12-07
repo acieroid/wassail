@@ -1,7 +1,7 @@
 open Core_kernel
 open Helpers
 
-type edge = (int * bool option) list
+type edges = (int * bool option) list
 [@@deriving sexp, compare, equal]
 
 type 'a t = {
@@ -14,8 +14,8 @@ type 'a t = {
   return_types: Type.t list;
   basic_blocks: 'a Basic_block.t IntMap.t;
   instructions : 'a Instr.t IntMap.t;
-  edges: edge IntMap.t;
-  back_edges: edge IntMap.t;
+  edges: edges IntMap.t;
+  back_edges: edges IntMap.t;
   entry_block: int;
   exit_block: int;
   loop_heads: IntSet.t;
@@ -50,11 +50,17 @@ let find_instr_exn (cfg : 'a t) (label : Instr.label) : 'a Instr.t =
   | Some i -> i
   | None -> failwith "Cfg.find_instr_exn did not find instruction"
 
-let successors (cfg : 'a t) (idx : int) : int list =
-  List.map (IntMap.find_multi cfg.edges idx) ~f:fst
+let outgoing_edges (cfg : 'a t) (idx : int) : edges =
+  IntMap.find_multi cfg.edges idx
 
-let predecessors (cfg : 'a t) (idx : int) : (int * bool option) list =
+let successors (cfg : 'a t) (idx : int) : int list =
+  List.map (outgoing_edges cfg idx) ~f:fst
+
+let incoming_edges (cfg : 'a t) (idx : int) : edges =
   IntMap.find_multi cfg.back_edges idx
+
+let predecessors (cfg : 'a t) (idx : int) : int list =
+  List.map (incoming_edges cfg idx) ~f:fst
 
 let callees (cfg : 'a t) : IntSet.t =
   (* Loop through all the blocks of the cfg, collecting the targets of call instructions *)
