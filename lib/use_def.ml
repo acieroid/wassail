@@ -1,5 +1,7 @@
 open Core_kernel
 
+let filter_consts : bool ref = ref true
+
 module Use = struct
   module T = struct
   (** Uses can either occur from:
@@ -29,13 +31,14 @@ module Def = struct
       | Instruction of int * Var.t (* Label of the instruction and variable defined *)
       | Merge of int * Var.t (* Label of the merge node and variable defined *)
       | Entry of Var.t (* Only the variable defined (because use-def is intraprocedural, we know the function) *)
-    (* TODO: constant variables can also be considered as not being defined in an instruction *) 
+      | Constant of Prim_value.t (* A constant does not really have a definition *)
     [@@deriving equal, compare]
 
     let to_string (def : t) : string = match def with
       | Instruction (n, v) -> Printf.sprintf "idef(%d, %s)" n (Var.to_string v)
       | Merge (n, v) -> Printf.sprintf "mdef(%d, %s)" n (Var.to_string v)
       | Entry v -> Printf.sprintf "edef(%s)" (Var.to_string v)
+      | Constant v -> Printf.sprintf "const(%s)" (Prim_value.to_string v)
   end
   include T
 end
@@ -66,32 +69,41 @@ module UseDefChains = struct
 end
 
 (** Return the list of variables defined by an instruction *)
-let instr_def (instr : Spec_inference.state Instr.t) : Var.t list = match instr with
-  | Instr.Data i ->
-    let top_n n = List.take i.annotation_after.vstack n in
-    begin match i.instr with
-      | Nop | Drop | MemoryGrow -> []
-      | Select | MemorySize | Const _
-      | Unary _ | Binary _ | Compare _ | Test _ | Convert _ -> top_n 1
-      | LocalGet _ | GlobalGet _ -> []
-      | LocalSet l | LocalTee l -> [List.nth_exn i.annotation_after.locals l]
-      | GlobalSet g -> [List.nth_exn i.annotation_after.globals g]
-      | Load _ -> top_n 1
-      | Store {offset; _} ->
-        let addr = List.hd_exn i.annotation_before.vstack in
-        [match Var.OffsetMap.find i.annotation_after.memory (addr, offset) with
-         | Some v -> v
-         | None -> failwith (Printf.sprintf "Wrong memory annotation while looking for %s+%d in memory" (Var.to_string addr) offset)]
-    end
-  | Instr.Control i ->
-    let top_n n = List.take i.annotation_after.vstack n in
-    begin match i.instr with
-      | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
-      | If _ -> [] (* We could say that if defines its "resulting" value, but that will be handled by the merge node *)
-      | Call ((_, arity_out), _) -> top_n arity_out
-      | CallIndirect ((_, arity_out), _) -> top_n arity_out
-      | Br _ | BrIf _ | BrTable _ | Return | Unreachable -> []
-    end
+let instr_def (instr : Spec_inference.state Instr.t) : Var.t list =
+  let defs = match instr with
+    | Instr.Data i ->
+      let top_n n = List.take i.annotation_after.vstack n in
+      begin match i.instr with
+        | Nop | Drop | MemoryGrow -> []
+        | Select | MemorySize
+        | Unary _ | Binary _ | Compare _ | Test _ | Convert _
+        | Const _ -> top_n 1
+        | LocalGet _ | GlobalGet _
+        | LocalSet _ | LocalTee _ | GlobalSet _ ->
+          (* accesses to locals and globals do not define anything new: they simply copy variables *)
+          []
+        | Load _ -> top_n 1
+        | Store {offset; _} ->
+          let addr = List.nth_exn i.annotation_before.vstack 1 (* address is not the top of the stack but the element after *) in
+          [match Var.OffsetMap.find i.annotation_after.memory (addr, offset) with
+           | Some v -> v
+           | None -> failwith (Printf.sprintf "Wrong memory annotation while looking for %s+%d in memory (instr: %s), annot after: %s" (Var.to_string addr) offset (Instr.to_string instr Spec_inference.state_to_string) (Spec_inference.state_to_string i.annotation_after))]
+      end
+    | Instr.Control i ->
+      let top_n n = List.take i.annotation_after.vstack n in
+      begin match i.instr with
+        | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
+        | If _ -> [] (* We could say that if defines its "resulting" value, but that will be handled by the merge node *)
+        | Call ((_, arity_out), _) -> top_n arity_out
+        | CallIndirect ((_, arity_out), _) -> top_n arity_out
+        | Br _ | BrIf _ | BrTable _ | Return | Unreachable -> []
+      end
+  in
+  List.filter defs ~f:(function
+      | Var.Const _ -> !filter_consts (* constants are not variables that can be defined (otherwise definitions are not unique anymore) *)
+      | Var.Local _ -> false (* locals don't have a definition point (they are part of the entry state) *)
+      | Var.Global _ -> false (* same for globals *)
+      | _ -> true)
 
 (** Return the list of variables used by an instruction *)
 let instr_use (instr : Spec_inference.state Instr.t) : Var.t list = match instr with
@@ -157,6 +169,21 @@ let make (cfg : Spec_inference.state Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.M
         match Var.Map.add defs ~key:var ~data:(Def.Entry var) with
         | `Duplicate -> failwith "use_def: more than one entry definition for a variable"
         | `Ok r -> r) in
+  (* Add definitions for all constants *)
+  let defs =
+    let all_vars : Var.Set.t = List.fold_left (Cfg.all_instructions cfg)
+        ~init:Var.Set.empty
+        ~f:(fun acc instr -> Var.Set.union acc
+               (Var.Set.union
+                  (Spec_inference.State.vars_of (Instr.annotation_before instr))
+                  (Spec_inference.State.vars_of (Instr.annotation_after instr)))) in
+    Var.Set.fold all_vars ~init:defs ~f:(fun defs var ->
+        match var with
+        | Var.Const n -> begin match Var.Map.add defs ~key:var ~data:(Def.Constant n)  with
+            | `Duplicate -> defs (* already in the set *)
+            | `Ok r -> r
+          end
+        | _ -> defs) in
   (* For each merge block, update the defs and uses map *)
   let (defs, uses) = List.fold_left (Cfg.all_merge_blocks cfg)
       ~init:(defs, uses)
@@ -182,7 +209,8 @@ let make (cfg : Spec_inference.state Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.M
     ~f:(fun (defs, uses) instr ->
         let defs = List.fold_left (instr_def instr) ~init:defs ~f:(fun defs var ->
             match Var.Map.add defs ~key:var ~data:(Def.Instruction (Instr.label instr, var)) with
-            | `Duplicate -> failwith "use_def: duplicate define in instruction"
+            | `Duplicate -> failwith (Printf.sprintf "use_def: duplicate define of %s in instruction %s"
+                                        (Var.to_string var) (Instr.to_string instr Spec_inference.state_to_string))
             | `Ok r -> r) in
         let uses = List.fold_left (instr_use instr) ~init:uses ~f:(fun uses var ->
             Var.Map.update uses var ~f:(function
@@ -200,25 +228,26 @@ let make (cfg : Spec_inference.state Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.M
 
 let%test "simplest ud chain" =
   Instr.reset_counter ();
+  filter_consts := false;
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
-    i32.const 0 ;; Instr 0
-    i32.const 1 ;; Instr 1
+    memory.size ;; Instr 0
+    memory.size ;; Instr 1
     i32.add)    ;; Instr 2
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
   let _, _, actual = make cfg in
-  let var n = Var.Const (Prim_value.of_int n) in
-  let expected = Use.Map.of_alist_exn [(Use.Instruction (2, var 0), Def.Instruction (0, var 0));
-                                       (Use.Instruction (2, var 1), Def.Instruction (1, var 1));
+  let expected = Use.Map.of_alist_exn [(Use.Instruction (2, Var.Var 0), Def.Instruction (0, (Var.Var 0)));
+                                       (Use.Instruction (2, Var.Var 1), Def.Instruction (1, Var.Var 1));
                                        (Use.Merge (1, Var.Var 2), Def.Instruction (2, Var.Var 2))] in
   UseDefChains.equal actual expected
 
 let%test "ud-chain with locals" =
   Instr.reset_counter ();
+  filter_consts := false;
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32 i32) (result i32)))
   (func (;test;) (type 0) (param i32 i32) (result i32)
@@ -239,29 +268,30 @@ let%test "ud-chain with locals" =
 
 let%test "use-def with merge blocks" =
   Instr.reset_counter ();
+  filter_consts := false;
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
-    i32.const 0     ;; Instr 0
+    memory.size     ;; Instr 0, Var 0
     if (result i32) ;; Instr 3
-      i32.const 1   ;; Instr 1
+      memory.size   ;; Instr 1, Var 1
     else
-      i32.const 2   ;; Instr 2
+      memory.size   ;; Instr 2, Var 2
     end
     ;; At this point we have a merge block, merging var 1 and var 2 into m4_1
-    i32.const 3     ;; Instr 4
-    i32.add)        ;; Instr 5
+    memory.size     ;; Instr 4, Var 4
+    i32.add)        ;; Instr 5, Var 5
     ;; Final merge block: i5 -> ret
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
   let _, _, actual = make cfg in
-  let var n = Var.Const (Prim_value.of_int n) in
-  let expected = Use.Map.of_alist_exn [(Use.Instruction (3, var 0), Def.Instruction (0, var 0));
-                                       (Use.Instruction (5, var 3), Def.Instruction (4, var 3));
+  let expected = Use.Map.of_alist_exn [(Use.Instruction (3, Var.Var 0), Def.Instruction (0, Var.Var 0));
+                                       (Use.Instruction (5, Var.Var 4), Def.Instruction (4, Var.Var 4));
                                        (Use.Instruction (5, Var.Merge (4, 1)), Def.Merge (4, Var.Merge (4, 1)));
-                                       (Use.Merge (4, var 1), Def.Instruction (1, var 1));
-                                       (Use.Merge (4, var 2), Def.Instruction (2, var 2));
+                                       (Use.Merge (4, Var.Var 1), Def.Instruction (1, Var.Var 1));
+                                       (Use.Merge (4, Var.Var 2), Def.Instruction (2, Var.Var 2));
                                        (Use.Merge (6, Var.Var 5), Def.Instruction(5, Var.Var 5))] in
   UseDefChains.equal actual expected
+

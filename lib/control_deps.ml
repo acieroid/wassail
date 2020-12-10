@@ -109,30 +109,32 @@ let find (cdeps : Pred.Set.t Var.Map.t) (var : Var.t) : Pred.Set.t =
   | None -> Pred.Set.empty
 
 let%test "control dependencies computation" =
+  Instr.reset_counter ();
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     block
-      i32.const 1
+      memory.size ;; Instr 0, Var 0
       br_if 0
-      i32.const 2 ;; This variable clearly depends on 1
+      ;; The following variable clearly depends on Var 0
+      memory.size ;; Instr 2, Var 2
       block
-        i32.const 3 ;; This one too
+        memory.size ;; Instr 3, Var 3. This one too
         br_if 0
-        i32.const 4 ;; This one depends on 3 (also on 1 transitively, but here we compute direct control dependencies)
+        memory.size ;; Instr 5, Var 5. This one depends on var 3 (also on var 0 transitively, but here we compute direct control dependencies)
         drop
       end
       drop
-      i32.const 5 ;; This one depends on 1
+      memory.size ;; Instr 9, Var 9. This one depends on var 0
       drop
     end
-    i32.const 6)
+    memory.size)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
   let actual = Var.Map.map (make cfg) ~f:(fun p -> Var.Set.of_list (List.map (Pred.Set.to_list p) ~f:fst)) in
-  let var n = Var.Const (Prim_value.of_int n) in
+  let var n = Var.Var n in
   let vars n = Var.Set.of_list [var n] in
-  let expected = Var.Map.of_alist_exn [(var 2, vars 1); (var 3, vars 1); (var 4, vars 3); (var 5, vars 1)] in
+  let expected = Var.Map.of_alist_exn [(var 2, vars 0); (var 3, vars 0); (var 5, vars 3); (var 9, vars 0)] in
   Var.Map.equal Var.Set.equal actual expected

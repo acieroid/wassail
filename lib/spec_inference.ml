@@ -86,8 +86,10 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
   (*---- Helper functions ----*)
   (** Like List.drop, but raises an exception if the list does not contain enough element *)
   let drop (n : int) (vstack : Var.t list) =
-    assert (List.length vstack >= n);
-    List.drop vstack n
+    if (List.length vstack < n) then
+      failwith "Spec_inference.drop: not enough elements in stack"
+    else
+      List.drop vstack n
 
   let get (n : int) (l : Var.t list) = List.nth_exn l n
 

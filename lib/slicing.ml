@@ -56,7 +56,8 @@ let slicing (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : Slice
               let to_add_from_def = match def with
                 | Use_def.Def.Instruction (instr', _) -> SlicePart.Set.singleton (Instruction instr')
                 | Use_def.Def.Merge (blockidx, _) -> SlicePart.Set.singleton (Merge blockidx)
-                | Use_def.Def.Entry _ -> SlicePart.Set.empty in
+                | Use_def.Def.Entry _ -> SlicePart.Set.empty
+                | Use_def.Def.Constant _ -> SlicePart.Set.empty in
               let preds = Control_deps.find control_dependencies use in (* the control dependencies for the current use *)
               Control_deps.Pred.Set.fold preds
                 ~init:(SlicePart.Set.union w to_add_from_def)
@@ -71,12 +72,12 @@ let%test "simple slicing - first slicing criterion, only const" =
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
-    i32.const 1 ;; Instr 0
-    i32.const 2 ;; Instr 1
+    memory.size ;; Instr 0
+    memory.size ;; Instr 1
     i32.add     ;; Instr 2
     drop        ;; Instr 3
-    local.get 0 ;; Instr 4
-    i32.const 3 ;; Instr 5
+    memory.size ;; Instr 4
+    memory.size ;; Instr 5
     i32.add)    ;; Instr 6
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
@@ -91,12 +92,12 @@ let%test "simple slicing - second slicing criterion, with locals" =
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
-    i32.const 1 ;; Instr 0
-    i32.const 2 ;; Instr 1
+    memory.size ;; Instr 0
+    memory.size ;; Instr 1
     i32.add     ;; Instr 2
     drop        ;; Instr 3
     local.get 0 ;; Instr 4
-    i32.const 3 ;; Instr 5
+    memory.size ;; Instr 5
     i32.add)    ;; Instr 6
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
@@ -115,9 +116,9 @@ let%test "slicing with block and br_if" =
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     block         ;; Instr 0
-      i32.const 1 ;; Instr 1
+      memory.size ;; Instr 1
       br_if 0     ;; Instr 2
-      i32.const 2 ;; Instr 3
+      memory.size ;; Instr 3
       drop        ;; Instr 4
     end
     local.get 0)   ;; Instr 5
@@ -135,20 +136,20 @@ let%test "slicing with merge blocks" =
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
-    i32.const 0     ;; Instr 0
+    memory.size     ;; Instr 0
     if (result i32) ;; Instr 1
-      i32.const 1   ;; Instr 2
+      memory.size   ;; Instr 2
     else
-      i32.const 2   ;; Instr 3
+      memory.size   ;; Instr 3
     end
     ;; Merge block 4 here
     ;; ----
-    i32.const 4     ;; Instr 4
-    i32.const 5     ;; Instr 5
+    memory.size     ;; Instr 4
+    memory.size     ;; Instr 5
     i32.add         ;; Instr 6
     drop            ;; Instr 7
     ;; ---- this previous part should not be part of the slice
-    i32.const 3     ;; Instr 8
+    memory.size     ;; Instr 8
     i32.add)        ;; Instr 9
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
@@ -281,25 +282,25 @@ let slice (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : unit Cf
            end)) in
   { cfg with basic_blocks; instructions; edges; back_edges }
 
-let%test "slicing with merge blocks" =
+let%test "slicing with merge blocks using slice" =
   Instr.reset_counter ();
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
-    i32.const 0     ;; Instr 0
+    memory.size     ;; Instr 0
     if (result i32) ;; Instr 1
-      i32.const 1   ;; Instr 2
+      memory.size   ;; Instr 2
     else
-      i32.const 2   ;; Instr 3
+      memory.size   ;; Instr 3
     end
     ;; Merge block 4 here
     ;; ----
-    i32.const 4     ;; Instr 4
-    i32.const 5     ;; Instr 5
+    memory.size     ;; Instr 4
+    memory.size     ;; Instr 5
     i32.add         ;; Instr 6
     drop            ;; Instr 7
     ;; ---- this previous part should not be part of the slice
-    i32.const 3     ;; Instr 8
+    memory.size     ;; Instr 8
     i32.add)        ;; Instr 9
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
@@ -310,4 +311,18 @@ let%test "slicing with merge blocks" =
   (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
   true
 
+(** Return the indices of each call_indirect instructions *)
+let find_call_indirect_instructions (cfg : Spec_inference.state Cfg.t) : int list =
+  List.filter_map (Cfg.all_instructions cfg) ~f:(fun instr -> match instr with
+      | Control {label; instr = CallIndirect _; _} -> Some label
+      | _ -> None)
 
+let%test_unit "slicing bigger program" =
+  Instr.reset_counter ();
+  let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
+  let cfg = Spec_analysis.analyze_intra1 module_ 14 in
+  List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
+      (* instr_idx is the label of a call_indirect instruction, slice it *)
+      let _sliced_cfg = slice cfg instr_idx in
+      (* let _annotated_slice_cfg = Spec.Intra.analyze module_ sliced_cfg in *)
+      ())
