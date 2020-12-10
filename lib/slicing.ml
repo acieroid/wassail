@@ -282,7 +282,7 @@ let slice (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : unit Cf
            end)) in
   { cfg with basic_blocks; instructions; edges; back_edges }
 
-let%test "slicing with merge blocks using slice" =
+let%test_unit "slicing with merge blocks using slice" =
   Instr.reset_counter ();
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
@@ -309,13 +309,34 @@ let%test "slicing with merge blocks using slice" =
   let sliced_cfg = slice cfg 9 in
   let _annotated_sliced_cfg = Spec.Intra.analyze module_ sliced_cfg in
   (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
-  true
+  ()
 
 (** Return the indices of each call_indirect instructions *)
 let find_call_indirect_instructions (cfg : Spec_inference.state Cfg.t) : int list =
   List.filter_map (Cfg.all_instructions cfg) ~f:(fun instr -> match instr with
       | Control {label; instr = CallIndirect _; _} -> Some label
       | _ -> None)
+
+
+let%test_unit "slicing with memory" =
+  Instr.reset_counter ();
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    memory.size     ;; Instr 0
+    memory.size     ;; Instr 1
+    i32.store       ;; Instr 2
+    memory.size     ;; Instr 3
+    memory.size     ;; Instr 4
+    i32.store       ;; Instr 5
+  )
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let sliced_cfg = slice cfg 5 in
+  let _annotated_sliced_cfg = Spec.Intra.analyze module_ sliced_cfg in
+  ()
 
 let%test_unit "slicing bigger program" =
   Instr.reset_counter ();
