@@ -13,7 +13,7 @@ end
 
 
 (** Algorithm for control dependencies, adapted from https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/ProgramSlicing.pdf *)
-let control_dep (cfg : Spec_inference.state Cfg.t) (root : Dominance.domtree) (is_immediate_post_dom : Dominance.domtree -> Var.t -> bool) : (Var.t * Pred.t) list =
+let control_dep (cfg : Spec.t Cfg.t) (root : Dominance.domtree) (is_immediate_post_dom : Dominance.domtree -> Var.t -> bool) : (Var.t * Pred.t) list =
   let push (tree : Dominance.domtree) (preds : Pred.t list) : Pred.t list = match tree with
     | Branch (b, p,_) -> begin match b.content with
         | Control i -> (p, i.label) :: preds
@@ -21,7 +21,7 @@ let control_dep (cfg : Spec_inference.state Cfg.t) (root : Dominance.domtree) (i
       end
     | Jump (_, _) -> preds in
   (* Creates the edges from a given block, where each edge links a defined variabl to a control variable it depends on *)
-  let link (block : Spec_inference.state Basic_block.t) (pred : Pred.t) : (Var.t * Pred.t) list =
+  let link (block : Spec.t Basic_block.t) (pred : Pred.t) : (Var.t * Pred.t) list =
     let defined = match block.content with
       | ControlMerge ->
         List.map (Spec_inference.new_merge_variables cfg block) ~f:snd
@@ -48,7 +48,7 @@ let control_dep (cfg : Spec_inference.state Cfg.t) (root : Dominance.domtree) (i
   vnode root []
 
 (** Construct a map from predicates at the end of a block (according to `branch_condition`), to the corrsponding block index *)
-let extract_preds (cfg : Spec_inference.state Cfg.t) : int Var.Map.t =
+let extract_preds (cfg : Spec.t Cfg.t) : int Var.Map.t =
   IntMap.fold cfg.basic_blocks ~init:Var.Map.empty ~f:(fun ~key:idx ~data:block acc ->
       match Dominance.branch_condition block with
       | Some pred -> Var.Map.add_exn acc ~key:pred ~data:idx
@@ -91,7 +91,7 @@ let%test "extract_preds when there are preds" =
   Var.Map.equal (Int.(=)) actual expected
 
 (** Computes the control dependencies of a CFG (as a map from variables to the control variables they depend upon) *)
-let make (cfg : Spec_inference.state Cfg.t) : Pred.Set.t Var.Map.t =
+let make (cfg : Spec.t Cfg.t) : Pred.Set.t Var.Map.t =
   let pdom = Dominance.cfg_post_dominator cfg in
   let preds : int Var.Map.t = extract_preds cfg in
   let deps = control_dep cfg (Dominance.cfg_dominator cfg) (fun tree pred ->

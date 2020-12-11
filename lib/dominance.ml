@@ -227,11 +227,11 @@ let%test "post-dominator tree is correctly computed by reversing the order of th
 
 (** A dominator tree. TODO: use Tree.t instead *)
 type domtree =
-  | Branch of Spec_inference.state Basic_block.t * Var.t * domtree list
-  | Jump of Spec_inference.state Basic_block.t * domtree list
+  | Branch of Spec.t Basic_block.t * Var.t * domtree list
+  | Jump of Spec.t Basic_block.t * domtree list
 
 (** Extract the final branch condition of a block, if there is any *)
-let branch_condition (block : Spec_inference.state Basic_block.t) : Var.t option =
+let branch_condition (block : Spec.t Basic_block.t) : Var.t option =
   match block.content with
   | Control c -> begin match c.instr with
       | BrIf _ | BrTable _ | If _ ->
@@ -243,7 +243,7 @@ let branch_condition (block : Spec_inference.state Basic_block.t) : Var.t option
   | Data _ | ControlMerge -> None
 
 (** Computes the dominator tree of a CFG . *)
-let cfg_dominator (cfg : Spec_inference.state Cfg.t) : domtree =
+let cfg_dominator (cfg : Spec.t Cfg.t) : domtree =
   let entry : int = cfg.entry_block in
   let nodes : int list = IntMap.keys cfg.basic_blocks in
   let succs (node : int) : int list =
@@ -264,7 +264,7 @@ let cfg_dominator (cfg : Spec_inference.state Cfg.t) : domtree =
   build_tree entry
 
 (** Computes the post-dominator tree of a CFG *)
-let cfg_post_dominator (cfg : Spec_inference.state Cfg.t) : Tree.t =
+let cfg_post_dominator (cfg : Spec.t Cfg.t) : Tree.t =
   let exit : int = cfg.exit_block in
   let nodes : int list = IntMap.keys cfg.basic_blocks in
   let succs (node : int) : int list =

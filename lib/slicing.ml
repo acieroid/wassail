@@ -22,7 +22,7 @@ end
    `criterion`, encoded as an instruction index. Returns the set
    of instructions that are part of the slice, as a list of instruction
     indices. *)
-let slicing (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : SlicePart.Set.t =
+let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.label) : SlicePart.Set.t =
   let control_dependencies = Control_deps.make cfg in
   let (_, _, data_dependencies) = Use_def.make cfg in
   let rec loop (worklist : SlicePart.Set.t) (slice : SlicePart.Set.t) : SlicePart.Set.t =
@@ -164,7 +164,7 @@ let%test "slicing with merge blocks" =
 
 (** Performs backwards slicing on `cfg`, relying on `slicing` defined above.
     Returns the slice as a modified CFG *)
-let slice (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : unit Cfg.t =
+let slice (cfg : Spec.t Cfg.t) (criterion : Instr.label) : unit Cfg.t =
   let sliceparts = slicing cfg criterion in
   let slice_instructions = IntSet.of_list (List.filter_map (SlicePart.Set.to_list sliceparts) ~f:(function
       | Instruction i -> Some i
@@ -304,7 +304,7 @@ let%test_unit "slicing with merge blocks using slice" =
   ()
 
 (** Return the indices of each call_indirect instructions *)
-let find_call_indirect_instructions (cfg : Spec_inference.state Cfg.t) : int list =
+let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : int list =
   List.filter_map (Cfg.all_instructions cfg) ~f:(fun instr -> match instr with
       | Control {label; instr = CallIndirect _; _} -> Some label
       | _ -> None)

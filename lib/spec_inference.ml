@@ -29,6 +29,10 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
   let set (n : int) (l : Var.t list) (v : Var.t) = List.mapi l ~f:(fun i v' -> if i = n then v else v')
 
   (*---- State ----*)
+  type state = Spec.t
+  [@@deriving compare, equal]
+
+  let state_to_string = Spec.to_string
 
   let init_state (cfg : 'a Cfg.t) : state = {
     vstack = []; (* the vstack is initially empty *)
@@ -49,19 +53,6 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
   }
 
   let bottom_state _ = bottom
-
-  let state_to_dot_string (s : state) : string =
-    Printf.sprintf "[%s] [%s]"
-      (String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
-  (* (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))*)
-  (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v))))
-
-  let state_to_string (s : state) : string =
-    Printf.sprintf "{\nvstack: [%s]\nlocals: [%s]\nglobals: [%s]\nmemory: [%s]\n}"
-      (String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
-      (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))
-      (String.concat ~sep:", " (List.map s.globals ~f:Var.to_string))
-      (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v))))
 
   let join_state (_s1 : state) (s2 : state) : state =
     s2 (* only keep the "most recent" state, this is safe for this analysis *)

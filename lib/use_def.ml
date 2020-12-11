@@ -67,7 +67,7 @@ module UseDefChains = struct
 end
 
 (** Return the list of variables defined by an instruction *)
-let instr_def (instr : Spec_inference.state Instr.t) : Var.t list =
+let instr_def (instr : Spec.t Instr.t) : Var.t list =
   let defs = match instr with
     | Instr.Data i ->
       let top_n n = List.take i.annotation_after.vstack n in
@@ -105,7 +105,7 @@ let instr_def (instr : Spec_inference.state Instr.t) : Var.t list =
       | _ -> true)
 
 (** Return the list of variables used by an instruction *)
-let instr_use (instr : Spec_inference.state Instr.t) : Var.t list = match instr with
+let instr_use (instr : Spec.t Instr.t) : Var.t list = match instr with
   | Instr.Data i ->
     let top_n n = List.take i.annotation_before.vstack n in
     begin match i.instr with
@@ -139,7 +139,7 @@ let instr_use (instr : Spec_inference.state Instr.t) : Var.t list = match instr 
     1. A map from variables to their definitions
     2. A map from variables to their uses
     3. A map of use-def chains *)
-let make (cfg : Spec_inference.state Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefChains.t) =
+let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefChains.t) =
   (* To construct the use-def map, we walk over each instruction, and collect uses and defines.
      There is exactly one define per variable.
      e.g., [] i32.const 0 [x] defines x
@@ -209,7 +209,7 @@ let make (cfg : Spec_inference.state Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.M
         let defs = List.fold_left (instr_def instr) ~init:defs ~f:(fun defs var ->
             match Var.Map.add defs ~key:var ~data:(Def.Instruction (Instr.label instr, var)) with
             | `Duplicate -> failwith (Printf.sprintf "use_def: duplicate define of %s in instruction %s"
-                                        (Var.to_string var) (Instr.to_string instr Spec_inference.state_to_string))
+                                        (Var.to_string var) (Instr.to_string instr Spec.to_string))
             | `Ok r -> r) in
         let uses = List.fold_left (instr_use instr) ~init:uses ~f:(fun uses var ->
             Var.Map.update uses var ~f:(function

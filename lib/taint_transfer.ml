@@ -3,7 +3,7 @@ open Helpers
 
 module Make (* : Transfer.TRANSFER *) = struct
   (** We need the variable names as annotations *)
-  type annot_expected = (Spec_inference.state * Relational_domain.t)
+  type annot_expected = (Spec.t * Relational_domain.t)
 
   (** The state *)
   type state = Taint_domain.t

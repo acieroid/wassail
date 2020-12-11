@@ -32,13 +32,13 @@ type t = UseDefMap.t
 [@@deriving sexp, compare, equal]
 
 (** Constructs a data dependence from the CFG of a function *)
-let make (cfg : Spec_inference.state Cfg.t) : t =
+let make (cfg : Spec.t Cfg.t) : t =
   (* The uses map will map variables to the indices of instructions that use them *)
   let uses_empty: (int list) Var.Map.t = Var.Map.empty in
   (* The defs map will map variables to the index of the instruciton that defines them.
      Because we are in SSA, there can only be one instruction that define a variable *)
   let defs_empty: int Var.Map.t = Var.Map.empty in
-  let all_instrs : Spec_inference.state Instr.t list = Cfg.all_instructions cfg in
+  let all_instrs : Spec.t Instr.t list = Cfg.all_instructions cfg in
   (* For each instruction, update the defs and uses map *)
   let (defs, uses) = List.fold_left all_instrs
     ~init:(defs_empty, uses_empty)

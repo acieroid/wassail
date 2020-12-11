@@ -1,7 +1,7 @@
 open Core_kernel
 open Helpers
 
-type annot_expected = Spec_inference.state
+type annot_expected = Spec.t
 
 type state = Relational_domain.t
 [@@deriving compare, equal]

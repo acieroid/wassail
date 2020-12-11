@@ -85,7 +85,7 @@ let spec_inference =
        let file_out = Printf.sprintf "%d.dot" fid in
        Out_channel.with_file file_out
          ~f:(fun ch ->
-             Out_channel.output_string ch (Cfg.to_dot annotated_cfg Spec_inference.state_to_dot_string)))
+             Out_channel.output_string ch (Cfg.to_dot annotated_cfg Spec.to_dot_string)))
 
 let count_vars =
   mk_intra "Count the number of program variables generated for a function"
@@ -102,7 +102,7 @@ let count_vars =
               let state_to_string _ = ""
               let join_state (s1, n1) (s2, n2) = (Var.Set.union s1 s2, max n1 n2)
               let widen_state = join_state
-              let extract_vars (st : Spec_inference.state) : Var.Set.t =
+              let extract_vars (st : Spec.t) : Var.Set.t =
                 Var.Set.filter ~f:(function
                     | Merge _ -> false
                     | _ -> true)
