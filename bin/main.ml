@@ -170,7 +170,8 @@ let slice_cfg =
     ~summary:"Slice a CFG at each call_indirect instruction"
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string)
-      and idx = anon ("fun" %: int)in
+      and idx = anon ("fun" %: int)
+      and criteria = anon ("criterias" %: int_comma_separated_list) in
       fun () ->
         Printf.printf "Reading module\n%!";
         let module_ = Wasm_module.of_file filename in
@@ -180,9 +181,11 @@ let slice_cfg =
         report_time "Spec analysis" t0 t1;
         Printf.printf "outputting initial CFG in initial.dot\n%!";
         Out_channel.with_file "initial.dot"
-                ~f:(fun ch ->
-                    Out_channel.output_string ch (Cfg.to_dot cfg (fun _ -> "")));
-        List.iter (Slicing.find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
+          ~f:(fun ch ->
+              Out_channel.output_string ch (Cfg.to_dot cfg (fun _ -> "")));
+        (* TODO: hacky *)
+        let actual_criteria = if true then List.take (Slicing.find_call_indirect_instructions cfg) 1 else criteria in
+        List.iter actual_criteria ~f:(fun instr_idx ->
             (* instr_idx is the label of a call_indirect instruction, slice it *)
             Printf.printf "Slicing for instruction %d\n%!" instr_idx;
             let t0 = Time.now () in

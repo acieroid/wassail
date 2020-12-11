@@ -183,9 +183,9 @@ let slice (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : unit Cf
            it has one successor (which becomes the new entry  block)
            or one predecessor (which becomes the new exit block) *)
         let keep_due_to_entry_or_exit = if block_idx = cfg.entry_block then
-            List.length (Cfg.successors cfg block_idx) > 1
+            true (* List.length (Cfg.successors cfg block_idx) > 1 *)
           else if block_idx = cfg.exit_block then
-            List.length (Cfg.predecessors cfg block_idx) > 1
+            true (* List.length (Cfg.predecessors cfg block_idx) > 1 *)
           else
             false in
         (* A block that is empty may also need to be kept if rewiring its edge
@@ -194,9 +194,12 @@ let slice (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : unit Cf
           (* The only safe way to rewrite edges of a block is if either:
              - all its incoming edges are "sequential" (i.e., are not the result of branches), or
              - all its outgoing edges are "sequential"
-             Otherwise, this would introduces edges that would be the results of multiple conditionals *)
-          List.for_all (Cfg.outgoing_edges cfg block_idx) ~f:(function (_, None) -> true | _ -> false) ||
-          List.for_all (Cfg.incoming_edges cfg block_idx) ~f:(function (_, None) -> true | _ -> false)
+             Otherwise, this would introduces edges that would be the results of multiple conditionals.
+          Note that this check is performed on the currently constructed CFG. *)
+          not (
+            List.for_all (IntMap.find_multi edges block_idx) ~f:(function (_, None) -> true | _ -> false) ||
+            List.for_all (IntMap.find_multi back_edges block_idx) ~f:(function (_, None) -> true | _ -> false)
+          )
         in
         let keep_anyway = keep_due_to_entry_or_exit || keep_due_to_edges in
         (* The new block, if it is kept *)
@@ -260,7 +263,7 @@ let slice (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : unit Cf
                    (* and remove them *)
                    IntMap.update edges src ~f:(function
                        | None -> []
-                       | Some es -> List.filter es ~f:(fun (target, _) -> target = block_idx))) in
+                       | Some es -> List.filter es ~f:(fun (target, _) -> not (target = block_idx)))) in
              let outgoing_edges = IntMap.find_multi edges block_idx in
              let incoming_edges = IntMap.find_multi back_edges block_idx in
              (* Connect each incoming edge to each outgoing edge *)
@@ -276,7 +279,7 @@ let slice (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : unit Cf
                List.fold_left dsts ~init:back_edges' ~f:(fun back_edges (dst, _) ->
                    IntMap.update back_edges dst ~f:(function
                        | None -> []
-                       | Some es -> List.filter es ~f:(fun (src, _) -> src = block_idx))) in
+                       | Some es -> List.filter es ~f:(fun (src, _) -> not (src = block_idx)))) in
              let outgoing_edges = IntMap.find_multi edges block_idx in
              let incoming_edges = IntMap.find_multi back_edges block_idx in
              List.fold_left incoming_edges ~init:without_back_edges ~f:(fun back_edges (src, cond) ->
@@ -338,9 +341,8 @@ let%test_unit "slicing with memory" =
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
   let sliced_cfg = slice cfg 5 in
   let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-
   ()
-(*
+
 let%test_unit "slicing bigger program" =
   Instr.reset_counter ();
   let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
@@ -348,7 +350,5 @@ let%test_unit "slicing bigger program" =
   List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
       (* instr_idx is the label of a call_indirect instruction, slice it *)
       let _sliced_cfg = slice cfg instr_idx in
-      Printf.printf "DOT with %d:\n%s\n" instr_idx (Cfg.to_dot _sliced_cfg (fun _ -> ""));
       (* let _annotated_slice_cfg = Spec.Intra.analyze module_ sliced_cfg in *)
       ())
-*)
