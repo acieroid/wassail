@@ -1,6 +1,30 @@
+open Core_kernel
 open Helpers
 
-type edges = (int * bool option) list (* TODO: change this to a set? *)
+module Edge : sig
+  type t = int * bool option
+  [@@deriving sexp, compare, equal]
+  val to_string : t -> string
+  module Set : Set.S with type Elt.t = t
+end
+
+module Edges : sig
+  type t = Edge.Set.t IntMap.t
+  [@@deriving sexp, compare, equal]
+
+  (** Return all edges going out of a given node *)
+  val from : t -> int -> Edge.t list
+
+  (** Add an edge from a given node *)
+  val add : t -> int -> Edge.t -> t
+
+  (** Remove an edge, irrespective of the condition *)
+  val remove : t -> int -> int -> t
+
+  (** Remove all edges from a given node *)
+  val remove_from : t -> int -> t
+end
+
 type 'a t = {
   (* Is this function exported or not? *)
   exported: bool;
@@ -21,9 +45,9 @@ type 'a t = {
   (* All instructions contained in this CFG, indexed in a map by their label *)
   instructions : 'a Instr.t IntMap.t;
   (* The edges between basic blocks (forward direction) *)
-  edges: edges IntMap.t;
+  edges: Edges.t;
   (* The edges between basic blocks (backward direction) *)
-  back_edges: edges IntMap.t;
+  back_edges: Edges.t;
   (* The entry block *)
   entry_block: int;
   (* The exit block *)
@@ -60,10 +84,10 @@ val successors : 'a t -> int -> int list
 val predecessors : 'a t -> int -> int list
 
 (** Extract the outgoing edges of a block *)
-val outgoing_edges : 'a t -> int -> edges
+val outgoing_edges : 'a t -> int -> Edge.t list
 
 (** Extract the incoming edges of a block *)
-val incoming_edges : 'a t -> int -> edges
+val incoming_edges : 'a t -> int -> Edge.t list
 
 (** Find the functions called in this CFG *)
 val callees : 'a t -> IntSet.t
@@ -94,10 +118,3 @@ val annotate : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> 'b t
 
 (** Add more annotations to an already-annotated CFG *)
 val add_annotation : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> ('a * 'b) t
-
-(** Return the forward edges of a node, given its index *)
-val forward_edges_from_node : 'a t -> int -> (int * bool option) list
-
-(** Return the backward edges of a node, given its index *)
-val backward_edges_from_node : 'a t -> int -> (int * bool option) list
-

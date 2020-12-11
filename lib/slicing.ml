@@ -223,19 +223,6 @@ let slice (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : unit Cf
               (* If there are no such instructions, don't keep the block *)
               None
         in
-        (* Merge two edge conditions *)
-        let merge_conds c1 c2 = match (c1, c2) with
-          | None, None -> None
-          | Some x, None | None, Some x -> Some x
-          | Some x, Some _ ->
-            (* Correctness for this case needs is established as follows.
-               What we're doing here is rewriting two edges such as
-               n1 -f-> n2 -t-> n3
-               to:
-               n1 -f-> n3
-               because n2 is removed.
-               It seems to make sense that we keep "f", but not "t", as n2 is not executed anymore *)
-            Some x in
         match new_block with
         | Some block ->
           (* Block is kept *)
@@ -251,34 +238,39 @@ let slice (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : unit Cf
            *)
            begin
              let without_edges =
-               let edges' = IntMap.remove edges block_idx in (* Remove all edges starting from the current block *)
-               let srcs = IntMap.find_multi back_edges block_idx in (* Find all edges that go to this node *)
+               let edges' = Cfg.Edges.remove_from edges block_idx in (* Remove all edges starting from the current block *)
+               let srcs = Cfg.Edges.from back_edges block_idx in (* Find all edges that go to this node *)
                List.fold_left srcs ~init:edges' ~f:(fun edges (src, _) ->
                    (* and remove them *)
-                   IntMap.update edges src ~f:(function
-                       | None -> []
-                       | Some es -> List.filter es ~f:(fun (target, _) -> not (target = block_idx)))) in
-             let outgoing_edges = IntMap.find_multi edges block_idx in
-             let incoming_edges = IntMap.find_multi back_edges block_idx in
+                   Cfg.Edges.remove edges src block_idx) in
+             let outgoing_edges = Cfg.Edges.from edges block_idx in
+             let incoming_edges = Cfg.Edges.from back_edges block_idx in
              (* Connect each incoming edge to each outgoing edge *)
              List.fold_left incoming_edges ~init:without_edges ~f:(fun edges (src, cond) ->
-                 List.fold_left outgoing_edges ~init:edges ~f:(fun edges (dst, cond') ->
-                     IntMap.add_multi edges ~key:src ~data:(dst, merge_conds cond cond')))
+                 List.fold_left outgoing_edges ~init:edges ~f:(fun edges (dst, _) ->
+                     if src <> dst then begin
+                       Cfg.Edges.add edges src (dst, cond (* Keep the first condition as the second block can't be executed anymore *))
+                     end else
+                       (* No self-cycle. TODO: ensure correctness, but because the block is removed, that should not be a problem *)
+                       edges))
          end,
            (* Mimic what's done for edges, this time for back edges *)
            begin
              let without_back_edges =
-               let back_edges' = IntMap.remove back_edges block_idx in
-               let dsts = IntMap.find_multi edges block_idx in
+               let back_edges' = Cfg.Edges.remove_from back_edges block_idx in
+               let dsts = Cfg.Edges.from edges block_idx in
                List.fold_left dsts ~init:back_edges' ~f:(fun back_edges (dst, _) ->
-                   IntMap.update back_edges dst ~f:(function
-                       | None -> []
-                       | Some es -> List.filter es ~f:(fun (src, _) -> not (src = block_idx)))) in
-             let outgoing_edges = IntMap.find_multi edges block_idx in
-             let incoming_edges = IntMap.find_multi back_edges block_idx in
+                   let after = Cfg.Edges.remove back_edges dst block_idx in
+                   after
+                 ) in
+             let outgoing_edges = Cfg.Edges.from edges block_idx in
+             let incoming_edges = Cfg.Edges.from back_edges block_idx in
              List.fold_left incoming_edges ~init:without_back_edges ~f:(fun back_edges (src, cond) ->
-                 List.fold_left outgoing_edges ~init:back_edges ~f:(fun back_edges (dst, cond') ->
-                     IntMap.add_multi back_edges ~key:dst ~data:(src, merge_conds cond cond')))
+                 List.fold_left outgoing_edges ~init:back_edges ~f:(fun back_edges (dst, _) ->
+                     if src <> dst then
+                       Cfg.Edges.add back_edges dst (src, cond)
+                     else
+                       back_edges))
            end)) in
   { cfg with basic_blocks; instructions; edges; back_edges }
 

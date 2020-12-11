@@ -265,9 +265,11 @@ let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
             IntMap.add_exn acc ~key:i.label ~data:(Instr.Data i))
         | ControlMerge -> acc);
     (* The forward edges *)
-    edges = IntMap.of_alist_multi (List.map actual_edges' ~f:(fun (src, dst, data) -> (src, (dst, data))));
+    edges = IntMap.map (IntMap.of_alist_multi (List.map actual_edges' ~f:(fun (src, dst, data) -> (src, (dst, data)))))
+        ~f:(fun es -> Edge.Set.of_list es);
     (* The backward edges *)
-    back_edges = IntMap.of_alist_multi (List.map actual_edges' ~f:(fun (left, right, data) -> (right, (left, data))));
+    back_edges = IntMap.map (IntMap.of_alist_multi (List.map actual_edges' ~f:(fun (left, right, data) -> (right, (left, data)))))
+        ~f:(fun es -> Edge.Set.of_list es);
     (* The entry block *)
     entry_block = entry_block;
     (* The exit block is the return block *)

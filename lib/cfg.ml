@@ -1,8 +1,40 @@
 open Core_kernel
 open Helpers
 
-type edges = (int * bool option) list
-[@@deriving sexp, compare, equal]
+module Edge = struct
+  module T = struct
+    type t = int * bool option
+    [@@deriving sexp, compare, equal]
+  end
+  include T
+  let to_string (e : t) : string = string_of_int (fst e)
+  module Set = Set.Make(T)
+end
+
+module Edges = struct
+  module T = struct
+    type t = Edge.Set.t IntMap.t
+    [@@deriving sexp, compare, equal]
+  end
+  include T
+  let from (edges : t) (idx : int) : Edge.t list =
+    match IntMap.find edges idx with
+    | Some es -> Edge.Set.to_list es
+    | None -> []
+
+  let add (edges : t) (from : int) (edge : Edge.t) : t =
+    IntMap.update edges from ~f:(function
+        | None -> Edge.Set.singleton edge
+        | Some es -> Edge.Set.add es edge)
+
+  let remove (edges : t) (from : int) (to_ : int) : t =
+    IntMap.update edges from ~f:(function
+        | None -> Edge.Set.empty
+        | Some es -> Edge.Set.filter es ~f:(fun (dst, _) -> not (dst = to_)))
+
+  let remove_from (edges : t) (from : int) : t =
+    IntMap.remove edges from
+end
 
 type 'a t = {
   exported: bool;
@@ -14,19 +46,13 @@ type 'a t = {
   return_types: Type.t list;
   basic_blocks: 'a Basic_block.t IntMap.t;
   instructions : 'a Instr.t IntMap.t;
-  edges: edges IntMap.t;
-  back_edges: edges IntMap.t;
+  edges: Edges.t;
+  back_edges: Edges.t;
   entry_block: int;
   exit_block: int;
   loop_heads: IntSet.t;
 }
 [@@deriving compare, equal]
-
-(* TODO: subsumed by callees and callers *)
-(* let dependencies (cfg : 'a t) : int list =
-  List.filter_map (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_idx, block) -> match block.content with
-      | Control { instr = Call (_, n); _ } -> Some n
-      | _ -> None) *)
 
 let to_string (cfg : 'a t) : string = Printf.sprintf "CFG of function %d" cfg.idx
 
@@ -35,7 +61,7 @@ let to_dot (cfg : 'a t) (annot_to_string : 'a -> string) : string =
     cfg.idx
     (String.concat ~sep:"\n" (List.map (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, b) -> Basic_block.to_dot b annot_to_string)))
     (String.concat ~sep:"\n" (List.concat_map (IntMap.to_alist cfg.edges) ~f:(fun (src, dsts) ->
-         List.map dsts ~f:(fun (dst, br) -> Printf.sprintf "block%d -> block%d [label=\"%s\"];\n" src dst (match br with
+         List.map (Edge.Set.to_list dsts) ~f:(fun (dst, br) -> Printf.sprintf "block%d -> block%d [label=\"%s\"];\n" src dst (match br with
              | Some true -> "t"
              | Some false -> "f"
              | None -> "")))))
@@ -50,14 +76,14 @@ let find_instr_exn (cfg : 'a t) (label : Instr.label) : 'a Instr.t =
   | Some i -> i
   | None -> failwith "Cfg.find_instr_exn did not find instruction"
 
-let outgoing_edges (cfg : 'a t) (idx : int) : edges =
-  IntMap.find_multi cfg.edges idx
+let outgoing_edges (cfg : 'a t) (idx : int) : Edge.t list =
+  Edges.from cfg.edges idx
 
 let successors (cfg : 'a t) (idx : int) : int list =
   List.map (outgoing_edges cfg idx) ~f:fst
 
-let incoming_edges (cfg : 'a t) (idx : int) : edges =
-  IntMap.find_multi cfg.back_edges idx
+let incoming_edges (cfg : 'a t) (idx : int) : Edge.t list =
+  Edges.from cfg.back_edges idx
 
 let predecessors (cfg : 'a t) (idx : int) : int list =
   List.map (incoming_edges cfg idx) ~f:fst
@@ -109,14 +135,3 @@ let add_annotation (cfg : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : 
     basic_blocks = IntMap.map ~f:(fun b -> Basic_block.add_annotation b block_data instr_data) cfg.basic_blocks;
     instructions = IntMap.map ~f:(fun i -> Instr.add_annotation i instr_data) cfg.instructions;
   }
-
-let forward_edges_from_node (cfg : 'a t) (node_idx : int) : (int * bool option) list =
-  match IntMap.find cfg.edges node_idx with
-  | Some e -> e
-  | None -> []
-
-let backward_edges_from_node (cfg : 'a t) (node_idx : int) : (int * bool option) list =
-  match IntMap.find cfg.back_edges node_idx with
-  | Some e -> e
-  | None -> []
-

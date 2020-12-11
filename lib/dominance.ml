@@ -247,11 +247,11 @@ let cfg_dominator (cfg : Spec_inference.state Cfg.t) : domtree =
   let entry : int = cfg.entry_block in
   let nodes : int list = IntMap.keys cfg.basic_blocks in
   let succs (node : int) : int list =
-    let edges = Cfg.forward_edges_from_node cfg node in
+    let edges = Cfg.outgoing_edges cfg node in
     List.map edges ~f:fst
   in
   let preds (node : int) : int list =
-    let back_edges = Cfg.backward_edges_from_node cfg node in
+    let back_edges = Cfg.incoming_edges cfg node in
     List.map back_edges ~f:fst
   in
   let tree : Tree.t = dominator_tree entry nodes succs preds in
@@ -268,11 +268,11 @@ let cfg_post_dominator (cfg : Spec_inference.state Cfg.t) : Tree.t =
   let exit : int = cfg.exit_block in
   let nodes : int list = IntMap.keys cfg.basic_blocks in
   let succs (node : int) : int list =
-    let edges = match IntMap.find cfg.edges node with Some es -> es | None -> [] in
+    let edges = Cfg.outgoing_edges cfg node in
     List.map edges ~f:fst
   in
   let preds (node : int) : int list =
-    let back_edges = match IntMap.find cfg.back_edges node with Some es -> es | None -> [] in
+    let back_edges = Cfg.incoming_edges cfg node in
     List.map back_edges ~f:fst
   in
   (* Note that we invert succs and preds here, and start from exit, in order to have the post-dominator tree *)
