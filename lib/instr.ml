@@ -348,3 +348,41 @@ let rec all_labels (i : 'a t) : IntSet.t =
           IntSet.union acc (all_labels i))
       | _ -> IntSet.empty
     end) c.label
+
+(** The input arity of an expression, i.e., how many values it expects on the stack *)
+let rec in_arity (i : 'a t) : int =
+  match i with
+  | Data d -> in_arity_data d
+  | Control c -> in_arity_control c
+and in_arity_data (i : (data, 'a) labelled) : int =
+  match i.instr with
+  | Nop -> 0
+  | Drop -> 1
+  | Select -> 3
+  | MemorySize -> 0
+  | MemoryGrow -> 1
+  | Const _ -> 1
+  | Unary _ -> 1
+  | Binary _ -> 2
+  | Compare _ -> 2
+  | Test _ -> 1
+  | Convert _ -> 1
+  | LocalGet _ -> 0
+  | LocalSet _ -> 1
+  | LocalTee _ -> 1
+  | GlobalGet _ -> 0
+  | GlobalSet _ -> 1
+  | Load _ -> 1
+  | Store _ -> 2
+and in_arity_control (i : ('a control, 'a) labelled) : int =
+  match i.instr with
+  | Block ((n, _), _) -> n
+  | Loop ((n, _), _) -> n
+  | If ((n, _), _, _) -> n
+  | Call ((n, _), _) -> n
+  | CallIndirect ((n, _), _) -> n
+  | Br _ -> 0
+  | BrIf _ -> 1
+  | BrTable (_, _) -> 1
+  | Return -> 0 (* this actually depends on the function, but strictly speaking, return does not expect anything *)
+  | Unreachable -> 0

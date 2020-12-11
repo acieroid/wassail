@@ -67,6 +67,7 @@ module UseDefChains = struct
 end
 
 (** Return the list of variables defined by an instruction *)
+(* TODO: this should be part of Spec_inference? *)
 let instr_def (instr : Spec.t Instr.t) : Var.t list =
   let defs = match instr with
     | Instr.Data i ->
@@ -76,9 +77,17 @@ let instr_def (instr : Spec.t Instr.t) : Var.t list =
         | Select | MemorySize
         | Unary _ | Binary _ | Compare _ | Test _ | Convert _
         | Const _ -> top_n 1
-        | LocalGet _ | GlobalGet _
+        | LocalGet _ ->
+          if !Spec_inference.propagate_locals then
+            []
+          else
+            top_n 1
+        | GlobalGet _ ->
+          if !Spec_inference.propagate_globals then
+            []
+          else
+            top_n 1
         | LocalSet _ | LocalTee _ | GlobalSet _ ->
-          (* accesses to locals and globals do not define anything new: they simply copy variables *)
           []
         | Load _ -> top_n 1
         | Store _ ->

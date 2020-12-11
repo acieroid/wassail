@@ -19,6 +19,7 @@ module Intra = Intra
 
 module Spec_inference = Spec_inference
 module Spec_analysis = Spec_analysis
+module Spec = Spec
 
 module Relational = Relational
 module Taint = Taint

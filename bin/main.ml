@@ -174,6 +174,9 @@ let slice_cfg =
       and criteria = anon ("criterias" %: int_comma_separated_list) in
       fun () ->
         Printf.printf "Reading module\n%!";
+        Spec_inference.propagate_globals := false;
+        Spec_inference.propagate_locals := false;
+        Spec_inference.use_const := false;
         let module_ = Wasm_module.of_file filename in
         let t0 = Time.now () in
         let cfg = Spec_analysis.analyze_intra1 module_ idx in
