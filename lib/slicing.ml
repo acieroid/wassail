@@ -182,26 +182,12 @@ let slice (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : unit Cf
         NOTE: this could be refined to remove entry/exit block only if
            it has one successor (which becomes the new entry  block)
            or one predecessor (which becomes the new exit block) *)
-        let keep_due_to_entry_or_exit = if block_idx = cfg.entry_block then
+        let keep_anyway = if block_idx = cfg.entry_block then
             true (* List.length (Cfg.successors cfg block_idx) > 1 *)
           else if block_idx = cfg.exit_block then
             true (* List.length (Cfg.predecessors cfg block_idx) > 1 *)
           else
             false in
-        (* A block that is empty may also need to be kept if rewiring its edge
-           would introduce inconsinstency in the graph. *)
-        let keep_due_to_edges =
-          (* The only safe way to rewrite edges of a block is if either:
-             - all its incoming edges are "sequential" (i.e., are not the result of branches), or
-             - all its outgoing edges are "sequential"
-             Otherwise, this would introduces edges that would be the results of multiple conditionals.
-          Note that this check is performed on the currently constructed CFG. *)
-          not (
-            List.for_all (IntMap.find_multi edges block_idx) ~f:(function (_, None) -> true | _ -> false) ||
-            List.for_all (IntMap.find_multi back_edges block_idx) ~f:(function (_, None) -> true | _ -> false)
-          )
-        in
-        let keep_anyway = keep_due_to_entry_or_exit || keep_due_to_edges in
         (* The new block, if it is kept *)
         let new_block : unit Basic_block.t option = match block.content with
           | ControlMerge ->
@@ -241,7 +227,15 @@ let slice (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : unit Cf
         let merge_conds c1 c2 = match (c1, c2) with
           | None, None -> None
           | Some x, None | None, Some x -> Some x
-          | Some _, Some _ -> failwith "incorrect invariant in slicing" in
+          | Some x, Some _ ->
+            (* Correctness for this case needs is established as follows.
+               What we're doing here is rewriting two edges such as
+               n1 -f-> n2 -t-> n3
+               to:
+               n1 -f-> n3
+               because n2 is removed.
+               It seems to make sense that we keep "f", but not "t", as n2 is not executed anymore *)
+            Some x in
         match new_block with
         | Some block ->
           (* Block is kept *)
