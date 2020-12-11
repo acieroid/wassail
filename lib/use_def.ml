@@ -1,7 +1,5 @@
 open Core_kernel
 
-let filter_consts : bool ref = ref true
-
 module Use = struct
   module T = struct
   (** Uses can either occur from:
@@ -83,11 +81,12 @@ let instr_def (instr : Spec_inference.state Instr.t) : Var.t list =
           (* accesses to locals and globals do not define anything new: they simply copy variables *)
           []
         | Load _ -> top_n 1
-        | Store {offset; _} ->
-          let addr = List.nth_exn i.annotation_before.vstack 1 (* address is not the top of the stack but the element after *) in
+        | Store _ ->
+          []
+        (*let addr = List.nth_exn i.annotation_before.vstack 1 (* address is not the top of the stack but the element after *) in
           [match Var.OffsetMap.find i.annotation_after.memory (addr, offset) with
            | Some v -> v
-           | None -> failwith (Printf.sprintf "Wrong memory annotation while looking for %s+%d in memory (instr: %s), annot after: %s" (Var.to_string addr) offset (Instr.to_string instr Spec_inference.state_to_string) (Spec_inference.state_to_string i.annotation_after))]
+           | None -> failwith (Printf.sprintf "Wrong memory annotation while looking for %s+%d in memory (instr: %s), annot after: %s" (Var.to_string addr) offset (Instr.to_string instr Spec_inference.state_to_string) (Spec_inference.state_to_string i.annotation_after))] *)
       end
     | Instr.Control i ->
       let top_n n = List.take i.annotation_after.vstack n in
@@ -100,7 +99,7 @@ let instr_def (instr : Spec_inference.state Instr.t) : Var.t list =
       end
   in
   List.filter defs ~f:(function
-      | Var.Const _ -> !filter_consts (* constants are not variables that can be defined (otherwise definitions are not unique anymore) *)
+      | Var.Const _ -> false (* constants are not variables that can be defined (otherwise definitions are not unique anymore) *)
       | Var.Local _ -> false (* locals don't have a definition point (they are part of the entry state) *)
       | Var.Global _ -> false (* same for globals *)
       | _ -> true)
@@ -175,8 +174,8 @@ let make (cfg : Spec_inference.state Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.M
         ~init:Var.Set.empty
         ~f:(fun acc instr -> Var.Set.union acc
                (Var.Set.union
-                  (Spec_inference.State.vars_of (Instr.annotation_before instr))
-                  (Spec_inference.State.vars_of (Instr.annotation_after instr)))) in
+                  (Spec.vars_of (Instr.annotation_before instr))
+                  (Spec.vars_of (Instr.annotation_after instr)))) in
     Var.Set.fold all_vars ~init:defs ~f:(fun defs var ->
         match var with
         | Var.Const n -> begin match Var.Map.add defs ~key:var ~data:(Def.Constant n)  with
@@ -228,7 +227,6 @@ let make (cfg : Spec_inference.state Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.M
 
 let%test "simplest ud chain" =
   Instr.reset_counter ();
-  filter_consts := false;
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
@@ -247,7 +245,6 @@ let%test "simplest ud chain" =
 
 let%test "ud-chain with locals" =
   Instr.reset_counter ();
-  filter_consts := false;
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32 i32) (result i32)))
   (func (;test;) (type 0) (param i32 i32) (result i32)
@@ -268,7 +265,6 @@ let%test "ud-chain with locals" =
 
 let%test "use-def with merge blocks" =
   Instr.reset_counter ();
-  filter_consts := false;
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
@@ -295,3 +291,25 @@ let%test "use-def with merge blocks" =
                                        (Use.Merge (6, Var.Var 5), Def.Instruction(5, Var.Var 5))] in
   UseDefChains.equal actual expected
 
+let%test "use-def with memory" =
+  Instr.reset_counter ();
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    memory.size     ;; Instr 0, Var 0
+    memory.size     ;; Instr 1, Var 1
+    i32.store       ;; Instr 2, i0+0 mapped to i1 (no new var!)
+    memory.size     ;; Instr 3, Var 3
+    memory.size     ;; Instr 4, Var 4
+    i32.store       ;; Instr 5, i3+0 mapped to i4 (no new var!)
+  )
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let _, _, actual = make cfg in
+  let expected = Use.Map.of_alist_exn [(Use.Instruction (2, Var.Var 0), Def.Instruction (0, Var.Var 0));
+                                       (Use.Instruction (2, Var.Var 1), Def.Instruction (1, Var.Var 1));
+                                       (Use.Instruction (5, Var.Var 3), Def.Instruction (3, Var.Var 3));
+                                       (Use.Instruction (5, Var.Var 4), Def.Instruction (4, Var.Var 4))] in
+  UseDefChains.equal actual expected

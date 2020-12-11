@@ -18,7 +18,10 @@ module Inter = Inter
 module Intra = Intra
 
 module Spec_inference = Spec_inference
+module Spec_analysis = Spec_analysis
 
 module Relational = Relational
 module Taint = Taint
 module Reltaint = Reltaint
+
+module Slicing = Slicing

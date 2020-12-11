@@ -39,6 +39,9 @@ let slicing (cfg : Spec_inference.state Cfg.t) (criterion : Instr.label) : Slice
     match SlicePart.Set.choose worklist with
     | None -> (* worklist is empty *)
       slice
+    | Some slicepart when SlicePart.Set.mem slice slicepart ->
+      (* Already seen this slice part, no need to process it again *)
+      loop (SlicePart.Set.remove worklist slicepart) slice
     | Some slicepart ->
       let uses = match slicepart with
         | Instruction instr -> Use_def.instr_use (Cfg.find_instr_exn cfg instr)
@@ -307,7 +310,7 @@ let%test_unit "slicing with merge blocks using slice" =
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
   let sliced_cfg = slice cfg 9 in
-  let _annotated_sliced_cfg = Spec.Intra.analyze module_ sliced_cfg in
+  let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
   (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
   ()
 
@@ -316,7 +319,6 @@ let find_call_indirect_instructions (cfg : Spec_inference.state Cfg.t) : int lis
   List.filter_map (Cfg.all_instructions cfg) ~f:(fun instr -> match instr with
       | Control {label; instr = CallIndirect _; _} -> Some label
       | _ -> None)
-
 
 let%test_unit "slicing with memory" =
   Instr.reset_counter ();
@@ -335,9 +337,10 @@ let%test_unit "slicing with memory" =
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
   let sliced_cfg = slice cfg 5 in
-  let _annotated_sliced_cfg = Spec.Intra.analyze module_ sliced_cfg in
-  ()
+  let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
 
+  ()
+(*
 let%test_unit "slicing bigger program" =
   Instr.reset_counter ();
   let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
@@ -345,5 +348,7 @@ let%test_unit "slicing bigger program" =
   List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
       (* instr_idx is the label of a call_indirect instruction, slice it *)
       let _sliced_cfg = slice cfg instr_idx in
+      Printf.printf "DOT with %d:\n%s\n" instr_idx (Cfg.to_dot _sliced_cfg (fun _ -> ""));
       (* let _annotated_slice_cfg = Spec.Intra.analyze module_ sliced_cfg in *)
       ())
+*)

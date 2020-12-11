@@ -163,6 +163,39 @@ let taint_inter =
     Taint.analyze_inter
     (fun fid summary -> Printf.printf "function %d: %s\n" fid (Taint.Summary.to_string summary))
 
+let slice_cfg =
+  let report_time (msg : string) (t0 : Time.t) (t1 : Time.t) : unit =
+    Printf.printf "Time for '%s': %s\n%!" msg (Time.Span.to_string (Time.diff t1 t0)) in
+  Command.basic
+    ~summary:"Slice a CFG at each call_indirect instruction"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and idx = anon ("fun" %: int)in
+      fun () ->
+        Printf.printf "Reading module\n%!";
+        let module_ = Wasm_module.of_file filename in
+        let t0 = Time.now () in
+        let cfg = Spec_analysis.analyze_intra1 module_ idx in
+        let t1 = Time.now () in
+        report_time "Spec analysis" t0 t1;
+        Printf.printf "outputting initial CFG in initial.dot\n%!";
+        Out_channel.with_file "initial.dot"
+                ~f:(fun ch ->
+                    Out_channel.output_string ch (Cfg.to_dot cfg (fun _ -> "")));
+        List.iter (Slicing.find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
+            (* instr_idx is the label of a call_indirect instruction, slice it *)
+            Printf.printf "Slicing for instruction %d\n%!" instr_idx;
+            let t0 = Time.now () in
+            let _sliced_cfg = Slicing.slice cfg instr_idx in
+            let t1 = Time.now () in
+            report_time "Slicing" t0 t1;
+            Printf.printf "outputting sliced cfg to sliced-%d.dot\n%!" instr_idx;
+            Out_channel.with_file (Printf.sprintf "sliced-%d.dot" instr_idx)
+                ~f:(fun ch ->
+                    Out_channel.output_string ch (Cfg.to_dot _sliced_cfg (fun _ -> "")));
+            (* let _annotated_slice_cfg = Spec.Intra.analyze module_ sliced_cfg in *)
+            ()))
+
 let () =
   Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
   Command.run ~version:"0.0"
@@ -176,4 +209,5 @@ let () =
        ; "taint-intra", taint_intra
        ; "taint-inter", taint_inter
        ; "reltaint-intra", reltaint_intra
-       ; "relational-intra", relational_intra])
+       ; "relational-intra", relational_intra
+       ; "slice", slice_cfg])

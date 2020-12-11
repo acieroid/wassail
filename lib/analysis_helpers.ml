@@ -13,7 +13,7 @@ let mk_intra
           summaries
         end else
           let cfg = IntMap.find_exn cfgs fid in
-          let annotated_cfg = Spec.Intra.analyze wasm_mod cfg in
+          let annotated_cfg = Spec_inference.Intra.analyze wasm_mod cfg in
           let (summary : 'a) = analysis summaries wasm_mod annotated_cfg in
           IntMap.update summaries fid ~f:(fun _ -> summary))
 
@@ -22,7 +22,7 @@ let mk_inter
     (analysis : Wasm_module.t -> Spec_inference.state Cfg.t IntMap.t -> 'a IntMap.t)
   : Wasm_module.t -> int list list -> 'a IntMap.t = fun wasm_mod sccs ->
   let cfgs = Cfg_builder.build_all wasm_mod in
-  let annotated_cfgs = IntMap.map cfgs ~f:(fun cfg -> Spec.Intra.analyze wasm_mod cfg) in
+  let annotated_cfgs = IntMap.map cfgs ~f:(fun cfg -> Spec_inference.Intra.analyze wasm_mod cfg) in
   List.fold_left sccs
     ~init:(init_summaries cfgs wasm_mod)
     ~f:(fun summaries funs ->
