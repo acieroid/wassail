@@ -87,8 +87,16 @@ let instr_def (instr : Spec.t Instr.t) : Var.t list =
             []
           else
             top_n 1
-        | LocalSet _ | LocalTee _ | GlobalSet _ ->
-          []
+        | LocalSet l | LocalTee l ->
+          if !Spec_inference.propagate_locals then
+            []
+          else
+            [List.nth_exn i.annotation_after.locals l]
+        | GlobalSet g ->
+          if !Spec_inference.propagate_globals then
+            []
+          else
+            [List.nth_exn i.annotation_after.globals g]
         | Load _ -> top_n 1
         | Store _ ->
           []

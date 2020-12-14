@@ -23,9 +23,9 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
   (*---- Helper functions ----*)
   (** Like List.drop, but raises an exception if the list does not contain enough element *)
   let drop (n : int) (vstack : Var.t list) =
-    if (List.length vstack < n) then
+    if (List.length vstack < n) then begin
       failwith "Spec_inference.drop: not enough elements in stack"
-    else
+    end else
       List.drop vstack n
 
   let get (n : int) (l : Var.t list) = List.nth_exn l n
@@ -80,10 +80,10 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
     | Drop -> { state with vstack = drop 1 state.vstack }
     | Select -> { state with vstack = ret :: (drop 3 state.vstack) }
     | LocalGet l -> { state with vstack = (if !propagate_locals then get l state.locals else ret) :: state.vstack }
-    | LocalSet l -> { state with vstack = drop 1 state.vstack; locals = set l state.locals (List.hd_exn state.vstack) }
-    | LocalTee l -> { state with locals = set l state.locals (List.hd_exn state.vstack) }
+    | LocalSet l -> { state with vstack = drop 1 state.vstack; locals = set l state.locals (if !propagate_locals then (List.hd_exn state.vstack) else ret) }
+    | LocalTee l -> { state with locals = set l state.locals (if !propagate_locals then (List.hd_exn state.vstack) else ret) }
     | GlobalGet g -> { state with vstack = (if !propagate_globals then get g state.globals else ret) :: state.vstack }
-    | GlobalSet g -> { state with globals = set g state.globals (List.hd_exn state.vstack) }
+    | GlobalSet g -> { state with globals = set g state.globals (if !propagate_globals then (List.hd_exn state.vstack) else ret) }
     | Const n -> { state with vstack = (if !use_const then (Var.Const n) else ret) :: state.vstack }
     | Compare _ -> { state with vstack = ret :: (drop 2 state.vstack) }
     | Binary _ -> { state with vstack = ret :: (drop 2 state.vstack) }

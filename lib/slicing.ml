@@ -56,17 +56,16 @@ let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.label) : SlicePart.Set.t =
               let def = Use_def.UseDefChains.get data_dependencies (match slicepart with
                   | Instruction instr -> Use_def.Use.Instruction (instr, use)
                   | Merge blockidx -> Use_def.Use.Merge (blockidx, use)) in
-              let to_add_from_def = match def with
+              let data_dependencies = match def with
                 | Use_def.Def.Instruction (instr', _) -> SlicePart.Set.singleton (Instruction instr')
                 | Use_def.Def.Merge (blockidx, _) -> SlicePart.Set.singleton (Merge blockidx)
                 | Use_def.Def.Entry _ -> SlicePart.Set.empty
                 | Use_def.Def.Constant _ -> SlicePart.Set.empty in
               let preds = Control_deps.find control_dependencies use in (* the control dependencies for the current use *)
-              Control_deps.Pred.Set.fold preds
-                ~init:(SlicePart.Set.union w to_add_from_def)
-                ~f:(fun w (_, instr') ->
-                    (* TODO: can't merge block also have control dependencies? Maybe not relevant, as they will have data dependencies on what they redefine *)
-                    SlicePart.Set.add w (Instruction instr'))) in
+              let control_dependencies = Control_deps.Pred.Set.fold preds ~init:SlicePart.Set.empty ~f:(fun w (_, instr') ->
+                  (* TODO: can't merge block also have control dependencies? Maybe not relevant, as they will have data dependencies on what they redefine *)
+                  SlicePart.Set.add w (Instruction instr')) in
+              SlicePart.Set.union w (SlicePart.Set.union data_dependencies control_dependencies)) in
       loop (SlicePart.Set.remove worklist' slicepart) (SlicePart.Set.add slice slicepart) in
   loop (SlicePart.Set.singleton (Instruction criterion)) SlicePart.Set.empty
 
@@ -272,6 +271,12 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.label) : unit Cfg.t =
                      else
                        back_edges))
            end)) in
+  (* Finally, we remove all edges going to the exit block *)
+  let edges_going_to_exit = Cfg.Edges.from back_edges cfg.exit_block in (* the edges that go to the exit block *)
+  let back_edges = Cfg.Edges.remove_from back_edges cfg.exit_block in
+  let edges = List.fold_left edges_going_to_exit
+      ~init:edges
+      ~f:(fun edges (src, _) -> Cfg.Edges.remove edges src cfg.exit_block) in
   { cfg with basic_blocks; instructions; edges; back_edges }
 
 let%test_unit "slicing with merge blocks using slice" =
@@ -332,9 +337,13 @@ let%test_unit "slicing with memory" =
 let%test_unit "slicing bigger program" =
   Instr.reset_counter ();
   let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
+  Spec_inference.propagate_globals := false;
+  Spec_inference.propagate_locals := false;
+  Spec_inference.use_const := false;
   let cfg = Spec_analysis.analyze_intra1 module_ 14 in
   List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
       (* instr_idx is the label of a call_indirect instruction, slice it *)
-      let _sliced_cfg = slice cfg instr_idx in
-      (* let _annotated_slice_cfg = Spec.Intra.analyze module_ sliced_cfg in *)
+      let sliced_cfg = slice cfg instr_idx in
+      (* We should be able to re-annotate the graph *)
+      let _annotated_slice_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
       ())
