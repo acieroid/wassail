@@ -28,6 +28,8 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
     end else
       List.drop vstack n
 
+  let top (l : Var.t list) = List.hd_exn l
+
   let get (n : int) (l : Var.t list) = List.nth_exn l n
 
   let set (n : int) (l : Var.t list) (v : Var.t) = List.mapi l ~f:(fun i v' -> if i = n then v else v')

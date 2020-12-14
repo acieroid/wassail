@@ -9,6 +9,7 @@
       Summary Intra Inter
       Vstack Locals Globals Prim_value
       Spec Spec_inference Spec_analysis
+      Var_prop
       Taint Taint_options Taint_domain Taint_transfer Taint_summary
       Relational Relational_domain Relational_transfer Relational_summary Relational_spec Relational_options
       Reltaint

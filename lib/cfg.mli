@@ -101,6 +101,9 @@ val callers : 'a t IntMap.t -> 'a t -> IntSet.t
 (** Return all the instructions contained within this CFG (in no particular order) *)
 val all_instructions : 'a t -> 'a Instr.t list
 
+(** Return all basic blocks within this CFG (in no particular ordr) *)
+val all_blocks : 'a t -> 'a Basic_block.t list
+
 (** Return all merge blocks contained within this CFG (in no particular order) *)
 val all_merge_blocks : 'a t -> 'a Basic_block.t list
 
@@ -118,3 +121,6 @@ val annotate : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> 'b t
 
 (** Add more annotations to an already-annotated CFG *)
 val add_annotation : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> ('a * 'b) t
+
+(** Map a function over all the annotations *)
+val map_annotations : 'a t -> f:('a -> 'a) -> 'a t

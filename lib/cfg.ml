@@ -108,6 +108,9 @@ let callers (cfgs : 'a t IntMap.t) (cfg : 'a t) : IntSet.t =
 let all_instructions (cfg : 'a t) : 'a Instr.t list =
   List.map ~f:snd (IntMap.to_alist cfg.instructions)
 
+let all_blocks (cfg : 'a t) : 'a Basic_block.t list =
+  IntMap.data cfg.basic_blocks
+
 let all_merge_blocks (cfg : 'a t) : 'a Basic_block.t list =
   IntMap.fold cfg.basic_blocks ~init:[] ~f:(fun ~key:_ ~data:block l ->
       match block.content with

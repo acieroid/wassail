@@ -1,21 +1,24 @@
 open Core_kernel
 open Helpers
 
-(** A basic block can either be a control block, a data block, or a merge block *)
-type 'a block_content =
-  | Control of ('a Instr.control, 'a) Instr.labelled
-  | Data of (Instr.data, 'a) Instr.labelled list
-  | ControlMerge
-[@@deriving sexp, compare, equal]
+module T = struct
+  (** A basic block can either be a control block, a data block, or a merge block *)
+  type 'a block_content =
+    | Control of ('a Instr.control, 'a) Instr.labelled
+    | Data of (Instr.data, 'a) Instr.labelled list
+    | ControlMerge
+  [@@deriving sexp, compare, equal]
 
-(** A basic block *)
-type 'a t = {
-  idx: int; (** Its index *)
-  content: 'a block_content; (** Its content *)
-  annotation_before : 'a;
-  annotation_after : 'a;
-}
-[@@deriving sexp, compare, equal]
+  (** A basic block *)
+  type 'a t = {
+    idx: int; (** Its index *)
+    content: 'a block_content; (** Its content *)
+    annotation_before : 'a;
+    annotation_after : 'a;
+  }
+  [@@deriving sexp, compare, equal]
+end
+include T
 
 (** Convert a block to its string representation *)
 let to_string (b : 'a t) (annot_to_string : 'a -> string) : string = Printf.sprintf "block %d, %s" b.idx (match b.content with

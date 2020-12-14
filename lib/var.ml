@@ -12,10 +12,8 @@ module T = struct
   [@@deriving sexp, compare, equal]
   type with_offset = t * int
   [@@deriving sexp, compare, equal]
-end
-include T
 
-let to_string (v : t) : string = match v with
+  let to_string (v : t) : string = match v with
   | Var n -> Printf.sprintf "i%d" n
   | Local n -> Printf.sprintf "l%d" n
   | Global n -> Printf.sprintf "g%d" n
@@ -24,7 +22,9 @@ let to_string (v : t) : string = match v with
   | Hole -> "_"
   | Const n ->  Prim_value.to_string n
 
-let list_to_string (vs : t list) : string = String.concat ~sep: ", " (List.map vs ~f:to_string)
+  let list_to_string (vs : t list) : string = String.concat ~sep: ", " (List.map vs ~f:to_string)
+end
+include T
 
 module OffsetMap = Map.Make(struct
     type t = with_offset
