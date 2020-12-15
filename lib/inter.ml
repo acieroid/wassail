@@ -39,7 +39,9 @@ module Make (Intra : Intra.INTRA) (*: INTER*) = struct
             (Printf.sprintf "Not analyzing cfg %d (it is an imported function)" cfg_idx);
           fixpoint (IntSet.remove worklist cfg_idx) acc
         end else begin
-          let cfg = IntMap.find_exn cfgs cfg_idx in
+          let cfg = match IntMap.find cfgs cfg_idx with
+            | Some r -> r
+            | None -> failwith "Inter: can't find CFG" in
           Logging.info !verbose
             (Printf.sprintf "Analyzing cfg %d (name: %s)\n" cfg_idx cfg.name);
           (* Perform intra-procedural analysis *)

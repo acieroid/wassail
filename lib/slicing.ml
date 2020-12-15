@@ -91,6 +91,9 @@ let%test "simple slicing - first slicing criterion, only const" =
 
 let%test "simple slicing - second slicing criterion, with locals" =
   Instr.reset_counter ();
+  Spec_inference.propagate_globals := false;
+  Spec_inference.propagate_locals := false;
+  Spec_inference.use_const := false;
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
@@ -106,10 +109,7 @@ let%test "simple slicing - second slicing criterion, with locals" =
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
   let actual = slicing cfg 6 in
-  (* Why is Instruction 4 not part of the slice?
-     Because this is not the instruction that *defines* l0, l0 is defined at the entry point of the function.
-     Instead, what will happen is that when we see that we need l0 in the slice, we can easily add a local.get 0 instruction to the slice, not matter what the input program was *)
-  let expected = SlicePart.Set.of_list [Instruction 5; Instruction 6] in
+  let expected = SlicePart.Set.of_list [Instruction 4; Instruction 5; Instruction 6] in
   SlicePart.Set.equal actual expected
 
 let%test "slicing with block and br_if" =
@@ -341,9 +341,18 @@ let%test_unit "slicing bigger program" =
   Spec_inference.propagate_locals := false;
   Spec_inference.use_const := false;
   let cfg = Spec_analysis.analyze_intra1 module_ 14 in
+  Printf.printf "number of vars: %d\n" (Var_prop.count_vars cfg);
   List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
       (* instr_idx is the label of a call_indirect instruction, slice it *)
+      Spec_inference.propagate_locals := false;
+      Spec_inference.propagate_globals := false;
+      Spec_inference.use_const := false;
       let sliced_cfg = slice cfg instr_idx in
       (* We should be able to re-annotate the graph *)
+      (* TODO: test fails if we enable the following: *)
+      Spec_inference.propagate_locals := true;
+      Spec_inference.propagate_globals := true;
+      Spec_inference.use_const := true;
       let _annotated_slice_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+      Printf.printf "big program vars after slicing: %d\n" (Var_prop.count_vars (Var_prop.var_prop _annotated_slice_cfg));
       ())

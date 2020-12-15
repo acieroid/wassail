@@ -67,7 +67,9 @@ let all_annots (b : 'a t) : 'a list =
 
 (** Change the annotations of a basic block *)
 let annotate (b : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b) IntMap.t) : 'b t =
-  let (annotation_before, annotation_after) = IntMap.find_exn block_data b.idx in
+  let (annotation_before, annotation_after) = match IntMap.find block_data b.idx with
+    | Some r -> r
+    | None -> failwith "Basic_block.annotate: can't find data" in
   { b with content = begin match b.content with
         | Control c -> Control (Instr.annotate_control c instr_data)
         | Data instrs -> Data (List.map instrs ~f:(fun i -> Instr.annotate_data i instr_data))
@@ -78,7 +80,9 @@ let annotate (b : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b
 
 (** Add more annotations to an already-annotated CFG *)
 let add_annotation (b : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b) IntMap.t) : ('a * 'b) t =
-  let (annotation_before, annotation_after) = IntMap.find_exn block_data b.idx in
+  let (annotation_before, annotation_after) = match IntMap.find block_data b.idx with
+    | Some r -> r
+    | None -> failwith "Basic_block.add_annotation: can't find data" in
   { b with content = begin match b.content with
         | Control c -> Control (Instr.add_annotation_control c instr_data)
         | Data instrs -> Data (List.map instrs ~f:(fun i -> Instr.add_annotation_data i instr_data))

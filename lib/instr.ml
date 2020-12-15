@@ -231,10 +231,14 @@ let rec annotate (i : 'a t) (data : ('b * 'b) IntMap.t) : 'b t =
   | Data d -> Data (annotate_data d data)
   | Control c -> Control (annotate_control c data)
 and annotate_data (i : (data, 'a) labelled) (data : ('b * 'b) IntMap.t) : (data, 'b) labelled =
-  let annotation_before, annotation_after = IntMap.find_exn data i.label in
+  let annotation_before, annotation_after = match IntMap.find data i.label with
+    | Some r -> r
+    | None -> failwith "Instr.annotate_data: can't find data" in
   { i with annotation_before; annotation_after }
 and annotate_control (i : ('a control, 'a) labelled) (data : ('b * 'b) IntMap.t) : ('b control, 'b) labelled =
-  let annotation_before, annotation_after = IntMap.find_exn data i.label in
+  let annotation_before, annotation_after = match IntMap.find data i.label with
+    | Some r -> r
+    | None -> failwith "Instr.annotate_control: can't find data" in
   { i with annotation_before; annotation_after;
            instr = match i.instr with
              | Block (arity, instrs) -> Block (arity, List.map instrs ~f:(fun i -> annotate i data))
@@ -269,10 +273,14 @@ let rec add_annotation (i : 'a t) (data : ('b * 'b) IntMap.t) : ('a * 'b) t =
   | Data d -> Data (add_annotation_data d data)
   | Control c -> Control (add_annotation_control c data)
 and add_annotation_data (i : (data, 'a) labelled) (data : ('b * 'b) IntMap.t) : (data, ('a * 'b)) labelled =
-  let annotation_before, annotation_after = IntMap.find_exn data i.label in
+  let annotation_before, annotation_after = match IntMap.find data i.label with
+    | Some r -> r
+    | None -> failwith "Instr.add_annotation_data: can't find data" in
   { i with annotation_before = (i.annotation_before, annotation_before); annotation_after = (i.annotation_after, annotation_after) }
 and add_annotation_control (i : ('a control, 'a) labelled) (data : ('b * 'b) IntMap.t) : (('a * 'b) control, ('a * 'b)) labelled =
-  let annotation_before, annotation_after = IntMap.find_exn data i.label in
+  let annotation_before, annotation_after = match IntMap.find data i.label with
+    | Some r -> r
+    | None -> failwith "Instr.add_annotation_control: can't find data" in
   { i with annotation_before = (i.annotation_before, annotation_before); annotation_after = (i.annotation_after, annotation_after);
            instr = match i.instr with
              | Block (arity, instrs) -> Block (arity, List.map instrs ~f:(fun i -> add_annotation i data))

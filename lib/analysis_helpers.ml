@@ -12,7 +12,9 @@ let mk_intra
         if fid < wasm_mod.nimports then begin
           summaries
         end else
-          let cfg = IntMap.find_exn cfgs fid in
+          let cfg = match IntMap.find cfgs fid with
+            | Some r -> r
+            | None -> failwith "Analysis_helpers.mk_intra: can't find CFG" in
           let annotated_cfg = Spec_inference.Intra.analyze wasm_mod cfg in
           let (summary : 'a) = analysis summaries wasm_mod annotated_cfg in
           IntMap.update summaries fid ~f:(fun _ -> summary))

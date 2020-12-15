@@ -77,7 +77,9 @@ let make (cfg : Spec.t Cfg.t) : t =
             | Load _ -> (defs, use (top_n_before 1)) (* use memory address *)
             | Store {offset; _} ->
               let addr = List.hd_exn i.annotation_before.vstack in
-              (def [Var.OffsetMap.find_exn i.annotation_after.memory (addr, offset)], use (top_n_before 2)) (* stores to memory value *)
+              (def [match Var.OffsetMap.find i.annotation_after.memory (addr, offset) with
+                   | Some r -> r
+                   | None -> failwith "Data_dependence_graph: can't find memory var"], use (top_n_before 2)) (* stores to memory value *)
           end
         | Instr.Control i ->
           let top_n_before n = List.take i.annotation_after.vstack n in
@@ -113,7 +115,9 @@ let make (cfg : Spec.t Cfg.t) : t =
      Given a use of v at instruction lab, add key:(lab, v) data:(lookup defs v) *)
   Var.Map.fold uses ~init:UseDefMap.empty ~f:(fun ~key:var ~data:uses map ->
       List.fold_left uses ~init:map ~f:(fun map use ->
-          UseDefMap.add map (use, var) (Var.Map.find_exn defs var)))
+          UseDefMap.add map (use, var) (match Var.Map.find defs var with
+              | Some r -> r
+              | None -> failwith "Data_dependence_graph: can't find def of var")))
   (* Derive a graph from def-use chains.
      The problem is simpler than for high-level languages, because we know there can only be one definition
      (and no other assignment!) to a program variable.

@@ -17,5 +17,7 @@ module MakeManager = functor (Summary : SUMMARY_T) -> struct
 
   let init (sums : Summary.t IntMap.t) : unit = summaries := sums
 
-  let get (f : int) : Summary.t = IntMap.find_exn !summaries f
+  let get (f : int) : Summary.t = match IntMap.find !summaries f with
+    | Some s -> s
+    | None -> failwith "Summary: can't find the summary"
 end

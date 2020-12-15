@@ -7,7 +7,9 @@ let analyze_intra : Wasm_module.t -> int list -> Spec.t Cfg.t IntMap.t =
 
 let analyze_intra1 (module_ : Wasm_module.t) (idx : int) : Spec.t Cfg.t =
   let results = analyze_intra module_ [idx] in
-  IntMap.find_exn results idx
+  match IntMap.find results idx with
+  | Some res -> res
+  | None -> failwith "Spec_analysis.analyze_intra did not actually analyze"
 
 let%test_unit "spec analysis does not error" =
   let module_ = Wasm_module.of_string "(module

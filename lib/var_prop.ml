@@ -31,6 +31,9 @@ module VarEq = struct
     (** Check if there is one equality pair that contains the given variable *)
     let contains_var (vs : t) (v : Var.t) : bool =
       exists vs ~f:(fun eq -> Var.Set.mem eq v)
+
+    let vars (vs : t) : Var.Set.t =
+      fold vs ~init:Var.Set.empty ~f:Var.Set.union
   end
 end
 
@@ -75,35 +78,80 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
   in
   (* Filter out tautologies *)
   let equalities = VarEq.Set.filter equalities ~f:(fun vs -> Var.Set.length vs = 2) in
-  (* Filter out variables that are involved in more than one equality *)
+  (* Filter out merge variables that are involved in more than one equality.
+     For other variables, it is fine for them to be in multiple equalities (e.g., i0 = 1024, i1 = i0) *)
   let equalities = VarEq.Set.filter equalities ~f:(fun vs ->
       Var.Set.for_all vs ~f:(fun v ->
-          (* If there is still one equality that contains v after removing the current equality *)
-          if VarEq.Set.contains_var (VarEq.Set.remove equalities vs) v then begin
-            Printf.printf "dropping equality: %s\n" (VarEq.to_string vs);
-            false
-          end else
-            true)) in
-  Printf.printf "equalities: %s\n" (VarEq.Set.to_string equalities);
+          match v with
+          | Var.Merge _ ->
+            (* If there is still one equality that contains v after removing the current equality *)
+            (* NOTE: it could be perfectly safe in some case to keep the merge variables, but this case may be a bit complex to compute. As a result, the reduction in variables is not the same as if we would perform variable propagation directly. *)
+            not (VarEq.Set.contains_var (VarEq.Set.remove equalities vs) v)
+          | _ -> true)) in
+  (* Compute equality classes *)
+  let rec eq_classes_computation (worklist : Var.Set.t) (current_class : Var.Set.t) (classes : Var.Set.t list) (equalities : VarEq.Set.t) : Var.Set.t list =
+    match Var.Set.choose worklist with
+    | None ->
+      (* No more variable on the worklist, we're done with the current class *)
+      begin match VarEq.Set.choose equalities with
+        | None ->
+          (* We went through all equalities, we're done *)
+          List.filter (current_class :: classes) ~f:(fun c -> not (Var.Set.is_empty c))
+        | Some eq ->
+          (* Compute the next equality class *)
+          eq_classes_computation eq Var.Set.empty (current_class :: classes) (VarEq.Set.remove equalities eq)
+      end
+    | Some var ->
+      if Var.Set.mem current_class var then
+        (* Already in the class, we can ignore it *)
+        eq_classes_computation (Var.Set.remove worklist var) current_class classes equalities
+      else
+        (* Add var to the current equality class,
+           and add all equalities in which it is involved to the worklist *)
+        let eqs = VarEq.Set.filter equalities ~f:(fun eq -> VarEq.contains eq var) in
+        let vars = VarEq.Set.vars eqs in
+        eq_classes_computation (Var.Set.union (Var.Set.remove worklist var) vars) (Var.Set.add current_class var) classes (VarEq.Set.diff equalities eqs) in
+  let classes = eq_classes_computation Var.Set.empty Var.Set.empty [] equalities in
+  let rewrite_target (vs : Var.Set.t) : Var.t =
+    (* Compute the target of a rewrite for all variables in a given class.
+       If one of the variable is an entry var, pick this one.
+       Otherwise, simply return the least element according to the ordering on Var.t *)
+    match Var.Set.find vs ~f:entry_var with
+    | Some v -> v
+    | None -> match Var.Set.min_elt vs with
+      | Some v -> v
+      | None -> failwith "var_prop: invalid equality class" in
   (* All variables that are involved in a single equality can then be propagated:
      they are replaced by the variable they are equal to.
      Precedence is given to variable defined at the entry point (locals, globals, constants, memory vars) *)
-  (* TODO: need a way to map over annotations to change them.
-     Then, for each annotation, we look at every variable. If it is part of an equality, it can be replaced (except if it is an "entry" variable *)
   Cfg.map_annotations cfg ~f:(fun (annot : Spec.t) ->
       Spec.map_vars annot ~f:(fun (v : Var.t) ->
-          if entry_var v then
-            (* Don't replace it, it is an entry var *)
-            v
-          else match VarEq.Set.find equalities ~f:(fun eq -> VarEq.contains eq v) with
-            | Some eq ->
-              let v' = VarEq.other_side eq v in
-              Printf.printf "Replacing var %s by %s\n" (Var.to_string v) (Var.to_string v');
-              v'
-            | None -> v))
+          match List.find classes ~f:(fun vs -> Var.Set.mem vs v) with
+          | Some class_ ->
+            (* Variable is part of an equality class, replace it by its target *)
+            let v' = rewrite_target class_ in
+            (* Printf.printf "Replacing var %s by %s\n" (Var.to_string v) (Var.to_string v'); *)
+            v'
+          | None ->
+            v))
+
+let all_vars (cfg : Spec.t Cfg.t) : Var.Set.t =
+  let vars : Var.Set.t ref = ref Var.Set.empty in
+  let _cfg = Cfg.map_annotations cfg ~f:(fun (annot : Spec.t) ->
+      Spec.map_vars annot ~f:(fun (v : Var.t) ->
+          vars := Var.Set.add !vars v;
+          v)) in
+  !vars
+
+let count_vars (cfg : Spec.t Cfg.t) : int =
+  Var.Set.length (all_vars cfg)
+
 
 let%test "var prop - simple test" =
   Instr.reset_counter ();
+  Spec_inference.propagate_globals := false;
+  Spec_inference.propagate_locals := false;
+  Spec_inference.use_const := false;
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
@@ -115,7 +163,20 @@ let%test "var prop - simple test" =
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  Spec_inference.propagate_globals := true;
+  Spec_inference.propagate_locals := true;
+  Spec_inference.use_const := true;
   let result = var_prop cfg in
-  match (Cfg.find_block_exn result result.exit_block).annotation_after.vstack with
-  | Var.Return :: [] -> true
-  | _ -> false
+  Var.Set.equal (Var.Set.of_list [Var.Return; Var.Local 0; Var.Global 0; Var.Const (Prim_value.of_int 0)]) (all_vars result)
+
+let%test "var prop - big program" =
+  Instr.reset_counter ();
+  let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
+  Spec_inference.propagate_globals := false;
+  Spec_inference.propagate_locals := false;
+  Spec_inference.use_const := false;
+  let cfg = Spec_analysis.analyze_intra1 module_ 14 in
+  let actual = var_prop cfg in
+  count_vars actual < count_vars cfg
+
+
