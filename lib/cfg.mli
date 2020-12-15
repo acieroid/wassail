@@ -123,4 +123,4 @@ val annotate : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> 'b t
 val add_annotation : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> ('a * 'b) t
 
 (** Map a function over all the annotations *)
-val map_annotations : 'a t -> f:('a -> 'a) -> 'a t
+val map_annotations : 'a t -> f:('a -> 'b) -> 'b t

@@ -304,20 +304,22 @@ let%test "Instr.add_annotation block" =
   let eq = (fun (n1, c1) (n2, c2) -> n1 = n2 && Char.equal c1 c2) in
   equal eq (add_annotation b annotation_map) b_annotated
 
-let rec clear_annotation (i : 'a t) : unit t =
+let rec map_annotation (i : 'a t) ~(f : 'a -> 'b) : 'b t =
   match i with
-  | Data d -> Data (clear_annotation_data d)
-  | Control c -> Control (clear_annotation_control c)
-and clear_annotation_data (i : (data, 'a) labelled) : (data, unit) labelled =
-  { i with annotation_before = (); annotation_after = () }
-and clear_annotation_control (i : ('a control, 'a) labelled) : (unit control, unit) labelled =
-  { i with annotation_before = (); annotation_after = ();
+  | Data d -> Data (map_annotation_data d ~f:f)
+  | Control c -> Control (map_annotation_control c ~f:f)
+and map_annotation_data (i : (data, 'a) labelled) ~(f : 'a -> 'b) : (data, 'b) labelled =
+  { i with annotation_before = f i.annotation_before;
+           annotation_after = f i.annotation_after }
+and map_annotation_control (i : ('a control, 'a) labelled) ~(f : 'a ->  'b) : ('b control, 'b) labelled =
+  { i with annotation_before = f i.annotation_before;
+           annotation_after = f i.annotation_after;
            instr = match i.instr with
-             | Block (arity, instrs) -> Block (arity, List.map instrs ~f:clear_annotation)
-             | Loop (arity, instrs) -> Loop (arity, List.map instrs ~f:clear_annotation)
+             | Block (arity, instrs) -> Block (arity, List.map instrs ~f:(map_annotation ~f:f))
+             | Loop (arity, instrs) -> Loop (arity, List.map instrs ~f:(map_annotation ~f:f))
              | If (arity, then_, else_) -> If (arity,
-                                               List.map then_ ~f:clear_annotation,
-                                               List.map else_ ~f:clear_annotation)
+                                               List.map then_ ~f:(map_annotation ~f:f),
+                                               List.map else_ ~f:(map_annotation ~f:f))
              | Call (arity, f) -> Call (arity, f)
              | CallIndirect (arity, f) -> CallIndirect (arity, f)
              | Br n -> Br n
@@ -325,6 +327,13 @@ and clear_annotation_control (i : ('a control, 'a) labelled) : (unit control, un
              | BrTable (l, n) -> BrTable (l, n)
              | Return -> Return
              | Unreachable -> Unreachable }
+
+let clear_annotation (i : 'a t) : unit t =
+  map_annotation i ~f:(fun _ -> ())
+let clear_annotation_data (i : (data, 'a) labelled) : (data, unit) labelled =
+  map_annotation_data i ~f:(fun _ -> ())
+let clear_annotation_control (i : ('a control, 'a) labelled) : (unit control, unit) labelled =
+  map_annotation_control i ~f:(fun _ -> ())
 
 let annotation_before (i : 'a t) : 'a =
   match i with

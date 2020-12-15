@@ -87,13 +87,17 @@ let add_annotation (b : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('
            annotation_before = (b.annotation_before, annotation_before);
            annotation_after = (b.annotation_after, annotation_after) }
 
-(** Clear the annotation of the block *)
-let clear_annotation (b : 'a t) : unit t =
+(** Maps a function over annotations of the block *)
+let map_annotations (b : 'a t) ~(f : 'a -> 'b) : 'b t =
   { b with content = begin match b.content with
-        | Control c -> Control (Instr.clear_annotation_control c)
-        | Data instrs -> Data (List.map instrs ~f:(fun i -> Instr.clear_annotation_data i))
+        | Control c -> Control (Instr.map_annotation_control c ~f:f)
+        | Data instrs -> Data (List.map instrs ~f:(Instr.map_annotation_data ~f:f))
         | ControlMerge -> ControlMerge
       end;
-           annotation_before = ();
-           annotation_after = () }
+           annotation_before = f b.annotation_before;
+           annotation_after = f b.annotation_after }
+
+(** Clear the annotation of the block *)
+let clear_annotation (b : 'a t) : unit t =
+  map_annotations b ~f:(fun _ -> ())
                                  

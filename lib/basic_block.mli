@@ -30,4 +30,8 @@ val annotate : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> 'b t
 
 val add_annotation : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> ('a * 'b) t
 
+val map_annotations : 'a t -> f:('a -> 'b) -> 'b t
+
 val clear_annotation : 'a t -> unit t
+
+

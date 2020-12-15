@@ -26,10 +26,17 @@ module T = struct
 end
 include T
 
-module OffsetMap = Map.Make(struct
-    type t = with_offset
-    [@@deriving sexp, compare, equal]
-  end)
+module OffsetMap = struct
+  include Map.Make(struct
+      type t = with_offset
+      [@@deriving sexp, compare, equal]
+    end)
+  let map_vars (m : T.t t) ~(f: T.t -> T.t) : T.t t =
+    of_alist_exn (List.map (to_alist m)
+                    ~f:(fun ((k, offset), v) ->
+                        ((f k, offset), f v)))
+end
+
 module Map = struct
   include Map.Make(T)
   let to_string (m : 'a t) (f : 'a -> string) : string =

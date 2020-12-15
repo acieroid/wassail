@@ -25,8 +25,11 @@ module Spec = struct
   (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v))))
 
 
-  let map_vars (s : t) ~f:(Var.t -> Var.t) : t =
-    TODO
+  let map_vars (s : t) ~(f : Var.t -> Var.t) : t =
+    { vstack = List.map s.vstack ~f:f;
+      locals = List.map s.locals ~f:f;
+      globals = List.map s.globals ~f:f;
+      memory = Var.OffsetMap.map_vars s.memory ~f:f }
 
   (** Returns all variables contained in the memory of a state *)
   let memvars (s : t) : Var.t list =

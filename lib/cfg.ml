@@ -138,3 +138,8 @@ let add_annotation (cfg : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : 
     basic_blocks = IntMap.map ~f:(fun b -> Basic_block.add_annotation b block_data instr_data) cfg.basic_blocks;
     instructions = IntMap.map ~f:(fun i -> Instr.add_annotation i instr_data) cfg.instructions;
   }
+
+let map_annotations (cfg : 'a t) ~(f : 'a -> 'b) : 'b t =
+  { cfg with
+    basic_blocks = IntMap.map ~f:(fun b -> Basic_block.map_annotations b ~f:f) cfg.basic_blocks;
+    instructions = IntMap.map ~f:(fun i -> Instr.map_annotation i ~f:f) cfg.instructions; }
