@@ -179,4 +179,3 @@ let%test "var prop - big program" =
   let actual = var_prop cfg in
   count_vars actual < count_vars cfg
 
-

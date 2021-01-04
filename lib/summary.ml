@@ -19,5 +19,5 @@ module MakeManager = functor (Summary : SUMMARY_T) -> struct
 
   let get (f : int) : Summary.t = match IntMap.find !summaries f with
     | Some s -> s
-    | None -> failwith "Summary: can't find the summary"
+    | None -> failwith (Printf.sprintf "Summary: can't find the summary of function %d" f)
 end

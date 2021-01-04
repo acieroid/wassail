@@ -1,6 +1,9 @@
 open Core_kernel
 open Helpers
 
+(** Remove vars in certain cases, but this is probably wrong so it is disabled *)
+let remove_vars : bool ref = ref false
+
 type annot_expected = Spec.t
 
 type state = Relational_domain.t
@@ -57,6 +60,12 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block :
           (* block is a control-flow merge *)
           let spec = block.annotation_after in
           let states' = List.map states ~f:(fun (idx, s) ->
+              (* Similar to what is done in data_instr_transfer: restrict the vars to only the important ones *)
+              let s = if !remove_vars then
+                  Domain.change_vars s (Var.Set.union_list [annot_vars (block.annotation_before);
+                                                            annot_vars (block.annotation_after);
+                                                            entry_vars cfg; exit_vars cfg])
+                else s in
               (* get the spec after that state *)
               let spec' = (IntMap.find_exn cfg.basic_blocks idx).annotation_after in
               (* equate all different variables in the post-state with the ones in the pre-state *)
@@ -79,7 +88,7 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block :
 *)
 let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_data) (state : state) : state =
   let ret (i : annot_expected Instr.labelled_data) : Var.t = List.hd_exn i.annotation_after.vstack in
-  let state = Domain.change_vars state (Var.Set.union_list [reachable_vars (Data i); entry_vars cfg; exit_vars cfg]) in
+  let state = if !remove_vars then Domain.change_vars state (Var.Set.union_list [reachable_vars (Data i); entry_vars cfg; exit_vars cfg]) else state in
   match i.instr with
   | Nop -> state
   | MemorySize ->
@@ -232,7 +241,8 @@ let control_instr_transfer
     (i : annot_expected Instr.labelled_control) (* The instruction *)
     (state : Domain.t) (* The pre state *)
   : [`Simple of state | `Branch of state * state] =
-  let state = Domain.change_vars state (Var.Set.union_list [reachable_vars (Control i); entry_vars cfg; exit_vars cfg]) in
+  (* This restricts the variables to only those used in the current instruction and those defined at the entry/exit of the CFG. This can be safely disabled. *)
+  let state = if !remove_vars then Domain.change_vars state (Var.Set.union_list [reachable_vars (Control i); entry_vars cfg; exit_vars cfg]) else state in
   let apply_summary (f : int) (arity : int * int) (state : state) : state =
     let summary = SummaryManager.get f in
     let args = List.take i.annotation_before.vstack (fst arity) in

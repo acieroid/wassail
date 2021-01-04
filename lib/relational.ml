@@ -18,7 +18,6 @@ let analyze_intra : Wasm_module.t -> int list -> Summary.t IntMap.t =
        let out_state = Intra.final_state result_cfg in
        Intra.summary cfg out_state)
 
-
 let check (expected : Summary.t) (actual : Summary.t) : bool =
   if Summary.equal expected actual then begin
     true

@@ -151,11 +151,11 @@ let add_constraints (s : t) (constraints : (Var.t * string) list) : t =
        (to_full_string s)
        (String.concat ~sep:", "
           (List.map constraints ~f:(fun (left, right) -> Printf.sprintf "%s = %s" (Var.to_string left) right)))); *)
-  let filtered_constraints = List.filter constraints ~f:(fun (l, _r) -> match l with
+  let filtered_constraints = List.filter constraints ~f:(fun (l, r) -> match l with
       | Const _ ->
         (* Const are not Apron variables, hence these are filtered out when adding constraints *)
         false
-      (* | _ when String.equal (Var.to_string l) r -> false *)
+      | _ when String.equal (Var.to_string l) r -> false
       |_  -> true) in
   rethrow_apron_error "Relational_domain.add_constraints" (fun () ->
       List.iter filtered_constraints ~f:(fun (x, y) ->
