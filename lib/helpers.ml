@@ -71,7 +71,7 @@ let input_from get_script run =
   | Wasm.Eval.Crash (at, msg) -> error at "runtime crash" msg
   | Wasm.Encode.Code (at, msg) -> error at "encoding error" msg
 
-let parse_from_lexbuf name lexbuf run =
+let parse_from_lexbuf_textual name lexbuf run =
   let extract (l : (Wasm.Script.var option * Wasm.Script.definition) list) =
     match l with
     | (_, { it = Wasm.Script.Textual m; _ }) :: _ -> run m
@@ -79,21 +79,28 @@ let parse_from_lexbuf name lexbuf run =
     input_from (fun _ ->
         let var_opt, def = Wasm.Parse.parse name lexbuf Wasm.Parse.Module in
         [(var_opt, def)])
-        extract
-
+      extract
 
 let parse_string str run =
   let lexbuf = Lexing.from_string str in
   input_from (fun _ ->
-      let var_opt, def = Wasm.Parse.parse "foo.wat" lexbuf Wasm.Parse.Module in
+      let var_opt, def = Wasm.Parse.parse "no-file" lexbuf Wasm.Parse.Module in
       [(var_opt, def)])
     run
 
-let apply_to_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
+let apply_to_textual_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
   In_channel.with_file filename ~f:(fun ic ->
       let lexbuf = Lexing.from_channel ic in
-      parse_from_lexbuf filename lexbuf f)
+      parse_from_lexbuf_textual filename lexbuf f)
+
+let apply_to_binary_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
+  In_channel.with_file filename ~f:(fun ic ->
+      f (Wasm.Decode.decode filename (In_channel.input_all ic)))
+
+let apply_to_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
+  try apply_to_textual_file filename f
+  with _ -> apply_to_binary_file filename f
 
 let apply_to_string (string : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
   let lexbuf = Lexing.from_string string in
-  parse_from_lexbuf "no-file" lexbuf f
+  parse_from_lexbuf_textual "no-file" lexbuf f

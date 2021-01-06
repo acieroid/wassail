@@ -180,11 +180,4 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
     let final = IntMap.find_exn cfg.basic_blocks cfg.exit_block in
     snd (final.annotation_after)
 
-  (*  let extract_spec (results : intra_results) : (state * state) IntMap.t =
-    IntMap.filter_map results ~f:(function
-        | Uninitialized, _ -> None
-        | Simple s, Simple s' -> Some (s, s')
-        | Simple s, Branch (s1, s2) ->
-          Some (s, join_state s1 s2)
-        | _ -> failwith "invalid spec") *)
 end
