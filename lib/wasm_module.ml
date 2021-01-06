@@ -10,6 +10,7 @@ module T = struct
     nglobals : int; (** The number of globals *)
     nimports : int; (** The number of function imported *)
     imported_funcs : (int * string * (Type.t list * Type.t list)) list; (** The description of the imported function: their id, name, and type *)
+    exported_funcs : (int * string * (Type.t list * Type.t list)) list; (** The description of the exported functions: the id, name, and type *)
     funcs : Func_inst.t list; (** The functions defined in the module *)
     mems : Memory_inst.t list; (** The memories specification *)
     tables : Table_inst.t list; (** The tables specification *)
@@ -39,21 +40,28 @@ let get_func_type (m : t) (fidx : int) : Type.t list * Type.t list =
 let of_wasm (m : Wasm.Ast.module_) : t =
   let minst = Module_inst.of_wasm m in
   let imported_funcs = List.filter_mapi m.it.imports ~f:(fun idx import -> match import.it.idesc.it with
-        | FuncImport v ->
-          Some (idx, Wasm.Ast.string_of_name import.it.item_name,
-                match (List.nth_exn m.it.types (Index.of_wasm v)).it with
-                | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
-                                                 List.map b ~f:Type.of_wasm))
-        | _ -> None) in
+      | FuncImport v ->
+        Some (idx, Wasm.Ast.string_of_name import.it.item_name,
+              match (List.nth_exn m.it.types (Index.of_wasm v)).it with
+              | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
+                                               List.map b ~f:Type.of_wasm))
+      | _ -> None) in
   let nimports = List.length imported_funcs in
   let nglobals = List.length m.it.globals in
+  let funcs = List.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m minst (i+nimports) f nglobals) in
+  let exported_funcs = List.filter_map m.it.exports ~f:(fun export -> match export.it.edesc.it with
+      | FuncExport v ->
+        let idx = Int32.to_int_exn v.it in
+        Some (idx, (Wasm.Ast.string_of_name export.it.name), (List.nth_exn funcs (idx-nimports)).typ)
+      | _ -> None) in
   let memories = List.filter_map m.it.imports ~f:(fun import -> match import.it.idesc.it with
       | MemoryImport m -> Some (Memory_inst.of_wasm_type m)
       | _ -> None) @ (List.map m.it.memories ~f:Memory_inst.of_wasm) in
   ({
-    nimports = nimports;
-    imported_funcs = imported_funcs;
-    funcs = List.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m minst (i+nimports) f nglobals);
+    nimports;
+    imported_funcs;
+    exported_funcs;
+    funcs;
     global_types = List.map m.it.globals ~f:(fun g -> match g.it.gtype with
       | Wasm.Types.GlobalType (t, _) -> Type.of_wasm t);
     nglobals = nglobals;

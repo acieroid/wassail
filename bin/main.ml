@@ -1,6 +1,28 @@
 open Core
 open Wassail
 
+let imports =
+  Command.basic
+    ~summary:"List functions imported by a WebAssembly module"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string) in
+      fun () ->
+        let wasm_mod = Wasm_module.of_file file_in in
+        List.iter wasm_mod.imported_funcs ~f:(fun (idx, name, ftype) ->
+            Printf.printf "%d: %s %s\n"
+              idx name (Type.funtype_to_string ftype)))
+
+let exports =
+  Command.basic
+    ~summary:"List functions exported by a WebAssembly module"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string) in
+      fun () ->
+        let wasm_mod = Wasm_module.of_file file_in in
+        List.iter wasm_mod.exported_funcs ~f:(fun (idx, name, ftype) ->
+            Printf.printf "%d: %s %s\n"
+              idx name (Type.funtype_to_string ftype)))
+
 let cfg =
   Command.basic
     ~summary:"Generate a DOT file representing the CFG of function [fid] from the wat file [in], in file [out]"
@@ -189,24 +211,36 @@ let slice_cfg =
             (* instr_idx is the label of a call_indirect instruction, slice it *)
             Printf.printf "Slicing for instruction %d\n%!" instr_idx;
             let sliced_cfg = Slicing.slice cfg instr_idx in
-            let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
             Printf.printf "outputting sliced cfg to sliced-%d.dot\n%!" instr_idx;
             Out_channel.with_file (Printf.sprintf "sliced-%d.dot" instr_idx)
                 ~f:(fun ch ->
-                  Out_channel.output_string ch (Cfg.to_dot annotated_sliced_cfg (Spec.to_dot_string)));
+                  Out_channel.output_string ch (Cfg.to_dot sliced_cfg (fun _ -> "")));
+            let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
             Printf.printf "Analyzing resulting CFG...\n%!";
             let t0 = Time.now () in
             Relational.Intra.init_summaries summaries;
-            let _res = Relational.Intra.analyze module_ annotated_sliced_cfg in
+            let res = Relational.Intra.analyze module_ annotated_sliced_cfg in
             let t1 = Time.now () in
             report_time "relational analysis" t0 t1;
+            let annotated_instr = IntMap.find_exn annotated_sliced_cfg.instructions instr_idx in
+            let var_of_call_target = List.hd_exn (Instr.annotation_before annotated_instr).vstack in
+            let relational_instr = IntMap.find_exn res.instructions instr_idx in
+            let domain_of_call_target = Instr.annotation_before relational_instr in
+            (* The box conversion is useluss, we want to compare to actual possible values for target (by checking subsumption) *)
+            let box = Apron.Abstract1.to_box Relational.Domain.manager domain_of_call_target.constraints in
+            let dim = Apron.Environment.dim_of_var box.box1_env (Apron.Var.of_string (Var.to_string var_of_call_target)) in
+            let itv = Array.get box.interval_array dim in
+            let itvstr = Printf.sprintf "[%s,%s]" (Apron.Scalar.to_string itv.inf) (Apron.Scalar.to_string itv.sup) in
+            Printf.printf "var: %s, itv: %s\n" (Var.to_string var_of_call_target) itvstr;
             ()))
 
 let () =
   Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
   Command.run ~version:"0.0"
     (Command.group ~summary:"Static analysis of WebAssembly"
-       ["cfg", cfg
+       [ "imports", imports
+       ; "exports", exports
+       ; "cfg", cfg
        ; "cfgs", cfgs
        ; "callgraph", callgraph
        ; "schedule", schedule
