@@ -42,17 +42,29 @@ let of_wasm (m : Wasm.Ast.module_) : t =
   let imported_funcs = List.filter_mapi m.it.imports ~f:(fun idx import -> match import.it.idesc.it with
       | FuncImport v ->
         Some (idx, Wasm.Ast.string_of_name import.it.item_name,
-              match (List.nth_exn m.it.types (Index.of_wasm v)).it with
-              | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
-                                               List.map b ~f:Type.of_wasm))
+              let type_idx = Index.of_wasm v in
+              match (List.nth m.it.types type_idx) with
+              | Some ({it = Wasm.Types.FuncType (a, b); _}) ->
+                      (List.map a ~f:Type.of_wasm, List.map b ~f:Type.of_wasm)
+              | None -> failwith (Printf.sprintf "Wasm_module.of_wasm: type %d not found" type_idx))
       | _ -> None) in
   let nimports = List.length imported_funcs in
   let nglobals = List.length m.it.globals in
   let funcs = List.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m minst (i+nimports) f nglobals) in
+  let ftype (fidx : int) : Type.t list * Type.t list = if fidx < nimports then
+      match List.nth imported_funcs fidx with
+      | Some (_, _, typ) -> typ
+      | None -> failwith (Printf.sprintf "Wasm_module.of_wasm: import %d not found" fidx)
+    else
+      match List.nth funcs (fidx-nimports) with
+      | Some f ->
+        assert (f.idx = fidx);
+        f.typ
+      | None -> failwith (Printf.sprintf "Wasm_module.of_wasm: function %d not found" fidx) in
   let exported_funcs = List.filter_map m.it.exports ~f:(fun export -> match export.it.edesc.it with
       | FuncExport v ->
         let idx = Int32.to_int_exn v.it in
-        Some (idx, (Wasm.Ast.string_of_name export.it.name), (List.nth_exn funcs (idx-nimports)).typ)
+        Some (idx, (Wasm.Ast.string_of_name export.it.name), ftype idx)
       | _ -> None) in
   let memories = List.filter_map m.it.imports ~f:(fun import -> match import.it.idesc.it with
       | MemoryImport m -> Some (Memory_inst.of_wasm_type m)

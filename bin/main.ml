@@ -9,7 +9,7 @@ let imports =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         List.iter wasm_mod.imported_funcs ~f:(fun (idx, name, ftype) ->
-            Printf.printf "%d: %s %s\n"
+            Printf.printf "%d\t%s\t%s\n"
               idx name (Type.funtype_to_string ftype)))
 
 let exports =
@@ -20,7 +20,7 @@ let exports =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         List.iter wasm_mod.exported_funcs ~f:(fun (idx, name, ftype) ->
-            Printf.printf "%d: %s %s\n"
+            Printf.printf "%d\t%s\t%s\n"
               idx name (Type.funtype_to_string ftype)))
 
 let cfg =
