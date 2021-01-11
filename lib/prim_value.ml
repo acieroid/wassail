@@ -6,9 +6,44 @@ module T = struct
   type t =
     | I32 of int32
     | I64 of int64
-    | F32 of int64 (* TODO: proper representation *)
-    | F64 of int64 (* TODO: proper representation *)
-  [@@deriving sexp, compare, equal]
+    | F32 of Wasm.F32.t
+    | F64 of Wasm.F64.t
+  let compare (x : t) (y : t) = match x, y with
+    | I32 x, I32 y -> Int32.compare x y
+    | I32 _, _ -> 1
+    | _, I32 _ -> -1
+    | I64 x, I64 y -> Int64.compare x y
+    | I64 _, _ -> 1
+    | _, I64 _ -> -1
+    | F32 x, F32 y -> compare_float (Wasm.F32.to_float x) (Wasm.F32.to_float y)
+    | F32 _, _ -> 1
+    | _, F32 _ -> -1
+    | F64 x, F64 y -> compare_float (Wasm.F64.to_float x) (Wasm.F64.to_float y)
+  let equal (x : t) (y : t) = match x, y with
+    | I32 x, I32 y -> Int32.equal x y
+    | I64 x, I64 y -> Int64.equal x y
+    | F32 x, F32 y -> Wasm.F32.eq x y
+    | F64 x, F64 y -> Wasm.F64.eq x y
+    | _, _ -> false
+  let sexp_of_t (t : t) : Sexp.t =
+    Sexp.(List [
+        Atom (match t with
+        | I32 _ -> "i32"
+        | I64 _ -> "i64"
+        | F32 _ -> "f32"
+        | F64 _ -> "f64");
+        Atom (match t with
+            | I32 x -> Int32.to_string x
+            | I64 x -> Int64.to_string x
+            | F32 x -> Wasm.F32.to_string x
+            | F64 x -> Wasm.F64.to_string x)
+      ])
+  let t_of_sexp (sexp : Sexp.t) : t = match sexp with
+    | Sexp.(List [Atom "i32"; Atom x]) -> I32 (Int32.of_string x)
+    | Sexp.(List [Atom "i64"; Atom x]) -> I64 (Int64.of_string x)
+    | Sexp.(List [Atom "f32"; Atom x]) -> F32 (Wasm.F32.of_string x)
+    | Sexp.(List [Atom "f64"; Atom x]) -> F64 (Wasm.F64.of_string x)
+    | _ -> failwith "Prim_value from sexp: sexp invalid"
 end
 
 include T
@@ -21,8 +56,8 @@ let of_wasm (v : Wasm.Values.value) : t =
   match v with
   | I32 x -> I32 x
   | I64 x -> I64 x
-  | F32 _x ->  F32 0L (* TODO *)
-  | F64 _x -> F64 0L (* TODO *)
+  | F32 x ->  F32 x
+  | F64 x -> F64 x
 
 let typ (v : t) : Type.t = match v with
   | I32 _ -> Type.I32
@@ -33,7 +68,8 @@ let typ (v : t) : Type.t = match v with
 let to_string (v : t) : string = match v with
   | I32 n -> Int32.to_string n
   | I64 n -> Int64.to_string n
-  | F32 _  | F64 _ -> "unsupported float"
+  | F32 n -> Wasm.F32.to_string n
+  | F64 n -> Wasm.F64.to_string n
 
 let is_zero (v : t) : bool = match v with
   | I32 0l | I64 0L -> true

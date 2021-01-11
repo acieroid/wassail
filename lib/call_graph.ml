@@ -8,8 +8,45 @@ type t = {
 }
 [@@deriving sexp, compare, equal]
 
+let indirect_call_targets (wasm_mod : Wasm_module.t) (_fidx : int )(_instr : 'a Instr.t) (typ : int) : int list =
+  let ftype = Wasm_module.get_type wasm_mod typ in
+  let table = List.nth_exn wasm_mod.tables 0 in
+  let funs = List.map (Table_inst.indices table) ~f:(fun idx -> Table_inst.get table idx) in
+  let funs_with_matching_type = List.filter_map funs ~f:(function
+      | Some fa -> if Stdlib.(ftype = Wasm_module.get_func_type wasm_mod fa) then Some fa else None
+      | None -> None) in
+  funs_with_matching_type
+
+(* TODO: call with
+ Relational.Summary.initial_summaries (Cfg_builder.build_all module_) module_ `Top
+   in order to get the right signature *)
+let indirect_call_targets_refined summaries (wasm_mod : Wasm_module.t) (fidx : int ) (instr : 'a Instr.t) (typ : int) : int list =
+  let targets = indirect_call_targets wasm_mod fidx instr typ in
+  Spec_inference.propagate_globals := false;
+  Spec_inference.propagate_locals := false;
+  Spec_inference.use_const := false;
+  let cfg = Spec_analysis.analyze_intra1 wasm_mod fidx in
+  let slicing_criteria = Instr.label instr in
+  Printf.printf "slicing criteria is: %d\n" slicing_criteria;
+  let sliced_cfg = Slicing.slice cfg slicing_criteria in
+  Printf.printf "Rerunning spec inference\n";
+  let annotated_sliced_cfg = Spec_inference.Intra.analyze wasm_mod sliced_cfg in
+  Relational.Intra.init_summaries summaries;
+  let res = Relational.Intra.analyze wasm_mod annotated_sliced_cfg in
+  let annotated_instr = IntMap.find_exn annotated_sliced_cfg.instructions slicing_criteria in
+  let var_of_call_target = List.hd_exn (Instr.annotation_before annotated_instr).vstack in
+  let relational_instr = IntMap.find_exn res.instructions slicing_criteria in
+  let domain_of_call_target = Instr.annotation_before relational_instr in
+  List.filter targets ~f:(fun target ->
+      match Relational.Domain.is_equal domain_of_call_target var_of_call_target target with
+      | true, _ -> true (* can be equal *)
+      | false, _ ->
+        Printf.printf "Filtered one call!\n";
+        false (* can't be equal *))
+
 (** Builds a call graph for a module *)
 let make (wasm_mod : Wasm_module.t) : t =
+  let find_targets = indirect_call_targets_refined (Relational.Summary.initial_summaries (Cfg_builder.build_all wasm_mod) wasm_mod `Top) in
   let nodes = IntSet.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> i)) in
   let rec collect_calls (f : int) (instr : 'a Instr.t) (edges : IntSet.t IntMap.t) : IntSet.t IntMap.t = match instr with
     | Control { instr = Call (_, f'); _ } ->
@@ -17,22 +54,16 @@ let make (wasm_mod : Wasm_module.t) : t =
           | None -> IntSet.singleton f'
           | Some fs -> IntSet.add fs f')
     | Control { instr = CallIndirect (_, typ); _ } ->
-      let ftype = Wasm_module.get_type wasm_mod typ in
-      let table = List.nth_exn wasm_mod.tables 0 in
-      let funs = List.map (Table_inst.indices table) ~f:(fun idx -> Table_inst.get table idx) in
-      let funs_with_matching_type = List.filter_map funs ~f:(function
-          | Some fa -> if Stdlib.(ftype = Wasm_module.get_func_type wasm_mod fa) then Some fa else None
-          | None -> None) in
-      List.fold_left funs_with_matching_type
+      List.fold_left (find_targets wasm_mod f instr typ)
         ~init:edges
         ~f:(fun edges f' ->
             IntMap.update edges f ~f:(function
                 | None -> IntSet.singleton f'
                 | Some fs -> IntSet.add fs f'))
-    | Control { instr = Block (_, instrs); _ }
-    | Control { instr = Loop (_, instrs); _ } ->
+    | Control { instr = Block (_, _, instrs); _ }
+    | Control { instr = Loop (_, _, instrs); _ } ->
       collect_calls_instrs f instrs edges
-    | Control { instr = If (_, instrs1, instrs2); _ } ->
+    | Control { instr = If (_,_, instrs1, instrs2); _ } ->
       collect_calls_instrs f (instrs1 @ instrs2) edges
     | _ -> edges
   and collect_calls_instrs (f : int) (instrs : 'a Instr.t list) (edges : IntSet.t IntMap.t) : IntSet.t IntMap.t =

@@ -33,6 +33,16 @@ let instructions =
         StringMap.iteri (Instruction_counter.count wasm_mod) ~f:(fun ~key:instr ~data:(appearances, funs) ->
             Printf.printf "%d\t%d\t%s\n" appearances (IntSet.length funs) instr))
 
+let sizes =
+  Command.basic
+    ~summary:"Inspects the size of code and of data sections of a WebAssembly module"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string) in
+      fun () ->
+        let wasm_mod = Wasm_module.of_file file_in in
+        let sizes = Sizes.sizes wasm_mod in
+        Printf.printf "code: %d bytes, data: %d bytes" sizes.code_section sizes.data_section)
+
 let cfg =
   Command.basic
     ~summary:"Generate a DOT file representing the CFG of function [fid] from the wat file [in], in file [out]"
@@ -251,6 +261,7 @@ let () =
        [ "imports", imports
        ; "exports", exports
        ; "instructions", instructions
+       ; "sizes", sizes
        ; "cfg", cfg
        ; "cfgs", cfgs
        ; "callgraph", callgraph

@@ -21,6 +21,10 @@ module T = struct
   type arity = int * int
   [@@deriving sexp, compare, equal]
 
+  (** The optional type of a block *)
+  type block_type = Type.t option
+  [@@deriving sexp, compare, equal]
+
   (** Data instructions *)
   type data =
     | Nop
@@ -43,9 +47,9 @@ module T = struct
 
   (** Control instructions *)
   and 'a control =
-    | Block of arity * 'a t list
-    | Loop of arity * 'a t list
-    | If of arity * 'a t list * 'a t list
+    | Block of block_type * arity * 'a t list
+    | Loop of block_type * arity * 'a t list
+    | If of block_type * arity * 'a t list * 'a t list
     | Call of arity * int
     | CallIndirect of arity * int
     | Br of int
@@ -106,9 +110,9 @@ let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (inst
   | BrTable (t, b) -> Printf.sprintf "br_table %s %d" (String.concat ~sep:" " (List.map t ~f:(Printf.sprintf "%d"))) b
   | Return -> "return"
   | Unreachable -> "unreachable"
-  | Block (_, instrs) -> Printf.sprintf "block%s%s" sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep)
-  | Loop (_, instrs) -> Printf.sprintf "loop%s%s" sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep)
-  | If (_, instrs1, instrs2) -> Printf.sprintf "if%s%s%selse%s%s" sep
+  | Block (_, _, instrs) -> Printf.sprintf "block%s%s" sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep)
+  | Loop (_, _, instrs) -> Printf.sprintf "loop%s%s" sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep)
+  | If (_, _, instrs1, instrs2) -> Printf.sprintf "if%s%s%selse%s%s" sep
                                (list_to_string instrs1 annot_to_string ~indent:(i+2) ~sep:sep) sep sep
                                (list_to_string instrs2 annot_to_string ~indent:(i+2) ~sep:sep)
 
@@ -152,9 +156,9 @@ let to_mnemonic (instr : 'a t) : string = match instr with
       | Store _ -> "store"
     end
   | Control c -> begin match c.instr with
-      | Block (_, _) -> "block"
-      | Loop (_, _) -> "loop"
-      | If (_, _, _) -> "if"
+      | Block (_, _, _) -> "block"
+      | Loop (_, _, _) -> "loop"
+      | If (_, _, _, _) -> "if"
       | Call (_, _) -> "call"
       | CallIndirect (_, _) -> "call_indirect"
       | Br _ -> "br"
@@ -191,11 +195,12 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) : unit t =
   | Ast.Nop -> data_labelled Nop () ()
   | Ast.Drop -> data_labelled Drop () ()
   | Ast.Block (st, instrs) ->
+    let block_type = Wasm_helpers.type_of_block st in
     let (arity_in, arity_out) = Wasm_helpers.arity_of_block st in
     assert (arity_in = 0); (* what does it mean to have arity_in > 0? *)
     assert (arity_out <= 1);
     let body = seq_of_wasm m instrs in
-    control_labelled (Block ((arity_in, arity_out), body)) () ()
+    control_labelled (Block (block_type, (arity_in, arity_out), body)) () ()
   | Ast.Const lit ->
     data_labelled (Const (Prim_value.of_wasm lit.it)) () ()
   | Ast.Binary bin ->
@@ -229,12 +234,12 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) : unit t =
     assert (arity_in = 0); (* what does it mean to have arity_in > 0 for a loop? *)
     assert (arity_out <= 1); (* TODO: support any arity out? *)
     let body = seq_of_wasm m instrs in
-    control_labelled (Loop ((arity_in, arity_out), body)) () ()
+    control_labelled (Loop (Wasm_helpers.type_of_block st, (arity_in, arity_out), body)) () ()
   | Ast.If (st, instrs1, instrs2) ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_block st in
     let body1 = seq_of_wasm m instrs1 in
     let body2 = seq_of_wasm m instrs2 in
-    control_labelled (If ((arity_in, arity_out), body1, body2)) () ()
+    control_labelled (If (Wasm_helpers.type_of_block st, (arity_in, arity_out), body1, body2)) () ()
   | Ast.CallIndirect f ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_fun_type m f in
     assert (arity_out <= 1);
@@ -276,9 +281,9 @@ and annotate_control (i : ('a control, 'a) labelled) (data : ('b * 'b) IntMap.t)
     | None -> failwith "Instr.annotate_control: can't find data" in
   { i with annotation_before; annotation_after;
            instr = match i.instr with
-             | Block (arity, instrs) -> Block (arity, List.map instrs ~f:(fun i -> annotate i data))
-             | Loop (arity, instrs) -> Loop (arity, List.map instrs ~f:(fun i -> annotate i data))
-             | If (arity, then_, else_) -> If (arity,
+             | Block (bt, arity, instrs) -> Block (bt, arity, List.map instrs ~f:(fun i -> annotate i data))
+             | Loop (bt, arity, instrs) -> Loop (bt, arity, List.map instrs ~f:(fun i -> annotate i data))
+             | If (bt, arity, then_, else_) -> If (bt, arity,
                                                List.map then_ ~f:(fun i -> annotate i data),
                                                List.map else_ ~f:(fun i -> annotate i data))
              | Call (arity, f) -> Call (arity, f)
@@ -298,8 +303,8 @@ let%test "Instr.annotate nop" =
 let%test "Instr.annotate block" =
   let i = Data { instr = Nop; label = 0; annotation_before = (); annotation_after = () } in
   let i_annotated = Data { instr = Nop; label = 0; annotation_before = 1; annotation_after = 2 } in
-  let b = Control { instr = Block ((0, 0), [i]) ; label = 1; annotation_before = (); annotation_after = () } in
-  let b_annotated = Control { instr = Block ((0, 0), [i_annotated]); label = 1; annotation_before = 3; annotation_after = 4 } in
+  let b = Control { instr = Block (None, (0, 0), [i]) ; label = 1; annotation_before = (); annotation_after = () } in
+  let b_annotated = Control { instr = Block (None, (0, 0), [i_annotated]); label = 1; annotation_before = 3; annotation_after = 4 } in
   let annotation_map = IntMap.of_alist_exn [(0, (1, 2)); (1, (3, 4))] in
   equal (=) (annotate b annotation_map) b_annotated
 
@@ -318,9 +323,9 @@ and add_annotation_control (i : ('a control, 'a) labelled) (data : ('b * 'b) Int
     | None -> failwith "Instr.add_annotation_control: can't find data" in
   { i with annotation_before = (i.annotation_before, annotation_before); annotation_after = (i.annotation_after, annotation_after);
            instr = match i.instr with
-             | Block (arity, instrs) -> Block (arity, List.map instrs ~f:(fun i -> add_annotation i data))
-             | Loop (arity, instrs) -> Loop (arity, List.map instrs ~f:(fun i -> add_annotation i data))
-             | If (arity, then_, else_) -> If (arity,
+             | Block (bt, arity, instrs) -> Block (bt, arity, List.map instrs ~f:(fun i -> add_annotation i data))
+             | Loop (bt, arity, instrs) -> Loop (bt, arity, List.map instrs ~f:(fun i -> add_annotation i data))
+             | If (bt, arity, then_, else_) -> If (bt, arity,
                                                List.map then_ ~f:(fun i -> add_annotation i data),
                                                List.map else_ ~f:(fun i -> add_annotation i data))
              | Call (arity, f) -> Call (arity, f)
@@ -341,8 +346,8 @@ let%test "Instr.add_annotation nop" =
 let%test "Instr.add_annotation block" =
   let i = Data { instr = Nop; label = 0; annotation_before = 1; annotation_after = 2 } in
   let i_annotated = Data { instr = Nop; label = 0; annotation_before = (1, 'a'); annotation_after = (2, 'b') } in
-  let b = Control { instr = Block ((0, 0), [i]) ; label = 1; annotation_before = 3; annotation_after = 4 } in
-  let b_annotated = Control { instr = Block ((0, 0), [i_annotated]); label = 1; annotation_before = (3, 'c'); annotation_after = (4, 'd') } in
+  let b = Control { instr = Block (None, (0, 0), [i]) ; label = 1; annotation_before = 3; annotation_after = 4 } in
+  let b_annotated = Control { instr = Block (None, (0, 0), [i_annotated]); label = 1; annotation_before = (3, 'c'); annotation_after = (4, 'd') } in
   let annotation_map = IntMap.of_alist_exn [(0, ('a', 'b')); (1, ('c', 'd'))] in
   let eq = (fun (n1, c1) (n2, c2) -> n1 = n2 && Char.equal c1 c2) in
   equal eq (add_annotation b annotation_map) b_annotated
@@ -358,9 +363,9 @@ and map_annotation_control (i : ('a control, 'a) labelled) ~(f : 'a ->  'b) : ('
   { i with annotation_before = f i.annotation_before;
            annotation_after = f i.annotation_after;
            instr = match i.instr with
-             | Block (arity, instrs) -> Block (arity, List.map instrs ~f:(map_annotation ~f:f))
-             | Loop (arity, instrs) -> Loop (arity, List.map instrs ~f:(map_annotation ~f:f))
-             | If (arity, then_, else_) -> If (arity,
+             | Block (bt, arity, instrs) -> Block (bt, arity, List.map instrs ~f:(map_annotation ~f:f))
+             | Loop (bt, arity, instrs) -> Loop (bt, arity, List.map instrs ~f:(map_annotation ~f:f))
+             | If (bt, arity, then_, else_) -> If (bt, arity,
                                                List.map then_ ~f:(map_annotation ~f:f),
                                                List.map else_ ~f:(map_annotation ~f:f))
              | Call (arity, f) -> Call (arity, f)
@@ -392,10 +397,10 @@ let rec all_labels (i : 'a t) : IntSet.t =
   match i with
   | Data d -> IntSet.singleton d.label
   | Control c -> IntSet.add (begin match c.instr with
-      | Block (_, instrs)
-      | Loop (_, instrs) -> List.fold_left instrs ~init:IntSet.empty ~f:(fun acc i ->
+      | Block (_, _, instrs)
+      | Loop (_, _, instrs) -> List.fold_left instrs ~init:IntSet.empty ~f:(fun acc i ->
           IntSet.union acc (all_labels i))
-      | If (_, instrs1, instrs2) ->
+      | If (_, _, instrs1, instrs2) ->
         List.fold_left (instrs1 @ instrs2) ~init:IntSet.empty ~f:(fun acc i ->
           IntSet.union acc (all_labels i))
       | _ -> IntSet.empty
@@ -428,9 +433,9 @@ and in_arity_data (i : (data, 'a) labelled) : int =
   | Store _ -> 2
 and in_arity_control (i : ('a control, 'a) labelled) : int =
   match i.instr with
-  | Block ((n, _), _) -> n
-  | Loop ((n, _), _) -> n
-  | If ((n, _), _, _) -> n
+  | Block (_, (n, _), _) -> n
+  | Loop (_, (n, _), _) -> n
+  | If (_, (n, _), _, _) -> n
   | Call ((n, _), _) -> n
   | CallIndirect ((n, _), _) -> n
   | Br _ -> 0
@@ -442,7 +447,7 @@ and in_arity_control (i : ('a control, 'a) labelled) : int =
 let instructions_contained_in (i : 'a t) : 'a t list = match i with
   | Data _ -> []
   | Control c -> match c.instr with
-    | Block (_, instrs)
-    | Loop (_, instrs) -> instrs
-    | If (_, instrs1, instrs2) -> instrs1 @ instrs2
+    | Block (_, _, instrs)
+    | Loop (_, _, instrs) -> instrs
+    | If (_, _, instrs1, instrs2) -> instrs1 @ instrs2
     | _ -> []

@@ -1,11 +1,16 @@
 open Core_kernel
 open Wasm
 
-(** Returns the arity of a block *)
-let arity_of_block (bt : Ast.block_type) : int * int = match bt with
+(** Returns the (optional) type of a block *)
+let type_of_block (bt : Ast.block_type) : Type.t option = match bt with
   | Ast.VarBlockType v -> failwith (Printf.sprintf "TODO: arity_of_block: var %s" (Int32.to_string v.it))
-  | Ast.ValBlockType None -> (0, 0)
-  | Ast.ValBlockType (Some _t) -> (0, 1) (* TODO: double check that this is what is intended *)
+  | Ast.ValBlockType None -> None
+  | Ast.ValBlockType (Some t) -> Some (Type.of_wasm t)
+
+(** Returns the arity of a block *)
+let arity_of_block (bt : Ast.block_type) : int * int = match type_of_block bt with
+  | Some _ -> (0, 1)
+  | None -> (0, 0)
 
 (** Returns the arity of a function *)
 let arity_of_fun_type (m : Ast.module_) (ft : Ast.var) : int * int =

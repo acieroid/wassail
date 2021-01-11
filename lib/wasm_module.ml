@@ -14,6 +14,7 @@ module T = struct
     funcs : Func_inst.t list; (** The functions defined in the module *)
     mems : Memory_inst.t list; (** The memories specification *)
     tables : Table_inst.t list; (** The tables specification *)
+    data : Segment.DataSegment.t list;
   }
   [@@deriving sexp, compare, equal]
 end
@@ -34,7 +35,6 @@ let get_type (m : t) (tid : int) : Type.t list * Type.t list =
 (** Get the type of the function with index fidx *)
 let get_func_type (m : t) (fidx : int) : Type.t list * Type.t list =
   (List.nth_exn m.funcs (fidx-m.nimports)).typ
-
 
 (** Constructs a Wasm_module *)
 let of_wasm (m : Wasm.Ast.module_) : t =
@@ -69,11 +69,14 @@ let of_wasm (m : Wasm.Ast.module_) : t =
   let memories = List.filter_map m.it.imports ~f:(fun import -> match import.it.idesc.it with
       | MemoryImport m -> Some (Memory_inst.of_wasm_type m)
       | _ -> None) @ (List.map m.it.memories ~f:Memory_inst.of_wasm) in
+  let data = List.map m.it.data ~f:(fun segment ->
+      Segment.DataSegment.of_wasm m segment) in
   ({
     nimports;
     imported_funcs;
     exported_funcs;
     funcs;
+    data;
     global_types = List.map m.it.globals ~f:(fun g -> match g.it.gtype with
       | Wasm.Types.GlobalType (t, _) -> Type.of_wasm t);
     nglobals = nglobals;

@@ -50,6 +50,9 @@ let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.label) : SlicePart.Set.t =
              redefined: all such initial variables are then considered to be
              used *)
           let vars = Spec_inference.new_merge_variables cfg (Cfg.find_block_exn cfg block_idx) in
+          if block_idx = 10 then
+            Printf.printf "vars of block 10: %s\n" (String.concat (List.map vars ~f:(fun (v1, v2) -> Printf.sprintf "%s,%s" (Var.to_string v1) (Var.to_string v2))))
+          ;
           List.map vars ~f:fst in
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
@@ -76,7 +79,7 @@ let%test "simple slicing - first slicing criterion, only const" =
   (func (;test;) (type 0) (param i32) (result i32)
     memory.size ;; Instr 0
     memory.size ;; Instr 1
-    i32.add     ;; Instr 2
+    i32.add     ;; Instr 2 -- slicing criterion
     drop        ;; Instr 3
     memory.size ;; Instr 4
     memory.size ;; Instr 5
@@ -103,7 +106,7 @@ let%test "simple slicing - second slicing criterion, with locals" =
     drop        ;; Instr 3
     local.get 0 ;; Instr 4
     memory.size ;; Instr 5
-    i32.add)    ;; Instr 6
+    i32.add)    ;; Instr 6 -- slicing criterion
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
@@ -120,7 +123,7 @@ let%test "slicing with block and br_if" =
     block         ;; Instr 0
       memory.size ;; Instr 1
       br_if 0     ;; Instr 2
-      memory.size ;; Instr 3
+      memory.size ;; Instr 3 -- slicing criterion
       drop        ;; Instr 4
     end
     local.get 0)   ;; Instr 5
@@ -152,7 +155,7 @@ let%test "slicing with merge blocks" =
     drop            ;; Instr 7
     ;; ---- this previous part should not be part of the slice
     memory.size     ;; Instr 8
-    i32.add)        ;; Instr 9
+    i32.add)        ;; Instr 9 -- slicing criterion
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
@@ -229,6 +232,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.label) : unit Cfg.t =
            edges, back_edges (* Edges are kept *)
           )
         | None ->
+          if block_idx = 10 then Printf.printf "block %d is removed\n" block_idx;
           (* Block is not kept because it is empty *)
           (basic_blocks, (* Don't add it *)
            (* Edges for that block need to be rewritten:
@@ -279,6 +283,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.label) : unit Cfg.t =
       ~f:(fun edges (src, _) -> Cfg.Edges.remove edges src cfg.exit_block) in
   { cfg with basic_blocks; instructions; edges; back_edges }
 
+(*
 let%test_unit "slicing with merge blocks using slice" =
   Instr.reset_counter ();
   let module_ = Wasm_module.of_string "(module
@@ -308,12 +313,43 @@ let%test_unit "slicing with merge blocks using slice" =
   (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
   ()
 
+*)
+
+let%test_unit "slicing with a block containing a single drop" =
+  Instr.reset_counter ();
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    block
+      local.get 0   ;; Instr 0
+      local.get 0   ;; Instr 1
+      if            ;; Instr 5
+        drop        ;; Instr 2
+        i32.const 0 ;; Instr 3
+      else
+        nop         ;; Instr 4
+      end
+      i32.const 32  ;; Instr 6
+      i32.add       ;; Instr 7
+    end
+  )
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  Printf.printf "DOT:\n%s\n" (Cfg.to_dot cfg (fun _ -> ""));
+  let sliced_cfg = slice cfg 7 in
+  Printf.printf "Sliced: %s\n" (Cfg.to_dot sliced_cfg (fun _ -> ""));
+  let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+  ()
+
 (** Return the indices of each call_indirect instructions *)
 let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : int list =
   List.filter_map (Cfg.all_instructions cfg) ~f:(fun instr -> match instr with
       | Control {label; instr = CallIndirect _; _} -> Some label
       | _ -> None)
 
+(*
 let%test_unit "slicing with memory" =
   Instr.reset_counter ();
   let module_ = Wasm_module.of_string "(module
@@ -334,14 +370,14 @@ let%test_unit "slicing with memory" =
   let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
   ()
 
-let%test_unit "slicing bigger program" =
+let%test_unit "slicing function 14 of trmm" =
   Instr.reset_counter ();
   let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
   Spec_inference.use_const := false;
   let cfg = Spec_analysis.analyze_intra1 module_ 14 in
-  Printf.printf "number of vars: %d\n" (Var_prop.count_vars cfg);
+  Printf.printf "number of vars of trmm(14): %d\n" (Var_prop.count_vars cfg);
   List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
       (* instr_idx is the label of a call_indirect instruction, slice it *)
       Spec_inference.propagate_locals := false;
@@ -349,10 +385,32 @@ let%test_unit "slicing bigger program" =
       Spec_inference.use_const := false;
       let sliced_cfg = slice cfg instr_idx in
       (* We should be able to re-annotate the graph *)
-      (* TODO: test fails if we enable the following: *)
       Spec_inference.propagate_locals := true;
       Spec_inference.propagate_globals := true;
       Spec_inference.use_const := true;
       let _annotated_slice_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-      Printf.printf "big program vars after slicing: %d\n" (Var_prop.count_vars (Var_prop.var_prop _annotated_slice_cfg));
+      Printf.printf "trmm(14) vars after slicing: %d\n" (Var_prop.count_vars (Var_prop.var_prop _annotated_slice_cfg));
       ())
+  *)
+(*let%test_unit "slicing function 22 of trmm" =
+  Instr.reset_counter ();
+  let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
+  Spec_inference.propagate_globals := false;
+  Spec_inference.propagate_locals := false;
+  Spec_inference.use_const := false;
+  let cfg = Spec_analysis.analyze_intra1 module_ 22 in
+  Printf.printf "number of vars of trmm(22): %d\n" (Var_prop.count_vars cfg);
+  List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
+      (* instr_idx is the label of a call_indirect instruction, slice it *)
+      Spec_inference.propagate_locals := false;
+      Spec_inference.propagate_globals := false;
+      Spec_inference.use_const := false;
+      let sliced_cfg = slice cfg instr_idx in
+      (* We should be able to re-annotate the graph *)
+        Spec_inference.propagate_locals := true;
+      Spec_inference.propagate_globals := true;
+      Spec_inference.use_const := true;
+      let _annotated_slice_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+      Printf.printf "trmm(22) vars after slicing: %d\n" (Var_prop.count_vars (Var_prop.var_prop _annotated_slice_cfg));
+      ())
+*)

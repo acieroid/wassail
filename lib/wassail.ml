@@ -29,3 +29,4 @@ module Reltaint = Reltaint
 module Slicing = Slicing
 
 module Instruction_counter = Instruction_counter
+module Sizes = Sizes

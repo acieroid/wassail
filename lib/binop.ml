@@ -2,7 +2,7 @@ open Core_kernel
 
 (** Binary operations *)
 module T = struct
-  type op = Add | Sub | Mul | DivS | DivU | RemS | RemU | And | Or | Xor | Shl | ShrS | ShrU | Rotl | Rotr | Min | Max | CopySign
+  type op = Add | Sub | Mul | Div | DivS | DivU | RemS | RemU | And | Or | Xor | Shl | ShrS | ShrU | Rotl | Rotr | Min | Max | CopySign
   [@@deriving sexp, compare, equal]
   type t = { op: op; typ: Type.t }
   [@@deriving sexp, compare, equal]
@@ -34,7 +34,7 @@ let of_wasm (b : Wasm.Ast.binop) : t =
     | Add -> Add
     | Sub -> Sub
     | Mul -> Mul
-    | Div -> DivS
+    | Div -> Div
     | Min -> Min
     | Max -> Max
     | CopySign -> CopySign
@@ -52,6 +52,7 @@ let to_mnemonic (b : t) : string =
      | Add -> "add"
      | Sub -> "sub"
      | Mul -> "mul"
+     | Div -> "div"
      | DivS -> "div_s"
      | DivU -> "div_u"
      | RemS -> "rem_s"

@@ -64,7 +64,7 @@ let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
             (* no return *)
             returns,
             block.idx, exit')
-        |  If (_arity, instrs1, instrs2) ->
+        |  If (_bt, _arity, instrs1, instrs2) ->
           (* Construct the current block *)
           let block = mk_data_block instrs in
           (* Construct the if block *)
@@ -133,8 +133,8 @@ let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
             breaks,
             returns,
             block.idx, exit')
-        | ((Block (_arity, instrs')) as b)
-        | ((Loop (_arity, instrs')) as b) ->
+        | ((Block (_bt, _arity, instrs')) as b)
+        | ((Loop (_bt, _arity, instrs')) as b) ->
           (* Create a new block with all instructions collected, without the current instruction *)
           let block = mk_data_block instrs in
           (* Is the current instruction a loop? *)

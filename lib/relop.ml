@@ -3,7 +3,7 @@ open Wasm
 
 module T = struct
   (** Relational operation *)
-  type op = Eq | Ne | LtS | LtU | GtS | GtU | LeS | LeU | GeS | GeU
+  type op = Eq | Ne | LtS | LtU | GtS | GtU | LeS | LeU | GeS | GeU | Lt | Gt | Le | Ge
   [@@deriving sexp, compare, equal]
   type t = { op: op; typ: Type.t }
   [@@deriving sexp, compare, equal]
@@ -29,10 +29,10 @@ let of_wasm (r : Ast.relop) : t =
   let of_op_f (op : Wasm.Ast.FloatOp.relop) : op = match op with
     | Eq -> Eq
     | Ne -> Ne
-    | Lt -> LtS
-    | Gt -> GtS
-    | Le -> LeS
-    | Ge -> GeS
+    | Lt -> Lt
+    | Gt -> Gt
+    | Le -> Le
+    | Ge -> Ge
   in
   match r with
   | I32 op -> { typ = I32; op = of_op op }
@@ -46,12 +46,16 @@ let to_mnemonic (r : t) : string =
     (match r.op with
      | Eq -> "eq"
      | Ne -> "ne"
+     | Lt -> "lt"
      | LtS -> "lt_s"
      | LtU -> "lt_u"
+     | Gt -> "gt"
      | GtS -> "gt_s"
      | GtU -> "gt_u"
+     | Le -> "le"
      | LeS -> "le_s"
      | LeU -> "le_u"
+     | Ge -> "ge"
      | GeS -> "ge_s"
      | GeU -> "ge_u")
 

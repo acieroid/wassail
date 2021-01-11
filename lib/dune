@@ -3,7 +3,7 @@
    (modules
       Wassail
       Logging Helpers Wasm_helpers Analysis_helpers
-      Type Binop Unop Memoryop Testop Relop Value Index Var Instr Memory_inst Module_inst Func Func_inst Elem Table Table_inst Convertop Wasm_module
+      Type Binop Unop Memoryop Testop Relop Value Index Var Instr Memory_inst Module_inst Func Func_inst Elem Table Table_inst Convertop Wasm_module Segment
       Basic_block Cfg Cfg_builder Call_graph
       Transfer
       Summary Intra Inter
@@ -14,7 +14,7 @@
       Relational Relational_domain Relational_transfer Relational_summary Relational_spec Relational_options
       Reltaint
       Use_def Dominance Control_deps Slicing
-      Instruction_counter)
+      Instruction_counter Sizes)
    (libraries core_kernel wasm  apron apron.polkaMPQ apron.octD sexplib)
    (inline_tests (flags))
    (preprocess (pps ppx_jane ppx_compare ppx_inline_test)))
