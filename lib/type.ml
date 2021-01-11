@@ -26,6 +26,11 @@ let to_string (t : t) : string =
   | F32 -> "f32"
   | F64 -> "f64"
 
+let size (t : t) : int =
+  match t with
+  | I32 | F32 -> 32
+  | I64 | F64 -> 64
+
 let list_to_string (l : t list) : string =
   String.concat ~sep:", " (List.map l ~f:to_string)
 

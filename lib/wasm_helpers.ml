@@ -26,7 +26,9 @@ let arity_of_fun (m : Ast.module_) (f : Ast.var) : int * int =
     (* imported function, arity is in import desc *)
     match (Lib.List32.nth m.it.imports f.it).it.idesc.it with
     | FuncImport v -> arity_of_fun_type m v
-    | _ -> failwith "not supported"
+    | TableImport _ -> failwith "table import not supported"
+    | MemoryImport _ -> failwith "memory import not supported"
+    | GlobalImport _ -> failwith "global import not supported"
   else
     (* defined function, get arity from function list *)
     arity_of_fun_type m (Lib.List32.nth m.it.funcs Int32.(f.it - n)).it.ftype

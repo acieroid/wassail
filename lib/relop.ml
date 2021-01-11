@@ -40,7 +40,7 @@ let of_wasm (r : Ast.relop) : t =
   | F32 op -> { typ = F32; op = of_op_f op }
   | F64 op -> { typ = F64; op = of_op_f op }
 
-let to_string (r : t) : string =
+let to_mnemonic (r : t) : string =
   Printf.sprintf "%s.%s"
     (Type.to_string r.typ)
     (match r.op with
@@ -54,3 +54,5 @@ let to_string (r : t) : string =
      | LeU -> "le_u"
      | GeS -> "ge_s"
      | GeU -> "ge_u")
+
+let  to_string (r : t) : string = to_mnemonic r

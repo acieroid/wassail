@@ -24,6 +24,12 @@ let of_wasm (v : Wasm.Values.value) : t =
   | F32 _x ->  F32 0L (* TODO *)
   | F64 _x -> F64 0L (* TODO *)
 
+let typ (v : t) : Type.t = match v with
+  | I32 _ -> Type.I32
+  | I64 _ -> Type.I64
+  | F32 _ -> Type.F32
+  | F64 _ -> Type.F64
+
 let to_string (v : t) : string = match v with
   | I32 n -> Int32.to_string n
   | I64 n -> Int64.to_string n

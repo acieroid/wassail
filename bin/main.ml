@@ -23,6 +23,16 @@ let exports =
             Printf.printf "%d\t%s\t%s\n"
               idx name (Type.funtype_to_string ftype)))
 
+let instructions =
+  Command.basic
+    ~summary:"List instructions used by a WebAssembly module, and how many time each instruction appears"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string) in
+      fun () ->
+        let wasm_mod = Wasm_module.of_file file_in in
+        StringMap.iteri (Instruction_counter.count wasm_mod) ~f:(fun ~key:instr ~data:(appearances, funs) ->
+            Printf.printf "%d\t%d\t%s\n" appearances (IntSet.length funs) instr))
+
 let cfg =
   Command.basic
     ~summary:"Generate a DOT file representing the CFG of function [fid] from the wat file [in], in file [out]"
@@ -240,6 +250,7 @@ let () =
     (Command.group ~summary:"Static analysis of WebAssembly"
        [ "imports", imports
        ; "exports", exports
+       ; "instructions", instructions
        ; "cfg", cfg
        ; "cfgs", cfgs
        ; "callgraph", callgraph

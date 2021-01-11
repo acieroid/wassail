@@ -129,6 +129,41 @@ let control_to_short_string (instr : 'a control) : string =
   | If _ -> "if"
   | _ -> control_to_string instr (fun _ -> "")
 
+(** Converts an instruction to its mnemonic *)
+let to_mnemonic (instr : 'a t) : string = match instr with
+  | Data d -> begin match d.instr with
+      | Nop -> "nop"
+      | Drop -> "drop"
+      | Select -> "select"
+      | MemorySize -> "memory.size"
+      | MemoryGrow -> "memory.grow"
+      | Const v -> Printf.sprintf "%s.const" (Type.to_string (Prim_value.typ v))
+      | Unary op -> Unop.to_mnemonic op
+      | Binary op -> Binop.to_mnemonic op
+      | Compare op -> Relop.to_mnemonic op
+      | Test op -> Testop.to_mnemonic op
+      | Convert op -> Convertop.to_mnemonic op
+      | LocalGet _ -> "local.get"
+      | LocalSet _ -> "local.set"
+      | LocalTee _ -> "local.tee"
+      | GlobalGet _ -> "global.get"
+      | GlobalSet _ -> "global.set"
+      | Load _ -> "load"
+      | Store _ -> "store"
+    end
+  | Control c -> begin match c.instr with
+      | Block (_, _) -> "block"
+      | Loop (_, _) -> "loop"
+      | If (_, _, _) -> "if"
+      | Call (_, _) -> "call"
+      | CallIndirect (_, _) -> "call_indirect"
+      | Br _ -> "br"
+      | BrIf _ -> "br_if"
+      | BrTable (_, _) -> "br_table"
+      | Return -> "return"
+      | Unreachable -> "unreachable"
+    end
+
 (** The instruction counter *)
 let counter : label ref = ref 0
 
@@ -403,3 +438,11 @@ and in_arity_control (i : ('a control, 'a) labelled) : int =
   | BrTable (_, _) -> 1
   | Return -> 0 (* this actually depends on the function, but strictly speaking, return does not expect anything *)
   | Unreachable -> 0
+
+let instructions_contained_in (i : 'a t) : 'a t list = match i with
+  | Data _ -> []
+  | Control c -> match c.instr with
+    | Block (_, instrs)
+    | Loop (_, instrs) -> instrs
+    | If (_, instrs1, instrs2) -> instrs1 @ instrs2
+    | _ -> []

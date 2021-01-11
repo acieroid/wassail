@@ -45,7 +45,7 @@ let of_wasm (b : Wasm.Ast.binop) : t =
   | F32 op -> { typ = F32; op = of_op_f op }
   | F64 op -> { typ = F64; op = of_op_f op }
 
-let to_string (b : t) : string =
+let to_mnemonic (b : t) : string =
   Printf.sprintf "%s.%s"
     (Type.to_string b.typ)
     (match b.op with
@@ -67,3 +67,5 @@ let to_string (b : t) : string =
      | Min -> "min"
      | Max -> "max"
      | CopySign -> "copy_sign")
+
+let to_string (b : t) : string = to_mnemonic b
