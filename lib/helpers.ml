@@ -18,10 +18,20 @@ module IntSet = struct
   let to_string (s : t) : string = String.concat ~sep:"," (List.map (to_list s) ~f:string_of_int)
 end
 
+module Int32Set = struct
+  include Set.Make(Int32)
+  let to_string (s : t) : string = String.concat ~sep:"," (List.map (to_list s) ~f:Int32.to_string)
+end
+
 (** Maps of integers *)
 module IntMap = struct
   include Map.Make(I)
   let to_string (m : 'a t) (f : 'a -> string) : string = String.concat ~sep:", " (List.map (to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%d -> %s" k (f v)))
+end
+
+module Int32Map = struct
+  include Map.Make(Int32)
+  let to_string (m : 'a t) (f : 'a -> string) : string = String.concat ~sep:", " (List.map (to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s -> %s" (Int32.to_string k) (f v)))
 end
 
 (** Sets of strings *)
@@ -32,7 +42,7 @@ module StringMap = Map.Make(S)
 
 
 (** Get the nth element of a list *)
-let get_nth (l : 'a list) (n : int) : Var.t = List.nth_exn l n
+let get_nth (l : 'a list) (n : Int32.t) : Var.t = List.nth_exn l (Int32.to_int_exn n)
 
 (** Pop one element from a list *)
 let pop (vstack : 'a list) : 'a =

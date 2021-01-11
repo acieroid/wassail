@@ -2,19 +2,26 @@
 module T = struct
   (* Size of each section of a WebAssembly module, in bytes *)
   type t = {
-    code_section: int;
-    data_section: int;
+    type_section : int;
+    import_section : int;
+    func_section : int;
+    table_section : int;
+    memory_section : int;
+    global_section : int;
+    export_section : int;
+    start_section : int;
+    elem_section : int;
+    code_section : int;
+    data_section : int;
   }
 end
 include T
 
-(** This is mostly the same code as in the spec's interpreter/binary/encode.ml, but used to compute the size of generated sections *)
-
+(* This is mostly the same code as in the spec's interpreter/binary/encode.ml, but used to compute the size of generated sections *)
 type stream = {
   buf: Buffer.t;
   patches: (int * char) list ref
 }
-
 
 let stream () : stream = {buf = Buffer.create 8192; patches = ref []}
 let pos (s : stream) : int = Buffer.length s.buf
@@ -22,7 +29,7 @@ let put (s : stream) (b : char) : unit = Buffer.add_char s.buf b
 let put_string (s : stream) (bs : string) : unit = Buffer.add_string s.buf bs
 let patch (s : stream) (pos : int) (b : char) : unit = s.patches := (pos, b) :: !(s.patches)
 
-let size (s : stream) : int =
+let buf_size (s : stream) : int =
   let bs = Buffer.to_bytes s.buf in
   List.iter (fun (pos, b) -> Bytes.set bs pos b) !(s.patches);
   Bytes.length bs
@@ -52,7 +59,7 @@ let sizes (m : Wasm_module.t) : t =
       if -64L <= i && i < 64L then u8 b
       else (u8 (b lor 0x80); vs64 (Int64.shift_right i 7))
 
-    (* let vu1 i = vu64 Int64.(logand (of_int i) 1L) *)
+    let vu1 i = vu64 Int64.(logand (of_int i) 1L)
     let vu32 i = vu64 Int64.(logand (of_int32 i) 0xffffffffL)
     let vs7 i = vs64 (Int64.of_int i)
     let vs32 i = vs64 (Int64.of_int32 i)
@@ -65,11 +72,11 @@ let sizes (m : Wasm_module.t) : t =
         failwith "cannot encode length with more than 32 bit";
       vu32 (Int32.of_int i)
 
-    (* let bool b = vu1 (if b then 1 else 0) *)
+    let bool b = vu1 (if b then 1 else 0)
     let string bs = len (String.length bs); put_string s bs
-    (* let name n = string (Wasm.Utf8.encode n) *)
+    let name n = string n
     let list f xs = List.iter f xs
-    (* let opt f xo = Wasm.Lib.Option.app f xo *)
+    let opt f xo = Wasm.Lib.Option.app f xo
     let vec f xs = len (List.length xs); list f xs
 
     let gap32 () = let p = pos s in u32 0l; u8 0; p
@@ -90,29 +97,26 @@ let sizes (m : Wasm_module.t) : t =
       | F32 -> vs7 (-0x03)
       | F64 -> vs7 (-0x04)
 
-(*     let elem_type = function
-       | FuncRefType -> vs7 (-0x10) *)
+    let elem_type = vs7 (-0x10)
 
-    (*let stack_type = vec value_type
+    let stack_type = vec value_type
     let func_type ((ins, outs) : Type.t list * Type.t list) =
-      vs7 (-0x20); stack_type ins; stack_type outs *)
-(* 
-    let limits vu {min; max} =
+      vs7 (-0x20); stack_type ins; stack_type outs
+
+    let limits vu (l : Limits.t) =
+      let (min, max) = l in
       bool (max <> None); vu min; opt vu max
 
-    let table_type = function
-      | TableType (lim, t) -> elem_type t; limits vu32 lim
+    let table_type (t : Table.table_type) = elem_type; limits vu32 t
 
-    let memory_type = function
-      | MemoryType lim -> limits vu32 lim
+    let memory_type (t : Memory.memory_type) = limits vu32 t
 
     let mutability = function
-      | Immutable -> u8 0
-      | Mutable -> u8 1
+      | Global.Immutable -> u8 0
+      | Global.Mutable -> u8 1
 
-    let global_type = function
-      | GlobalType (t, mut) -> value_type t; mutability mut
-*)
+    let global_type (t : Global.global_type) = value_type t.typ; mutability t.mutability
+
     (* Expressions *)
 
     let op n = u8 n
@@ -121,7 +125,7 @@ let sizes (m : Wasm_module.t) : t =
     let memop (op : Memoryop.t) =
       vu32 (Int32.of_int op.align); vu32 (Int32.of_int op.offset)
 
-    let var (x : int) = vu32 (Int32.of_int x)
+    let var (x : Int32.t) = vu32 x
 
     let block_type = function
       (* TODO: VarBlockType x -> vs33 x.it *)
@@ -345,7 +349,7 @@ let sizes (m : Wasm_module.t) : t =
           | BrIf x -> op 0x0d; var x
           | BrTable (xs, x) -> op 0x0e; vec var xs; var x
           | Return -> op 0x0f
-          | Call (_, x) -> op 0x10; var x
+          | Call (_, x) -> op 0x10; var (Int32.of_int x)
           | CallIndirect (_, x) -> op 0x11; var x; u8 0x00
         end
 
@@ -365,76 +369,70 @@ let sizes (m : Wasm_module.t) : t =
       end
 
     (* Type section *)
-    (* let type_ (t : Type.t list * Type.t list) = func_type t *)
+    let type_ (t : Type.t list * Type.t list) = func_type t
 
-    (* let type_section (ts : (Type.t list * Type.t list) list) =
-       section 1 (vec type_) ts (ts <> []) *)
+    let type_section (ts : (Type.t list * Type.t list) list) =
+       section 1 (vec type_) ts (ts <> [])
 
     (* Import section *)
-    (* let import_desc d =
-      match d.it with
+    let import_desc (d : Import.desc) =
+      match d with
       | FuncImport x -> u8 0x00; var x
       | TableImport t -> u8 0x01; table_type t
       | MemoryImport t -> u8 0x02; memory_type t
       | GlobalImport t -> u8 0x03; global_type t
 
-    let import im =
-      let {module_name; item_name; idesc} = im.it in
-      name module_name; name item_name; import_desc idesc
+    let import (im : Import.t) =
+      name im.module_name; name im.item_name; import_desc im.idesc
 
     let import_section ims =
-       section 2 (vec import) ims (ims <> []) *)
+       section 2 (vec import) ims (ims <> [])
 
     (* Function section *)
-    (*let func (f : Func_inst.t) = var f.type_idx
+    let func (f : Func_inst.t) = var f.type_idx
 
      let func_section (fs : Func_inst.t list) =
-       section 3 (vec func) fs (fs <> []) *)
+       section 3 (vec func) fs (fs <> [])
 
     (* Table section *)
-    (* let table tab =
-      let {ttype} = tab.it in
-      table_type ttype
+     let table (tab : Table.t) =
+      table_type tab.ttype
 
     let table_section tabs =
-       section 4 (vec table) tabs (tabs <> []) *)
+       section 4 (vec table) tabs (tabs <> [])
 
     (* Memory section *)
-    (* let memory mem =
-      let {mtype} = mem.it in
-      memory_type mtype
+    let memory (mem : Memory.t) =
+      memory_type mem.mtype
 
     let memory_section mems =
-       section 5 (vec memory) mems (mems <> []) *)
+       section 5 (vec memory) mems (mems <> [])
 
     (* Global section *)
-    (* let global g =
-      let {gtype; value} = g.it in
-      global_type gtype; const value
+    let global (g : Global.t) =
+      global_type g.gtype; const g.value
 
     let global_section gs =
       section 6 (vec global) gs (gs <> [])
-    *)
+
     (* Export section *)
-       (* let export_desc d =
-      match d.it with
+    let export_desc (d : Export.desc) =
+      match d with
       | FuncExport x -> u8 0; var x
       | TableExport x -> u8 1; var x
       | MemoryExport x -> u8 2; var x
       | GlobalExport x -> u8 3; var x
 
-    let export ex =
-      let {name = n; edesc} = ex.it in
-      name n; export_desc edesc
+    let export (ex : Export.t) =
+      name ex.name; export_desc ex.edesc
 
     let export_section exs =
       section 7 (vec export) exs (exs <> [])
 
-*)
     (* Start section *)
-       (* let start_section xo =
+    let start_section xo =
       section 8 (opt var) xo (xo <> None)
- *)
+
     (* Code section *)
     let compress ts =
       let combine t = function
@@ -458,42 +456,54 @@ let sizes (m : Wasm_module.t) : t =
       section 10 (vec code) fs (fs <> [])
 
     (* Element section *)
-    let segment (dat : 'a) (seg : Segment.DataSegment.t) = (* TODO: extend to any segment *)
+    let segment_data dat (seg : Segment.DataSegment.t) =
       let index = seg.index in
       let offset = seg.offset in
       let init = seg.init in
       var index; const offset; dat init
-(*
+
+    let segment_elem dat (seg : Segment.ElemSegment.t) = (* TODO: extend to any segment *)
+      let index = seg.index in
+      let offset = seg.offset in
+      let init = seg.init in
+      var index; const offset; dat init
+
     let table_segment seg =
-      segment (vec var) seg
+      segment_elem (vec var) seg
 
     let elem_section elems =
-       section 9 (vec table_segment) elems (elems <> []) *)
+       section 9 (vec table_segment) elems (elems <> [])
 
     (* Data section *)
     let memory_segment seg =
-      segment string seg
+      segment_data string seg
 
     let data_section data =
       section 11 (vec memory_segment) data (data <> [])
 
     (* Module *)
 
-    (* let module_ (m : Wasm_module.t) =
+    let size (f : unit -> unit) : int =
+      let s0 = buf_size s in
+      f ();
+      let s1 = buf_size s in
+      s1 - s0
+
+    let module_ (m : Wasm_module.t) =
       u32 0x6d736100l;
       u32 Wasm.Encode.version;
-      type_section m.types;
-      (* import_section m.imports; *)
-      func_section m.funcs;
-      (* table_section m.tables;
-      memory_section m.memories;
-      global_section m.globals;
-      export_section m.exports;
-      start_section m.start;
-      elem_section m.elems; *)
-      code_section m.funcs;
-       data_section m.data *)
+      let type_section = size (fun () -> type_section m.types) in
+      let import_section = size (fun () -> import_section m.imports) in
+      let func_section = size (fun () -> func_section m.funcs) in
+      let table_section = size (fun () -> table_section m.tables) in
+      let memory_section = size (fun () -> memory_section m.memories) in
+      let global_section = size (fun () -> global_section m.globals) in
+      let export_section = size (fun () -> export_section m.exports) in
+      let start_section = size (fun () -> start_section m.start) in
+      let elem_section = size (fun () -> elem_section m.elems) in
+      let code_section = size (fun () -> code_section m.funcs) in
+      let data_section = size (fun () -> data_section m.data) in
+      { type_section; import_section; func_section; table_section; memory_section;
+        global_section; export_section; start_section; elem_section; code_section; data_section }
   end in
-    let code_section = E.code_section m.funcs; size s in
-    let data_section = E.data_section m.data; size s - code_section in
-    { code_section; data_section }
+    E.module_ m

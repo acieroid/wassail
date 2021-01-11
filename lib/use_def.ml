@@ -1,4 +1,5 @@
 open Core_kernel
+open Helpers
 
 module Use = struct
   module T = struct
@@ -91,12 +92,12 @@ let instr_def (instr : Spec.t Instr.t) : Var.t list =
           if !Spec_inference.propagate_locals then
             []
           else
-            [List.nth_exn i.annotation_after.locals l]
+            [get_nth i.annotation_after.locals l]
         | GlobalSet g ->
           if !Spec_inference.propagate_globals then
             []
           else
-            [List.nth_exn i.annotation_after.globals g]
+            [get_nth i.annotation_after.globals g]
         | Load _ -> top_n 1
         | Store _ ->
           []
@@ -134,9 +135,9 @@ let instr_use (instr : Spec.t Instr.t) : Var.t list = match instr with
       | Const _ -> []
       | Unary _ | Test _ | Convert _ -> top_n 1
       | Binary _ | Compare _ -> top_n 2
-      | LocalGet l -> [List.nth_exn i.annotation_before.locals l] (* use local l *)
+      | LocalGet l -> [get_nth i.annotation_before.locals l] (* use local l *)
       | LocalSet _ | LocalTee _ -> top_n 1 (* use top of the stack to define local *)
-      | GlobalGet g -> [List.nth_exn i.annotation_before.globals g] (* use global g *)
+      | GlobalGet g -> [get_nth i.annotation_before.globals g] (* use global g *)
       | GlobalSet _ -> top_n 1
       | Load _ -> top_n 1 (* use memory address from the top of the stack *)
       | Store _ -> top_n 2 (* use address and valu from the top of the stack *)

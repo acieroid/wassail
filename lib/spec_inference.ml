@@ -30,9 +30,9 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
 
   let top (l : Var.t list) = List.hd_exn l
 
-  let get (n : int) (l : Var.t list) = List.nth_exn l n
+  let get (n : Int32.t) (l : Var.t list) = List.nth_exn l (Int32.to_int_exn n)
 
-  let set (n : int) (l : Var.t list) (v : Var.t) = List.mapi l ~f:(fun i v' -> if i = n then v else v')
+  let set (n : Int32.t) (l : Var.t list) (v : Var.t) = List.mapi l ~f:(fun i v' -> if i = (Int32.to_int_exn n) then v else v')
 
   (*---- State ----*)
   type state = Spec.t

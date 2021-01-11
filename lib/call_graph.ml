@@ -8,9 +8,9 @@ type t = {
 }
 [@@deriving sexp, compare, equal]
 
-let indirect_call_targets (wasm_mod : Wasm_module.t) (_fidx : int )(_instr : 'a Instr.t) (typ : int) : int list =
+let indirect_call_targets (wasm_mod : Wasm_module.t) (_fidx : int )(_instr : 'a Instr.t) (typ : Int32.t) : int list =
   let ftype = Wasm_module.get_type wasm_mod typ in
-  let table = List.nth_exn wasm_mod.tables 0 in
+  let table = List.nth_exn wasm_mod.table_insts 0 in
   let funs = List.map (Table_inst.indices table) ~f:(fun idx -> Table_inst.get table idx) in
   let funs_with_matching_type = List.filter_map funs ~f:(function
       | Some fa -> if Stdlib.(ftype = Wasm_module.get_func_type wasm_mod fa) then Some fa else None
@@ -20,7 +20,7 @@ let indirect_call_targets (wasm_mod : Wasm_module.t) (_fidx : int )(_instr : 'a 
 (* TODO: call with
  Relational.Summary.initial_summaries (Cfg_builder.build_all module_) module_ `Top
    in order to get the right signature *)
-let indirect_call_targets_refined summaries (wasm_mod : Wasm_module.t) (fidx : int ) (instr : 'a Instr.t) (typ : int) : int list =
+let indirect_call_targets_refined summaries (wasm_mod : Wasm_module.t) (fidx : int ) (instr : 'a Instr.t) (typ : Int32.t) : int list =
   let targets = indirect_call_targets wasm_mod fidx instr typ in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;

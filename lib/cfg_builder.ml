@@ -30,7 +30,7 @@ let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
     (* The edges within the blocks created *)
     (int * int * (bool option)) list *
     (* The break points as (block_idx, break_level, edge_data) *)
-    (int * int * (bool option)) list *
+    (int * Int32.t * (bool option)) list *
     (* The blocks that have to be connected to the return *)
     int list *
     (* The entry and exit of the created blocks *)
@@ -81,10 +81,10 @@ let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
              All other breaks see their level decreased by one *)
           let all_breaks = breaks @ breaks' in
           let new_breaks = List.map (List.filter all_breaks
-                                       ~f:(fun (_, level, _) -> level > 0))
-              ~f:(fun (idx, level, branch) -> (idx, level - 1, branch)) in
+                                       ~f:(fun (_, level, _) -> Int32.(level > 0l)))
+              ~f:(fun (idx, level, branch) -> (idx, Int32.(level - 1l), branch)) in
           let break_edges = List.map (List.filter all_breaks
-                                        ~f:(fun (_, level, _) -> level = 0))
+                                        ~f:(fun (_, level, _) -> Int32.(level = 0l)))
               ~f:(fun (idx, _, branch) -> (idx, merge_block.idx, branch)) in
           (block :: if_block :: merge_block :: (blocks @ blocks' @ blocks''),
            (* Edges *)
@@ -158,10 +158,10 @@ let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
              Important: break are handled differently within loop: a break goes back to the loop entry*)
           let all_breaks = breaks in
           let new_breaks = breaks' @ (List.map (List.filter all_breaks
-                                                  ~f:(fun (_, level, _) -> level > 0)))
-              ~f:(fun (idx, level, branch) -> (idx, level - 1, branch)) in
+                                                  ~f:(fun (_, level, _) -> Int32.(level > 0l))))
+              ~f:(fun (idx, level, branch) -> (idx, Int32.(level - 1l), branch)) in
           let break_edges = List.map (List.filter all_breaks
-                                        ~f:(fun (_, level, _) -> level = 0))
+                                        ~f:(fun (_, level, _) -> Int32.(level = 0l)))
               ~f:(fun (idx, _, branch) -> (idx, (if is_loop then block_entry.idx else block_exit.idx), branch)) in
           (* Compute the new edges. This is different between a loop and a
              block, for the exit of the inside of the block *)

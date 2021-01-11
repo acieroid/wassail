@@ -147,7 +147,7 @@ module Make (* : Transfer.TRANSFER *) = struct
     | CallIndirect (arity, typ) ->
       (* Simplest case: all functions with the proper type can be called.
          Refined case: all functions that are deemed reachable by previous analysis stages (i.e., relational analysis) can be called *)
-      let table = List.nth_exn module_.tables 0 in
+      let table = List.nth_exn module_.table_insts 0 in
       let funs = List.map (Table_inst.indices table) ~f:(fun idx -> (Table_inst.get table idx, idx)) in
       let ftype = Wasm_module.get_type module_ typ in
       assert (snd arity <= 1);

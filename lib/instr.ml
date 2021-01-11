@@ -37,11 +37,11 @@ module T = struct
     | Compare of Relop.t
     | Test of Testop.t
     | Convert of Convertop.t
-    | LocalGet of int
-    | LocalSet of int
-    | LocalTee of int
-    | GlobalGet of int
-    | GlobalSet of int
+    | LocalGet of Int32.t
+    | LocalSet of Int32.t
+    | LocalTee of Int32.t
+    | GlobalGet of Int32.t
+    | GlobalSet of Int32.t
     | Load of Memoryop.t
     | Store of Memoryop.t
 
@@ -50,11 +50,11 @@ module T = struct
     | Block of block_type * arity * 'a t list
     | Loop of block_type * arity * 'a t list
     | If of block_type * arity * 'a t list * 'a t list
-    | Call of arity * int
-    | CallIndirect of arity * int
-    | Br of int
-    | BrIf of int
-    | BrTable of int list * int
+    | Call of arity * int (* TODO: int32 *)
+    | CallIndirect of arity * Int32.t
+    | Br of Int32.t
+    | BrIf of Int32.t
+    | BrTable of Int32.t list * Int32.t
     | Return
     | Unreachable
 
@@ -92,22 +92,22 @@ let data_to_string (instr : data) : string =
      | Compare r -> Printf.sprintf "compare %s" (Relop.to_string r)
      | Test t -> Printf.sprintf "test %s" (Testop.to_string t)
      | Convert t -> Printf.sprintf "cvt %s" (Convertop.to_string t)
-     | LocalGet v -> Printf.sprintf "local.get %d" v
-     | LocalSet v -> Printf.sprintf "local.set %d" v
-     | LocalTee v -> Printf.sprintf "local.tee %d" v
-     | GlobalGet v -> Printf.sprintf "global.get %d" v
-     | GlobalSet v -> Printf.sprintf "global.set %d" v
+     | LocalGet v -> Printf.sprintf "local.get %s" (Int32.to_string v)
+     | LocalSet v -> Printf.sprintf "local.set %s" (Int32.to_string v)
+     | LocalTee v -> Printf.sprintf "local.tee %s" (Int32.to_string v)
+     | GlobalGet v -> Printf.sprintf "global.get %s" (Int32.to_string v)
+     | GlobalSet v -> Printf.sprintf "global.set %s" (Int32.to_string v)
      | Load op -> Printf.sprintf "load %s" (Memoryop.to_string op)
      | Store op -> Printf.sprintf "store %s" (Memoryop.to_string op)
 
 (** Converts a control instruction to its string representation *)
 let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : 'a control) (annot_to_string : 'a -> string) : string =
   match instr with
-  | Call (_, v) -> Printf.sprintf "call %d" v
-  | CallIndirect (_, v) -> Printf.sprintf "call_indirect %d" v
-  | Br b -> Printf.sprintf "br %d" b
-  | BrIf b -> Printf.sprintf "brif %d" b
-  | BrTable (t, b) -> Printf.sprintf "br_table %s %d" (String.concat ~sep:" " (List.map t ~f:(Printf.sprintf "%d"))) b
+  | Call (_, v) -> Printf.sprintf "call %s" (string_of_int v)
+  | CallIndirect (_, v) -> Printf.sprintf "call_indirect %s" (Int32.to_string v)
+  | Br b -> Printf.sprintf "br %s" (Int32.to_string b)
+  | BrIf b -> Printf.sprintf "brif %s" (Int32.to_string b)
+  | BrTable (t, b) -> Printf.sprintf "br_table %s %s" (String.concat ~sep:" " (List.map t ~f:Int32.to_string)) (Int32.to_string b)
   | Return -> "return"
   | Unreachable -> "unreachable"
   | Block (_, _, instrs) -> Printf.sprintf "block%s%s" sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep)
@@ -208,21 +208,21 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) : unit t =
   | Ast.Compare rel ->
     data_labelled (Compare (Relop.of_wasm rel)) () ()
   | Ast.LocalGet l ->
-    data_labelled (LocalGet (Index.of_wasm l)) () ()
+    data_labelled (LocalGet l.it) () ()
   | Ast.LocalSet l ->
-    data_labelled (LocalSet (Index.of_wasm l)) () ()
+    data_labelled (LocalSet l.it) () ()
   | Ast.LocalTee l ->
-    data_labelled (LocalTee (Index.of_wasm l)) () ()
+    data_labelled (LocalTee l.it) () ()
   | Ast.BrIf label ->
-    control_labelled (BrIf (Index.of_wasm label)) () ()
+    control_labelled (BrIf label.it) () ()
   | Ast.Br label ->
-    control_labelled (Br (Index.of_wasm label)) () ()
+    control_labelled (Br label.it) () ()
   | Ast.BrTable (table, label) ->
-    control_labelled (BrTable (List.map table ~f:Index.of_wasm, Index.of_wasm label)) () ()
+    control_labelled (BrTable (List.map table ~f:(fun v -> v.it), label.it)) () ()
   | Ast.Call f ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_fun m f in
     assert (arity_out <= 1);
-    control_labelled (Call ((arity_in, arity_out), Index.of_wasm f)) () ()
+    control_labelled (Call ((arity_in, arity_out), Int32.to_int_exn f.it)) () ()
   | Ast.Return ->
     control_labelled (Return) () ()
   | Ast.Unreachable ->
@@ -243,11 +243,11 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) : unit t =
   | Ast.CallIndirect f ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_fun_type m f in
     assert (arity_out <= 1);
-    control_labelled (CallIndirect ((arity_in, arity_out), Index.of_wasm f)) () ()
+    control_labelled (CallIndirect ((arity_in, arity_out), f.it)) () ()
   | Ast.GlobalGet g ->
-    data_labelled (GlobalGet (Index.of_wasm g)) () ()
+    data_labelled (GlobalGet g.it) () ()
   | Ast.GlobalSet g ->
-    data_labelled (GlobalSet (Index.of_wasm g)) () ()
+    data_labelled (GlobalSet g.it) () ()
   | Ast.Load op ->
     data_labelled (Load (Memoryop.of_wasm_load op)) () ()
   | Ast.Store op ->

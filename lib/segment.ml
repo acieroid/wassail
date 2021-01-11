@@ -3,27 +3,46 @@ open Core_kernel
 module type SegmentType = sig
   type t
   [@@deriving sexp, compare, equal]
+
+  type wasm_t
+
+  val of_wasm : wasm_t -> t
 end
 
 module Make(ST: SegmentType) = struct
   type t = {
-    index : int;
+    index : Int32.t;
     offset : unit Instr.t list;
     init : ST.t;
   }
   [@@deriving sexp, compare, equal]
+
+  let of_wasm (module_ : Wasm.Ast.module_) (d : ST.wasm_t Wasm.Ast.segment) : t =
+    { index = d.it.index.it;
+      offset = List.map d.it.offset.it ~f:(Instr.of_wasm module_);
+      init = ST.of_wasm d.it.init}
 end
 
 module Data = struct
   type t = string
   [@@deriving sexp, compare, equal]
+
+  type wasm_t = string
+  let of_wasm (d : wasm_t) : t = d
 end
 
 module DataSegment = struct
   include Make(Data)
-  let of_wasm (module_ : Wasm.Ast.module_) (d : string Wasm.Ast.segment) : t =
-    { index = Int32.to_int_exn d.it.index.it;
-      offset = List.map d.it.offset.it ~f:(Instr.of_wasm module_);
-      init = d.it.init }
 end
-                
+
+module Elem = struct
+  type t = Int32.t list
+  [@@deriving sexp, compare, equal]
+
+  type wasm_t = Wasm.Ast.var list
+  let of_wasm (e : wasm_t) : t = List.map e ~f:(fun v -> v.it)
+end
+
+module ElemSegment = struct
+  include Make(Elem)
+end

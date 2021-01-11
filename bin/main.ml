@@ -41,7 +41,17 @@ let sizes =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         let sizes = Sizes.sizes wasm_mod in
-        Printf.printf "code: %d bytes, data: %d bytes" sizes.code_section sizes.data_section)
+        Printf.printf "type:\t%d bytes\n" sizes.type_section;
+        Printf.printf "import:\t%d bytes\n" sizes.import_section;
+        Printf.printf "func:\t%d bytes\n" sizes.func_section;
+        Printf.printf "table:\t%d bytes\n" sizes.table_section;
+        Printf.printf "memory:\t%d bytes\n" sizes.memory_section;
+        Printf.printf "global:\t%d bytes\n" sizes.global_section;
+        Printf.printf "export:\t%d bytes\n" sizes.export_section;
+        Printf.printf "start: %d bytes\n" sizes.start_section;
+        Printf.printf "elem: %d bytes\n" sizes.elem_section;
+        Printf.printf "code: %d bytes\n" sizes.code_section;
+        Printf.printf "data: %d bytes\n" sizes.data_section)
 
 let cfg =
   Command.basic

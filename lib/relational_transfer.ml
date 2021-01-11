@@ -258,7 +258,7 @@ let control_instr_transfer
     (* v is the index in the table that points to the called functiion *)
     let v = pop i.annotation_before.vstack in
     (* Get table 0 *)
-    let table = List.nth_exn module_.tables 0 in
+    let table = List.nth_exn module_.table_insts 0 in
     (* Get all indices that v could be equal to *)
     let funids = List.filter (Table_inst.indices table) ~f:(fun idx ->
         fst (Domain.is_equal state v idx)) in

@@ -4,7 +4,7 @@ module T = struct
   type t = {
     idx : int;
     name : string option;
-    type_idx : int;
+    type_idx : Int32.t;
     typ : (Type.t list * Type.t list);
     module_: Module_inst.t;
     code: Func.t;
@@ -23,7 +23,7 @@ let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (fid : int) (f : Wasm
   | FuncType (input, output) -> {
       idx = fid;
       name = name;
-      type_idx = (Int32.to_int_exn f.it.ftype.it);
+      type_idx = f.it.ftype.it;
       typ = (List.map input ~f:Type.of_wasm, List.map output ~f:Type.of_wasm);
       module_ = minst;
       code = Func.of_wasm m fid f (List.length input) nglobals (List.length output)

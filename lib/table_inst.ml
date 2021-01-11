@@ -13,8 +13,8 @@ end
 include T
 
 let init (t : Table.t) (elems : Elem.t list) : t =
-  let table = { max = snd t.limits;
-                elems = Wasm.Lib.Array32.make (fst t.limits) None } in
+  let table = { max = Limits.max t.ttype;
+                elems = Wasm.Lib.Array32.make (Limits.min t.ttype) None } in
   List.iter elems ~f:(fun e ->
       assert (e.index = 0);
       match e.offset with
