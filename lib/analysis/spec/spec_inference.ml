@@ -162,6 +162,9 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                         | v' when Var.equal v v' -> v'
                         | _ -> Var.Hole (* this is a hole *)
                       in
+                      assert (List.length acc.vstack = List.length s.vstack);
+                      assert (List.length acc.locals = List.length s.locals);
+                      assert (List.length acc.globals = List.length s.globals);
                       { vstack = List.map2_exn acc.vstack s.vstack ~f:f;
                         locals = List.map2_exn acc.locals s.locals ~f:f;
                         globals = List.map2_exn acc.globals s.globals ~f:f;

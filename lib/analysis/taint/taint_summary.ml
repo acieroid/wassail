@@ -128,6 +128,8 @@ let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pr
   let subst (t : Taint_domain.Taint.t) : Taint_domain.Taint.t =
     (* We substitute in the taint: l0 by the actual argument (a in the example.
        Similarly for globals: g0 becomes the corresponding global in globals_pre *)
+    assert (List.length summary_args = List.length args);
+    assert (List.length summary_globals = List.length globals_pre);
     (Taint_domain.Taint.substitute t
            ((List.map2_exn summary_args args ~f:(fun x y -> (x, Taint_domain.get_taint state y))) @
             (List.map2_exn summary_globals globals_pre ~f:(fun x y -> (x, Taint_domain.get_taint state y))))) in
@@ -140,6 +142,7 @@ let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pr
     | _ -> failwith "Taint_summary.apply: incompatible return value for summary"
   in
   (* Then, propagate the taint for the globals in a similar way*)
+  assert (List.length summary.globals = List.length globals_post);
   let with_globals = List.fold_left (List.map2_exn summary.globals globals_post ~f:(fun x y -> (x, y)))
       ~init:with_ret
       ~f:(fun acc (g, g') ->

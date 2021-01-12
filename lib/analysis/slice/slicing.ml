@@ -54,9 +54,6 @@ let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.label) : SlicePart.Set.t =
              redefined: all such initial variables are then considered to be
              used *)
           let vars = Spec_inference.new_merge_variables cfg (Cfg.find_block_exn cfg block_idx) in
-          if block_idx = 10 then
-            Printf.printf "vars of block 10: %s\n" (String.concat (List.map vars ~f:(fun (v1, v2) -> Printf.sprintf "%s,%s" (Var.to_string v1) (Var.to_string v2))))
-          ;
           List.map vars ~f:fst in
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
@@ -210,7 +207,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.label) : unit Cfg.t =
                   (* Instruction is part of the slice, annotation is emptied *)
                   Some {instr with annotation_before = (); annotation_after = () }
                 else
-                  (* INstruction is not part of the slice, drop it *)
+                  (* Instruction is not part of the slice, drop it *)
                   None) in
             if keep_anyway || not (List.is_empty instrs) then
               (* Otherwise, keep it and clear its annotation *)
@@ -227,7 +224,6 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.label) : unit Cfg.t =
            edges, back_edges (* Edges are kept *)
           )
         | None ->
-          if block_idx = 10 then Printf.printf "block %d is removed\n" block_idx;
           (* Block is not kept because it is empty *)
           (basic_blocks, (* Don't add it *)
            (* Edges for that block need to be rewritten:
@@ -334,6 +330,33 @@ let%test_unit "slicing with a block containing a single drop" =
   Printf.printf "Sliced: %s\n" (Cfg.to_dot sliced_cfg (fun _ -> ""));
   let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
   ()
+
+let%test_unit "slicing with a block containing a single drop - variant" =
+  Instr.reset_counter ();
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    block
+      local.get 0   ;; Instr 0
+      local.get 0   ;; Instr 1
+      if            ;; Instr 6
+        drop        ;; Instr 2
+        i32.const 0 ;; Instr 3
+      else
+        i32.const 1 ;; Instr 4
+        drop        ;; Instr 5
+      end
+      i32.const 32  ;; Instr 7
+      i32.add       ;; Instr 8
+    end)
+  )" in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+  Printf.printf "DOT:\n%s\n" (Cfg.to_dot cfg (fun _ -> ""));
+  let sliced_cfg = slice cfg 8 in
+  Printf.printf "Sliced: %s\n" (Cfg.to_dot sliced_cfg (fun _ -> ""));
+  let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+  ()
+
 
 (** Return the indices of each call_indirect instructions *)
 let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : int list =

@@ -80,8 +80,15 @@ S /home/quentin/.opam/ocaml-base-compiler.4.11.1/lib/variantslib
 S /home/quentin/.opam/ocaml-base-compiler.4.11.1/lib/wasm
 S .
 S analysis
+S analysis/call_graph
+S analysis/instruction_counter
 S analysis/relational
+S analysis/reltaint
+S analysis/sizes
+S analysis/slice
+S analysis/spec
 S analysis/taint
+S analysis/var_prop
 S cfg
 S wasm
 FLG -ppx '/home/quentin/p/wassail/_build/default/.ppx/b25febcec82391b63df83fd6c2ead495/ppx.exe --as-ppx --cookie '\''inline_tests="enabled"'\'' --cookie '\''library-name="wassail"'\'''

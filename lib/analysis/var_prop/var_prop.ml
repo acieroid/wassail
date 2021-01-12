@@ -70,6 +70,9 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
             List.fold_left preds
               ~init:eqs
               ~f:(fun eqs pred ->
+                  assert (List.length pred.annotation_after.vstack = List.length block.annotation_after.vstack);
+                  assert (List.length pred.annotation_after.locals = List.length block.annotation_after.locals);
+                  assert (List.length pred.annotation_after.globals = List.length block.annotation_after.globals);
                   VarEq.Set.union eqs
                     (VarEq.Set.of_list
                        ((List.map2_exn ~f:VarEq.of_vars pred.annotation_after.vstack block.annotation_after.vstack) @

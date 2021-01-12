@@ -257,7 +257,6 @@ let%test "simplest ud chain" =
     i32.add)    ;; Instr 3
   )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-  Printf.printf "DOTsimplest:\n%s\n" (Cfg.to_dot cfg (fun _ -> ""));
   let _, _, actual = make cfg in
   let expected = Use.Map.of_alist_exn [(Use.Instruction (2, Var.Var 0), Def.Instruction (0, (Var.Var 0)));
                                        (Use.Instruction (2, Var.Var 1), Def.Instruction (1, Var.Var 1));
