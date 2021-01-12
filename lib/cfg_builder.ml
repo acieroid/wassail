@@ -2,7 +2,7 @@ open Core_kernel
 open Helpers
 
 (** Constructs a CFG for function `fid` in a module. *)
-let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
+let build (fid : Int32.t) (module_ : Wasm_module.t) : unit Cfg.t =
   (* TODO: this implementation is really not ideal and should be clean *)
   (* true to simplify the CFG, false to disable simplification *)
   let rec check_no_rest (rest : 'a Instr.t list) : unit = match rest with
@@ -278,9 +278,9 @@ let build (fid : int) (module_ : Wasm_module.t) : unit Cfg.t =
     loop_heads = !loop_heads;
   }
 
-let build_all (mod_ : Wasm_module.t) : unit Cfg.t IntMap.t =
-  IntMap.of_alist_exn (List.mapi mod_.funcs ~f:(fun i _ ->
-      let faddr = mod_.nimports + i in
+let build_all (mod_ : Wasm_module.t) : unit Cfg.t Int32Map.t =
+  Int32Map.of_alist_exn (List.mapi mod_.funcs ~f:(fun i _ ->
+      let faddr = Int32.(mod_.nimports + (Int32.of_int_exn i)) in
       (faddr, build faddr mod_)))
 
 module Cfg_builder_tests = struct
@@ -290,7 +290,7 @@ module Cfg_builder_tests = struct
     let wasm_mod = Wasm_module.of_file file in
     List.iteri wasm_mod.funcs
       ~f:(fun i _ ->
-          let faddr = wasm_mod.nimports + i in
+          let faddr = Int32.(wasm_mod.nimports + (Int32.of_int_exn i)) in
           let _ : unit Cfg.t = build faddr wasm_mod in
           ())
 

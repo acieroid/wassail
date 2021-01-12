@@ -9,15 +9,15 @@ module type SUMMARY_T = sig
   val to_string : t -> string
   val bottom : 'a Cfg.t -> Var.Set.t -> t
   val top : 'a Cfg.t -> Var.Set.t -> t
-  val initial_summaries : 'a Cfg.t IntMap.t -> Wasm_module.t -> [`Bottom | `Top ] -> t IntMap.t
+  val initial_summaries : 'a Cfg.t Int32Map.t -> Wasm_module.t -> [`Bottom | `Top ] -> t Int32Map.t
 end
 
 module MakeManager = functor (Summary : SUMMARY_T) -> struct
-  let summaries : Summary.t IntMap.t ref = ref IntMap.empty
+  let summaries : Summary.t Int32Map.t ref = ref Int32Map.empty
 
-  let init (sums : Summary.t IntMap.t) : unit = summaries := sums
+  let init (sums : Summary.t Int32Map.t) : unit = summaries := sums
 
-  let get (f : int) : Summary.t = match IntMap.find !summaries f with
+  let get (f : Int32.t) : Summary.t = match Int32Map.find !summaries f with
     | Some s -> s
-    | None -> failwith (Printf.sprintf "Summary: can't find the summary of function %d" f)
+    | None -> failwith (Printf.sprintf "Summary: can't find the summary of function %s" (Int32.to_string f))
 end

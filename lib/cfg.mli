@@ -31,7 +31,7 @@ type 'a t = {
   (* The name of the function *)
   name: string;
   (* The index of this CFG *)
-  idx: int;
+  idx: Int32.t;
   (* Types of globals (they are not specific to this CFG, but useful to have here) *)
   global_types: Type.t list;
   (* Types of arguments *)
@@ -90,10 +90,10 @@ val outgoing_edges : 'a t -> int -> Edge.t list
 val incoming_edges : 'a t -> int -> Edge.t list
 
 (** Find the functions called in this CFG *)
-val callees : 'a t -> IntSet.t
+val callees : 'a t -> Int32Set.t
 
 (** Find the callers of this function *)
-val callers : 'a t IntMap.t -> 'a t -> IntSet.t
+val callers : 'a t Int32Map.t -> 'a t -> Int32Set.t
 
 (** Return all the instructions within this CFG *)
 (* val all_block_indices : 'a t -> IntSet.t *)

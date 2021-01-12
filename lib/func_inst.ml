@@ -2,7 +2,7 @@ open Core_kernel
 
 module T = struct
   type t = {
-    idx : int;
+    idx : Int32.t;
     name : string option;
     type_idx : Int32.t;
     typ : (Type.t list * Type.t list);
@@ -12,10 +12,10 @@ module T = struct
   [@@deriving sexp, compare, equal]
 end
 include T
-let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (fid : int) (f : Wasm.Ast.func) (nglobals : int) : t =
+let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (fid : Int32.t) (f : Wasm.Ast.func) : t =
   let name = (List.find_map m.it.exports ~f:(fun x ->
       match x.it.edesc.it with
-      | FuncExport v when (Int32.to_int_exn v.it) = fid -> Some (Wasm.Ast.string_of_name x.it.name)
+      | FuncExport v when Int32.(v.it = fid) -> Some (Wasm.Ast.string_of_name x.it.name)
       | _ -> None
     ))
   in
@@ -26,7 +26,7 @@ let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (fid : int) (f : Wasm
       type_idx = f.it.ftype.it;
       typ = (List.map input ~f:Type.of_wasm, List.map output ~f:Type.of_wasm);
       module_ = minst;
-      code = Func.of_wasm m fid f (List.length input) nglobals (List.length output)
+      code = Func.of_wasm m f
     }
 let to_string (f : t) : string =
   Printf.sprintf "Function %s (%s -> %s):\nCode: %s"

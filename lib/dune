@@ -3,7 +3,7 @@
    (modules
       Wassail
       Logging Helpers Wasm_helpers Analysis_helpers
-      Type Binop Unop Memoryop Testop Relop Value Index Var Instr Memory_inst Module_inst Func Func_inst Elem Table Table_inst Convertop Wasm_module Segment Import Limits Memory Global Export
+      Type Binop Unop Memoryop Testop Relop Value Var Instr Memory_inst Module_inst Func Func_inst Elem Table Table_inst Convertop Wasm_module Segment Import Limits Memory Global Export
       Basic_block Cfg Cfg_builder Call_graph
       Transfer
       Summary Intra Inter

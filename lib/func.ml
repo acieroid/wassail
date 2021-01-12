@@ -7,7 +7,7 @@ type t = {
 }
 [@@deriving sexp, compare, equal]
 
-let of_wasm (m : Ast.module_) (_fid : int) (f : Ast.func) (_nargs : int) (_nglobals : int) (_nreturns : int) : t = {
+let of_wasm (m : Ast.module_) (f : Ast.func) : t = {
   locals = List.map f.it.locals ~f:Type.of_wasm;
   body = Instr.seq_of_wasm m f.it.body;
 }

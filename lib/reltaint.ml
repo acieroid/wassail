@@ -3,18 +3,18 @@ open Helpers
 
 let verbose = ref false
 
-let analyze_intra : Wasm_module.t -> int list -> (Relational.Summary.t * Taint.Summary.t) IntMap.t =
+let analyze_intra : Wasm_module.t -> Int32.t list -> (Relational.Summary.t * Taint.Summary.t) Int32Map.t =
   Analysis_helpers.mk_intra
     (fun cfgs wasm_mod ->
-       IntMap.merge
+       Int32Map.merge
          (Relational.Summary.initial_summaries cfgs wasm_mod `Top)
          (Taint.Summary.initial_summaries cfgs wasm_mod `Top)
          ~f:(fun ~key:_k -> function
              | `Both (s1, s2) -> Some (s1, s2)
              | _ -> failwith "unexpected"))
     (fun summaries wasm_mod cfg ->
-       Relational.Intra.init_summaries (IntMap.map summaries ~f:fst);
-       Taint.Intra.init_summaries (IntMap.map summaries ~f:snd);
+       Relational.Intra.init_summaries (Int32Map.map summaries ~f:fst);
+       Taint.Intra.init_summaries (Int32Map.map summaries ~f:snd);
        Relational.Options.ignore_memory := false;
        Logging.info !verbose  "---------- Relational analysis ----------";
        let relational_cfg = Relational.Intra.analyze_keep wasm_mod cfg in

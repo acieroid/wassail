@@ -3,12 +3,12 @@ open Helpers
 
 (** A call graph *)
 type t = {
-  nodes : IntSet.t; (** Nodes of the call graphs are function indices *)
-  edges : IntSet.t IntMap.t; (** Edges are from one node to multiple nodes *)
+  nodes : Int32Set.t; (** Nodes of the call graphs are function indices *)
+  edges : Int32Set.t Int32Map.t; (** Edges are from one node to multiple nodes *)
 }
 [@@deriving sexp, compare, equal]
 
-let indirect_call_targets (wasm_mod : Wasm_module.t) (_fidx : int )(_instr : 'a Instr.t) (typ : Int32.t) : int list =
+let indirect_call_targets (wasm_mod : Wasm_module.t) (_fidx : Int32.t) (_instr : 'a Instr.t) (typ : Int32.t) : Int32.t list =
   let ftype = Wasm_module.get_type wasm_mod typ in
   let table = List.nth_exn wasm_mod.table_insts 0 in
   let funs = List.map (Table_inst.indices table) ~f:(fun idx -> Table_inst.get table idx) in
@@ -20,7 +20,7 @@ let indirect_call_targets (wasm_mod : Wasm_module.t) (_fidx : int )(_instr : 'a 
 (* TODO: call with
  Relational.Summary.initial_summaries (Cfg_builder.build_all module_) module_ `Top
    in order to get the right signature *)
-let indirect_call_targets_refined summaries (wasm_mod : Wasm_module.t) (fidx : int ) (instr : 'a Instr.t) (typ : Int32.t) : int list =
+let indirect_call_targets_refined summaries (wasm_mod : Wasm_module.t) (fidx : Int32.t) (instr : 'a Instr.t) (typ : Int32.t) : Int32.t list =
   let targets = indirect_call_targets wasm_mod fidx instr typ in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
@@ -47,29 +47,29 @@ let indirect_call_targets_refined summaries (wasm_mod : Wasm_module.t) (fidx : i
 (** Builds a call graph for a module *)
 let make (wasm_mod : Wasm_module.t) : t =
   let find_targets = indirect_call_targets_refined (Relational.Summary.initial_summaries (Cfg_builder.build_all wasm_mod) wasm_mod `Top) in
-  let nodes = IntSet.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> i)) in
-  let rec collect_calls (f : int) (instr : 'a Instr.t) (edges : IntSet.t IntMap.t) : IntSet.t IntMap.t = match instr with
+  let nodes = Int32Set.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> Int32.of_int_exn i)) in
+  let rec collect_calls (f : Int32.t) (instr : 'a Instr.t) (edges : Int32Set.t Int32Map.t) : Int32Set.t Int32Map.t = match instr with
     | Control { instr = Call (_, f'); _ } ->
-      IntMap.update edges f ~f:(function
-          | None -> IntSet.singleton f'
-          | Some fs -> IntSet.add fs f')
+      Int32Map.update edges f ~f:(function
+          | None -> Int32Set.singleton f'
+          | Some fs -> Int32Set.add fs f')
     | Control { instr = CallIndirect (_, typ); _ } ->
       List.fold_left (find_targets wasm_mod f instr typ)
         ~init:edges
         ~f:(fun edges f' ->
-            IntMap.update edges f ~f:(function
-                | None -> IntSet.singleton f'
-                | Some fs -> IntSet.add fs f'))
+            Int32Map.update edges f ~f:(function
+                | None -> Int32Set.singleton f'
+                | Some fs -> Int32Set.add fs f'))
     | Control { instr = Block (_, _, instrs); _ }
     | Control { instr = Loop (_, _, instrs); _ } ->
       collect_calls_instrs f instrs edges
     | Control { instr = If (_,_, instrs1, instrs2); _ } ->
       collect_calls_instrs f (instrs1 @ instrs2) edges
     | _ -> edges
-  and collect_calls_instrs (f : int) (instrs : 'a Instr.t list) (edges : IntSet.t IntMap.t) : IntSet.t IntMap.t =
+  and collect_calls_instrs (f : Int32.t) (instrs : 'a Instr.t list) (edges : Int32Set.t Int32Map.t) : Int32Set.t Int32Map.t =
     List.fold_left instrs ~init:edges ~f:(fun edges i -> collect_calls f i edges) in
   let edges = List.fold_left wasm_mod.funcs
-      ~init:IntMap.empty
+      ~init:Int32Map.empty
       ~f:(fun edges f ->
           List.fold_left f.code.body
             ~init:edges
@@ -80,20 +80,20 @@ let make (wasm_mod : Wasm_module.t) : t =
 let to_dot (cg : t) : string =
   Printf.sprintf "digraph \"Call graph\" {\n%s\n%s\n}"
     (String.concat ~sep:"\n"
-       (List.map (IntSet.to_list cg.nodes) ~f:(fun n ->
-            Printf.sprintf "node%d [shape=record, label=\"{%d}\"];" n n)))
-    (String.concat ~sep:"\n" (List.concat_map (IntMap.to_alist cg.edges)
+       (List.map (Int32Set.to_list cg.nodes) ~f:(fun n ->
+            Printf.sprintf "node%s [shape=record, label=\"{%s}\"];" (Int32.to_string n) (Int32.to_string n))))
+    (String.concat ~sep:"\n" (List.concat_map (Int32Map.to_alist cg.edges)
                                 ~f:(fun (src, dsts) ->
-                                    List.map (IntSet.to_list dsts) ~f:(fun dst ->
-                                        Printf.sprintf "node%d -> node%d;\n" src dst))))
+                                    List.map (Int32Set.to_list dsts) ~f:(fun dst ->
+                                        Printf.sprintf "node%s -> node%s;\n" (Int32.to_string src) (Int32.to_string dst)))))
 
 (** Remove nodes that are imported functions. Also removes all edges to these nodes *)
-let remove_imports (cg : t) (nimports : int) : t =
-  let nodes = IntSet.filter cg.nodes ~f:(fun n -> n >= nimports) in
-  let edges = IntMap.filter_mapi cg.edges ~f:(fun ~key:src ~data:dsts ->
-      if src >= nimports then
-        let dsts' = IntSet.filter dsts ~f:(fun n -> n >= nimports) in
-        if IntSet.is_empty dsts' then
+let remove_imports (cg : t) (nimports : Int32.t) : t =
+  let nodes = Int32Set.filter cg.nodes ~f:(fun n -> Int32.(n >= nimports)) in
+  let edges = Int32Map.filter_mapi cg.edges ~f:(fun ~key:src ~data:dsts ->
+      if Int32.(src >= nimports) then
+        let dsts' = Int32Set.filter dsts ~f:(fun n -> Int32.(n >= nimports)) in
+        if Int32Set.is_empty dsts' then
           None
         else
           Some dsts'
@@ -105,57 +105,57 @@ let remove_imports (cg : t) (nimports : int) : t =
 
 (** Computes the SCC in topological order using Tarjan's algorithm.
     The implementation of Tarjan's algorithm follows the pseudo-code implementation of Wikipedia: https://en.wikipedia.org/wiki/Tarjan%27s_strongly_connected_components_algorithm *)
-let scc_topological (cg : t) : (int list) list =
-  let indices : int IntMap.t ref = ref IntMap.empty in
-  let lowlinks : int IntMap.t ref = ref IntMap.empty in
-  let on_stack : bool IntMap.t ref = ref IntMap.empty in
-  let index = ref 0 in
-  let sccs : (int list) list ref = ref [] in
-  let stack = ref [] in
-  let rec strong_connect (v : int) =
-    indices := IntMap.set !indices ~key:v ~data:!index;
-    lowlinks := IntMap.set !lowlinks ~key:v ~data:!index;
-    index := !index + 1;
+let scc_topological (cg : t) : (Int32.t list) list =
+  let indices : Int32.t Int32Map.t ref = ref Int32Map.empty in
+  let lowlinks : Int32.t Int32Map.t ref = ref Int32Map.empty in
+  let on_stack : bool Int32Map.t ref = ref Int32Map.empty in
+  let index : Int32.t ref = ref 0l in
+  let sccs : (Int32.t list) list ref = ref [] in
+  let stack : Int32.t list ref = ref [] in
+  let rec strong_connect (v : Int32.t) =
+    indices := Int32Map.set !indices ~key:v ~data:!index;
+    lowlinks := Int32Map.set !lowlinks ~key:v ~data:!index;
+    index := Int32.(!index + 1l);
     stack := v :: !stack;
-    on_stack := IntMap.set !on_stack ~key:v ~data:true;
-    IntSet.iter
-      (match IntMap.find cg.edges v with
+    on_stack := Int32Map.set !on_stack ~key:v ~data:true;
+    Int32Set.iter
+      (match Int32Map.find cg.edges v with
        | Some ws -> ws
-       | None -> IntSet.empty)
+       | None -> Int32Set.empty)
       ~f:(fun w ->
-          match IntMap.find !indices w with
+          match Int32Map.find !indices w with
           | None -> (* w.index is undefined *)
             strong_connect w;
-            lowlinks := IntMap.set !lowlinks
+            lowlinks := Int32Map.set !lowlinks
                 ~key:v
-                ~data:(min (IntMap.find_exn !lowlinks v) (IntMap.find_exn !lowlinks w));
+                ~data:(Int32.min (Int32Map.find_exn !lowlinks v) (Int32Map.find_exn !lowlinks w));
           | Some windex ->
-            begin match IntMap.find !on_stack w with
+            begin match Int32Map.find !on_stack w with
               | Some true ->
-                lowlinks := IntMap.set !lowlinks
+                lowlinks := Int32Map.set !lowlinks
                     ~key:v
-                    ~data:(min (IntMap.find_exn !lowlinks v) windex)
+                    ~data:(Int32.min (Int32Map.find_exn !lowlinks v) windex)
               | _ -> ()
             end);
-    if IntMap.find_exn !lowlinks v = IntMap.find_exn !indices v then
-      let rec make_scc (scc : int list) : int list =
+    if Int32.(Int32Map.find_exn !lowlinks v = Int32Map.find_exn !indices v) then
+      let rec make_scc (scc : Int32.t list) : Int32.t list =
         match !stack with
         | [] -> failwith "scc_topological: should not happen, stack is empty"
         | w :: rest ->
           stack := rest;
-          on_stack := IntMap.set !on_stack ~key:w ~data:false;
-          if w = v then
+          on_stack := Int32Map.set !on_stack ~key:w ~data:false;
+          if Int32.(w = v) then
             w :: scc
           else
             make_scc (w :: scc)
       in
       sccs := make_scc [] :: !sccs
   in
-  IntSet.iter cg.nodes ~f:(fun v -> match IntMap.find !indices v with
+  Int32Set.iter cg.nodes ~f:(fun v -> match Int32Map.find !indices v with
       | Some _ -> ()
       | None -> strong_connect v);
   !sccs
 
 (** Provides a analysis schedule from a call graph, as SCCs in their reverse topological order *)
-let analysis_schedule (cg : t) (nimports : int) : (int list) list =
+let analysis_schedule (cg : t) (nimports : Int32.t) : (Int32.t list) list =
   List.rev (scc_topological (remove_imports cg nimports))

@@ -133,7 +133,7 @@ module Make (* : Transfer.TRANSFER *) = struct
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : state) (* The pre state *)
     : [`Simple of state | `Branch of state * state] =
-    let apply_summary (f : int) (arity : int * int) (state : state) : state =
+    let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
       let summary = SummaryManager.get f in
       let args = List.take (fst i.annotation_before).vstack (fst arity) in
       let ret = if snd arity = 1 then List.hd (fst i.annotation_after).vstack else None in

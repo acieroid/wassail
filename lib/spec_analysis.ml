@@ -1,13 +1,13 @@
 open Helpers
 
-let analyze_intra : Wasm_module.t -> int list -> Spec.t Cfg.t IntMap.t =
+let analyze_intra : Wasm_module.t -> Int32.t list -> Spec.t Cfg.t Int32Map.t =
   Analysis_helpers.mk_intra
-    (fun _cfgs _wasm_mod -> IntMap.empty)
+    (fun _cfgs _wasm_mod -> Int32Map.empty)
     (fun _summaries _wasm_mod cfg -> cfg)
 
-let analyze_intra1 (module_ : Wasm_module.t) (idx : int) : Spec.t Cfg.t =
+let analyze_intra1 (module_ : Wasm_module.t) (idx : Int32.t) : Spec.t Cfg.t =
   let results = analyze_intra module_ [idx] in
-  match IntMap.find results idx with
+  match Int32Map.find results idx with
   | Some res -> res
   | None -> failwith "Spec_analysis.analyze_intra did not actually analyze"
 
@@ -22,5 +22,5 @@ let%test_unit "spec analysis does not error" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let _ : Spec.t Cfg.t = analyze_intra1 module_ 0 in
+  let _ : Spec.t Cfg.t = analyze_intra1 module_ 0l in
   ()

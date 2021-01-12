@@ -8,12 +8,12 @@ module Summary = Taint_summary
 module Intra = Intra.Make(Transfer)
 module Inter = Inter.Make(Intra)
 
-let analyze_intra : Wasm_module.t -> int list -> Summary.t IntMap.t =
+let analyze_intra : Wasm_module.t -> Int32.t list -> Summary.t Int32Map.t =
   Analysis_helpers.mk_intra
     (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Bottom)
     (fun summaries wasm_mod cfg ->
        Logging.info !Taint_options.verbose
-         (Printf.sprintf "---------- Taint analysis of function %d ----------" cfg.idx);
+         (Printf.sprintf "---------- Taint analysis of function %s ----------" (Int32.to_string cfg.idx));
        (* Run the taint analysis *)
        Options.use_relational := false;
        Intra.init_summaries summaries;
@@ -47,7 +47,7 @@ let%test "simple function has no taint" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let actual = IntMap.find_exn (analyze_intra module_ [0]) 0 in
+  let actual = Int32Map.find_exn (analyze_intra module_ [0l]) 0l in
   let expected = Summary.{ ret = Some Domain.Taint.bottom; mem = Domain.Taint.bottom; globals = [Domain.Taint.taint (Var.Global 0)] } in
   check expected actual
 
@@ -62,19 +62,19 @@ let%test "test store" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let actual = IntMap.find_exn (analyze_intra module_ [0]) 0 in
+  let actual = Int32Map.find_exn (analyze_intra module_ [0l]) 0l in
   let expected = Summary.{ ret = Some (Domain.Taint.taint (Var.Local 0)); mem = Domain.Taint.taint (Var.Local 0); globals = [Domain.Taint.taint (Var.Global 0)] } in
   check expected actual
 
-let analyze_inter : Wasm_module.t -> int list list -> Summary.t IntMap.t =
+let analyze_inter : Wasm_module.t -> Int32.t list list -> Summary.t Int32Map.t =
   Analysis_helpers.mk_inter
     (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Bottom)
     (fun wasm_mod scc ->
        Logging.info !Taint_options.verbose
          (Printf.sprintf "---------- Taint analysis of SCC {%s} ----------"
-            (String.concat ~sep:"," (List.map (IntMap.keys scc) ~f:string_of_int)));
+            (String.concat ~sep:"," (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
        (* Run the taint analysis *)
        Options.use_relational := false;
-       let annotated_scc = IntMap.map scc ~f:Relational.Transfer.dummy_annotate in
+       let annotated_scc = Int32Map.map scc ~f:Relational.Transfer.dummy_annotate in
        let analyzed_cfgs = Inter.analyze wasm_mod annotated_scc in
-       IntMap.map analyzed_cfgs ~f:(fun cfg -> Intra.summary (IntMap.find_exn annotated_scc cfg.idx) (Intra.final_state cfg)))
+       Int32Map.map analyzed_cfgs ~f:(fun cfg -> Intra.summary (Int32Map.find_exn annotated_scc cfg.idx) (Intra.final_state cfg)))

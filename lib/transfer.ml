@@ -60,6 +60,6 @@ module type TRANSFER = sig
   val summary : annot_expected Cfg.t -> state -> summary
 
   (** Stores the summaries produced by other intra analyses, to be used upon function calls *)
-  val init_summaries : summary IntMap.t -> unit
+  val init_summaries : summary Int32Map.t -> unit
 end
 

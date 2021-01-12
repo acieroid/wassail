@@ -67,7 +67,7 @@ let top (cfg : 'a Cfg.t) (vars : Var.Set.t) : t =
   make cfg (Domain.top (Var.Set.union_list [Var.Set.of_option ret; params; vars])) ret [] [] []
 
 (** Constructs a summary from an imported function *)
-let of_import (_idx : int) (name : string) (args : Type.t list) (ret : Type.t list) : t =
+let of_import (name : string) (args : Type.t list) (ret : Type.t list) : t =
   (* These should be fairly easy to encode: we just list constraints between input and output, no constraint if we don't know anything about that name *)
   let params = List.mapi args ~f:(fun argi _ -> Var.Local argi) in
   assert (List.length ret <= 1); (* wasm spec does not allow for more than one return type (currently) *)
@@ -136,13 +136,13 @@ let apply (summary : t) (state : Domain.t) (args: string list) (ret : string opt
     failwith (Printf.sprintf "Apron error in Summary.apply: exc: %s, funid: %s, msg: %s" (Apron.Manager.string_of_exc exn) (Apron.Manager.string_of_funid funid) msg)
 
 (** Constructs all summaries for a given module, including imported functions *)
-let initial_summaries (cfgs : 'a Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t IntMap.t =
+let initial_summaries (cfgs : 'a Cfg.t Int32Map.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t Int32Map.t =
   List.fold_left module_.imported_funcs
     (* Summaries for defined functions are all initialized to bottom (or top) *)
-    ~init:(IntMap.map cfgs ~f:(fun cfg ->
+    ~init:(Int32Map.map cfgs ~f:(fun cfg ->
         (match typ with
          | `Bottom -> bottom
          | `Top -> top) cfg Var.Set.empty (* TODO: vars *)))
     ~f:(fun summaries (idx, name, (args, ret)) ->
-        IntMap.set summaries ~key:idx ~data:(of_import idx name args ret))
+        Int32Map.set summaries ~key:idx ~data:(of_import name args ret))
 

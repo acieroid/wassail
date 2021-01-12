@@ -282,13 +282,13 @@ let%test "keep_only works as expected" =
 
 (** Checks if the value of variable v may be equal to a given number.
     Returns two booleans: the first one indicates if v can be equal to n, and the second if it can be different than n *)
-let is_equal (s : t) (v : Var.t) (n : int) : bool * bool =
+let is_equal (s : t) (v : Var.t) (n : Int32.t) : bool * bool =
   rethrow_apron_error "Relational_domain.is_equal" (fun () ->
       let box = Apron.Abstract1.to_box manager s.constraints in
       let dim = Apron.Environment.dim_of_var box.box1_env (Apron.Var.of_string (Var.to_string v)) in
       let interval = Array.get box.interval_array dim in
       (* Apron doc: cmp is: "0: equality -1: i1 included in i2 +1: i2 included in i1 -2: i1.inf less than or equal to i2.inf +2: i1.inf greater than i2.inf" *)
-      match Apron.Interval.cmp interval (Apron.Interval.of_int n n) with
+      match Apron.Interval.cmp interval (Apron.Interval.of_int (Int32.to_int_exn n) (Int32.to_int_exn n)) with
       | 0 -> (true, false) (* definitely n, and only n *)
       | -1 -> (true, false) (* should not happen, because that's caught by the previous case *)
       | +1 -> (true, true) (* [n,n] is contained in v: can be n or not *)
@@ -302,14 +302,14 @@ let%test "is_equal works as expected" =
   (* l0 = l1, l0 = [0,0] *)
   let v1 = add_interval_constraint (of_equality_constraints vars [(Var.Local 0, Var.Local 1)]) (Var.Local 0) (0, 0) in
   (* in v0, l0 =? 0, could be true, could be false *)
-  Stdlib.(=) (is_equal v0 (Var.Local 0) 0) (true, true) &&
+  Stdlib.(=) (is_equal v0 (Var.Local 0) 0l) (true, true) &&
   (* in v0, l0 =? 0, false *)
-  Stdlib.(=) (is_equal v0 (Var.Local 0) 200) (false, true) &&
+  Stdlib.(=) (is_equal v0 (Var.Local 0) 200l) (false, true) &&
   (* in v0, l0 =? 0, true *)
-  Stdlib.(=) (is_equal v1 (Var.Local 0) 0) (true, false)
+  Stdlib.(=) (is_equal v1 (Var.Local 0) 0l) (true, false)
 
 (** Shortcut for is_equal s v 0 *)
-let is_zero (s : t) (v : Var.t) : bool * bool = is_equal s v 0
+let is_zero (s : t) (v : Var.t) : bool * bool = is_equal s v 0l
 
 (** Checks if two variables may be equal.
     Returns two booleans: the first one indicates if they may be equal, the second one if they may be different *)
@@ -532,8 +532,8 @@ let%test_unit "init should not result in an error" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg0 = Cfg_builder.build 0 module_ in
-  let cfg1 = Cfg_builder.build 1 module_ in
+  let cfg0 = Cfg_builder.build 0l module_ in
+  let cfg1 = Cfg_builder.build 1l module_ in
   let _: t = init cfg0 (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
   let _: t = init cfg1 (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
   ()

@@ -63,11 +63,11 @@ let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
   let mem = Taint_domain.Taint.top in
   { globals; ret; mem }
 
-let of_import (_idx : int) (name : string) (nglobals : int) (_args : Type.t list) (ret : Type.t list) : t =
+let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : Type.t list) : t =
   match name with
   | "fd_write" | "fd_close" | "fd_seek" | "fd_fdstat_get" | "proc_exit" ->
     (* Globals are unchanged *)
-    let globals = List.init nglobals ~f:(fun i -> Taint_domain.Taint.taint (Var.Global i)) in
+    let globals = List.init (Int32.to_int_exn nglobals) ~f:(fun i -> Taint_domain.Taint.taint (Var.Global i)) in
     (* Ret is untainted *)
     let ret = match ret with
       | [] -> None
@@ -77,7 +77,7 @@ let of_import (_idx : int) (name : string) (nglobals : int) (_args : Type.t list
   | _ ->
     (* XXX: We assume globals are unchanged, might not always be the case! *)
     Logging.info !Taint_options.verbose (Printf.sprintf "Imported function is not modelled: %s" name);
-    let globals = List.init nglobals ~f:(fun i -> Taint_domain.Taint.taint (Var.Global i)) in
+    let globals = List.init (Int32.to_int_exn nglobals) ~f:(fun i -> Taint_domain.Taint.taint (Var.Global i)) in
     (* Ret is tainted *)
     let ret = match ret with
       | [] -> None
@@ -85,14 +85,14 @@ let of_import (_idx : int) (name : string) (nglobals : int) (_args : Type.t list
       | _ -> failwith "more than one return value" in
     { globals; ret; mem = Taint_domain.Taint.top }
 
-let initial_summaries (cfgs : 'a Cfg.t IntMap.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t IntMap.t =
+let initial_summaries (cfgs : 'a Cfg.t Int32Map.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t Int32Map.t =
   List.fold_left module_.imported_funcs
-    ~init:(IntMap.map cfgs ~f:(fun cfg ->
+    ~init:(Int32Map.map cfgs ~f:(fun cfg ->
         (match typ with
          | `Bottom -> bottom
          | `Top -> top) cfg Var.Set.empty))
     ~f:(fun summaries (idx, name, (args, ret)) ->
-        IntMap.set summaries ~key:idx ~data:(of_import idx name module_.nglobals args ret))
+        Int32Map.set summaries ~key:idx ~data:(of_import name module_.nglobals args ret))
 
 let make (_cfg : 'a Cfg.t) (state : Taint_domain.t)
     (ret : Var.t option) (globals_post : Var.t list)

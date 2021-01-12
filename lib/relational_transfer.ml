@@ -243,7 +243,7 @@ let control_instr_transfer
   : [`Simple of state | `Branch of state * state] =
   (* This restricts the variables to only those used in the current instruction and those defined at the entry/exit of the CFG. This can be safely disabled. *)
   let state = if !remove_vars then Domain.change_vars state (Var.Set.union_list [reachable_vars (Control i); entry_vars cfg; exit_vars cfg]) else state in
-  let apply_summary (f : int) (arity : int * int) (state : state) : state =
+  let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
     let summary = SummaryManager.get f in
     let args = List.take i.annotation_before.vstack (fst arity) in
     let ret = if snd arity = 1 then List.hd i.annotation_after.vstack else None in
@@ -272,7 +272,7 @@ let control_instr_transfer
         | Some fa ->
           if Stdlib.(ftype = (Wasm_module.get_func_type module_ fa)) then begin
             Logging.info !Relational_options.verbose
-              (Printf.sprintf "call_indirect applies function %d (type: %s)" fa (Type.funtype_to_string ftype));
+              (Printf.sprintf "call_indirect applies function %s (type: %s)" (Int32.to_string fa) (Type.funtype_to_string ftype));
             (* Types match, apply the summary *)
             Some (Domain.join_opt (apply_summary fa arity state) acc)
           end else

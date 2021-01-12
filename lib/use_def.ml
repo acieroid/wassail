@@ -254,7 +254,7 @@ let%test "simplest ud chain" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let _, _, actual = make cfg in
   let expected = Use.Map.of_alist_exn [(Use.Instruction (2, Var.Var 0), Def.Instruction (0, (Var.Var 0)));
                                        (Use.Instruction (2, Var.Var 1), Def.Instruction (1, Var.Var 1));
@@ -272,7 +272,7 @@ let%test "ud-chain with locals" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let _, _, actual = make cfg in
   let expected = Use.Map.of_alist_exn [(Use.Instruction (0, Var.Local 0), Def.Entry (Var.Local 0));
                                        (Use.Instruction (1, Var.Local 1), Def.Entry (Var.Local 1));
@@ -299,7 +299,7 @@ let%test "use-def with merge blocks" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let _, _, actual = make cfg in
   let expected = Use.Map.of_alist_exn [(Use.Instruction (3, Var.Var 0), Def.Instruction (0, Var.Var 0));
                                        (Use.Instruction (5, Var.Var 4), Def.Instruction (4, Var.Var 4));
@@ -324,7 +324,7 @@ let%test "use-def with memory" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let _, _, actual = make cfg in
   let expected = Use.Map.of_alist_exn [(Use.Instruction (2, Var.Var 0), Def.Instruction (0, Var.Var 0));
                                        (Use.Instruction (2, Var.Var 1), Def.Instruction (1, Var.Var 1));

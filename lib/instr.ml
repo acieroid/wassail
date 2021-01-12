@@ -50,7 +50,7 @@ module T = struct
     | Block of block_type * arity * 'a t list
     | Loop of block_type * arity * 'a t list
     | If of block_type * arity * 'a t list * 'a t list
-    | Call of arity * int (* TODO: int32 *)
+    | Call of arity * Int32.t
     | CallIndirect of arity * Int32.t
     | Br of Int32.t
     | BrIf of Int32.t
@@ -103,7 +103,7 @@ let data_to_string (instr : data) : string =
 (** Converts a control instruction to its string representation *)
 let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : 'a control) (annot_to_string : 'a -> string) : string =
   match instr with
-  | Call (_, v) -> Printf.sprintf "call %s" (string_of_int v)
+  | Call (_, v) -> Printf.sprintf "call %s" (Int32.to_string v)
   | CallIndirect (_, v) -> Printf.sprintf "call_indirect %s" (Int32.to_string v)
   | Br b -> Printf.sprintf "br %s" (Int32.to_string b)
   | BrIf b -> Printf.sprintf "brif %s" (Int32.to_string b)
@@ -222,7 +222,7 @@ let rec of_wasm (m : Ast.module_) (i : Ast.instr) : unit t =
   | Ast.Call f ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_fun m f in
     assert (arity_out <= 1);
-    control_labelled (Call ((arity_in, arity_out), Int32.to_int_exn f.it)) () ()
+    control_labelled (Call ((arity_in, arity_out), f.it)) () ()
   | Ast.Return ->
     control_labelled (Return) () ()
   | Ast.Unreachable ->

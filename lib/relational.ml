@@ -8,7 +8,7 @@ module Options = Relational_options
 
 module Intra = Intra.Make(Transfer)
 
-let analyze_intra : Wasm_module.t -> int list -> Summary.t IntMap.t =
+let analyze_intra : Wasm_module.t -> Int32.t list -> Summary.t Int32Map.t =
   Analysis_helpers.mk_intra
     (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Top)
     (fun summaries wasm_mod cfg ->
@@ -34,7 +34,7 @@ let%test "local.get 0 relational summary" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let actual = IntMap.find_exn (analyze_intra module_ [0]) 0 in
+  let actual = Int32Map.find_exn (analyze_intra module_ [0l]) 0l in
   let expected = Summary.{
       in_arity = 1;
       params = [Var.Local 0];
@@ -59,7 +59,7 @@ let%test "call correctly propagates summaries" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-    let actual = IntMap.find_exn (analyze_intra module_ [0; 1]) 1 in
+    let actual = Int32Map.find_exn (analyze_intra module_ [0l; 1l]) 1l in
     let expected = Summary.{
         in_arity = 1;
         params = [Var.Local 0];
@@ -87,7 +87,7 @@ let%test "memory is supported" =
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
   Relational_options.ignore_memory := false;
-  let actual = IntMap.find_exn (analyze_intra module_ [0]) 0 in
+  let actual = Int32Map.find_exn (analyze_intra module_ [0l]) 0l in
   let expected = Summary.{
       in_arity = 1;
       params = [Var.Local 0];

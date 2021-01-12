@@ -87,7 +87,7 @@ let%test "simple slicing - first slicing criterion, only const" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let actual = slicing cfg 2 in
   let expected = SlicePart.Set.of_list [Instruction 0; Instruction 1; Instruction 2] in
   SlicePart.Set.equal actual expected
@@ -110,7 +110,7 @@ let%test "simple slicing - second slicing criterion, with locals" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let actual = slicing cfg 6 in
   let expected = SlicePart.Set.of_list [Instruction 4; Instruction 5; Instruction 6] in
   SlicePart.Set.equal actual expected
@@ -131,7 +131,7 @@ let%test "slicing with block and br_if" =
 
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let actual = slicing cfg 3 in
   let expected = SlicePart.Set.of_list [Instruction 0; Instruction 1; Instruction 2; Instruction 3] in
   SlicePart.Set.equal actual expected
@@ -159,7 +159,7 @@ let%test "slicing with merge blocks" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let actual = slicing cfg 9 in
   let expected = SlicePart.Set.of_list [Instruction 0; Instruction 1; Instruction 2; Instruction 3; Merge 4; Instruction 8; Instruction 9] in
   SlicePart.Set.equal actual expected
@@ -336,7 +336,7 @@ let%test_unit "slicing with a block containing a single drop" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   Printf.printf "DOT:\n%s\n" (Cfg.to_dot cfg (fun _ -> ""));
   let sliced_cfg = slice cfg 7 in
   Printf.printf "Sliced: %s\n" (Cfg.to_dot sliced_cfg (fun _ -> ""));

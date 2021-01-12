@@ -39,7 +39,7 @@ end
 type 'a t = {
   exported: bool;
   name: string;
-  idx: int;
+  idx: Int32.t;
   global_types: Type.t list;
   arg_types: Type.t list;
   local_types: Type.t list;
@@ -54,11 +54,11 @@ type 'a t = {
 }
 [@@deriving compare, equal]
 
-let to_string (cfg : 'a t) : string = Printf.sprintf "CFG of function %d" cfg.idx
+let to_string (cfg : 'a t) : string = Printf.sprintf "CFG of function %s" (Int32.to_string cfg.idx)
 
 let to_dot (cfg : 'a t) (annot_to_string : 'a -> string) : string =
-  Printf.sprintf "digraph \"CFG of function %d\" {\n%s\n%s}\n"
-    cfg.idx
+  Printf.sprintf "digraph \"CFG of function %s\" {\n%s\n%s}\n"
+    (Int32.to_string cfg.idx)
     (String.concat ~sep:"\n" (List.map (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, b) -> Basic_block.to_dot b annot_to_string)))
     (String.concat ~sep:"\n" (List.concat_map (IntMap.to_alist cfg.edges) ~f:(fun (src, dsts) ->
          List.map (Edge.Set.to_list dsts) ~f:(fun (dst, br) -> Printf.sprintf "block%d -> block%d [label=\"%s\"];\n" src dst (match br with
@@ -88,20 +88,20 @@ let incoming_edges (cfg : 'a t) (idx : int) : Edge.t list =
 let predecessors (cfg : 'a t) (idx : int) : int list =
   List.map (incoming_edges cfg idx) ~f:fst
 
-let callees (cfg : 'a t) : IntSet.t =
+let callees (cfg : 'a t) : Int32Set.t =
   (* Loop through all the blocks of the cfg, collecting the targets of call instructions *)
   IntMap.fold cfg.basic_blocks
-    ~init:IntSet.empty
+    ~init:Int32Set.empty
     ~f:(fun ~key:_ ~data:block callees -> match block.content with
-        | Control { instr = Call (_, n); _} -> IntSet.union (IntSet.singleton n) callees
+        | Control { instr = Call (_, n); _} -> Int32Set.union (Int32Set.singleton n) callees
         | _ -> callees)
 
-let callers (cfgs : 'a t IntMap.t) (cfg : 'a t) : IntSet.t =
-  IntMap.fold cfgs
-    ~init:IntSet.empty ~f:(fun ~key:caller ~data:cfg' callers ->
-      if IntSet.mem (callees cfg') cfg.idx then
+let callers (cfgs : 'a t Int32Map.t) (cfg : 'a t) : Int32Set.t =
+  Int32Map.fold cfgs
+    ~init:Int32Set.empty ~f:(fun ~key:caller ~data:cfg' callers ->
+      if Int32Set.mem (callees cfg') cfg.idx then
         (* cfg' calls into cfg *)
-        IntSet.union (IntSet.singleton caller) callers
+        Int32Set.add callers caller
       else
         callers)
 
