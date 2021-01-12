@@ -1,8 +1,6 @@
 open Core_kernel
 open Helpers
 
-let verbose = ref false
-
 (** The interface of an intra analysis *)
 module type INTRA = sig
   (** The state of the analysis *)
@@ -121,11 +119,9 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = IntSet.min_elt_exn worklist in
-        Logging.info !verbose
-          (Printf.sprintf "-----------------------\n Analyzing block %d\n" block_idx);
+        Log.info (Printf.sprintf "-----------------------\n Analyzing block %d\n" block_idx);
         let (in_state, out_state) = analyze_block block_idx in
-        Logging.info !verbose
-          (Printf.sprintf "out_state is: %s\n" (result_to_string out_state));
+        Log.info (Printf.sprintf "out_state is: %s\n" (result_to_string out_state));
         (* Has out state changed? *)
         let previous_out_state = snd (IntMap.find_exn !block_data block_idx) in
         match previous_out_state with

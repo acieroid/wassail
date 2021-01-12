@@ -91,7 +91,7 @@ let of_import (name : string) (args : Type.t list) (ret : Type.t list) : t =
       topstate
     | _ ->
       (* We have not modelled this imported function, so we don't have any constraints *)
-      Logging.info !Relational_options.verbose (Printf.sprintf "Imported function is not modelled: %s" name);
+      Log.warn (Printf.sprintf "Imported function is not modelled: %s" name);
       topstate
   in
   { params = params;
@@ -107,7 +107,7 @@ let of_import (name : string) (args : Type.t list) (ret : Type.t list) : t =
    called, AND updating the set of called functions *)
 let apply (summary : t) (state : Domain.t) (args: string list) (ret : string option) : Domain.t =
   try
-    Logging.info !Relational_options.verbose
+    Log.info
       (Printf.sprintf "Applying summary %s\n" (to_string summary));
     (* A summary encodes the relation between the arguments and return value.
        To apply it, we do the following: *)
@@ -115,11 +115,11 @@ let apply (summary : t) (state : Domain.t) (args: string list) (ret : string opt
     (* 1. Rename the parameters and return value in the summary to match the actual arguments and return value *)
     let rename_from = List.map (summary.params @ (Option.to_list summary.return)) ~f:(fun v -> Apron.Var.of_string (Var.to_string v)) in
     let rename_to = List.map args_and_ret ~f:Apron.Var.of_string in
-    Logging.info !Relational_options.verbose
+    Log.info
       (Printf.sprintf "vars: %s\n" (String.concat ~sep:","
                                     (List.map (Array.to_list (fst (Apron.Environment.vars summary.state.constraints.env)))
                                        ~f:Apron.Var.to_string)));
-    Logging.info !Relational_options.verbose
+    Log.info
       (Printf.sprintf "renaming in state %s\nFrom %s to %s\n" (Domain.to_string summary.state) (String.concat ~sep:"," (List.map rename_from ~f:Apron.Var.to_string )) (String.concat ~sep:"," (List.map rename_to ~f:Apron.Var.to_string)));
     let renamed = Apron.Abstract1.rename_array Domain.manager summary.state.constraints
         (Array.of_list rename_from)

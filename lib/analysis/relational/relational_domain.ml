@@ -159,7 +159,7 @@ let add_constraints (s : t) (constraints : (Var.t * string) list) : t =
       |_  -> true) in
   rethrow_apron_error "Relational_domain.add_constraints" (fun () ->
       List.iter filtered_constraints ~f:(fun (x, y) ->
-          (Logging.info !Relational_options.verbose
+          (Log.info
              (Printf.sprintf "add constraint: %s = %s" (Var.to_string x) y)));
       let lhs = List.map filtered_constraints ~f:(fun (v, _) -> Apron.Var.of_string (Var.to_string v)) in
       let rhs = List.map filtered_constraints ~f:(fun (_, c) -> Apron.Parser.linexpr1_of_string s.constraints.env c) in
@@ -416,7 +416,7 @@ let join (s1 : t) (s2 : t) : t =
       let res = {
         constraints = Apron.Abstract1.join manager s1.constraints s2.constraints;
       } in
-      Logging.info !Relational_options.verbose
+      Log.info
         (Printf.sprintf "join %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
       res)
 
@@ -454,7 +454,7 @@ let widen (s1 : t) (s2 : t) : t =
       let res = {
         constraints = Apron.Abstract1.widening manager s1.constraints s2.constraints;
       } in
-      Logging.info !Relational_options.verbose
+      Log.info
         (Printf.sprintf "widening %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
       res)
 
@@ -471,7 +471,7 @@ let meet (s1 : t) (s2 : t) : t =
       let res = {
         constraints = Apron.Abstract1.meet manager s1.constraints s2.constraints;
       } in
-      Logging.info !Relational_options.verbose
+      Log.info
         (Printf.sprintf "meet %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
       res)
 

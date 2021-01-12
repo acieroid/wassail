@@ -92,7 +92,7 @@ module Make (* : Transfer.TRANSFER *) = struct
          In practice, both the memory location and the value have the same taint
       *)
       let taints = List.map locs ~f:(fun (k, offset) ->
-          Logging.info !Taint_options.verbose
+          Log.warn
             (Printf.sprintf "TODO: currently ignoring offsets in taints!!!\n--------------------\n--------------\n"); (* maybe only the values should be tainted, not the keys *)
           Taint_domain.Taint.join (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Var.OffsetMap.find_exn mem (k, offset)))) in
       Taint_domain.add_taint
@@ -123,7 +123,7 @@ module Make (* : Transfer.TRANSFER *) = struct
           all_locs in
       (* Set the taint of memory locations and the value to the taint of vval *)
       List.fold_left locs ~init:state ~f:(fun s (k, offset) ->
-          Logging.info !Taint_options.verbose (Printf.sprintf "TODO: ignoring offsets!");
+          Log.warn (Printf.sprintf "TODO: ignoring offsets!");
           Taint_domain.add_taint_v (Taint_domain.add_taint_v s k vval)
             (Var.OffsetMap.find_exn mem (k, offset)) vval)
 
@@ -139,7 +139,7 @@ module Make (* : Transfer.TRANSFER *) = struct
       let ret = if snd arity = 1 then List.hd (fst i.annotation_after).vstack else None in
       Taint_summary.apply summary state args (fst i.annotation_before).globals (fst i.annotation_after).globals (List.concat_map (Var.OffsetMap.to_alist (fst i.annotation_after).memory)
                                                                                                        ~f:(fun ((a, _offset), b) ->
-                                                                                                           Logging.info !Taint_options.verbose (Printf.sprintf "TODO: ignoring offset\n");
+                                                                                                           Log.warn (Printf.sprintf "TODO: ignoring offset\n");
                                                                                                            [a; b])) ret
     in
     match i.instr with
@@ -211,7 +211,7 @@ module Make (* : Transfer.TRANSFER *) = struct
       exit_spec.globals
       (List.concat_map (Var.OffsetMap.to_alist exit_spec.memory)
          ~f:(fun ((a, _), b) ->
-             Logging.info !Taint_options.verbose
+             Log.warn
                (Printf.sprintf "ignoring offset");
              [a; b]))
 end

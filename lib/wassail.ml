@@ -2,7 +2,7 @@ include Helpers
 
 module Analysis_helpers = Analysis_helpers
 
-module Logging = Logging
+module Log = Log
 
 module Wasm_module = Wasm_module
 module Instr = Instr

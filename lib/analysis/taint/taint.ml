@@ -12,7 +12,7 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> Summary.t Int32Map.t =
   Analysis_helpers.mk_intra
     (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Bottom)
     (fun summaries wasm_mod cfg ->
-       Logging.info !Taint_options.verbose
+       Log.info
          (Printf.sprintf "---------- Taint analysis of function %s ----------" (Int32.to_string cfg.idx));
        (* Run the taint analysis *)
        Options.use_relational := false;
@@ -70,7 +70,7 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> Summary.t Int32Map.t =
   Analysis_helpers.mk_inter
     (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Bottom)
     (fun wasm_mod scc ->
-       Logging.info !Taint_options.verbose
+       Log.info
          (Printf.sprintf "---------- Taint analysis of SCC {%s} ----------"
             (String.concat ~sep:"," (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
        (* Run the taint analysis *)

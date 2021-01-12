@@ -271,7 +271,7 @@ let control_instr_transfer
         match f with
         | Some fa ->
           if Stdlib.(ftype = (Wasm_module.get_func_type module_ fa)) then begin
-            Logging.info !Relational_options.verbose
+            Log.info
               (Printf.sprintf "call_indirect applies function %s (type: %s)" (Int32.to_string fa) (Type.funtype_to_string ftype));
             (* Types match, apply the summary *)
             Some (Domain.join_opt (apply_summary fa arity state) acc)
