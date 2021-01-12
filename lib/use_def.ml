@@ -44,12 +44,16 @@ end
 
 module UseDefChains = struct
   (** Use-definition chains, as a mapping from uses (as the index of the instruction that uses the variable, and the variable name) to their definition (as the index of the instruction that defines the variable)*)
-  type t = Def.t Use.Map.t
-  [@@deriving compare, equal]
+  module T = struct
+    type t = Def.t Use.Map.t
+    [@@deriving compare, equal]
 
-  (** Convert a use-def map to its string representation *)
-  let to_string (m : t) : string =
-    String.concat ~sep:", " (List.map (Use.Map.to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s -> %s" (Use.to_string k) (Def.to_string v)))
+    (** Convert a use-def map to its string representation *)
+    let to_string (m : t) : string =
+      String.concat ~sep:", " (List.map (Use.Map.to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s -> %s" (Use.to_string k) (Def.to_string v)))
+  end
+  include T
+  include TestHelpers(T)
 
   (** The empty use-def map *)
   let empty : t = Use.Map.empty
@@ -248,18 +252,17 @@ let%test "simplest ud chain" =
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
-    memory.size ;; Instr 0
     memory.size ;; Instr 1
-    i32.add)    ;; Instr 2
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
+    memory.size ;; Instr 2
+    i32.add)    ;; Instr 3
+  )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+  Printf.printf "DOTsimplest:\n%s\n" (Cfg.to_dot cfg (fun _ -> ""));
   let _, _, actual = make cfg in
   let expected = Use.Map.of_alist_exn [(Use.Instruction (2, Var.Var 0), Def.Instruction (0, (Var.Var 0)));
                                        (Use.Instruction (2, Var.Var 1), Def.Instruction (1, Var.Var 1));
                                        (Use.Merge (1, Var.Var 2), Def.Instruction (2, Var.Var 2))] in
-  UseDefChains.equal actual expected
+  UseDefChains.check_equality ~actual:actual ~expected:expected
 
 let%test "ud-chain with locals" =
   Instr.reset_counter ();
@@ -269,9 +272,7 @@ let%test "ud-chain with locals" =
     local.get 0 ;; Instr 0
     local.get 1 ;; Instr 1
     i32.add)    ;; Instr 2
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
+  )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let _, _, actual = make cfg in
   let expected = Use.Map.of_alist_exn [(Use.Instruction (0, Var.Local 0), Def.Entry (Var.Local 0));
@@ -279,7 +280,7 @@ let%test "ud-chain with locals" =
                                        (Use.Instruction (2, Var.Local 0), Def.Entry (Var.Local 0));
                                        (Use.Instruction (2, Var.Local 1), Def.Entry (Var.Local 1));
                                        (Use.Merge (1, Var.Var 2), Def.Instruction (2, Var.Var 2))] in
-  UseDefChains.equal actual expected
+  UseDefChains.check_equality ~actual:actual ~expected:expected
 
 let%test "use-def with merge blocks" =
   Instr.reset_counter ();
@@ -296,9 +297,7 @@ let%test "use-def with merge blocks" =
     memory.size     ;; Instr 4, Var 4
     i32.add)        ;; Instr 5, Var 5
     ;; Final merge block: i5 -> ret
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
+  )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let _, _, actual = make cfg in
   let expected = Use.Map.of_alist_exn [(Use.Instruction (3, Var.Var 0), Def.Instruction (0, Var.Var 0));
@@ -307,7 +306,7 @@ let%test "use-def with merge blocks" =
                                        (Use.Merge (4, Var.Var 1), Def.Instruction (1, Var.Var 1));
                                        (Use.Merge (4, Var.Var 2), Def.Instruction (2, Var.Var 2));
                                        (Use.Merge (6, Var.Var 5), Def.Instruction(5, Var.Var 5))] in
-  UseDefChains.equal actual expected
+  UseDefChains.check_equality ~actual:actual ~expected:expected
 
 let%test "use-def with memory" =
   Instr.reset_counter ();
@@ -319,15 +318,12 @@ let%test "use-def with memory" =
     i32.store       ;; Instr 2, i0+0 mapped to i1 (no new var!)
     memory.size     ;; Instr 3, Var 3
     memory.size     ;; Instr 4, Var 4
-    i32.store       ;; Instr 5, i3+0 mapped to i4 (no new var!)
-  )
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
+    i32.store)       ;; Instr 5, i3+0 mapped to i4 (no new var!)
+  )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let _, _, actual = make cfg in
   let expected = Use.Map.of_alist_exn [(Use.Instruction (2, Var.Var 0), Def.Instruction (0, Var.Var 0));
                                        (Use.Instruction (2, Var.Var 1), Def.Instruction (1, Var.Var 1));
                                        (Use.Instruction (5, Var.Var 3), Def.Instruction (3, Var.Var 3));
                                        (Use.Instruction (5, Var.Var 4), Def.Instruction (4, Var.Var 4))] in
-  UseDefChains.equal actual expected
+  UseDefChains.check_equality ~actual:actual ~expected:expected

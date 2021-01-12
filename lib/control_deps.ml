@@ -129,9 +129,7 @@ let%test "control dependencies computation" =
       drop
     end
     memory.size)
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
+  )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let actual = Var.Map.map (make cfg) ~f:(fun p -> Var.Set.of_list (List.map (Pred.Set.to_list p) ~f:fst)) in
   let var n = Var.Var n in

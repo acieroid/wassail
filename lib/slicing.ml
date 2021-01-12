@@ -13,8 +13,12 @@ module SlicePart = struct
   end
   include T
   module Set = struct
-    include Set.Make(T)
-    let to_string (s : t) : string = String.concat ~sep:"," (List.map (to_list s) ~f:T.to_string)
+    module S = struct
+      include Set.Make(T)
+      let to_string (s : t) : string = String.concat ~sep:"," (List.map (to_list s) ~f:T.to_string)
+    end
+    include S
+    include TestHelpers(S)
   end
 end
 
@@ -84,13 +88,11 @@ let%test "simple slicing - first slicing criterion, only const" =
     memory.size ;; Instr 4
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
+  )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let actual = slicing cfg 2 in
   let expected = SlicePart.Set.of_list [Instruction 0; Instruction 1; Instruction 2] in
-  SlicePart.Set.equal actual expected
+  SlicePart.Set.check_equality ~actual:actual ~expected:expected
 
 let%test "simple slicing - second slicing criterion, with locals" =
   Instr.reset_counter ();
@@ -107,13 +109,11 @@ let%test "simple slicing - second slicing criterion, with locals" =
     local.get 0 ;; Instr 4
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6 -- slicing criterion
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
+  )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let actual = slicing cfg 6 in
   let expected = SlicePart.Set.of_list [Instruction 4; Instruction 5; Instruction 6] in
-  SlicePart.Set.equal actual expected
+  SlicePart.Set.check_equality ~actual:actual ~expected:expected
 
 let%test "slicing with block and br_if" =
   Instr.reset_counter ();
@@ -127,14 +127,11 @@ let%test "slicing with block and br_if" =
       drop        ;; Instr 4
     end
     local.get 0)   ;; Instr 5
-  (table (;0;) 1 1 funcref)
-
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
+  )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let actual = slicing cfg 3 in
   let expected = SlicePart.Set.of_list [Instruction 0; Instruction 1; Instruction 2; Instruction 3] in
-  SlicePart.Set.equal actual expected
+  SlicePart.Set.check_equality ~actual:actual ~expected:expected
 
 let%test "slicing with merge blocks" =
   Instr.reset_counter ();
@@ -156,13 +153,11 @@ let%test "slicing with merge blocks" =
     ;; ---- this previous part should not be part of the slice
     memory.size     ;; Instr 8
     i32.add)        ;; Instr 9 -- slicing criterion
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
+  )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let actual = slicing cfg 9 in
   let expected = SlicePart.Set.of_list [Instruction 0; Instruction 1; Instruction 2; Instruction 3; Merge 4; Instruction 8; Instruction 9] in
-  SlicePart.Set.equal actual expected
+  SlicePart.Set.check_equality ~actual:actual ~expected:expected
 
 (** Performs backwards slicing on `cfg`, relying on `slicing` defined above.
     Returns the slice as a modified CFG *)
@@ -331,11 +326,8 @@ let%test_unit "slicing with a block containing a single drop" =
       end
       i32.const 32  ;; Instr 6
       i32.add       ;; Instr 7
-    end
-  )
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
+    end)
+  )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   Printf.printf "DOT:\n%s\n" (Cfg.to_dot cfg (fun _ -> ""));
   let sliced_cfg = slice cfg 7 in

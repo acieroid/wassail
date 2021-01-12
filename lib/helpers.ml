@@ -40,6 +40,22 @@ module StringSet = Set.Make(S)
 (** Maps of strings *)
 module StringMap = Map.Make(S)
 
+module type EqualT = sig
+  type t
+  [@@deriving equal]
+  val to_string : t -> string
+end
+
+(** Module that provides helper functions to use within tests *)
+module TestHelpers(T : EqualT) = struct
+  (** Check equality and print both elements if they are not equal. *)
+  let check_equality ~expected:(expected : 'a) ~actual:(actual : 'a) : bool =
+    let eq = T.equal actual expected in
+    begin if not eq then
+        Printf.printf "not equal:\n\texpected: %s\n\tactual: %s\n" (T.to_string actual) (T.to_string expected)
+    end;
+    eq
+end
 
 (** Get the nth element of a list *)
 let get_nth (l : 'a list) (n : Int32.t) : Var.t = List.nth_exn l (Int32.to_int_exn n)
@@ -114,3 +130,4 @@ let apply_to_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
 let apply_to_string (string : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
   let lexbuf = Lexing.from_string string in
   parse_from_lexbuf_textual "no-file" lexbuf f
+
