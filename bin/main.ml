@@ -1,6 +1,12 @@
 open Core
 open Wassail
 
+let int32 = Command.Arg_type.create Int32.of_string
+
+let int32_comma_separated_list =
+  Command.Arg_type.create (fun ids ->
+      List.map (String.split ids ~on:',') ~f:Int32.of_string)
+
 let imports =
   Command.basic
     ~summary:"List functions imported by a WebAssembly module"
@@ -9,7 +15,7 @@ let imports =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         List.iter wasm_mod.imported_funcs ~f:(fun (idx, name, ftype) ->
-            Printf.printf "%d\t%s\t%s\n"
+            Printf.printf "%ld\t%s\t%s\n"
               idx name (Type.funtype_to_string ftype)))
 
 let exports =
@@ -20,7 +26,7 @@ let exports =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         List.iter wasm_mod.exported_funcs ~f:(fun (idx, name, ftype) ->
-            Printf.printf "%d\t%s\t%s\n"
+            Printf.printf "%ld\t%s\t%s\n"
               idx name (Type.funtype_to_string ftype)))
 
 let instructions =
@@ -31,40 +37,39 @@ let instructions =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         StringMap.iteri (Instruction_counter.count wasm_mod) ~f:(fun ~key:instr ~data:(appearances, funs) ->
-            Printf.printf "%d\t%d\t%s\n" appearances (IntSet.length funs) instr))
+            Printf.printf "%d\t%d\t%s\n" appearances (Int32Set.length funs) instr))
 
 let sizes =
   Command.basic
-    ~summary:"Inspects the size of code and of data sections of a WebAssembly module"
+    ~summary:"Output the size (in bytes) of each section of a WebAssembly module"
     Command.Let_syntax.(
       let%map_open file_in = anon ("in" %: string) in
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         let sizes = Sizes.sizes wasm_mod in
-        Printf.printf "type:\t%d bytes\n" sizes.type_section;
-        Printf.printf "import:\t%d bytes\n" sizes.import_section;
-        Printf.printf "func:\t%d bytes\n" sizes.func_section;
-        Printf.printf "table:\t%d bytes\n" sizes.table_section;
-        Printf.printf "memory:\t%d bytes\n" sizes.memory_section;
-        Printf.printf "global:\t%d bytes\n" sizes.global_section;
-        Printf.printf "export:\t%d bytes\n" sizes.export_section;
-        Printf.printf "start: %d bytes\n" sizes.start_section;
-        Printf.printf "elem: %d bytes\n" sizes.elem_section;
-        Printf.printf "code: %d bytes\n" sizes.code_section;
-        Printf.printf "data: %d bytes\n" sizes.data_section)
+        Printf.printf "%d\ttype\n" sizes.type_section;
+        Printf.printf "%d\timport\n" sizes.import_section;
+        Printf.printf "%d\tfunc\n" sizes.func_section;
+        Printf.printf "%d\ttable\n" sizes.table_section;
+        Printf.printf "%d\tmemory\n" sizes.memory_section;
+        Printf.printf "%d\tglobal\n" sizes.global_section;
+        Printf.printf "%d\texport\n" sizes.export_section;
+        Printf.printf "%d\tstart\n" sizes.start_section;
+        Printf.printf "%d\telem\n" sizes.elem_section;
+        Printf.printf "%d\tcode\n" sizes.code_section;
+        Printf.printf "%d\tdata\n" sizes.data_section)
 
 let cfg =
   Command.basic
     ~summary:"Generate a DOT file representing the CFG of function [fid] from the wat file [in], in file [out]"
     Command.Let_syntax.(
       let%map_open file_in = anon ("in" %: string)
-      and fid = anon ("fid" %: int)
+      and fid = anon ("fid" %: int32)
       and file_out = anon ("out" %: string) in
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
-        let nimports = List.length wasm_mod.imported_funcs in
-        if fid < nimports then
-          Printf.printf "Can't build CFG for function %d: it is an imported function" fid
+        if Int32.(fid < wasm_mod.nimports) then
+          Printf.printf "Can't build CFG for function %ld: it is an imported function" fid
         else
           let cfg = Cfg_builder.build fid wasm_mod in
           Out_channel.with_file file_out
@@ -82,9 +87,9 @@ let cfgs =
         Core.Unix.mkdir_p out_dir;
         List.iteri wasm_mod.funcs
           ~f:(fun i _ ->
-              let faddr = wasm_mod.nimports + i in
+              let faddr = Int32.(wasm_mod.nimports + (Int32.of_int_exn i)) in
               let cfg = Cfg_builder.build faddr wasm_mod in
-              Out_channel.with_file (Printf.sprintf "%s/%d.dot" out_dir faddr)
+              Out_channel.with_file (Printf.sprintf "%s/%ld.dot" out_dir faddr)
                 ~f:(fun ch ->
                     Out_channel.output_string ch (Cfg.to_dot cfg (fun () -> "")))))
 
@@ -97,10 +102,9 @@ let callgraph =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         let cg = Call_graph.make wasm_mod in
-        let nimports = List.length wasm_mod.imported_funcs in
-        let schedule = Call_graph.analysis_schedule cg nimports in
+        let schedule = Call_graph.analysis_schedule cg wasm_mod.nimports in
         List.iter schedule ~f:(fun elems ->
-            Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:string_of_int)));
+            Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:Int32.to_string)));
         Out_channel.with_file file_out
           ~f:(fun ch ->
               Out_channel.output_string ch (Call_graph.to_dot cg)))
@@ -113,35 +117,34 @@ let schedule =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         let cg = Call_graph.make wasm_mod in
-        let nimports = List.length wasm_mod.imported_funcs in
-        let schedule = Call_graph.analysis_schedule cg nimports in
+        let schedule = Call_graph.analysis_schedule cg wasm_mod.nimports in
         List.iter schedule ~f:(fun elems ->
-            Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:string_of_int)));
+            Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:Int32.to_string)));
         Printf.printf "\n")
 
 
-let mk_intra (desc : string) (analysis : Wasm_module.t -> int list -> 'a IntMap.t) (print : int -> 'a -> unit) =
+let mk_intra (desc : string) (analysis : Wasm_module.t -> Int32.t list -> 'a Int32Map.t) (print : Int32.t -> 'a -> unit) =
   Command.basic
     ~summary:desc
     Command.Let_syntax.(
     let%map_open filename = anon ("file" %: string)
-    and funs = anon (sequence ("funs" %: int)) in
+    and funs = anon (sequence ("funs" %: int32)) in
     fun () ->
       let results = analysis (Wasm_module.of_file filename) funs in
-      IntMap.iteri results ~f:(fun ~key:id ~data:summary -> print id summary))
+      Int32Map.iteri results ~f:(fun ~key:id ~data:summary -> print id summary))
 
 let spec_inference =
   mk_intra "Annotate the CFG with the inferred variables"
-    (Analysis_helpers.mk_intra (fun _ _ -> IntMap.empty) (fun _ _ annotated_cfg -> annotated_cfg))
+    (Analysis_helpers.mk_intra (fun _ _ -> Int32Map.empty) (fun _ _ annotated_cfg -> annotated_cfg))
     (fun fid annotated_cfg ->
-       let file_out = Printf.sprintf "%d.dot" fid in
+       let file_out = Printf.sprintf "%ld.dot" fid in
        Out_channel.with_file file_out
          ~f:(fun ch ->
              Out_channel.output_string ch (Cfg.to_dot annotated_cfg Spec.to_dot_string)))
 
 let count_vars =
   mk_intra "Count the number of program variables generated for a function"
-    (Analysis_helpers.mk_intra (fun _ _ -> IntMap.empty)
+    (Analysis_helpers.mk_intra (fun _ _ -> Int32Map.empty)
        (fun _ wasm_mod annotated_cfg ->
           let module CountVarsIntra = Intra.Make(struct
               type annot_expected = Spec_inference.state
@@ -179,41 +182,37 @@ let count_vars =
           Printf.printf "Vars: %d, max: %d\n" (Var.Set.length vars) n;
           (vars, n)))
     (fun fid summary ->
-       Printf.printf "Vars %d: %d, max: %d\n" fid (Var.Set.length (fst summary)) (snd summary))
+       Printf.printf "Vars %ld: %d, max: %d\n" fid (Var.Set.length (fst summary)) (snd summary))
 
 let taint_intra =
   mk_intra "Just like `intra`, but only performs the taint analysis" Taint.analyze_intra
     (fun fid summary ->
-       Printf.printf "function %d: %s\n" fid (Taint.Summary.to_string summary))
+       Printf.printf "function %ld: %s\n" fid (Taint.Summary.to_string summary))
 
 let relational_intra =
   mk_intra "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)" Relational.analyze_intra
     (fun fid summary ->
-       Printf.printf "function %d: %s" fid (Relational.Summary.to_string summary))
+       Printf.printf "function %ld: %s" fid (Relational.Summary.to_string summary))
 
 let reltaint_intra =
   mk_intra "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)" Reltaint.analyze_intra
     (fun fid summary ->
-       Printf.printf "function %d: %s, %s" fid (Relational.Summary.to_string (fst summary)) (Taint.Summary.to_string (snd summary)))
+       Printf.printf "function %ld: %s, %s" fid (Relational.Summary.to_string (fst summary)) (Taint.Summary.to_string (snd summary)))
 
-let int_comma_separated_list =
-  Command.Arg_type.create (fun ids ->
-      List.map (String.split ids ~on:',') ~f:int_of_string)
-
-let mk_inter (desc : string) (analysis : Wasm_module.t -> int list list -> 'a IntMap.t) (print : int -> 'a -> unit) =
+let mk_inter (desc : string) (analysis : Wasm_module.t -> Int32.t list list -> 'a Int32Map.t) (print : Int32.t -> 'a -> unit) =
   Command.basic
     ~summary:desc
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string)
-      and sccs = anon (sequence ("funs" %: int_comma_separated_list)) in
+      and sccs = anon (sequence ("funs" %: int32_comma_separated_list)) in
       fun () ->
         let results = analysis (Wasm_module.of_file filename) sccs in
-        IntMap.iteri results ~f:(fun ~key:id ~data: summary -> print id summary))
+        Int32Map.iteri results ~f:(fun ~key:id ~data: summary -> print id summary))
 
 let taint_inter =
   mk_inter "Performs inter analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target."
     Taint.analyze_inter
-    (fun fid summary -> Printf.printf "function %d: %s\n" fid (Taint.Summary.to_string summary))
+    (fun fid summary -> Printf.printf "function %ld: %s\n" fid (Taint.Summary.to_string summary))
 
 let report_time (msg : string) (t0 : Time.t) (t1 : Time.t) : unit =
   Printf.printf "Time for '%s': %s\n%!" msg (Time.Span.to_string (Time.diff t1 t0))
@@ -223,7 +222,7 @@ let slice_cfg =
     ~summary:"Slice a CFG at each call_indirect instruction"
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string)
-      and idx = anon ("fun" %: int) in
+      and idx = anon ("fun" %: int32) in
       fun () ->
         Printf.printf "Reading module\n%!";
         Spec_inference.propagate_globals := false;
