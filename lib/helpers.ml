@@ -124,8 +124,10 @@ let apply_to_binary_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
       f (Wasm.Decode.decode filename (In_channel.input_all ic)))
 
 let apply_to_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
-  try apply_to_textual_file filename f
-  with _ -> apply_to_binary_file filename f
+  match Stdlib.Filename.extension filename with
+  | ".wat" -> apply_to_textual_file filename f
+  | ".wasm" -> apply_to_binary_file filename f
+  | ext -> failwith (Printf.sprintf "Invalid extension for WebAssembly module: %s" ext)
 
 let apply_to_string (string : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
   let lexbuf = Lexing.from_string string in

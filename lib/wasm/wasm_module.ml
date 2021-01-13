@@ -105,3 +105,48 @@ let of_file (file : string) : t =
 let of_string (string : string) : t =
   apply_to_string string of_wasm
 
+let%test_unit "construct Wasm_module from .wat files without erroring" =
+  List.iter [
+    (*    "../../../benchmarks/benchmarksgame/binarytrees.wat"; *)
+    "../../../benchmarks/benchmarksgame/fankuchredux.wat";
+    "../../../benchmarks/benchmarksgame/fasta.wat";
+    "../../../benchmarks/benchmarksgame/k-nucleotide.wat";
+    "../../../benchmarks/benchmarksgame/mandelbrot.wat";
+    "../../../benchmarks/benchmarksgame/nbody.wat";
+    "../../../benchmarks/benchmarksgame/reverse-complement.wat";
+    "../../../benchmarks/benchmarksgame/spectral-norm.wat";
+    "../../../benchmarks/polybench-clang/2mm.wat";
+    "../../../benchmarks/polybench-clang/3mm.wat";
+    "../../../benchmarks/polybench-clang/adi.wat";
+    "../../../benchmarks/polybench-clang/atax.wat";
+    "../../../benchmarks/polybench-clang/bicg.wat";
+    "../../../benchmarks/polybench-clang/cholesky.wat";
+    "../../../benchmarks/polybench-clang/correlation.wat";
+    "../../../benchmarks/polybench-clang/covariance.wat";
+    "../../../benchmarks/polybench-clang/deriche.wat";
+    "../../../benchmarks/polybench-clang/doitgen.wat";
+    "../../../benchmarks/polybench-clang/durbin.wat";
+    "../../../benchmarks/polybench-clang/fdtd-2d.wat";
+    "../../../benchmarks/polybench-clang/floyd-warshall.wat";
+    "../../../benchmarks/polybench-clang/gemm.wat";
+    "../../../benchmarks/polybench-clang/gemver.wat";
+    "../../../benchmarks/polybench-clang/gesummv.wat";
+    "../../../benchmarks/polybench-clang/gramschmidt.wat";
+    "../../../benchmarks/polybench-clang/heat-3d.wat";
+    "../../../benchmarks/polybench-clang/jacobi-1d.wat";
+    "../../../benchmarks/polybench-clang/jacobi-2d.wat";
+    "../../../benchmarks/polybench-clang/ludcmp.wat";
+    "../../../benchmarks/polybench-clang/lu.wat";
+    "../../../benchmarks/polybench-clang/mvt.wat";
+    "../../../benchmarks/polybench-clang/nussinov.wat";
+    "../../../benchmarks/polybench-clang/seidel-2d.wat";
+    "../../../benchmarks/polybench-clang/symm.wat";
+    "../../../benchmarks/polybench-clang/syr2k.wat";
+    "../../../benchmarks/polybench-clang/syrk.wat";
+    "../../../benchmarks/polybench-clang/trisolv.wat";
+    "../../../benchmarks/polybench-clang/trmm.wat";
+  ] ~f:(fun program ->
+      try
+        let _ : t = of_file program in
+        ()
+      with e -> failwith (Printf.sprintf "Cannot parse %s: %s" program (Exn.to_string e)))
