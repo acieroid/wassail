@@ -1,6 +1,6 @@
 TEST_EXECUTABLE=./_build/default/lib/.wassail.inline-tests/inline_test_runner_wassail.exe
 
-all: bin test
+all: bin
 
 bin:
 	dune build ./bin/main.exe
@@ -16,5 +16,9 @@ test:
 clean:
 	dune clean
 
+install:
+	dune build @install
+	dune install
 
-.PHONY: bin js test clean all
+
+.PHONY: bin js test clean install all

@@ -1,0 +1,28 @@
+opam-version: "2.0"
+name: "wassail"
+version: "~dev"
+synopsis:
+  "Wassail (WebAssembly static analyzer and inspection library) is a toolkit to perform both lightweight and heavyweight static analysis of WebAssembly modules"
+maintainer: "Quentin Stiévenart <quentin.stievenart@gmail.com>"
+authors: "Quentin Stiévenart <quentin.stievenart@gmail.com>"
+license: "MIT"
+homepage: "https://github.com/acieroid/wassail"
+bug-reports: "https://github.com/acieroid/wassail"
+depends: [
+  "apron"
+  "core"
+  "core_kernel"
+  "ppx_compare"
+  "ppx_inline_test"
+  "ppx_jane"
+  "sexplib"
+  "wasm"
+]
+build: [
+  [make]
+]
+install: [make "install"]
+dev-repo: "git+https://github.com/acieroid/wassail"
+url {
+  src: "git+https://github.com/acieroid/wassail"
+}
