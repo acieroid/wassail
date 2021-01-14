@@ -21,5 +21,6 @@ jobs:
         uses: avsm/setup-ocaml@v1
         with:
           ocaml-version: ${{ matrix.ocaml-version }}
+      - run: sudo apt-get install -y libmpfr-dev
       - run: opam install . --deps-only --with-doc --with-test
       - run: make test
