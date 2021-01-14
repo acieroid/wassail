@@ -270,10 +270,10 @@ let () =
        [ "imports", imports
        ; "exports", exports
        ; "instructions", instructions
+       ; "callgraph", callgraph
        ; "sizes", sizes
        ; "cfg", cfg
        ; "cfgs", cfgs
-       ; "callgraph", callgraph
        ; "schedule", schedule
        ; "spec-inference", spec_inference
        ; "count-vars", count_vars
