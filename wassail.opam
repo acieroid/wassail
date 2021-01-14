@@ -12,6 +12,7 @@ depends: [
   "apron"
   "core"
   "core_kernel"
+  "dune"
   "ppx_compare"
   "ppx_inline_test"
   "ppx_jane"
