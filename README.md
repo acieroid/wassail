@@ -69,7 +69,7 @@ $ ./main.exe callgraph benchmarks/benchmarksgame/fankuchredux.wat foo.dot
 
 Output graph:
 
-[!DOT call graph](doc/callgraph.png)
+![DOT call graph](doc/callgraph.png)
 
 ## Generating Control-Flow Graphs
 You can either generate a single CFG, for example to generate the CFG of function 1 from file `foo.wat` into `foo.dot`:
@@ -86,7 +86,7 @@ $ ./main.exe cfgs foo.wat out/
 
 Example output:
 
-[!DOT CFG](doc/cfg.png)
+![DOT CFG](doc/cfg.png)
 
 ## Performing Taint Analysis
 WIP, more to come.
