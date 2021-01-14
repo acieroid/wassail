@@ -238,10 +238,10 @@ let slice_cfg =
         let slicing_criteria = Slicing.find_call_indirect_instructions cfg in
         List.iter slicing_criteria ~f:(fun instr_idx ->
             (* instr_idx is the label of a call_indirect instruction, slice it *)
-            Printf.printf "Slicing for instruction %d\n%!" instr_idx;
+            Printf.printf "Slicing for instruction %s\n%!" (Instr.Label.to_string instr_idx);
             let sliced_cfg = Slicing.slice cfg instr_idx in
-            Printf.printf "outputting sliced cfg to sliced-%d.dot\n%!" instr_idx;
-            Out_channel.with_file (Printf.sprintf "sliced-%d.dot" instr_idx)
+            Printf.printf "outputting sliced cfg to sliced-%s.dot\n%!" (Instr.Label.to_string instr_idx);
+            Out_channel.with_file (Printf.sprintf "sliced-%s.dot" (Instr.Label.to_string instr_idx))
                 ~f:(fun ch ->
                   Out_channel.output_string ch (Cfg.to_dot sliced_cfg (fun _ -> "")));
             let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
@@ -251,9 +251,9 @@ let slice_cfg =
             let res = Relational.Intra.analyze module_ annotated_sliced_cfg in
             let t1 = Time.now () in
             report_time "relational analysis" t0 t1;
-            let annotated_instr = IntMap.find_exn annotated_sliced_cfg.instructions instr_idx in
+            let annotated_instr = Instr.Label.Map.find_exn annotated_sliced_cfg.instructions instr_idx in
             let var_of_call_target = List.hd_exn (Instr.annotation_before annotated_instr).vstack in
-            let relational_instr = IntMap.find_exn res.instructions instr_idx in
+            let relational_instr = Instr.Label.Map.find_exn res.instructions instr_idx in
             let domain_of_call_target = Instr.annotation_before relational_instr in
             (* The box conversion is useluss, we want to compare to actual possible values for target (by checking subsumption) *)
             let box = Apron.Abstract1.to_box Relational.Domain.manager domain_of_call_target.constraints in
@@ -264,7 +264,6 @@ let slice_cfg =
             ()))
 
 let () =
-  Logging.add_callback (fun opt msg -> Printf.printf "[%s] %s" (Logging.option_to_string opt) msg);
   Command.run ~version:"0.0"
     (Command.group ~summary:"Static analysis of WebAssembly"
        [ "imports", imports
