@@ -1,15 +1,52 @@
 open Core_kernel
-open Helpers
-open Wasm
 
-module T = struct
-  (** A label is a unique identifier for an instruction *)
-  type label = int
+module Label = struct
+  (** The section in which an instruction is contained *)
+  type section =
+    | Function of Int32.t (** Instruction is part of the function with the given index *)
+    | Elem of Int32.t
   [@@deriving sexp, compare, equal]
 
+  let section_to_string (s : section) = match s with
+    | Function n -> Printf.sprintf "%ld" n
+    | Elem n -> Printf.sprintf "elem%ld" n
+
+  module T = struct
+    (** A label is a unique identifier for an instruction *)
+    type t = {
+      section: section;
+      id: int;
+    }
+    [@@deriving sexp, compare, equal]
+
+    let to_string (l : t) : string =
+      Printf.sprintf "%d" l.id (* We don't show the section because usually it is obvious from the context *)
+  end
+  include T
+
+  let maker (section : section) : unit -> t =
+    let counter = ref 0 in
+    fun () ->
+      let id = !counter in
+      counter := !counter + 1;
+      { section; id }
+
+  module Set = Set.Make(T)
+  module Map = Map.Make(T)
+
+  (** Test data *)
+  module Test = struct
+    let lab (n : int) = {
+      section = Function 0l;
+      id = n;
+    }
+  end
+end
+
+module T = struct
   (** A container for an instruction with a label *)
   type ('a, 'b) labelled = {
-    label : label; (** The label of the instruction *)
+    label : Label.t; (** The label of the instruction *)
     instr : 'a; (** The instruction itself *)
     annotation_before: 'b; (** The annotation before the instruction *)
     annotation_after: 'b; (** The annotation after the instruction *)
@@ -74,7 +111,7 @@ end
 include T
 
 (** Return the label of an instruction *)
-let label (instr : 'a t) : label = match instr with
+let label (instr : 'a t) : Label.t = match instr with
   | Data i -> i.label
   | Control i -> i.label
 
@@ -118,7 +155,7 @@ let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (inst
 
 (** Converts an instruction to its string representation *)
 and to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : 'a t) (annot_to_string : 'a -> string): string =
-  Printf.sprintf "%d:%s%s" (label instr) (String.make i ' ')
+  Printf.sprintf "%s:%s%s" (Label.to_string (label instr)) (String.make i ' ')
     (match instr with
      | Data instr -> data_to_string instr.instr
      | Control instr -> control_to_string instr.instr  annot_to_string ~sep:sep ~indent:i)
@@ -168,104 +205,99 @@ let to_mnemonic (instr : 'a t) : string = match instr with
       | Unreachable -> "unreachable"
     end
 
-(** The instruction counter *)
-let counter : label ref = ref 0
-
-(** Creates a fresh label *)
-let new_label () : label =
-  let v = !counter in
-  counter := !counter + 1;
-  v
-
-(** Reset the instruction counter. (Only to use in the tests to have stable labels) *)
-let reset_counter () : unit =
-  counter := 0
-
-(** Adds a label to a data instruction *)
-let data_labelled (d : data) (annotation_before : 'a) (annotation_after : 'a) : 'a t =
-  Data { instr = d; label = new_label (); annotation_before; annotation_after; }
-
-(** Adds a label to a control instruction *)
-let control_labelled (c : 'a control) (annotation_before : 'a) (annotation_after : 'a) : 'a t =
-  Control { instr = c; label = new_label (); annotation_before; annotation_after }
 
 (** Create an instruction from a WebAssembly instruction *)
-let rec of_wasm (m : Ast.module_) (i : Ast.instr) : unit t =
+let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.Ast.instr) : unit t =
+  (* Construct a labelled data instruction *)
+  let data_labelled ?label:(lab : Label.t option) (instr : data) : unit t =
+    let label = match lab with
+      | Some l -> l
+      | None -> new_label () in
+    Data { instr; label; annotation_before = (); annotation_after = (); } in
+  (* Construct a labelled control instruction *)
+  let control_labelled ?label:(lab : Label.t option) (instr : 'a control) : 'a t =
+    let label = match lab with
+      | Some l -> l
+      | None -> new_label () in
+    Control { instr; label; annotation_before = (); annotation_after = (); } in
   match i.it with
-  | Ast.Nop -> data_labelled Nop () ()
-  | Ast.Drop -> data_labelled Drop () ()
-  | Ast.Block (st, instrs) ->
+  | Nop -> data_labelled Nop
+  | Drop -> data_labelled Drop
+  | Block (st, instrs) ->
     let block_type = Wasm_helpers.type_of_block st in
     let (arity_in, arity_out) = Wasm_helpers.arity_of_block st in
     assert (arity_in = 0); (* what does it mean to have arity_in > 0? *)
     assert (arity_out <= 1);
-    let body = seq_of_wasm m instrs in
-    control_labelled (Block (block_type, (arity_in, arity_out), body)) () ()
-  | Ast.Const lit ->
-    data_labelled (Const (Prim_value.of_wasm lit.it)) () ()
-  | Ast.Binary bin ->
-    data_labelled (Binary (Binop.of_wasm bin)) () ()
-  | Ast.Compare rel ->
-    data_labelled (Compare (Relop.of_wasm rel)) () ()
-  | Ast.LocalGet l ->
-    data_labelled (LocalGet l.it) () ()
-  | Ast.LocalSet l ->
-    data_labelled (LocalSet l.it) () ()
-  | Ast.LocalTee l ->
-    data_labelled (LocalTee l.it) () ()
-  | Ast.BrIf label ->
-    control_labelled (BrIf label.it) () ()
-  | Ast.Br label ->
-    control_labelled (Br label.it) () ()
-  | Ast.BrTable (table, label) ->
-    control_labelled (BrTable (List.map table ~f:(fun v -> v.it), label.it)) () ()
-  | Ast.Call f ->
+    let label = new_label () in
+    let body = seq_of_wasm m new_label instrs in
+    control_labelled ~label:label (Block (block_type, (arity_in, arity_out), body))
+  | Const lit ->
+    data_labelled (Const (Prim_value.of_wasm lit.it))
+  | Binary bin ->
+    data_labelled (Binary (Binop.of_wasm bin))
+  | Compare rel ->
+    data_labelled (Compare (Relop.of_wasm rel))
+  | LocalGet l ->
+    data_labelled (LocalGet l.it)
+  | LocalSet l ->
+    data_labelled (LocalSet l.it)
+  | LocalTee l ->
+    data_labelled (LocalTee l.it)
+  | BrIf label ->
+    control_labelled (BrIf label.it)
+  | Br label ->
+    control_labelled (Br label.it)
+  | BrTable (table, label) ->
+    control_labelled (BrTable (List.map table ~f:(fun v -> v.it), label.it))
+  | Call f ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_fun m f in
     assert (arity_out <= 1);
-    control_labelled (Call ((arity_in, arity_out), f.it)) () ()
-  | Ast.Return ->
-    control_labelled (Return) () ()
-  | Ast.Unreachable ->
-    control_labelled (Unreachable) () ()
-  | Ast.Select ->
-    data_labelled (Select) () ()
-  | Ast.Loop (st, instrs) ->
+    control_labelled (Call ((arity_in, arity_out), f.it))
+  | Return ->
+    control_labelled (Return)
+  | Unreachable ->
+    control_labelled (Unreachable)
+  | Select ->
+    data_labelled (Select)
+  | Loop (st, instrs) ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_block st in
     assert (arity_in = 0); (* what does it mean to have arity_in > 0 for a loop? *)
     assert (arity_out <= 1); (* TODO: support any arity out? *)
-    let body = seq_of_wasm m instrs in
-    control_labelled (Loop (Wasm_helpers.type_of_block st, (arity_in, arity_out), body)) () ()
-  | Ast.If (st, instrs1, instrs2) ->
+    let label = new_label () in
+    let body = seq_of_wasm m new_label instrs in
+    control_labelled ~label:label (Loop (Wasm_helpers.type_of_block st, (arity_in, arity_out), body))
+  | If (st, instrs1, instrs2) ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_block st in
-    let body1 = seq_of_wasm m instrs1 in
-    let body2 = seq_of_wasm m instrs2 in
-    control_labelled (If (Wasm_helpers.type_of_block st, (arity_in, arity_out), body1, body2)) () ()
-  | Ast.CallIndirect f ->
+    let label = new_label () in
+    let body1 = seq_of_wasm m new_label instrs1 in
+    let body2 = seq_of_wasm m new_label instrs2 in
+    control_labelled ~label:label (If (Wasm_helpers.type_of_block st, (arity_in, arity_out), body1, body2))
+  | CallIndirect f ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_fun_type m f in
     assert (arity_out <= 1);
-    control_labelled (CallIndirect ((arity_in, arity_out), f.it)) () ()
-  | Ast.GlobalGet g ->
-    data_labelled (GlobalGet g.it) () ()
-  | Ast.GlobalSet g ->
-    data_labelled (GlobalSet g.it) () ()
-  | Ast.Load op ->
-    data_labelled (Load (Memoryop.of_wasm_load op)) () ()
-  | Ast.Store op ->
-    data_labelled (Store (Memoryop.of_wasm_store op)) () ()
-  | Ast.MemorySize -> data_labelled (MemorySize) () ()
-  | Ast.MemoryGrow -> data_labelled MemoryGrow () ()
-  | Ast.Test op ->
-    data_labelled (Test (Testop.of_wasm op)) () ()
-  | Ast.Convert op ->
-    data_labelled (Convert (Convertop.of_wasm op)) () ()
-  | Ast.Unary op ->
-    data_labelled (Unary (Unop.of_wasm op)) () ()
+    control_labelled (CallIndirect ((arity_in, arity_out), f.it))
+  | GlobalGet g ->
+    data_labelled (GlobalGet g.it)
+  | GlobalSet g ->
+    data_labelled (GlobalSet g.it)
+  | Load op ->
+    data_labelled (Load (Memoryop.of_wasm_load op))
+  | Store op ->
+    data_labelled (Store (Memoryop.of_wasm_store op))
+  | MemorySize -> data_labelled (MemorySize)
+  | MemoryGrow -> data_labelled MemoryGrow
+  | Test op ->
+    data_labelled (Test (Testop.of_wasm op))
+  | Convert op ->
+    data_labelled (Convert (Convertop.of_wasm op))
+  | Unary op ->
+    data_labelled (Unary (Unop.of_wasm op))
 
 (** Creates a sequence of instructions from their Wasm representation *)
-and seq_of_wasm (m : Ast.module_) (is : Ast.instr list) : unit t list =
-  List.map is ~f:(of_wasm m)
+and seq_of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (is : Wasm.Ast.instr list) : unit t list =
+  List.map is ~f:(of_wasm m new_label)
 
-(** Change the annotation of an instruction, where `data` is a map from instruction indices to the new annotation *)
+(*(** Change the annotation of an instruction, where `data` is a map from instruction indices to the new annotation *)
 let rec annotate (i : 'a t) (data : ('b * 'b) IntMap.t) : 'b t =
   match i with
   | Data d -> Data (annotate_data d data)
@@ -336,6 +368,7 @@ and add_annotation_control (i : ('a control, 'a) labelled) (data : ('b * 'b) Int
              | Return -> Return
              | Unreachable -> Unreachable }
 
+
 let%test "Instr.add_annotation nop" =
   let i = Data { instr = Nop; label = 0; annotation_before = 1; annotation_after = 2 } in
   let i_annotated = Data { instr = Nop; label = 0; annotation_before = (1, 'a'); annotation_after = (2, 'b') } in
@@ -352,16 +385,18 @@ let%test "Instr.add_annotation block" =
   let eq = (fun (n1, c1) (n2, c2) -> n1 = n2 && Char.equal c1 c2) in
   equal eq (add_annotation b annotation_map) b_annotated
 
-let rec map_annotation (i : 'a t) ~(f : 'a -> 'b) : 'b t =
+*)
+
+let rec map_annotation (i : 'a t) ~(f : 'a t -> 'b * 'b) : 'b t =
   match i with
   | Data d -> Data (map_annotation_data d ~f:f)
   | Control c -> Control (map_annotation_control c ~f:f)
-and map_annotation_data (i : (data, 'a) labelled) ~(f : 'a -> 'b) : (data, 'b) labelled =
-  { i with annotation_before = f i.annotation_before;
-           annotation_after = f i.annotation_after }
-and map_annotation_control (i : ('a control, 'a) labelled) ~(f : 'a ->  'b) : ('b control, 'b) labelled =
-  { i with annotation_before = f i.annotation_before;
-           annotation_after = f i.annotation_after;
+and map_annotation_data (i : (data, 'a) labelled) ~(f : 'a t -> 'b * 'b) : (data, 'b) labelled =
+  let (annotation_before, annotation_after) = f (Data i) in
+  { i with annotation_before; annotation_after }
+and map_annotation_control (i : ('a control, 'a) labelled) ~(f : 'a t ->  'b * 'b) : ('b control, 'b) labelled =
+  let (annotation_before, annotation_after) = f (Control i) in
+  { i with annotation_before; annotation_after;
            instr = match i.instr with
              | Block (bt, arity, instrs) -> Block (bt, arity, List.map instrs ~f:(map_annotation ~f:f))
              | Loop (bt, arity, instrs) -> Loop (bt, arity, List.map instrs ~f:(map_annotation ~f:f))
@@ -377,11 +412,11 @@ and map_annotation_control (i : ('a control, 'a) labelled) ~(f : 'a ->  'b) : ('
              | Unreachable -> Unreachable }
 
 let clear_annotation (i : 'a t) : unit t =
-  map_annotation i ~f:(fun _ -> ())
+  map_annotation i ~f:(fun _ -> (), ())
 let clear_annotation_data (i : (data, 'a) labelled) : (data, unit) labelled =
-  map_annotation_data i ~f:(fun _ -> ())
+  map_annotation_data i ~f:(fun _ -> (), ())
 let clear_annotation_control (i : ('a control, 'a) labelled) : (unit control, unit) labelled =
-  map_annotation_control i ~f:(fun _ -> ())
+  map_annotation_control i ~f:(fun _ -> (), ())
 
 let annotation_before (i : 'a t) : 'a =
   match i with
@@ -393,17 +428,17 @@ let annotation_after (i : 'a t) : 'a =
   | Data d -> d.annotation_after
   | Control c -> c.annotation_after
 
-let rec all_labels (i : 'a t) : IntSet.t =
+let rec all_labels (i : 'a t) : Label.Set.t =
   match i with
-  | Data d -> IntSet.singleton d.label
-  | Control c -> IntSet.add (begin match c.instr with
+  | Data d -> Label.Set.singleton d.label
+  | Control c -> Label.Set.add (begin match c.instr with
       | Block (_, _, instrs)
-      | Loop (_, _, instrs) -> List.fold_left instrs ~init:IntSet.empty ~f:(fun acc i ->
-          IntSet.union acc (all_labels i))
+      | Loop (_, _, instrs) -> List.fold_left instrs ~init:Label.Set.empty ~f:(fun acc i ->
+          Label.Set.union acc (all_labels i))
       | If (_, _, instrs1, instrs2) ->
-        List.fold_left (instrs1 @ instrs2) ~init:IntSet.empty ~f:(fun acc i ->
-          IntSet.union acc (all_labels i))
-      | _ -> IntSet.empty
+        List.fold_left (instrs1 @ instrs2) ~init:Label.Set.empty ~f:(fun acc i ->
+          Label.Set.union acc (all_labels i))
+      | _ -> Label.Set.empty
     end) c.label
 
 (** The input arity of an expression, i.e., how many values it expects on the stack *)

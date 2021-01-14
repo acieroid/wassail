@@ -40,6 +40,12 @@ module StringSet = Set.Make(S)
 (** Maps of strings *)
 module StringMap = Map.Make(S)
 
+module List32 = struct
+  let nth_exn = Wasm.Lib.List32.nth
+  let mapi (l : 'a list) ~(f : Int32.t -> 'a -> 'b) : 'b list =
+    List.mapi l ~f:(fun x -> f (Int32.of_int_exn x))
+end
+
 module type EqualT = sig
   type t
   [@@deriving equal]

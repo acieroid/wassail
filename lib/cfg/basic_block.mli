@@ -1,5 +1,3 @@
-open Helpers
-
 type 'a block_content =
   | Control of ('a Instr.control, 'a) Instr.labelled
   | Data of (Instr.data, 'a) Instr.labelled list
@@ -22,15 +20,11 @@ val to_dot : 'a t -> ('a -> string) -> string
 
 val all_instructions : 'a t -> 'a Instr.t list
 
-val all_instruction_labels : 'a t -> IntSet.t
+val all_instruction_labels : 'a t -> Instr.Label.Set.t
 
 val all_annots : 'a t -> 'a list
 
-val annotate : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> 'b t
-
-val add_annotation : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> ('a * 'b) t
-
-val map_annotations : 'a t -> f:('a -> 'b) -> 'b t
+val map_annotations : 'a t -> fblock:('a t -> 'b * 'b) -> finstr:('a Instr.t -> 'b * 'b) -> 'b t
 
 val clear_annotation : 'a t -> unit t
 

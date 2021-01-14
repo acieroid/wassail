@@ -43,7 +43,7 @@ type 'a t = {
   (* All basic blocks contained in this CFG, indexed in a map by their index *)
   basic_blocks: 'a Basic_block.t IntMap.t;
   (* All instructions contained in this CFG, indexed in a map by their label *)
-  instructions : 'a Instr.t IntMap.t;
+  instructions : 'a Instr.t Instr.Label.Map.t;
   (* The edges between basic blocks (forward direction) *)
   edges: Edges.t;
   (* The edges between basic blocks (backward direction) *)
@@ -73,7 +73,7 @@ val to_dot : 'a t -> ('a -> string) -> string
 val find_block_exn : 'a t -> int -> 'a Basic_block.t
 
 (** Find an instruction given its label *)
-val find_instr_exn : 'a t -> Instr.label -> 'a Instr.t
+val find_instr_exn : 'a t -> Instr.Label.t -> 'a Instr.t
 
 (** Extract the successors of a block in the CFG, given its index.
     Return the successors as a list of their indices *)
@@ -111,16 +111,10 @@ val all_merge_blocks : 'a t -> 'a Basic_block.t list
 val all_block_indices : 'a t -> IntSet.t
 
 (** Return the labels of all the instructions contained within this CFG *)
-val all_instruction_labels : 'a t -> IntSet.t
+val all_instruction_labels : 'a t -> Instr.Label.Set.t
 
 (** Return all annotations used in this CFG *)
 val all_annots : 'a t -> 'a list
 
-(** Change the annotations of a CFG *)
-val annotate : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> 'b t
-
-(** Add more annotations to an already-annotated CFG *)
-val add_annotation : 'a t -> ('b * 'b) IntMap.t -> ('b * 'b) IntMap.t -> ('a * 'b) t
-
 (** Map a function over all the annotations *)
-val map_annotations : 'a t -> f:('a -> 'b) -> 'b t
+val map_annotations : 'a t -> fblock:('a Basic_block.t -> 'b * 'b) -> finstr:('a Instr.t -> 'b * 'b) -> 'b t

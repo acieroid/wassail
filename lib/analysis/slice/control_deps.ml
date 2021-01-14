@@ -4,7 +4,7 @@ open Helpers
 (** A predicate is represented as the variable used in the predicate as well as the label of the control instruction using it *)
 module Pred = struct
   module T = struct
-    type t = Var.t * Instr.label
+    type t = Var.t * Instr.Label.t
     [@@deriving sexp, compare, equal]
   end
   include T
@@ -109,23 +109,22 @@ let find (cdeps : Pred.Set.t Var.Map.t) (var : Var.t) : Pred.Set.t =
   | None -> Pred.Set.empty
 
 let%test "control dependencies computation" =
-  Instr.reset_counter ();
+  let open Instr.Label.Test in
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
-    block
-      memory.size ;; Instr 0, Var 0
-      br_if 0
-      ;; The following variable clearly depends on Var 0
-      memory.size ;; Instr 2, Var 2
-      block
-        memory.size ;; Instr 3, Var 3. This one too
-        br_if 0
-        memory.size ;; Instr 5, Var 5. This one depends on var 3 (also on var 0 transitively, but here we compute direct control dependencies)
-        drop
+    block         ;; Instr 0
+      memory.size ;; Instr 1
+      br_if 0     ;; Instr 2
+      memory.size ;; Instr 3. Depends on var 1
+      block       ;; Instr 4
+        memory.size ;; Instr 5. This one too depends on var 1
+        br_if 0     ;; Instr 6
+        memory.size ;; Instr 7. This one depends on var 5 (also on var 1 transitively, but here we compute direct control dependencies)
+        drop        ;; Instr 8
       end
-      drop
-      memory.size ;; Instr 9, Var 9. This one depends on var 0
+      drop          ;; Intr 9
+      memory.size   ;; Instr 10. This one depends on var 1
       drop
     end
     memory.size)
@@ -134,5 +133,6 @@ let%test "control dependencies computation" =
   let actual = Var.Map.map (make cfg) ~f:(fun p -> Var.Set.of_list (List.map (Pred.Set.to_list p) ~f:fst)) in
   let var n = Var.Var n in
   let vars n = Var.Set.of_list [var n] in
-  let expected = Var.Map.of_alist_exn [(var 2, vars 0); (var 3, vars 0); (var 5, vars 3); (var 9, vars 0)] in
+  let expected = Var.Map.of_alist_exn [(var (lab 3), vars (lab 1)); (var (lab 5), vars (lab 1)); (var (lab 7), vars (lab 5)); (var (lab 10), vars (lab 1))] in
+  Printf.printf "actual: %s\nexpected: %s" (Var.Map.to_string actual Var.Set.to_string) (Var.Map.to_string expected Var.Set.to_string);
   Var.Map.equal Var.Set.equal actual expected

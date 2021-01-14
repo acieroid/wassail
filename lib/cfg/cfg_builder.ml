@@ -258,11 +258,11 @@ let build (fid : Int32.t) (module_ : Wasm_module.t) : unit Cfg.t =
     (* The basic blocks *)
     basic_blocks = basic_blocks;
     (* All the instructions *)
-    instructions = IntMap.fold basic_blocks ~init:IntMap.empty ~f:(fun ~key:_ ~data:block acc ->
+    instructions = IntMap.fold basic_blocks ~init:Instr.Label.Map.empty ~f:(fun ~key:_ ~data:block acc ->
         match block.content with
-        | Control i -> IntMap.add_exn acc ~key:i.label ~data:(Instr.Control i)
+        | Control i -> Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Control i)
         | Data d -> List.fold_left d ~init:acc ~f:(fun acc i ->
-            IntMap.add_exn acc ~key:i.label ~data:(Instr.Data i))
+            Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Data i))
         | ControlMerge -> acc);
     (* The forward edges *)
     edges = IntMap.map (IntMap.of_alist_multi (List.map actual_edges' ~f:(fun (src, dst, data) -> (src, (dst, data)))))

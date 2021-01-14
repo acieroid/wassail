@@ -166,7 +166,7 @@ let add_constraints (s : t) (constraints : (Var.t * string) list) : t =
       { constraints = Apron.Abstract1.assign_linexpr_array manager s.constraints (Array.of_list lhs)  (Array.of_list rhs) None })
 
 let%test "add_constraints top (l0 = l0) results in top" =
-  let top: t = top (Var.Set.of_list [Var.Local 0; Var.Var 609; Var.Return; Var.Global 0]) in
+  let top: t = top (Var.Set.of_list [Var.Local 0; Var.Var (Instr.Label.Test.lab 0); Var.Return; Var.Global 0]) in
   let top2 = add_constraints top [(Var.Local 0, "l0")] in
   should_equal top top2
 

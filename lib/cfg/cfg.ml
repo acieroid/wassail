@@ -45,7 +45,7 @@ type 'a t = {
   local_types: Type.t list;
   return_types: Type.t list;
   basic_blocks: 'a Basic_block.t IntMap.t;
-  instructions : 'a Instr.t IntMap.t;
+  instructions : 'a Instr.t Instr.Label.Map.t;
   edges: Edges.t;
   back_edges: Edges.t;
   entry_block: int;
@@ -71,8 +71,8 @@ let find_block_exn (cfg : 'a t) (idx : int) : 'a Basic_block.t =
   | Some b -> b
   | None -> failwith "Cfg.find_block_exn did not find block"
 
-let find_instr_exn (cfg : 'a t) (label : Instr.label) : 'a Instr.t =
-  match IntMap.find cfg.instructions label with
+let find_instr_exn (cfg : 'a t) (label : Instr.Label.t) : 'a Instr.t =
+  match Instr.Label.Map.find cfg.instructions label with
   | Some i -> i
   | None -> failwith "Cfg.find_instr_exn did not find instruction"
 
@@ -106,7 +106,7 @@ let callers (cfgs : 'a t Int32Map.t) (cfg : 'a t) : Int32Set.t =
         callers)
 
 let all_instructions (cfg : 'a t) : 'a Instr.t list =
-  List.map ~f:snd (IntMap.to_alist cfg.instructions)
+  List.map ~f:snd (Instr.Label.Map.to_alist cfg.instructions)
 
 let all_blocks (cfg : 'a t) : 'a Basic_block.t list =
   IntMap.data cfg.basic_blocks
@@ -120,26 +120,14 @@ let all_merge_blocks (cfg : 'a t) : 'a Basic_block.t list =
 let all_block_indices (cfg : 'a t) : IntSet.t =
   IntSet.of_list (IntMap.keys cfg.basic_blocks)
 
-let all_instruction_labels (cfg : 'a t) : IntSet.t =
-  IntMap.fold cfg.basic_blocks ~init:IntSet.empty ~f:(fun ~key:_ ~data:block l ->
-      IntSet.union (Basic_block.all_instruction_labels block) l)
+let all_instruction_labels (cfg : 'a t) : Instr.Label.Set.t =
+  IntMap.fold cfg.basic_blocks ~init:Instr.Label.Set.empty ~f:(fun ~key:_ ~data:block l ->
+      Instr.Label.Set.union (Basic_block.all_instruction_labels block) l)
 
 let all_annots (cfg : 'a t) : 'a list =
   IntMap.fold cfg.basic_blocks ~init:[] ~f:(fun ~key:_ ~data:block l -> (Basic_block.all_annots block) @ l)
 
-let annotate (cfg : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b) IntMap.t) : 'b t =
+let map_annotations (cfg : 'a t) ~(fblock : 'a Basic_block.t -> 'b * 'b) ~(finstr : 'a Instr.t -> 'b * 'b) : 'b t =
   { cfg with
-    basic_blocks = IntMap.map ~f:(fun b -> Basic_block.annotate b block_data instr_data) cfg.basic_blocks;
-    instructions = IntMap.map ~f:(fun i -> Instr.annotate i instr_data) cfg.instructions;
-  }
-
-let add_annotation (cfg : 'a t) (block_data : ('b * 'b) IntMap.t) (instr_data : ('b * 'b) IntMap.t) : ('a * 'b) t =
-  { cfg with
-    basic_blocks = IntMap.map ~f:(fun b -> Basic_block.add_annotation b block_data instr_data) cfg.basic_blocks;
-    instructions = IntMap.map ~f:(fun i -> Instr.add_annotation i instr_data) cfg.instructions;
-  }
-
-let map_annotations (cfg : 'a t) ~(f : 'a -> 'b) : 'b t =
-  { cfg with
-    basic_blocks = IntMap.map ~f:(fun b -> Basic_block.map_annotations b ~f:f) cfg.basic_blocks;
-    instructions = IntMap.map ~f:(fun i -> Instr.map_annotation i ~f:f) cfg.instructions; }
+    basic_blocks = IntMap.map ~f:(fun b -> Basic_block.map_annotations b ~fblock ~finstr) cfg.basic_blocks;
+    instructions = Instr.Label.Map.map ~f:(fun i -> Instr.map_annotation i ~f:finstr) cfg.instructions; }

@@ -28,7 +28,7 @@ include T
 
 (** Get the function instance for the function with index fidx *)
 let get_funcinst (m : t) (fidx : Int32.t) : Func_inst.t =
-  Wasm.Lib.List32.nth m.funcs Int32.(fidx-(Int32.of_int_exn (List.length m.imported_funcs)))
+  List32.nth_exn m.funcs Int32.(fidx-(Int32.of_int_exn (List.length m.imported_funcs)))
 
 (** Get the memory instance for the memory with index idx *)
 let get_meminst (m : t) (idx : int) : Memory_inst.t =
@@ -54,11 +54,11 @@ let of_wasm (m : Wasm.Ast.module_) : t =
                 (List.map a ~f:Type.of_wasm, List.map b ~f:Type.of_wasm))
       | _ -> None) in
   let nimports = Wasm.Lib.List32.length imported_funcs in
-  let globals = List.map m.it.globals ~f:(Global.of_wasm m) in
+  let globals = List32.mapi m.it.globals ~f:(Global.of_wasm m) in
   let nglobals = Wasm.Lib.List32.length m.it.globals in
   let global_types = List.map m.it.globals ~f:(fun g -> match g.it.gtype with
       | Wasm.Types.GlobalType (t, _) -> Type.of_wasm t) in
-  let funcs = List.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m minst Int32.((Int32.of_int_exn i)+nimports) f) in
+  let funcs = List32.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m minst Int32.(i+nimports) f) in
   let ftype (fidx : Int32.t) : Type.t list * Type.t list = if Int32.(fidx < nimports) then
       match Wasm.Lib.List32.nth imported_funcs fidx with
       | (_, _, typ) -> typ
@@ -76,15 +76,15 @@ let of_wasm (m : Wasm.Ast.module_) : t =
   let memory_insts = List.filter_map m.it.imports ~f:(fun import -> match import.it.idesc.it with
       | MemoryImport m -> Some (Memory_inst.of_wasm_type m)
       | _ -> None) @ (List.map m.it.memories ~f:Memory_inst.of_wasm) in
-  let data = List.map m.it.data ~f:(Segment.DataSegment.of_wasm m) in
+  let data = List32.mapi m.it.data ~f:(Segment.DataSegment.of_wasm m) in
   let imports = List.map m.it.imports ~f:Import.of_wasm in
   let tables = List.map m.it.tables ~f:Table.of_wasm in
   let table_insts = List.map m.it.tables ~f:(fun t ->
         Table_inst.init
           (Table.of_wasm t)
-          (List.map m.it.elems ~f:(Elem.of_wasm m))) in
+          (List32.mapi m.it.elems ~f:(Elem.of_wasm m))) in
   let start = Option.map m.it.start ~f:(fun v -> v.it) in
-  let elems = List.map m.it.elems ~f:(Segment.ElemSegment.of_wasm m) in
+  let elems = List32.mapi m.it.elems ~f:(Segment.ElemSegment.of_wasm m) in
   ({
     start;
     imports; nimports; imported_funcs;

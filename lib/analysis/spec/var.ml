@@ -2,7 +2,7 @@ open Core_kernel
 
 module T = struct
   type t =
-    | Var of int (* variable resulting from an instruction *)
+    | Var of Instr.Label.t (* variable resulting from an instruction *)
     | Local of int (* nth local *)
     | Global of int (* nth global *)
     | Merge of int * int (* merge variable (n, m) meaning from nth function, mth merge variable *)
@@ -14,7 +14,7 @@ module T = struct
   [@@deriving sexp, compare, equal]
 
   let to_string (v : t) : string = match v with
-  | Var n -> Printf.sprintf "i%d" n
+  | Var l -> Printf.sprintf "i%s" (Instr.Label.to_string l)
   | Local n -> Printf.sprintf "l%d" n
   | Global n -> Printf.sprintf "g%d" n
   | Merge (idx, n) -> Printf.sprintf "m%d_%d" idx n

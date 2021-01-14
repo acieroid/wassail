@@ -17,9 +17,9 @@ module Make(ST: SegmentType) = struct
   }
   [@@deriving sexp, compare, equal]
 
-  let of_wasm (module_ : Wasm.Ast.module_) (d : ST.wasm_t Wasm.Ast.segment) : t =
+  let of_wasm (module_ : Wasm.Ast.module_) (idx : Int32.t) (d : ST.wasm_t Wasm.Ast.segment) : t =
     { index = d.it.index.it;
-      offset = List.map d.it.offset.it ~f:(Instr.of_wasm module_);
+      offset = Instr.seq_of_wasm module_ (Instr.Label.maker (Instr.Label.Function idx)) d.it.offset.it;
       init = ST.of_wasm d.it.init}
 end
 

@@ -315,6 +315,4 @@ let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
 
 let dummy_annotate (cfg : 'a Cfg.t) : ('a * state) Cfg.t =
   let bot = Relational_domain.bottom Var.Set.empty in
-  let annots_instr = IntMap.of_alist_exn (List.map (IntSet.to_list (Cfg.all_instruction_labels cfg)) ~f:(fun i -> (i, (bot, bot)))) in
-  let annots_block = IntMap.of_alist_exn (List.map (IntSet.to_list (Cfg.all_block_indices cfg)) ~f:(fun i -> (i, (bot, bot)))) in
-  Cfg.add_annotation cfg annots_block annots_instr
+  Cfg.map_annotations cfg ~fblock:(fun b -> ((b.annotation_before, bot), (b.annotation_after, bot))) ~finstr:(fun i -> ((Instr.annotation_before i, bot), (Instr.annotation_after i, bot)))

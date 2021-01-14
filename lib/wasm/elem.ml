@@ -1,5 +1,4 @@
 open Core_kernel
-open Wasm
 
 type t = {
   index : Int32.t; (** The table index (should always be 0 currently, wasm does
@@ -11,9 +10,9 @@ type t = {
 }
 [@@deriving sexp, compare]
 
-let of_wasm (m : Ast.module_) (e : Ast.var list Ast.segment) : t = {
+let of_wasm (m : Wasm.Ast.module_) (idx : Int32.t) (e : Wasm.Ast.var list Wasm.Ast.segment) : t = {
   index = e.it.index.it;
-  offset = Instr.seq_of_wasm m e.it.offset.it;
+  offset = Instr.seq_of_wasm m (Instr.Label.maker (Instr.Label.Elem idx)) e.it.offset.it;
   init = List.map e.it.init ~f:(fun v -> v.it)
 }
 

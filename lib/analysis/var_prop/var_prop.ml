@@ -127,31 +127,33 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
   (* All variables that are involved in a single equality can then be propagated:
      they are replaced by the variable they are equal to.
      Precedence is given to variable defined at the entry point (locals, globals, constants, memory vars) *)
-  Cfg.map_annotations cfg ~f:(fun (annot : Spec.t) ->
-      Spec.map_vars annot ~f:(fun (v : Var.t) ->
-          match List.find classes ~f:(fun vs -> Var.Set.mem vs v) with
-          | Some class_ ->
-            (* Variable is part of an equality class, replace it by its target *)
-            let v' = rewrite_target class_ in
-            (* Printf.printf "Replacing var %s by %s\n" (Var.to_string v) (Var.to_string v'); *)
-            v'
-          | None ->
-            v))
+  let fannot (annot : Spec.t) : Spec.t = Spec.map_vars annot ~f:(fun (v : Var.t) ->
+      match List.find classes ~f:(fun vs -> Var.Set.mem vs v) with
+      | Some class_ ->
+        (* Variable is part of an equality class, replace it by its target *)
+        let v' = rewrite_target class_ in
+        (* Printf.printf "Replacing var %s by %s\n" (Var.to_string v) (Var.to_string v'); *)
+        v'
+      | None ->
+        v) in
+  Cfg.map_annotations cfg
+    ~fblock:(fun b -> (fannot b.annotation_before, fannot b.annotation_after))
+    ~finstr:(fun i -> (fannot (Instr.annotation_before i), fannot (Instr.annotation_after i)))
 
 let all_vars (cfg : Spec.t Cfg.t) : Var.Set.t =
   let vars : Var.Set.t ref = ref Var.Set.empty in
-  let _cfg = Cfg.map_annotations cfg ~f:(fun (annot : Spec.t) ->
-      Spec.map_vars annot ~f:(fun (v : Var.t) ->
-          vars := Var.Set.add !vars v;
-          v)) in
+  let fannot (annot : Spec.t) : Spec.t = Spec.map_vars annot ~f:(fun (v : Var.t) ->
+      vars := Var.Set.add !vars v;
+      v) in
+  let _cfg = Cfg.map_annotations cfg
+    ~fblock:(fun b -> (fannot b.annotation_before, fannot b.annotation_after))
+    ~finstr:(fun i -> (fannot (Instr.annotation_before i), fannot (Instr.annotation_after i))) in
   !vars
 
 let count_vars (cfg : Spec.t Cfg.t) : int =
   Var.Set.length (all_vars cfg)
 
-
 let%test "var prop - simple test" =
-  Instr.reset_counter ();
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
   Spec_inference.use_const := false;
@@ -173,7 +175,6 @@ let%test "var prop - simple test" =
   Var.Set.equal (Var.Set.of_list [Var.Return; Var.Local 0; Var.Global 0; Var.Const (Prim_value.of_int 0)]) (all_vars result)
 
 let%test "var prop - big program" =
-  Instr.reset_counter ();
   let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
