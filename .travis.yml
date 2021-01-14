@@ -22,6 +22,9 @@ arch:
 
 jobs:
   include:
+    - stage: compilation
+      name: Compilation
+      script: make
     - stage: test
       name: Tests
       script: make test
