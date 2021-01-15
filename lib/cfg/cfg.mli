@@ -67,7 +67,7 @@ val equal : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
 val to_string : 'a t -> string
 
 (** Return the DOT graph representatino of a CFG *)
-val to_dot : ?spec_str:('a -> string) -> 'a t -> string
+val to_dot : ?annot_str:('a -> string) -> 'a t -> string
 
 (** Find a basic block given its index *)
 val find_block_exn : 'a t -> int -> 'a Basic_block.t

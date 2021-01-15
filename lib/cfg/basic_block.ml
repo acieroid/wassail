@@ -17,15 +17,15 @@ end
 include T
 
 (** Convert a block to its string representation *)
-let to_string (b : 'a t) (annot_to_string : 'a -> string) : string = Printf.sprintf "block %d, %s" b.idx (match b.content with
-    | Control instr -> Printf.sprintf "control block: %s" (Instr.control_to_string instr.instr annot_to_string)
+let to_string ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : string = Printf.sprintf "block %d, %s" b.idx (match b.content with
+    | Control instr -> Printf.sprintf "control block: %s" (Instr.control_to_string instr.instr ~annot_str)
     | Data instrs -> Printf.sprintf "data block: %s" (String.concat ~sep:"\\l"
          (List.map instrs
             ~f:(fun instr ->
                 Printf.sprintf "%s" (Instr.data_to_string instr.instr)))))
 
 (** Convert a basic block to its dot representation *)
-let to_dot (b : 'a t) (annot_to_string : 'a -> string) : string =
+let to_dot ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : string =
   match b.content with
   | Data instrs ->
     Printf.sprintf "block%d [shape=record, label=\"{Data block %d:\\l\\l%s\\l}\"];"
@@ -33,9 +33,9 @@ let to_dot (b : 'a t) (annot_to_string : 'a -> string) : string =
       (String.concat ~sep:"\\l"
          (List.map instrs
             ~f:(fun instr ->
-                Printf.sprintf "%s:%s ;; %s → %s" (Instr.Label.to_string instr.label) (Instr.data_to_string instr.instr) (annot_to_string instr.annotation_before) (annot_to_string instr.annotation_after))))
+                Printf.sprintf "%s:%s ;; %s → %s" (Instr.Label.to_string instr.label) (Instr.data_to_string instr.instr) (annot_str instr.annotation_before) (annot_str instr.annotation_after))))
   | Control instr ->
-    Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d:\\l\\l%s:%s ;; %s → %s\"];" b.idx b.idx (Instr.Label.to_string instr.label) (Instr.control_to_short_string instr.instr) (annot_to_string instr.annotation_before) (annot_to_string instr.annotation_after)
+    Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d:\\l\\l%s:%s ;; %s → %s\"];" b.idx b.idx (Instr.Label.to_string instr.label) (Instr.control_to_short_string instr.instr) (annot_str instr.annotation_before) (annot_str instr.annotation_after)
 
 (** Return all the instructions contained within this block (in no particular order) *)
 let all_instructions (b : 'a t) : 'a Instr.t list =

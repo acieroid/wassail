@@ -21,8 +21,9 @@ module Label = struct
     }
     [@@deriving sexp, compare, equal]
 
-    let to_string (l : t) : string =
-      Printf.sprintf "%d" l.id (* We don't show the section because usually it is obvious from the context *)
+    let to_string (l : t) : string = match l.section with
+      | Function _ -> Printf.sprintf "%d" l.id (* Printed differently to have a cleaner output *)
+      | _ -> Printf.sprintf "%s_%d" (section_to_string l.section) l.id
   end
   include T
 
@@ -40,6 +41,10 @@ module Label = struct
   module Test = struct
     let lab (n : int) = {
       section = Function 0l;
+      id = n;
+    }
+    let merge (n : int) = {
+      section = MergeInFunction 0l;
       id = n;
     }
   end
@@ -141,7 +146,7 @@ let data_to_string (instr : data) : string =
      | Store op -> Printf.sprintf "store %s" (Memoryop.to_string op)
 
 (** Converts a control instruction to its string representation *)
-let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : 'a control) (annot_to_string : 'a -> string) : string =
+let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot_to_string : 'a -> string = fun _ -> "") (instr : 'a control)  : string =
   match instr with
   | Call (_, v) -> Printf.sprintf "call %s" (Int32.to_string v)
   | CallIndirect (_, v) -> Printf.sprintf "call_indirect %s" (Int32.to_string v)
@@ -158,13 +163,13 @@ let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (inst
   | Merge -> "merge"
 
 (** Converts an instruction to its string representation *)
-and to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : 'a t) (annot_to_string : 'a -> string): string =
+and to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot_to_string : 'a -> string = fun _ -> "") (instr : 'a t) : string =
   Printf.sprintf "%s:%s%s" (Label.to_string (label instr)) (String.make i ' ')
     (match instr with
      | Data instr -> data_to_string instr.instr
-     | Control instr -> control_to_string instr.instr  annot_to_string ~sep:sep ~indent:i)
+     | Control instr -> control_to_string instr.instr ~annot_str:annot_to_string ~sep:sep ~indent:i)
 and list_to_string ?indent:(i : int = 0) ?sep:(sep : string = ", ") (l : 'a t list) (annot_to_string : 'a -> string) : string =
-  String.concat ~sep:sep (List.map l ~f:(fun instr -> to_string instr annot_to_string ?sep:(Some sep) ?indent:(Some i)))
+  String.concat ~sep:sep (List.map l ~f:(fun instr -> to_string instr ~annot_str:annot_to_string ?sep:(Some sep) ?indent:(Some i)))
 
 (** Converts a control expression to a shorter string *)
 let control_to_short_string (instr : 'a control) : string =
@@ -172,7 +177,7 @@ let control_to_short_string (instr : 'a control) : string =
   | Block _ -> "block"
   | Loop _ -> "loop"
   | If _ -> "if"
-  | _ -> control_to_string instr (fun _ -> "")
+  | _ -> control_to_string instr ~annot_str:(fun _ -> "")
 
 (** Converts an instruction to its mnemonic *)
 let to_mnemonic (instr : 'a t) : string = match instr with

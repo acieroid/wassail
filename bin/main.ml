@@ -74,7 +74,7 @@ let cfg =
           let cfg = Cfg_builder.build fid wasm_mod in
           Out_channel.with_file file_out
             ~f:(fun ch ->
-                Out_channel.output_string ch (Cfg.to_dot cfg (fun () -> ""))))
+                Out_channel.output_string ch (Cfg.to_dot cfg)))
 
 let cfgs =
   Command.basic
@@ -91,7 +91,7 @@ let cfgs =
               let cfg = Cfg_builder.build faddr wasm_mod in
               Out_channel.with_file (Printf.sprintf "%s/%ld.dot" out_dir faddr)
                 ~f:(fun ch ->
-                    Out_channel.output_string ch (Cfg.to_dot cfg (fun () -> "")))))
+                    Out_channel.output_string ch (Cfg.to_dot cfg))))
 
 let callgraph =
   Command.basic
@@ -140,7 +140,7 @@ let spec_inference =
        let file_out = Printf.sprintf "%ld.dot" fid in
        Out_channel.with_file file_out
          ~f:(fun ch ->
-             Out_channel.output_string ch (Cfg.to_dot annotated_cfg Spec.to_dot_string)))
+             Out_channel.output_string ch (Cfg.to_dot annotated_cfg ~annot_str:Spec.to_dot_string)))
 
 let count_vars =
   mk_intra "Count the number of program variables generated for a function"
@@ -234,7 +234,7 @@ let slice_cfg =
         Printf.printf "outputting initial CFG in initial.dot\n%!";
         Out_channel.with_file "initial.dot"
           ~f:(fun ch ->
-              Out_channel.output_string ch (Cfg.to_dot cfg (fun _ -> "")));
+              Out_channel.output_string ch (Cfg.to_dot cfg));
         let slicing_criteria = Slicing.find_call_indirect_instructions cfg in
         List.iter slicing_criteria ~f:(fun instr_idx ->
             (* instr_idx is the label of a call_indirect instruction, slice it *)
@@ -243,7 +243,7 @@ let slice_cfg =
             Printf.printf "outputting sliced cfg to sliced-%s.dot\n%!" (Instr.Label.to_string instr_idx);
             Out_channel.with_file (Printf.sprintf "sliced-%s.dot" (Instr.Label.to_string instr_idx))
                 ~f:(fun ch ->
-                  Out_channel.output_string ch (Cfg.to_dot sliced_cfg (fun _ -> "")));
+                  Out_channel.output_string ch (Cfg.to_dot sliced_cfg ~annot_str:(fun _ -> "")));
             let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
             Printf.printf "Analyzing resulting CFG...\n%!";
             let t0 = Time.now () in

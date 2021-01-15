@@ -1,35 +1,14 @@
 open Core_kernel
 open Helpers
 
-module SlicePart = struct
-  module T = struct
-    type t =
-      | Instruction of Instr.Label.t
-      | Merge of int
-    [@@deriving sexp, compare, equal]
-    let to_string (t : t) : string = match t with
-      | Instruction l -> Printf.sprintf "instr(%s)" (Instr.Label.to_string l)
-      | Merge idx -> Printf.sprintf "merge(%d)" idx
-  end
-  include T
-  module Set = struct
-    module S = struct
-      include Set.Make(T)
-      let to_string (s : t) : string = String.concat ~sep:"," (List.map (to_list s) ~f:T.to_string)
-    end
-    include S
-    include Test.Helpers(S)
-  end
-end
-
 (** Performs backwards slicing on `cfg`, using the slicing criterion
     `criterion`, encoded as an instruction index. Returns the set
     of instructions that are part of the slice, as a list of instruction
     indices. *)
-let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : SlicePart.Set.t =
+let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Instr.Label.Set.t =
   let control_dependencies = Control_deps.make cfg in
   let (_, _, data_dependencies) = Use_def.make cfg in
-  let rec loop (worklist : SlicePart.Set.t) (slice : SlicePart.Set.t) : SlicePart.Set.t =
+  let rec loop (worklist : Instr.Label.Set.t) (slice : Instr.Label.Set.t) : Instr.Label.Set.t =
     (* Perform backward slicing as follows:
        Given an instruction as the slicing criterion (we can derive variable uses from instructions),
        perform the following fixpoint algorithm, starting with W = instr
@@ -40,49 +19,34 @@ let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : SlicePart.Set.t =
              if def contains an istruction, add def.instr to W
            for _, instr' in cdeps(use.var):
              add instr to W *)
-    match SlicePart.Set.choose worklist with
+    match Instr.Label.Set.choose worklist with
     | None -> (* worklist is empty *)
       slice
-    | Some slicepart when SlicePart.Set.mem slice slicepart ->
+    | Some slicepart when Instr.Label.Set.mem slice slicepart ->
       (* Already seen this slice part, no need to process it again *)
-      loop (SlicePart.Set.remove worklist slicepart) slice
+      loop (Instr.Label.Set.remove worklist slicepart) slice
     | Some slicepart ->
-      let uses = match slicepart with
-        | Instruction instr_label ->
-          let instr = Cfg.find_instr_exn cfg instr_label in
-          Use_def.instr_use cfg instr
-        | Merge block_idx ->
-          (* to find uses of a merge block, we look at variables that are
-             redefined: all such initial variables are then considered to be
-             used *)
-          let vars = Spec_inference.new_merge_variables cfg (Cfg.find_block_exn cfg block_idx) in
-          List.map vars ~f:fst in
+      let uses =  Use_def.instr_use cfg (Cfg.find_instr_exn cfg slicepart) in
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
-              let def = Use_def.UseDefChains.get data_dependencies (match slicepart with
-                  | Instruction instr -> Use_def.Use.Instruction (instr, use)
-                  | Merge blockidx -> Use_def.Use.Merge (blockidx, use)) in
+              let def = Use_def.UseDefChains.get data_dependencies (Use_def.Use.make slicepart use) in
               let data_dependencies = match def with
-                | Use_def.Def.Instruction (instr', _) -> SlicePart.Set.singleton (Instruction instr')
-                | Use_def.Def.Merge (blockidx, _) -> SlicePart.Set.singleton (Merge blockidx)
-                | Use_def.Def.Entry _ -> SlicePart.Set.empty
-                | Use_def.Def.Constant _ -> SlicePart.Set.empty in
+                | Use_def.Def.Instruction (instr', _) -> Instr.Label.Set.singleton instr'
+                | Use_def.Def.Entry _ -> Instr.Label.Set.empty
+                | Use_def.Def.Constant _ -> Instr.Label.Set.empty in
               let preds = Control_deps.find control_dependencies use in (* the control dependencies for the current use *)
-              let control_dependencies = Control_deps.Pred.Set.fold preds ~init:SlicePart.Set.empty ~f:(fun w (_, instr') ->
+              let control_dependencies = Control_deps.Pred.Set.fold preds ~init:Instr.Label.Set.empty ~f:(fun w (_, instr') ->
                   (* TODO: can't merge block also have control dependencies? Maybe not relevant, as they will have data dependencies on what they redefine *)
-                  SlicePart.Set.add w (Instruction instr')) in
-              SlicePart.Set.union w (SlicePart.Set.union data_dependencies control_dependencies)) in
-      loop (SlicePart.Set.remove worklist' slicepart) (SlicePart.Set.add slice slicepart) in
-  loop (SlicePart.Set.singleton (Instruction criterion)) SlicePart.Set.empty
+                  Instr.Label.Set.add w instr') in
+              Instr.Label.Set.union w (Instr.Label.Set.union data_dependencies control_dependencies)) in
+      loop (Instr.Label.Set.remove worklist' slicepart) (Instr.Label.Set.add slice slicepart) in
+  loop (Instr.Label.Set.singleton criterion) Instr.Label.Set.empty
 
 (** Performs backwards slicing on `cfg`, relying on `slicing` defined above.
     Returns the slice as a modified CFG *)
 let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
   let sliceparts = slicing cfg criterion in
-  let slice_instructions = Instr.Label.Set.of_list (List.filter_map (SlicePart.Set.to_list sliceparts) ~f:(function
-      | Instruction i -> Some i
-      | _ -> None)) in
-  let instructions = Instr.Label.Map.map (Instr.Label.Map.filteri cfg.instructions ~f:(fun ~key:idx ~data:_ -> Instr.Label.Set.mem slice_instructions idx)) ~f:Instr.clear_annotation in
+  let instructions = Instr.Label.Map.map (Instr.Label.Map.filteri cfg.instructions ~f:(fun ~key:idx ~data:_ -> Instr.Label.Set.mem sliceparts idx)) ~f:Instr.clear_annotation in
   let (basic_blocks, edges, back_edges) =
     IntMap.fold cfg.basic_blocks ~init:(IntMap.empty, cfg.edges, cfg.back_edges) ~f:(fun ~key:block_idx ~data:block (basic_blocks, edges, back_edges) ->
         (* Remove any annotation of the block *)
@@ -102,7 +66,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
         let new_block : unit Basic_block.t option = match block.content with
           | Control i ->
             (* Keep control block if its instruction is part of the slice *)
-            if Instr.Label.Set.mem slice_instructions i.label then
+            if Instr.Label.Set.mem sliceparts i.label then
               Some block
             else if keep_anyway then
               (* Block needs to be kept but not its content, change it to a data block *)
@@ -113,7 +77,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
             (* Only keep instructions that are part of the slice.
                All annotations are removed. *)
             let instrs = List.filter_map instrs ~f:(fun instr ->
-                if Instr.Label.Set.mem slice_instructions instr.label then
+                if Instr.Label.Set.mem sliceparts instr.label then
                   (* Instruction is part of the slice, annotation is emptied *)
                   Some {instr with annotation_before = (); annotation_after = () }
                 else
@@ -183,7 +147,13 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
       ~f:(fun edges (src, _) -> Cfg.Edges.remove edges src cfg.exit_block) in
   { cfg with basic_blocks; instructions; edges; back_edges }
 
-module Test = struct
+(** Return the indices of each call_indirect instructions *)
+let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : Instr.Label.t list =
+  List.filter_map (Cfg.all_instructions cfg) ~f:(fun instr -> match instr with
+      | Control {label; instr = CallIndirect _; _} -> Some label
+      | _ -> None)
+
+(*module Test = struct
   let%test "simple slicing - first slicing criterion, only const" =
     let open Instr.Label.Test in
     let module_ = Wasm_module.of_string "(module
@@ -199,8 +169,8 @@ module Test = struct
   )" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let actual = slicing cfg (lab 2) in
-    let expected = SlicePart.Set.of_list [Instruction (lab 0); Instruction (lab 1); Instruction (lab 2)] in
-    SlicePart.Set.check_equality ~actual:actual ~expected:expected
+    let expected = Instr.Label.Set.of_list [Instruction (lab 0); Instruction (lab 1); Instruction (lab 2)] in
+    Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
   let%test "simple slicing - second slicing criterion, with locals" =
     let open Instr.Label.Test in
@@ -220,8 +190,8 @@ module Test = struct
   )" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let actual = slicing cfg (lab 6) in
-    let expected = SlicePart.Set.of_list [Instruction (lab 4); Instruction (lab 5); Instruction (lab 6)] in
-    SlicePart.Set.check_equality ~actual:actual ~expected:expected
+    let expected = Instr.Label.Set.of_list [Instruction (lab 4); Instruction (lab 5); Instruction (lab 6)] in
+    Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
   let%test "slicing with block and br_if" =
     let open Instr.Label.Test in
@@ -238,8 +208,8 @@ module Test = struct
   )" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let actual = slicing cfg (lab 3) in
-    let expected = SlicePart.Set.of_list [Instruction (lab 0); Instruction (lab 1); Instruction (lab 2); Instruction (lab 3)] in
-    SlicePart.Set.check_equality ~actual:actual ~expected:expected
+    let expected = Instr.Label.Set.of_list [Instruction (lab 0); Instruction (lab 1); Instruction (lab 2); Instruction (lab 3)] in
+    Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
   let%test "slicing with merge blocks" =
     let open Instr.Label.Test in
@@ -264,8 +234,8 @@ module Test = struct
   )" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let actual = slicing cfg (lab 9) in
-    let expected = SlicePart.Set.of_list [Instruction (lab 0); Instruction (lab 1); Instruction (lab 2); Instruction (lab 3); Merge 4; Instruction (lab 8); Instruction (lab 9)] in
-    SlicePart.Set.check_equality ~actual:actual ~expected:expected
+    let expected = Instr.Label.Set.of_list [Instruction (lab 0); Instruction (lab 1); Instruction (lab 2); Instruction (lab 3); Merge 4; Instruction (lab 8); Instruction (lab 9)] in
+    Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
 
 (* let%test_unit "slicing with merge blocks using slice" =
@@ -349,12 +319,6 @@ module Test = struct
    let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
    ()
 
-   (** Return the indices of each call_indirect instructions *)
-   let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : Instr.Label.t list =
-   List.filter_map (Cfg.all_instructions cfg) ~f:(fun instr -> match instr with
-      | Control {label; instr = CallIndirect _; _} -> Some label
-      | _ -> None)
-
    let%test_unit "slicing with memory" =
    Instr.reset_counter ();
    let module_ = Wasm_module.of_string "(module
@@ -419,3 +383,4 @@ module Test = struct
       ())
 *)
 end
+              *)

@@ -3,21 +3,19 @@ open Helpers
 
 module Use = struct
   module T = struct
-    (** Uses can either occur from:
-        - instruction: they are represented by the index of the instruction that uses the variable, as well as the variable name
-        - merge blocks: they are represented by the index of the merge block, as well as the variable name *)
-    type t =
-      | Instruction of Instr.Label.t * Var.t
-      | Merge of int * Var.t
+    (** Uses occur from instructions *)
+    type t = {
+      label : Instr.Label.t;
+      var: Var.t;
+    }
     [@@deriving sexp, equal, compare]
   end
   include T
 
   module Set = Set.Make(T)
   module Map = Map.Make(T)
-  let to_string (use : t) : string = match use with
-    | Instruction (n, v) -> Printf.sprintf "iuse(%s, %s)" (Instr.Label.to_string n) (Var.to_string v)
-    | Merge (n, v) -> Printf.sprintf "muse(%d, %s)" n (Var.to_string v)
+  let to_string (use : t) : string = Printf.sprintf "iuse(%s, %s)" (Instr.Label.to_string use.label) (Var.to_string use.var)
+  let make (label : Instr.Label.t) (var : Var.t) = { label; var; }
 end
 
 module Def = struct
@@ -28,14 +26,12 @@ module Def = struct
         - At the entry of a function (e.g., for local, global, and memory variables) *)
     type t =
       | Instruction of Instr.Label.t * Var.t (* Label of the instruction and variable defined *) (* TODO: the label is part of the variable *)
-      | Merge of int * Var.t (* Label of the merge node and variable defined *)
       | Entry of Var.t (* Only the variable defined (because use-def is intraprocedural, we know the function) *)
       | Constant of Prim_value.t (* A constant does not really have a definition *)
     [@@deriving equal, compare]
 
     let to_string (def : t) : string = match def with
       | Instruction (n, v) -> Printf.sprintf "idef(%s, %s)" (Instr.Label.to_string n) (Var.to_string v)
-      | Merge (n, v) -> Printf.sprintf "mdef(%d, %s)" n (Var.to_string v)
       | Entry v -> Printf.sprintf "edef(%s)" (Var.to_string v)
       | Constant v -> Printf.sprintf "const(%s)" (Prim_value.to_string v)
   end
@@ -118,8 +114,13 @@ let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
         | Call ((_, arity_out), _) -> top_n arity_out
         | CallIndirect ((_, arity_out), _) -> top_n arity_out
         | Merge ->
+          (* Merge instruction defines new variabes *)
           let block = Cfg.find_enclosing_block cfg instr in
-          List.map (Spec_inference.new_merge_variables cfg block) ~f:snd
+          let vars = List.map (Spec_inference.new_merge_variables cfg block) ~f:snd in
+          (* There might be duplicates. For example, i3 becomes m0 from one branch, and i4 becomes m0 from another branch.
+             If that is the case, we have two definitions of m0.
+             Hence we eliminate duplicates *)
+          Var.Set.to_list (Var.Set.of_list vars)
         | Br _ | BrIf _ | BrTable _ | Return | Unreachable -> []
       end
   in
@@ -158,8 +159,9 @@ let instr_use (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list = match
       | CallIndirect ((arity_in, __), _) -> top_n (arity_in + 1) (* + 1 because we need to pop the index that will refer to the called function, on top of the arguments *)
       | BrIf _ | BrTable _ -> top_n 1
       | Merge ->
+        (* Merge instruction uses the variables it redefines *)
         let block = Cfg.find_enclosing_block cfg instr in
-        List.map (Spec_inference.new_merge_variables cfg block) ~f:snd
+        List.map (Spec_inference.new_merge_variables cfg block) ~f:fst
       | Br _ | Return | Unreachable -> []
     end
 
@@ -235,15 +237,17 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
       ~init:(defs, uses)
       ~f:(fun (defs, uses) instr ->
           let defs = List.fold_left (instr_def cfg instr) ~init:defs ~f:(fun defs var ->
+              Log.debug (Printf.sprintf "instruction %s defines %s\n" (Instr.to_string instr ~annot_str:Spec.to_string) (Var.to_string var));
               match Var.Map.add defs ~key:var ~data:(Def.Instruction (Instr.label instr, var)) with
               | `Duplicate -> failwith (Printf.sprintf "use_def: duplicate define of %s in instruction %s, was already defined at %s"
-                                          (Var.to_string var) (Instr.to_string instr Spec.to_string)
+                                          (Var.to_string var) (Instr.to_string instr ~annot_str:Spec.to_string)
                                           (Def.to_string (Var.Map.find_exn defs var)))
               | `Ok r -> r) in
           let uses = List.fold_left (instr_use cfg instr) ~init:uses ~f:(fun uses var ->
+              Log.debug (Printf.sprintf "instruction %s uses %s\n" (Instr.to_string instr ~annot_str:Spec.to_string) (Var.to_string var));
               Var.Map.update uses var ~f:(function
-                  | Some v -> Use.Set.add v (Use.Instruction (Instr.label instr, var))
-                  | None -> Use.Set.singleton (Use.Instruction (Instr.label instr, var)))) in
+                  | Some v -> Use.Set.add v { label = Instr.label instr; var }
+                  | None -> Use.Set.singleton { label = Instr.label instr; var })) in
           (defs, uses)) in
   (* From this, it is a matter of folding over use to construct the DefUseMap:
      Given a use of v at instruction lab, add key:(lab, v) data:(lookup defs v) *)
@@ -261,16 +265,17 @@ module Test = struct
     let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
-    memory.size ;; Instr 0
-    memory.size ;; Instr 1
-    i32.add)    ;; Instr 2
+    memory.size ;; Instr 0 [i0] defines i0, uses nothing
+    memory.size ;; Instr 1 [i1] defines i1, uses nothing
+    i32.add     ;; Instr 2 [i2] defines i2, uses i0 and i1
+                ;; return block: defines ret, uses i2
+    )
   )" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-    Printf.printf "----- DOT ----\n%s\n" (Cfg.to_dot ~spec_str:Spec.to_dot_string cfg);
     let _, _, actual = make cfg in
-    let expected = Use.Map.of_alist_exn [(Use.Instruction (lab 2, Var.Var (lab 0)), Def.Instruction (lab 0, (Var.Var (lab 0))));
-                                         (Use.Instruction (lab 2, Var.Var (lab 1)), Def.Instruction (lab 1, Var.Var (lab 1)));
-                                         (Use.Merge (1, Var.Var (lab 2)), Def.Instruction (lab 2, Var.Var (lab 2)))] in
+    let expected = Use.Map.of_alist_exn [(Use.make (lab 2) (Var.Var (lab 0)), Def.Instruction (lab 0, (Var.Var (lab 0))));
+                                         (Use.make (lab 2) (Var.Var (lab 1)), Def.Instruction (lab 1, Var.Var (lab 1)));
+                                         (Use.make (merge 1) (Var.Var (lab 2)), Def.Instruction (lab 2, Var.Var (lab 2)))] in
     UseDefChains.check_equality ~actual:actual ~expected:expected
 
   let%test "ud-chain with locals" =
@@ -284,11 +289,11 @@ module Test = struct
   )" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let _, _, actual = make cfg in
-    let expected = Use.Map.of_alist_exn [(Use.Instruction (lab 0, Var.Local 0), Def.Entry (Var.Local 0));
-                                         (Use.Instruction (lab 1, Var.Local 1), Def.Entry (Var.Local 1));
-                                         (Use.Instruction (lab 2, Var.Local 0), Def.Entry (Var.Local 0));
-                                         (Use.Instruction (lab 2, Var.Local 1), Def.Entry (Var.Local 1));
-                                         (Use.Merge (1, Var.Var (lab 2)), Def.Instruction (lab 2, Var.Var (lab 2)))] in
+    let expected = Use.Map.of_alist_exn [(Use.make (lab 0) (Var.Local 0), Def.Entry (Var.Local 0));
+                                         (Use.make (lab 1) (Var.Local 1), Def.Entry (Var.Local 1));
+                                         (Use.make (lab 2) (Var.Local 0), Def.Entry (Var.Local 0));
+                                         (Use.make (lab 2) (Var.Local 1), Def.Entry (Var.Local 1));
+                                         (Use.make (merge 1) (Var.Var (lab 2)), Def.Instruction (lab 2, Var.Var (lab 2)))] in
     UseDefChains.check_equality ~actual:actual ~expected:expected
 
   let%test "use-def with merge blocks" =
@@ -296,26 +301,25 @@ module Test = struct
     let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
-    memory.size     ;; Instr 0
-    if (result i32) ;; Instr 1
-      memory.size   ;; Instr 2
+    memory.size     ;; Instr 0 [i0]
+    if (result i32) ;; Instr 1 [] uses i0
+      memory.size   ;; Instr 2 [i2]
     else
-      memory.size   ;; Instr 3
+      memory.size   ;; Instr 3 [i3]
     end
-    ;; At this point we have a merge block, merging var 2 and var 3 into m4_1
+    ;; At this point we have a merge block, merging i2 and i3 into m4_1
     memory.size     ;; Instr 4
     i32.add)        ;; Instr 5
     ;; Final merge block: i5 -> ret
   )" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let _, _, actual = make cfg in
-    let expected = Use.Map.of_alist_exn [(Use.Instruction (lab 1, Var.Var (lab 0)), Def.Instruction (lab 0, Var.Var (lab 0)));
-                                         (Use.Instruction (lab 5, Var.Var (lab 4)), Def.Instruction (lab 4, Var.Var (lab 4)));
-                                         (Use.Instruction (lab 5, Var.Merge (4, 1)), Def.Merge (4, Var.Merge (4, 1)));
-                                         (Use.Merge (4, Var.Var (lab 2)), Def.Instruction (lab 2, Var.Var (lab 2)));
-                                         (Use.Merge (4, Var.Var (lab 3)), Def.Instruction (lab 3, Var.Var (lab 3)));
-                                         (Use.Merge (6, Var.Var (lab 5)), Def.Instruction (lab 5, Var.Var (lab 5)))] in
-
+    let expected = Use.Map.of_alist_exn [(Use.make (lab 1) (Var.Var (lab 0)), Def.Instruction (lab 0, Var.Var (lab 0)));
+                                         (Use.make (lab 5) (Var.Var (lab 4)), Def.Instruction (lab 4, Var.Var (lab 4)));
+                                         (Use.make (lab 5) (Var.Merge (4, 1)), Def.Instruction (merge 4, Var.Merge (4, 1)));
+                                         (Use.make (merge 4) (Var.Var (lab 2)), Def.Instruction (lab 2, Var.Var (lab 2)));
+                                         (Use.make (merge 4) (Var.Var (lab 3)), Def.Instruction (lab 3, Var.Var (lab 3)));
+                                         (Use.make (merge 6) (Var.Var (lab 5)), Def.Instruction (lab 5, Var.Var (lab 5)))] in
     UseDefChains.check_equality ~actual:actual ~expected:expected
 
   let%test "use-def with memory" =
@@ -332,10 +336,9 @@ module Test = struct
   )" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let _, _, actual = make cfg in
-    let expected = Use.Map.of_alist_exn [(Use.Instruction (lab 2, Var.Var (lab 0)), Def.Instruction (lab 0, Var.Var (lab 0)));
-                                         (Use.Instruction (lab 2, Var.Var (lab 1)), Def.Instruction (lab 1, Var.Var (lab 1)));
-                                         (Use.Instruction (lab 5, Var.Var (lab 3)), Def.Instruction (lab 3, Var.Var (lab 3)));
-                                         (Use.Instruction (lab 5, Var.Var (lab 4)), Def.Instruction (lab 4, Var.Var (lab 4)))] in
+    let expected = Use.Map.of_alist_exn [(Use.make (lab 2) (Var.Var (lab 0)), Def.Instruction (lab 0, Var.Var (lab 0)));
+                                         (Use.make (lab 2) (Var.Var (lab 1)), Def.Instruction (lab 1, Var.Var (lab 1)));
+                                         (Use.make (lab 5) (Var.Var (lab 3)), Def.Instruction (lab 3, Var.Var (lab 3)));
+                                         (Use.make (lab 5) (Var.Var (lab 4)), Def.Instruction (lab 4, Var.Var (lab 4)))] in
     UseDefChains.check_equality ~actual:actual ~expected:expected
-
 end

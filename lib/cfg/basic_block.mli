@@ -11,9 +11,9 @@ val equal : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
 
 val compare : ('a -> 'a -> int) -> 'a t -> 'a t -> int
 
-val to_string : 'a t -> ('a -> string) -> string
+val to_string : ?annot_str:('a -> string) -> 'a t -> string
 
-val to_dot : 'a t -> ('a -> string) -> string
+val to_dot : ?annot_str:('a -> string) -> 'a t -> string
 
 val all_instructions : 'a t -> 'a Instr.t list
 

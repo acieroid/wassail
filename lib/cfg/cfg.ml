@@ -56,14 +56,10 @@ type 'a t = {
 
 let to_string (cfg : 'a t) : string = Printf.sprintf "CFG of function %s" (Int32.to_string cfg.idx)
 
-let to_dot ?spec_str:(spec_str : ('a -> string) option) (cfg : 'a t) : string =
-  let annot_to_string = match spec_str with
-    | Some f -> f
-    | None -> fun _ -> ""
-  in
+let to_dot ?annot_str:(annot_str : ('a -> string) = fun _ -> "") (cfg : 'a t) : string =
   Printf.sprintf "digraph \"CFG of function %s\" {\n%s\n%s}\n"
     (Int32.to_string cfg.idx)
-    (String.concat ~sep:"\n" (List.map (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, b) -> Basic_block.to_dot b annot_to_string)))
+    (String.concat ~sep:"\n" (List.map (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, b) -> Basic_block.to_dot ~annot_str b)))
     (String.concat ~sep:"\n" (List.concat_map (IntMap.to_alist cfg.edges) ~f:(fun (src, dsts) ->
          List.map (Edge.Set.to_list dsts) ~f:(fun (dst, br) -> Printf.sprintf "block%d -> block%d [label=\"%s\"];\n" src dst (match br with
              | Some true -> "t"
