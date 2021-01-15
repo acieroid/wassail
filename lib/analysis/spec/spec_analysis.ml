@@ -11,8 +11,10 @@ let analyze_intra1 (module_ : Wasm_module.t) (idx : Int32.t) : Spec.t Cfg.t =
   | Some res -> res
   | None -> failwith "Spec_analysis.analyze_intra did not actually analyze"
 
-let%test_unit "spec analysis does not error" =
-  let module_ = Wasm_module.of_string "(module
+
+module Test = struct
+  let%test_unit "spec analysis does not error" =
+    let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     i32.const 256
@@ -22,5 +24,6 @@ let%test_unit "spec analysis does not error" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let _ : Spec.t Cfg.t = analyze_intra1 module_ 0l in
-  ()
+    let _ : Spec.t Cfg.t = analyze_intra1 module_ 0l in
+    ()
+end

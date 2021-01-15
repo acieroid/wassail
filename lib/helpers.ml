@@ -46,23 +46,6 @@ module List32 = struct
     List.mapi l ~f:(fun x -> f (Int32.of_int_exn x))
 end
 
-module type EqualT = sig
-  type t
-  [@@deriving equal]
-  val to_string : t -> string
-end
-
-(** Module that provides helper functions to use within tests *)
-module TestHelpers(T : EqualT) = struct
-  (** Check equality and print both elements if they are not equal. *)
-  let check_equality ~expected:(expected : 'a) ~actual:(actual : 'a) : bool =
-    let eq = T.equal actual expected in
-    begin if not eq then
-        Printf.printf "not equal:\n\texpected: %s\n\tactual: %s\n" (T.to_string actual) (T.to_string expected)
-    end;
-    eq
-end
-
 (** Get the nth element of a list *)
 let get_nth (l : 'a list) (n : Int32.t) : Var.t = List.nth_exn l (Int32.to_int_exn n)
 

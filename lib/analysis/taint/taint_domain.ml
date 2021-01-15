@@ -25,26 +25,11 @@ module Taint = struct
     | _, TopTaint -> false
     | Taints v1, Taints v2 -> Var.Set.is_subset v2 ~of_:v1
 
-  let%test "taint subsumption works as expected" =
-    subsumes TopTaint bottom &&
-    subsumes (taint (Var.Local 0)) bottom &&
-    subsumes (taint (Var.Local 0)) (taint (Var.Local 0)) &&
-    subsumes (taints (Var.Set.of_list [Var.Local 0; Var.Local 1])) (taint (Var.Local 0)) &&
-    not (subsumes bottom (taint (Var.Local 0))) &&
-    not (subsumes bottom TopTaint)
-
   (** Joining taints is simply taking their union *)
   let join (t1 : t) (t2 : t) : t = match t1, t2 with
     | TopTaint, _
     | _, TopTaint -> TopTaint
     | Taints t1, Taints t2 -> Taints (Var.Set.union t1 t2)
-
-  let%test "taint joining works as expected" =
-    equal (join bottom bottom) bottom &&
-    equal (join top bottom) top &&
-    equal (join bottom top) top &&
-    equal (join (taint (Var.Local 0)) (taint (Var.Local 1)))
-      (taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))
 
   (** Converts a taint to its string representation *)
   let to_string (t : t) : string = match t with
@@ -53,11 +38,6 @@ module Taint = struct
         String.concat ~sep:"," (List.map (Var.Set.to_list t)
                                   ~f:Var.to_string)
     | TopTaint -> "TopTaint"
-
-  let%test "taint to_string works as expected" =
-    String.equal "_" (to_string bottom) &&
-    String.equal "l0" (to_string (taint (Var.Local 0))) &&
-    String.equal "l0,l1" (to_string (taints (Var.Set.of_list [Var.Local 0; Var.Local 1])))
 
   (** Parses a taint from its string representation *)
   let of_string (s : string) : t = match s with
@@ -83,18 +63,41 @@ module Taint = struct
       (join (Taints (Var.Set.diff ts vars_to_remove)) taint_to_add)
     | TopTaint -> TopTaint
 
-  let%test "taint substitute works as expected" =
-    let l0 = taint (Var.Local 0) in
-    let l1 = taint (Var.Local 1) in
-    let l0l1 = taints (Var.Set.of_list [Var.Local 0; Var.Local 1]) in
-    equal (substitute bottom []) bottom &&
-    equal (substitute bottom [(Var.Local 0, top)]) bottom &&
-    equal (substitute top [(Var.Local 0, bottom)]) top &&
-    equal (substitute l0 [(Var.Local 0, taint (Var.Local 1))]) l1 &&
-    equal (substitute l0 [(Var.Local 0, top)]) top &&
-    equal (substitute l0l1 [(Var.Local 0, l1)]) l1 &&
-    equal (substitute l0l1 [(Var.Local 0, l0)]) l0l1 &&
-    equal (substitute l0l1 [(Var.Local 1, l0)]) l0
+
+  module Test = struct
+    let%test "taint subsumption works as expected" =
+      subsumes TopTaint bottom &&
+      subsumes (taint (Var.Local 0)) bottom &&
+      subsumes (taint (Var.Local 0)) (taint (Var.Local 0)) &&
+      subsumes (taints (Var.Set.of_list [Var.Local 0; Var.Local 1])) (taint (Var.Local 0)) &&
+      not (subsumes bottom (taint (Var.Local 0))) &&
+      not (subsumes bottom TopTaint)
+
+    let%test "taint joining works as expected" =
+      equal (join bottom bottom) bottom &&
+      equal (join top bottom) top &&
+      equal (join bottom top) top &&
+      equal (join (taint (Var.Local 0)) (taint (Var.Local 1)))
+        (taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))
+
+    let%test "taint to_string works as expected" =
+      String.equal "_" (to_string bottom) &&
+      String.equal "l0" (to_string (taint (Var.Local 0))) &&
+      String.equal "l0,l1" (to_string (taints (Var.Set.of_list [Var.Local 0; Var.Local 1])))
+
+    let%test "taint substitute works as expected" =
+      let l0 = taint (Var.Local 0) in
+      let l1 = taint (Var.Local 1) in
+      let l0l1 = taints (Var.Set.of_list [Var.Local 0; Var.Local 1]) in
+      equal (substitute bottom []) bottom &&
+      equal (substitute bottom [(Var.Local 0, top)]) bottom &&
+      equal (substitute top [(Var.Local 0, bottom)]) top &&
+      equal (substitute l0 [(Var.Local 0, taint (Var.Local 1))]) l1 &&
+      equal (substitute l0 [(Var.Local 0, top)]) top &&
+      equal (substitute l0l1 [(Var.Local 0, l1)]) l1 &&
+      equal (substitute l0l1 [(Var.Local 0, l0)]) l0l1 &&
+      equal (substitute l0l1 [(Var.Local 1, l0)]) l0
+  end
 end
 
 (** The state of the taint analysis is a map from variables to their taint values.
@@ -104,7 +107,6 @@ type t = Taint.t Var.Map.t
 
 (** The bottom state does not contain any taint *)
 let bottom : t = Var.Map.empty
-
 
 (** The top state taints all globals and the return value with the top taint *)
 let top (globals : Var.t list) (ret : Var.t option) : t =
@@ -130,31 +132,6 @@ let subsumes (t1 : t) (t2 : t) : bool =
       else
         false)
 
-let%test "subsumption works as expected" =
-  let open Instr.Label.Test in
-  (* [i0 -> bottom *)
-  let bot = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                  (Var.Var (lab 0), Taint.bottom)] in
-  (* [i0 -> l0] *)
-  let l0 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                 (Var.Local 1, Taint.taint (Var.Local 1));
-                                 (Var.Var (lab 0), Taint.taint (Var.Local 0))] in
-  (* [i0 -> l1] *)
-  let l1 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                 (Var.Local 1, Taint.taint (Var.Local 1));
-                                 (Var.Var (lab 0), Taint.taint (Var.Local 1))] in
-  (* [i0 -> top] *)
-  let top = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                   (Var.Var (lab 0), Taint.top)] in
-  subsumes l0 bot && not (subsumes bot l0)  &&
-  subsumes l1 bot && not (subsumes bot l1) &&
-  subsumes top bot && not (subsumes bot top)  &&
-  subsumes top l0 && not (subsumes l0 top) &&
-  subsumes top l1 && not (subsumes l1 top) &&
-  not (subsumes l0 l1) && not (subsumes l1 l0)
-
 (** Convert a taint map to its string representation *)
 let to_string (s : t) : string =
   Printf.sprintf "[%s]" (String.concat ~sep:", "
@@ -164,56 +141,11 @@ let to_string (s : t) : string =
                                     (Var.to_string k)
                                     (Taint.to_string t))))
 
-let%test "to_string produces the expected string" =
-  let open Instr.Label.Test in
-  (* [i0 -> bottom *)
-  let bot = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                  (Var.Var (lab 0), Taint.bottom)] in
-  (* [i0 -> l0] *)
-  let l0 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                 (Var.Local 1, Taint.taint (Var.Local 1));
-                                 (Var.Var (lab 0), Taint.taint (Var.Local 0))] in
-  let l0l1 =  Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                    (Var.Local 1, Taint.taint (Var.Local 1));
-                                    (Var.Var (lab 0), Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))] in
-  String.equal (to_string bot) "[i0: _, l0: l0, l1: l1]" &&
-  String.equal (to_string l0) "[i0: l0, l0: l0, l1: l1]" &&
-  String.equal (to_string l0l1) "[i0: l0,l1, l0: l0, l1: l1]"
-
 (** Join two taint maps together *)
 let join (s1 : t) (s2 : t) : t =
   Var.Map.merge s1 s2 ~f:(fun ~key:_ v -> match v with
       | `Both (x, y) -> Some (Taint.join x y)
       | `Left x | `Right x -> Some x)
-
-let%test "join produces the expected taint maps" =
-  let open Instr.Label.Test in
-  (* [i0 -> bottom *)
-  let bot = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                  (Var.Var (lab 0), Taint.bottom)] in
-  (* [i0 -> l0] *)
-  let l0 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                 (Var.Local 1, Taint.taint (Var.Local 1));
-                                 (Var.Var (lab 0), Taint.taint (Var.Local 0))] in
-  (* [i0 -> l1] *)
-  let l1 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                 (Var.Local 1, Taint.taint (Var.Local 1));
-                                 (Var.Var (lab 0), Taint.taint (Var.Local 1))] in
-  (* [i0 -> {l0,l1}] *)
-  let l0l1 =  Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                  (Var.Var (lab 0), Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))] in
-  (* [i0 -> top] *)
-  let top = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                   (Var.Var (lab 0), Taint.top)] in
-  equal (join bot l0) l0 && equal (join l0 bot) l0 &&
-  equal (join l0 l1) l0l1 && equal (join l1 l0) l0l1 &&
-  equal (join l0 l0l1) l0l1 && equal (join l0l1 l0) l0l1 &&
-  equal (join bot top) top && equal (join top bot) top &&
-  equal (join top l0) top && equal (join l0 top) top
 
 (** Get the taint of a variable in the taint map *)
 let get_taint (s : t) (var : Var.t) : Taint.t =
@@ -221,86 +153,160 @@ let get_taint (s : t) (var : Var.t) : Taint.t =
   | Some t -> t
   | None -> Taints Var.Set.empty
 
-let%test "get_taint produces the expected taint" =
-  let open Instr.Label.Test in
-  (* [i0 -> bottom *)
-  let bot = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                  (Var.Var (lab 0), Taint.bottom)] in
-  (* [i0 -> l0] *)
-  let l0 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                 (Var.Local 1, Taint.taint (Var.Local 1));
-                                 (Var.Var (lab 0), Taint.taint (Var.Local 0))] in
-  (* [i0 -> l1] *)
-  let l1 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                 (Var.Local 1, Taint.taint (Var.Local 1));
-                                 (Var.Var (lab 0), Taint.taint (Var.Local 1))] in
-  (* [i0 -> {l0,l1}] *)
-  let l0l1 =  Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                  (Var.Var (lab 0), Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))] in
-  (* [i0 -> top] *)
-  let top = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                  (Var.Var (lab 0), Taint.top)] in
-  Taint.equal (get_taint bot  (Var.Var (lab 0))) Taint.bottom &&
-  Taint.equal (get_taint l0   (Var.Var (lab 0))) (Taint.taint (Var.Local 0)) &&
-  Taint.equal (get_taint l1   (Var.Var (lab 0))) (Taint.taint (Var.Local 1)) &&
-  Taint.equal (get_taint l0l1 (Var.Var (lab 0))) (Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1])) &&
-  Taint.equal (get_taint top  (Var.Var (lab 0))) Taint.top
-
 (** Add taint to a variable *)
 let add_taint (s : t) (v : Var.t) (taint : Taint.t) : t =
   Var.Map.update s v ~f:(function
       | None -> taint
       | Some t -> Taint.join t taint)
 
-let%test "add_taint adds the taint as expected" =
-  let open Instr.Label.Test in
-  (* [i0 -> bottom *)
-  let bot = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                  (Var.Var (lab 0), Taint.bottom)] in
-  (* [i0 -> l0] *)
-  let l0 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                 (Var.Local 1, Taint.taint (Var.Local 1));
-                                 (Var.Var (lab 0), Taint.taint (Var.Local 0))] in
-  (* [i0 -> {l0,l1}] *)
-  let l0l1 =  Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                  (Var.Var (lab 0), Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))] in
-  (* [i0 -> top] *)
-  let top = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                  (Var.Var (lab 0), Taint.top)] in
-  equal (add_taint bot (Var.Var (lab 0)) (Taint.taint (Var.Local 0))) l0 &&
-  equal (add_taint l0 (Var.Var (lab 0)) (Taint.taint (Var.Local 1))) l0l1 &&
-  equal (add_taint l0l1 (Var.Var (lab 0)) (Taint.taint (Var.Local 1))) l0l1 &&
-  equal (add_taint top (Var.Var (lab 0)) (Taint.taint (Var.Local 1))) top
-
 (** Make the taint flow from one variable to another *)
 let add_taint_v (s : t) (v : Var.t) (taint : Var.t) : t =
   add_taint s v (get_taint s taint)
 
-let%test "add_taint_v adds the taint as expected" =
-  let open Instr.Label.Test in
-  (* [i0 -> bottom *)
-  let bot = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                  (Var.Var (lab 0), Taint.bottom)] in
-  (* [i0 -> l0] *)
-  let l0 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                 (Var.Local 1, Taint.taint (Var.Local 1));
-                                 (Var.Var (lab 0), Taint.taint (Var.Local 0))] in
-  (* [i0 -> {l0,l1}] *)
-  let l0l1 =  Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                  (Var.Var (lab 0), Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))] in
-  (* [i0 -> top] *)
-  let top = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
-                                  (Var.Local 1, Taint.taint (Var.Local 1));
-                                  (Var.Var (lab 0), Taint.top)] in
-  equal (add_taint_v bot (Var.Var (lab 0)) (Var.Local 0)) l0 &&
-  equal (add_taint_v l0 (Var.Var (lab 0)) (Var.Local 1)) l0l1 &&
-  equal (add_taint_v l0l1 (Var.Var (lab 0)) (Var.Local 1)) l0l1 &&
-  equal (add_taint_v top (Var.Var (lab 0)) (Var.Local 1)) top
+
+module Test = struct
+  let%test "subsumption works as expected" =
+    let open Instr.Label.Test in
+    (* [i0 -> bottom *)
+    let bot = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                    (Var.Local 1, Taint.taint (Var.Local 1));
+                                    (Var.Var (lab 0), Taint.bottom)] in
+    (* [i0 -> l0] *)
+    let l0 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                   (Var.Local 1, Taint.taint (Var.Local 1));
+                                   (Var.Var (lab 0), Taint.taint (Var.Local 0))] in
+    (* [i0 -> l1] *)
+    let l1 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                   (Var.Local 1, Taint.taint (Var.Local 1));
+                                   (Var.Var (lab 0), Taint.taint (Var.Local 1))] in
+    (* [i0 -> top] *)
+    let top = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                    (Var.Local 1, Taint.taint (Var.Local 1));
+                                    (Var.Var (lab 0), Taint.top)] in
+    subsumes l0 bot && not (subsumes bot l0)  &&
+    subsumes l1 bot && not (subsumes bot l1) &&
+    subsumes top bot && not (subsumes bot top)  &&
+    subsumes top l0 && not (subsumes l0 top) &&
+    subsumes top l1 && not (subsumes l1 top) &&
+    not (subsumes l0 l1) && not (subsumes l1 l0)
+
+  let%test "to_string produces the expected string" =
+    let open Instr.Label.Test in
+    (* [i0 -> bottom *)
+    let bot = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                    (Var.Local 1, Taint.taint (Var.Local 1));
+                                    (Var.Var (lab 0), Taint.bottom)] in
+    (* [i0 -> l0] *)
+    let l0 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                   (Var.Local 1, Taint.taint (Var.Local 1));
+                                   (Var.Var (lab 0), Taint.taint (Var.Local 0))] in
+    let l0l1 =  Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                      (Var.Local 1, Taint.taint (Var.Local 1));
+                                      (Var.Var (lab 0), Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))] in
+    String.equal (to_string bot) "[i0: _, l0: l0, l1: l1]" &&
+    String.equal (to_string l0) "[i0: l0, l0: l0, l1: l1]" &&
+    String.equal (to_string l0l1) "[i0: l0,l1, l0: l0, l1: l1]"
+
+  let%test "join produces the expected taint maps" =
+    let open Instr.Label.Test in
+    (* [i0 -> bottom *)
+    let bot = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                    (Var.Local 1, Taint.taint (Var.Local 1));
+                                    (Var.Var (lab 0), Taint.bottom)] in
+    (* [i0 -> l0] *)
+    let l0 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                   (Var.Local 1, Taint.taint (Var.Local 1));
+                                   (Var.Var (lab 0), Taint.taint (Var.Local 0))] in
+    (* [i0 -> l1] *)
+    let l1 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                   (Var.Local 1, Taint.taint (Var.Local 1));
+                                   (Var.Var (lab 0), Taint.taint (Var.Local 1))] in
+    (* [i0 -> {l0,l1}] *)
+    let l0l1 =  Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                      (Var.Local 1, Taint.taint (Var.Local 1));
+                                      (Var.Var (lab 0), Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))] in
+    (* [i0 -> top] *)
+    let top = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                    (Var.Local 1, Taint.taint (Var.Local 1));
+                                    (Var.Var (lab 0), Taint.top)] in
+    equal (join bot l0) l0 && equal (join l0 bot) l0 &&
+    equal (join l0 l1) l0l1 && equal (join l1 l0) l0l1 &&
+    equal (join l0 l0l1) l0l1 && equal (join l0l1 l0) l0l1 &&
+    equal (join bot top) top && equal (join top bot) top &&
+    equal (join top l0) top && equal (join l0 top) top
+
+  let%test "get_taint produces the expected taint" =
+    let open Instr.Label.Test in
+    (* [i0 -> bottom *)
+    let bot = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                    (Var.Local 1, Taint.taint (Var.Local 1));
+                                    (Var.Var (lab 0), Taint.bottom)] in
+    (* [i0 -> l0] *)
+    let l0 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                   (Var.Local 1, Taint.taint (Var.Local 1));
+                                   (Var.Var (lab 0), Taint.taint (Var.Local 0))] in
+    (* [i0 -> l1] *)
+    let l1 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                   (Var.Local 1, Taint.taint (Var.Local 1));
+                                   (Var.Var (lab 0), Taint.taint (Var.Local 1))] in
+    (* [i0 -> {l0,l1}] *)
+    let l0l1 =  Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                      (Var.Local 1, Taint.taint (Var.Local 1));
+                                      (Var.Var (lab 0), Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))] in
+    (* [i0 -> top] *)
+    let top = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                    (Var.Local 1, Taint.taint (Var.Local 1));
+                                    (Var.Var (lab 0), Taint.top)] in
+    Taint.equal (get_taint bot  (Var.Var (lab 0))) Taint.bottom &&
+    Taint.equal (get_taint l0   (Var.Var (lab 0))) (Taint.taint (Var.Local 0)) &&
+    Taint.equal (get_taint l1   (Var.Var (lab 0))) (Taint.taint (Var.Local 1)) &&
+    Taint.equal (get_taint l0l1 (Var.Var (lab 0))) (Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1])) &&
+    Taint.equal (get_taint top  (Var.Var (lab 0))) Taint.top
+
+  let%test "add_taint adds the taint as expected" =
+    let open Instr.Label.Test in
+    (* [i0 -> bottom *)
+    let bot = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                    (Var.Local 1, Taint.taint (Var.Local 1));
+                                    (Var.Var (lab 0), Taint.bottom)] in
+    (* [i0 -> l0] *)
+    let l0 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                   (Var.Local 1, Taint.taint (Var.Local 1));
+                                   (Var.Var (lab 0), Taint.taint (Var.Local 0))] in
+    (* [i0 -> {l0,l1}] *)
+    let l0l1 =  Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                      (Var.Local 1, Taint.taint (Var.Local 1));
+                                      (Var.Var (lab 0), Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))] in
+    (* [i0 -> top] *)
+    let top = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                    (Var.Local 1, Taint.taint (Var.Local 1));
+                                    (Var.Var (lab 0), Taint.top)] in
+    equal (add_taint bot (Var.Var (lab 0)) (Taint.taint (Var.Local 0))) l0 &&
+    equal (add_taint l0 (Var.Var (lab 0)) (Taint.taint (Var.Local 1))) l0l1 &&
+    equal (add_taint l0l1 (Var.Var (lab 0)) (Taint.taint (Var.Local 1))) l0l1 &&
+    equal (add_taint top (Var.Var (lab 0)) (Taint.taint (Var.Local 1))) top
+
+  let%test "add_taint_v adds the taint as expected" =
+    let open Instr.Label.Test in
+    (* [i0 -> bottom *)
+    let bot = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                    (Var.Local 1, Taint.taint (Var.Local 1));
+                                    (Var.Var (lab 0), Taint.bottom)] in
+    (* [i0 -> l0] *)
+    let l0 = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                   (Var.Local 1, Taint.taint (Var.Local 1));
+                                   (Var.Var (lab 0), Taint.taint (Var.Local 0))] in
+    (* [i0 -> {l0,l1}] *)
+    let l0l1 =  Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                      (Var.Local 1, Taint.taint (Var.Local 1));
+                                      (Var.Var (lab 0), Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))] in
+    (* [i0 -> top] *)
+    let top = Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
+                                    (Var.Local 1, Taint.taint (Var.Local 1));
+                                    (Var.Var (lab 0), Taint.top)] in
+    equal (add_taint_v bot (Var.Var (lab 0)) (Var.Local 0)) l0 &&
+    equal (add_taint_v l0 (Var.Var (lab 0)) (Var.Local 1)) l0l1 &&
+    equal (add_taint_v l0l1 (Var.Var (lab 0)) (Var.Local 1)) l0l1 &&
+    equal (add_taint_v top (Var.Var (lab 0)) (Var.Local 1)) top
+
+end

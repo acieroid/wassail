@@ -287,7 +287,7 @@ let build_all (mod_ : Wasm_module.t) : unit Cfg.t Int32Map.t =
       let faddr = Int32.(mod_.nimports + (Int32.of_int_exn i)) in
       (faddr, build faddr mod_)))
 
-module Cfg_builder_tests = struct
+module Test = struct
   (** Check that building the CFG for each function of a .wat file succeeds.
       Does not actually check that the CFG is correct. *)
   let test_cfgs file =

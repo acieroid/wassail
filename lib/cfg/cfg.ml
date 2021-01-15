@@ -56,7 +56,11 @@ type 'a t = {
 
 let to_string (cfg : 'a t) : string = Printf.sprintf "CFG of function %s" (Int32.to_string cfg.idx)
 
-let to_dot (cfg : 'a t) (annot_to_string : 'a -> string) : string =
+let to_dot ?spec_str:(spec_str : ('a -> string) option) (cfg : 'a t) : string =
+  let annot_to_string = match spec_str with
+    | Some f -> f
+    | None -> fun _ -> ""
+  in
   Printf.sprintf "digraph \"CFG of function %s\" {\n%s\n%s}\n"
     (Int32.to_string cfg.idx)
     (String.concat ~sep:"\n" (List.map (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, b) -> Basic_block.to_dot b annot_to_string)))
@@ -187,4 +191,4 @@ and state_after_block (cfg : 'a t) (block_idx : int) : 'a =
         state_before_block cfg succ
       | _ -> failwith "state_after_bloc: multiple successors for an empty block"
     end
-  | Data (i :: _) -> Instr.annotation_after (Data i)
+  | Data l -> Instr.annotation_after (Data (List.last_exn l))

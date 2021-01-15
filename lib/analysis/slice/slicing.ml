@@ -18,13 +18,13 @@ module SlicePart = struct
       let to_string (s : t) : string = String.concat ~sep:"," (List.map (to_list s) ~f:T.to_string)
     end
     include S
-    include TestHelpers(S)
+    include Test.Helpers(S)
   end
 end
 
 (** Performs backwards slicing on `cfg`, using the slicing criterion
-   `criterion`, encoded as an instruction index. Returns the set
-   of instructions that are part of the slice, as a list of instruction
+    `criterion`, encoded as an instruction index. Returns the set
+    of instructions that are part of the slice, as a list of instruction
     indices. *)
 let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : SlicePart.Set.t =
   let control_dependencies = Control_deps.make cfg in
@@ -75,89 +75,6 @@ let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : SlicePart.Set.t =
       loop (SlicePart.Set.remove worklist' slicepart) (SlicePart.Set.add slice slicepart) in
   loop (SlicePart.Set.singleton (Instruction criterion)) SlicePart.Set.empty
 
-let%test "simple slicing - first slicing criterion, only const" =
-  let open Instr.Label.Test in
-  let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;test;) (type 0) (param i32) (result i32)
-    memory.size ;; Instr 0
-    memory.size ;; Instr 1
-    i32.add     ;; Instr 2 -- slicing criterion
-    drop        ;; Instr 3
-    memory.size ;; Instr 4
-    memory.size ;; Instr 5
-    i32.add)    ;; Instr 6
-  )" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-  let actual = slicing cfg (lab 2) in
-  let expected = SlicePart.Set.of_list [Instruction (lab 0); Instruction (lab 1); Instruction (lab 2)] in
-  SlicePart.Set.check_equality ~actual:actual ~expected:expected
-
-let%test "simple slicing - second slicing criterion, with locals" =
-  let open Instr.Label.Test in
-  Spec_inference.propagate_globals := false;
-  Spec_inference.propagate_locals := false;
-  Spec_inference.use_const := false;
-  let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;test;) (type 0) (param i32) (result i32)
-    memory.size ;; Instr 0
-    memory.size ;; Instr 1
-    i32.add     ;; Instr 2
-    drop        ;; Instr 3
-    local.get 0 ;; Instr 4
-    memory.size ;; Instr 5
-    i32.add)    ;; Instr 6 -- slicing criterion
-  )" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-  let actual = slicing cfg (lab 6) in
-  let expected = SlicePart.Set.of_list [Instruction (lab 4); Instruction (lab 5); Instruction (lab 6)] in
-  SlicePart.Set.check_equality ~actual:actual ~expected:expected
-
-let%test "slicing with block and br_if" =
-  let open Instr.Label.Test in
-  let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;test;) (type 0) (param i32) (result i32)
-    block         ;; Instr 0
-      memory.size ;; Instr 1
-      br_if 0     ;; Instr 2
-      memory.size ;; Instr 3 -- slicing criterion
-      drop        ;; Instr 4
-    end
-    local.get 0)   ;; Instr 5
-  )" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-  let actual = slicing cfg (lab 3) in
-  let expected = SlicePart.Set.of_list [Instruction (lab 0); Instruction (lab 1); Instruction (lab 2); Instruction (lab 3)] in
-  SlicePart.Set.check_equality ~actual:actual ~expected:expected
-
-let%test "slicing with merge blocks" =
-  let open Instr.Label.Test in
-  let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;test;) (type 0) (param i32) (result i32)
-    memory.size     ;; Instr 0
-    if (result i32) ;; Instr 1
-      memory.size   ;; Instr 2
-    else
-      memory.size   ;; Instr 3
-    end
-    ;; Merge block 4 here
-    ;; ----
-    memory.size     ;; Instr 4
-    memory.size     ;; Instr 5
-    i32.add         ;; Instr 6
-    drop            ;; Instr 7
-    ;; ---- this previous part should not be part of the slice
-    memory.size     ;; Instr 8
-    i32.add)        ;; Instr 9 -- slicing criterion
-  )" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-  let actual = slicing cfg (lab 9) in
-  let expected = SlicePart.Set.of_list [Instruction (lab 0); Instruction (lab 1); Instruction (lab 2); Instruction (lab 3); Merge 4; Instruction (lab 8); Instruction (lab 9)] in
-  SlicePart.Set.check_equality ~actual:actual ~expected:expected
-
 (** Performs backwards slicing on `cfg`, relying on `slicing` defined above.
     Returns the slice as a modified CFG *)
 let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
@@ -165,14 +82,14 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
   let slice_instructions = Instr.Label.Set.of_list (List.filter_map (SlicePart.Set.to_list sliceparts) ~f:(function
       | Instruction i -> Some i
       | _ -> None)) in
-    let instructions = Instr.Label.Map.map (Instr.Label.Map.filteri cfg.instructions ~f:(fun ~key:idx ~data:_ -> Instr.Label.Set.mem slice_instructions idx)) ~f:Instr.clear_annotation in
+  let instructions = Instr.Label.Map.map (Instr.Label.Map.filteri cfg.instructions ~f:(fun ~key:idx ~data:_ -> Instr.Label.Set.mem slice_instructions idx)) ~f:Instr.clear_annotation in
   let (basic_blocks, edges, back_edges) =
     IntMap.fold cfg.basic_blocks ~init:(IntMap.empty, cfg.edges, cfg.back_edges) ~f:(fun ~key:block_idx ~data:block (basic_blocks, edges, back_edges) ->
         (* Remove any annotation of the block *)
         let block = Basic_block.clear_annotation block in
         (* The block could be empty after slicing and not to keep,
            EXCEPT if it is the entry block or if it is the exit block.
-        NOTE: this could be refined to remove entry/exit block only if
+           NOTE: this could be refined to remove entry/exit block only if
            it has one successor (which becomes the new entry  block)
            or one predecessor (which becomes the new exit block) *)
         let keep_anyway = if block_idx = cfg.entry_block then
@@ -239,7 +156,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
                      end else
                        (* No self-cycle. TODO: ensure correctness, but because the block is removed, that should not be a problem *)
                        edges))
-         end,
+           end,
            (* Mimic what's done for edges, this time for back edges *)
            begin
              let without_back_edges =
@@ -266,10 +183,67 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
       ~f:(fun edges (src, _) -> Cfg.Edges.remove edges src cfg.exit_block) in
   { cfg with basic_blocks; instructions; edges; back_edges }
 
-(*
-let%test_unit "slicing with merge blocks using slice" =
-  Instr.reset_counter ();
-  let module_ = Wasm_module.of_string "(module
+module Test = struct
+  let%test "simple slicing - first slicing criterion, only const" =
+    let open Instr.Label.Test in
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    memory.size ;; Instr 0
+    memory.size ;; Instr 1
+    i32.add     ;; Instr 2 -- slicing criterion
+    drop        ;; Instr 3
+    memory.size ;; Instr 4
+    memory.size ;; Instr 5
+    i32.add)    ;; Instr 6
+  )" in
+    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    let actual = slicing cfg (lab 2) in
+    let expected = SlicePart.Set.of_list [Instruction (lab 0); Instruction (lab 1); Instruction (lab 2)] in
+    SlicePart.Set.check_equality ~actual:actual ~expected:expected
+
+  let%test "simple slicing - second slicing criterion, with locals" =
+    let open Instr.Label.Test in
+    Spec_inference.propagate_globals := false;
+    Spec_inference.propagate_locals := false;
+    Spec_inference.use_const := false;
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    memory.size ;; Instr 0
+    memory.size ;; Instr 1
+    i32.add     ;; Instr 2
+    drop        ;; Instr 3
+    local.get 0 ;; Instr 4
+    memory.size ;; Instr 5
+    i32.add)    ;; Instr 6 -- slicing criterion
+  )" in
+    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    let actual = slicing cfg (lab 6) in
+    let expected = SlicePart.Set.of_list [Instruction (lab 4); Instruction (lab 5); Instruction (lab 6)] in
+    SlicePart.Set.check_equality ~actual:actual ~expected:expected
+
+  let%test "slicing with block and br_if" =
+    let open Instr.Label.Test in
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    block         ;; Instr 0
+      memory.size ;; Instr 1
+      br_if 0     ;; Instr 2
+      memory.size ;; Instr 3 -- slicing criterion
+      drop        ;; Instr 4
+    end
+    local.get 0)   ;; Instr 5
+  )" in
+    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    let actual = slicing cfg (lab 3) in
+    let expected = SlicePart.Set.of_list [Instruction (lab 0); Instruction (lab 1); Instruction (lab 2); Instruction (lab 3)] in
+    SlicePart.Set.check_equality ~actual:actual ~expected:expected
+
+  let%test "slicing with merge blocks" =
+    let open Instr.Label.Test in
+    let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     memory.size     ;; Instr 0
@@ -286,23 +260,48 @@ let%test_unit "slicing with merge blocks using slice" =
     drop            ;; Instr 7
     ;; ---- this previous part should not be part of the slice
     memory.size     ;; Instr 8
+    i32.add)        ;; Instr 9 -- slicing criterion
+  )" in
+    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    let actual = slicing cfg (lab 9) in
+    let expected = SlicePart.Set.of_list [Instruction (lab 0); Instruction (lab 1); Instruction (lab 2); Instruction (lab 3); Merge 4; Instruction (lab 8); Instruction (lab 9)] in
+    SlicePart.Set.check_equality ~actual:actual ~expected:expected
+
+
+(* let%test_unit "slicing with merge blocks using slice" =
+   Instr.reset_counter ();
+   let module_ = Wasm_module.of_string "(module
+   (type (;0;) (func (param i32) (result i32)))
+   (func (;test;) (type 0) (param i32) (result i32)
+    memory.size     ;; Instr 0
+    if (result i32) ;; Instr 1
+      memory.size   ;; Instr 2
+    else
+      memory.size   ;; Instr 3
+    end
+    ;; Merge block 4 here
+    ;; ----
+    memory.size     ;; Instr 4
+    memory.size     ;; Instr 5
+    i32.add         ;; Instr 6
+    drop            ;; Instr 7
+    ;; ---- this previous part should not be part of the slice
+    memory.size     ;; Instr 8
     i32.add)        ;; Instr 9
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
-  let sliced_cfg = slice cfg 9 in
-  let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-  (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
-  ()
+   (table (;0;) 1 1 funcref)
+   (memory (;0;) 2)
+   (global (;0;) (mut i32) (i32.const 66560)))" in
+   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+   let sliced_cfg = slice cfg 9 in
+   let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+   (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
+   ()
 
-*)
-
-let%test_unit "slicing with a block containing a single drop" =
-  let open Instr.Label.Test in
-  let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;test;) (type 0) (param i32) (result i32)
+   let%test_unit "slicing with a block containing a single drop" =
+   let open Instr.Label.Test in
+   let module_ = Wasm_module.of_string "(module
+   (type (;0;) (func (param i32) (result i32)))
+   (func (;test;) (type 0) (param i32) (result i32)
     block
       local.get 0   ;; Instr 0 [i0]
       local.get 0   ;; Instr 1 [i1, i0]
@@ -316,19 +315,19 @@ let%test_unit "slicing with a block containing a single drop" =
       i32.const 32  ;; Instr 6 ;; [i6, m1]
       i32.add       ;; Instr 7 ;; [i7]
     end)
-  )" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-  Printf.printf "DOT:\n%s\n" (Cfg.to_dot cfg (fun _ -> ""));
-  let sliced_cfg = slice cfg (lab 7) in
-  Printf.printf "Sliced: %s\n" (Cfg.to_dot sliced_cfg (fun _ -> ""));
-  let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-  ()
+   )" in
+   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+   Printf.printf "DOT:\n%s\n" (Cfg.to_dot cfg);
+   let sliced_cfg = slice cfg (lab 7) in
+   Printf.printf "Sliced: %s\n" (Cfg.to_dot sliced_cfg);
+   let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+   ()
 
-let%test_unit "slicing with a block containing a single drop - variant" =
-  let open Instr.Label.Test in
-  let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;test;) (type 0) (param i32) (result i32)
+   let%test_unit "slicing with a block containing a single drop - variant" =
+   let open Instr.Label.Test in
+   let module_ = Wasm_module.of_string "(module
+   (type (;0;) (func (param i32) (result i32)))
+   (func (;test;) (type 0) (param i32) (result i32)
     block
       local.get 0   ;; Instr 0
       local.get 0   ;; Instr 1
@@ -342,50 +341,49 @@ let%test_unit "slicing with a block containing a single drop - variant" =
       i32.const 32  ;; Instr 7
       i32.add       ;; Instr 8
     end)
-  )" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-  Printf.printf "DOT:\n%s\n" (Cfg.to_dot cfg (fun _ -> ""));
-  let sliced_cfg = slice cfg (lab 8) in
-  Printf.printf "Sliced: %s\n" (Cfg.to_dot sliced_cfg (fun _ -> ""));
-  let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-  ()
+   )" in
+   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+   Printf.printf "DOT:\n%s\n" (Cfg.to_dot cfg);
+   let sliced_cfg = slice cfg (lab 8) in
+   Printf.printf "Sliced: %s\n" (Cfg.to_dot sliced_cfg);
+   let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+   ()
 
-(** Return the indices of each call_indirect instructions *)
-let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : Instr.Label.t list =
-  List.filter_map (Cfg.all_instructions cfg) ~f:(fun instr -> match instr with
+   (** Return the indices of each call_indirect instructions *)
+   let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : Instr.Label.t list =
+   List.filter_map (Cfg.all_instructions cfg) ~f:(fun instr -> match instr with
       | Control {label; instr = CallIndirect _; _} -> Some label
       | _ -> None)
 
-(*
-let%test_unit "slicing with memory" =
-  Instr.reset_counter ();
-  let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;test;) (type 0) (param i32) (result i32)
+   let%test_unit "slicing with memory" =
+   Instr.reset_counter ();
+   let module_ = Wasm_module.of_string "(module
+   (type (;0;) (func (param i32) (result i32)))
+   (func (;test;) (type 0) (param i32) (result i32)
     memory.size     ;; Instr 0
     memory.size     ;; Instr 1
     i32.store       ;; Instr 2
     memory.size     ;; Instr 3
     memory.size     ;; Instr 4
     i32.store       ;; Instr 5
-  )
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0 in
-  let sliced_cfg = slice cfg 5 in
-  let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-  ()
+   )
+   (table (;0;) 1 1 funcref)
+   (memory (;0;) 2)
+   (global (;0;) (mut i32) (i32.const 66560)))" in
+   let cfg = Spec_analysis.analyze_intra1 module_ 0 in
+   let sliced_cfg = slice cfg 5 in
+   let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+   ()
 
-let%test_unit "slicing function 14 of trmm" =
-  Instr.reset_counter ();
-  let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
-  Spec_inference.propagate_globals := false;
-  Spec_inference.propagate_locals := false;
-  Spec_inference.use_const := false;
-  let cfg = Spec_analysis.analyze_intra1 module_ 14 in
-  Printf.printf "number of vars of trmm(14): %d\n" (Var_prop.count_vars cfg);
-  List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
+   let%test_unit "slicing function 14 of trmm" =
+   Instr.reset_counter ();
+   let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
+   Spec_inference.propagate_globals := false;
+   Spec_inference.propagate_locals := false;
+   Spec_inference.use_const := false;
+   let cfg = Spec_analysis.analyze_intra1 module_ 14 in
+   Printf.printf "number of vars of trmm(14): %d\n" (Var_prop.count_vars cfg);
+   List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
       (* instr_idx is the label of a call_indirect instruction, slice it *)
       Spec_inference.propagate_locals := false;
       Spec_inference.propagate_globals := false;
@@ -398,16 +396,15 @@ let%test_unit "slicing function 14 of trmm" =
       let _annotated_slice_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
       Printf.printf "trmm(14) vars after slicing: %d\n" (Var_prop.count_vars (Var_prop.var_prop _annotated_slice_cfg));
       ())
-  *)
-(*let%test_unit "slicing function 22 of trmm" =
-  Instr.reset_counter ();
-  let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
-  Spec_inference.propagate_globals := false;
-  Spec_inference.propagate_locals := false;
-  Spec_inference.use_const := false;
-  let cfg = Spec_analysis.analyze_intra1 module_ 22 in
-  Printf.printf "number of vars of trmm(22): %d\n" (Var_prop.count_vars cfg);
-  List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
+   let%test_unit "slicing function 22 of trmm" =
+   Instr.reset_counter ();
+   let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
+   Spec_inference.propagate_globals := false;
+   Spec_inference.propagate_locals := false;
+   Spec_inference.use_const := false;
+   let cfg = Spec_analysis.analyze_intra1 module_ 22 in
+   Printf.printf "number of vars of trmm(22): %d\n" (Var_prop.count_vars cfg);
+   List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
       (* instr_idx is the label of a call_indirect instruction, slice it *)
       Spec_inference.propagate_locals := false;
       Spec_inference.propagate_globals := false;
@@ -421,3 +418,4 @@ let%test_unit "slicing function 14 of trmm" =
       Printf.printf "trmm(22) vars after slicing: %d\n" (Var_prop.count_vars (Var_prop.var_prop _annotated_slice_cfg));
       ())
 *)
+end

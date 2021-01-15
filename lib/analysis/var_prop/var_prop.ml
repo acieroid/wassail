@@ -37,7 +37,7 @@ module VarEq = struct
   end
 end
 
-(** Return the equalities that arise between variable, from an instruction *)
+(** Return the equalities that arise between variable, from a data instruction *)
 let eqs_data_instr (instr : (Instr.data, Spec.t) Instr.labelled) : VarEq.Set.t =
   match instr.instr with
   | Nop | Drop | Select | MemorySize | MemoryGrow
@@ -65,12 +65,11 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
             List.fold_left instrs ~init:eqs ~f:(fun eqs instr -> VarEq.Set.union eqs (eqs_data_instr instr))
           | Control { instr = Merge; _ } ->
             (* Equate annotation after each predecessor of this merge block with the annotation after this merge block *)
-            let preds = List.map ~f:(Cfg.find_block_exn cfg) (Cfg.predecessors cfg block.idx) in
             let spec = Cfg.state_after_block cfg block.idx in
-            List.fold_left preds
+            List.fold_left (Cfg.predecessors cfg block.idx)
               ~init:eqs
               ~f:(fun eqs pred ->
-                  let pred_spec = Cfg.state_after_block cfg pred.idx in
+                  let pred_spec = Cfg.state_after_block cfg pred in
                   assert (List.length pred_spec.vstack = List.length spec.vstack);
                   assert (List.length pred_spec.locals = List.length spec.locals);
                   assert (List.length pred_spec.globals = List.length spec.globals);
@@ -80,7 +79,7 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
                         (List.map2_exn ~f:VarEq.of_vars pred_spec.locals spec.locals) @
                         (List.map2_exn ~f:VarEq.of_vars pred_spec.globals spec.globals))))
           | Control _ -> eqs (* No equality arises from other control blocks *)
-)
+        )
   in
   (* Filter out tautologies *)
   let equalities = VarEq.Set.filter equalities ~f:(fun vs -> Var.Set.length vs = 2) in
@@ -134,11 +133,8 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
       match List.find classes ~f:(fun vs -> Var.Set.mem vs v) with
       | Some class_ ->
         (* Variable is part of an equality class, replace it by its target *)
-        let v' = rewrite_target class_ in
-        (* Printf.printf "Replacing var %s by %s\n" (Var.to_string v) (Var.to_string v'); *)
-        v'
-      | None ->
-        v) in
+        rewrite_target class_
+      | None -> v) in
   Cfg.map_annotations cfg
     ~f:(fun i -> (fannot (Instr.annotation_before i), fannot (Instr.annotation_after i)))
 
@@ -148,39 +144,42 @@ let all_vars (cfg : Spec.t Cfg.t) : Var.Set.t =
       vars := Var.Set.add !vars v;
       v) in
   let _cfg = Cfg.map_annotations cfg
-    ~f:(fun i -> (fannot (Instr.annotation_before i), fannot (Instr.annotation_after i))) in
+      ~f:(fun i -> (fannot (Instr.annotation_before i), fannot (Instr.annotation_after i))) in
   !vars
 
 let count_vars (cfg : Spec.t Cfg.t) : int =
   Var.Set.length (all_vars cfg)
 
-let%test "var prop - simple test" =
-  Spec_inference.propagate_globals := false;
-  Spec_inference.propagate_locals := false;
-  Spec_inference.use_const := false;
-  let module_ = Wasm_module.of_string "(module
+module Test = struct
+  let%test "var prop - simple test" =
+    Spec_inference.propagate_globals := false;
+    Spec_inference.propagate_locals := false;
+    Spec_inference.use_const := false;
+    let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
-    local.get 0 ;; Instr 0
-    i32.const 0 ;; Instr 1
-    i32.add     ;; Instr 2
+    local.get 0 ;; Instr 0, [i0], but clearly, i0 = l0
+    i32.const 0 ;; Instr 1, [i1, i0], but clearly, i1 = 0
+    i32.add     ;; Instr 2, [i2, i1, i0], with i2 = ret
   )
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-  Spec_inference.propagate_globals := true;
-  Spec_inference.propagate_locals := true;
-  Spec_inference.use_const := true;
-  let result = var_prop cfg in
-  Var.Set.equal (Var.Set.of_list [Var.Return; Var.Local 0; Var.Global 0; Var.Const (Prim_value.of_int 0)]) (all_vars result)
+    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    Spec_inference.propagate_globals := true;
+    Spec_inference.propagate_locals := true;
+    Spec_inference.use_const := true;
+    let result = var_prop cfg in
+    let actual = all_vars result in
+    let expected = Var.Set.of_list [Var.Return; Var.Local 0; Var.Global 0; Var.Const (Prim_value.of_int 0)] in
+    Var.Set.check_equality ~actual ~expected
 
-let%test "var prop - big program" =
-  let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
-  Spec_inference.propagate_globals := false;
-  Spec_inference.propagate_locals := false;
-  Spec_inference.use_const := false;
-  let cfg = Spec_analysis.analyze_intra1 module_ 14l in
-  let actual = var_prop cfg in
-  count_vars actual < count_vars cfg
-
+  let%test "var prop - big program" =
+    let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
+    Spec_inference.propagate_globals := false;
+    Spec_inference.propagate_locals := false;
+    Spec_inference.use_const := false;
+    let cfg = Spec_analysis.analyze_intra1 module_ 14l in
+    let actual = var_prop cfg in
+    count_vars actual < count_vars cfg
+end

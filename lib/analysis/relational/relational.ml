@@ -26,30 +26,31 @@ let check (expected : Summary.t) (actual : Summary.t) : bool =
     false
   end
 
-let%test "local.get 0 relational summary" =
-  let module_ = Wasm_module.of_string "(module
+module Test = struct
+  let%test "local.get 0 relational summary" =
+    let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     local.get 0)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let actual = Int32Map.find_exn (analyze_intra module_ [0l]) 0l in
-  let expected = Summary.{
-      in_arity = 1;
-      params = [Var.Local 0];
-      return = Some Var.Return;
-      mem_pre = [];
-      mem_post = [];
-      globals_pre = [Var.Global 0];
-      globals_post = [Var.Global 0];
-      state = Relational_domain.of_equality_constraints (Var.Set.of_list [Var.Global 0; Var.Local 0; Var.Return])
-          [(Var.Local 0, Var.Return)]
-    } in
-  check expected actual
+    let actual = Int32Map.find_exn (analyze_intra module_ [0l]) 0l in
+    let expected = Summary.{
+        in_arity = 1;
+        params = [Var.Local 0];
+        return = Some Var.Return;
+        mem_pre = [];
+        mem_post = [];
+        globals_pre = [Var.Global 0];
+        globals_post = [Var.Global 0];
+        state = Relational_domain.of_equality_constraints (Var.Set.of_list [Var.Global 0; Var.Local 0; Var.Return])
+            [(Var.Local 0, Var.Return)]
+      } in
+    check expected actual
 
-let%test "call correctly propagates summaries" =
-  let module_ = Wasm_module.of_string "(module
+  let%test "call correctly propagates summaries" =
+    let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     local.get 0)
@@ -73,8 +74,8 @@ let%test "call correctly propagates summaries" =
       } in
     check expected actual
 
-let%test "memory is supported" =
-  let module_ = Wasm_module.of_string "(module
+  let%test "memory is supported" =
+    let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     global.get 0 ;; [g0]
@@ -86,17 +87,18 @@ let%test "memory is supported" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  Relational_options.ignore_memory := false;
-  let actual = Int32Map.find_exn (analyze_intra module_ [0l]) 0l in
-  let expected = Summary.{
-      in_arity = 1;
-      params = [Var.Local 0];
-      return = Some Var.Return;
-      mem_pre = [];
-      mem_post = [Var.Global 0; Var.Local 0];
-      globals_pre = [Var.Global 0];
-      globals_post = [Var.Global 0];
-      state = Relational_domain.of_equality_constraints (Var.Set.of_list [Var.Global 0; Var.Local 0; Var.Return])
-          [(Var.Local 0, Var.Return)]
-    } in
-  check expected actual
+    Relational_options.ignore_memory := false;
+    let actual = Int32Map.find_exn (analyze_intra module_ [0l]) 0l in
+    let expected = Summary.{
+        in_arity = 1;
+        params = [Var.Local 0];
+        return = Some Var.Return;
+        mem_pre = [];
+        mem_post = [Var.Global 0; Var.Local 0];
+        globals_pre = [Var.Global 0];
+        globals_post = [Var.Global 0];
+        state = Relational_domain.of_equality_constraints (Var.Set.of_list [Var.Global 0; Var.Local 0; Var.Return])
+            [(Var.Local 0, Var.Return)]
+      } in
+    check expected actual
+end

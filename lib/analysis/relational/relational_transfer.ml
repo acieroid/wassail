@@ -297,6 +297,7 @@ let control_instr_transfer
   | Unreachable ->
     (* Unreachable, so what we return does not really matter *)
     `Simple state
+  | Merge -> (* Not handled here, but in merge_flows *) `Simple state
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr))
 
 let memvars (annot : annot_expected) : Var.t list =

@@ -36,36 +36,6 @@ let check (expected : Summary.t) (actual : Summary.t) : bool =
     false
   end
 
-let%test "simple function has no taint" =
-  let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;test;) (type 0) (param i32) (result i32)
-    i32.const 256
-    i32.const 512
-    i32.const 0
-    select)
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
-  let actual = Int32Map.find_exn (analyze_intra module_ [0l]) 0l in
-  let expected = Summary.{ ret = Some Domain.Taint.bottom; mem = Domain.Taint.bottom; globals = [Domain.Taint.taint (Var.Global 0)] } in
-  check expected actual
-
-let%test "test store" =
-  let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;test;) (type 0) (param i32) (result i32)
-    global.get 0
-    local.get 0
-    i32.store
-    local.get 0)
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))" in
-  let actual = Int32Map.find_exn (analyze_intra module_ [0l]) 0l in
-  let expected = Summary.{ ret = Some (Domain.Taint.taint (Var.Local 0)); mem = Domain.Taint.taint (Var.Local 0); globals = [Domain.Taint.taint (Var.Global 0)] } in
-  check expected actual
-
 let analyze_inter : Wasm_module.t -> Int32.t list list -> Summary.t Int32Map.t =
   Analysis_helpers.mk_inter
     (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Bottom)
@@ -78,3 +48,35 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> Summary.t Int32Map.t =
        let annotated_scc = Int32Map.map scc ~f:Relational.Transfer.dummy_annotate in
        let analyzed_cfgs = Inter.analyze wasm_mod annotated_scc in
        Int32Map.map analyzed_cfgs ~f:(fun cfg -> Intra.summary (Int32Map.find_exn annotated_scc cfg.idx) (Intra.final_state cfg)))
+
+module Test = struct
+  let%test "simple function has no taint" =
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    i32.const 256
+    i32.const 512
+    i32.const 0
+    select)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+    let actual = Int32Map.find_exn (analyze_intra module_ [0l]) 0l in
+    let expected = Summary.{ ret = Some Domain.Taint.bottom; mem = Domain.Taint.bottom; globals = [Domain.Taint.taint (Var.Global 0)] } in
+    check expected actual
+
+  let%test "test store" =
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    global.get 0
+    local.get 0
+    i32.store
+    local.get 0)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+    let actual = Int32Map.find_exn (analyze_intra module_ [0l]) 0l in
+    let expected = Summary.{ ret = Some (Domain.Taint.taint (Var.Local 0)); mem = Domain.Taint.taint (Var.Local 0); globals = [Domain.Taint.taint (Var.Global 0)] } in
+    check expected actual
+end

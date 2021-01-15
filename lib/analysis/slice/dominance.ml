@@ -32,13 +32,6 @@ module Tree = struct
     in
     visit IntMap.empty entry
 
-  let%test "revert tree computation" =
-    let entry : int = 0 in
-    let tree : IntSet.t IntMap.t = IntMap.map ~f:IntSet.of_list (IntMap.of_alist_exn [(0, [1; 2]); (1, [3; 4]); (2, [5]); (3, []); (4, []); (5, [])]) in
-    let actual = revert_tree_representation entry tree in
-    let expected : int IntMap.t = IntMap.of_alist_exn [(1, 0); (3, 1); (4, 1); (2, 0); (5, 2)] in
-    IntMap.equal Int.(=) actual expected
-
   (** Constructs a tree from its representation as a map (encoded as a list) from nodes to their children *)
   let of_children_map (entry : int) (children_map : (int * int list) list) : t =
     let check_validity_of_children_map = true in
@@ -75,47 +68,6 @@ module Tree = struct
         List.fold_left children ~init:(tree_with_children_connected, added') ~f:(fun (tree, added) node -> dfs tree added node)
     in
     of_children_map entry (IntMap.to_alist (fst (dfs IntMap.empty IntSet.empty entry)))
-
-  let%test "spanning tree computation" =
-    let graph : int list IntMap.t = IntMap.of_alist_exn [(0, [4; 2]); (4, [5; 3]); (2, [5; 1]); (3, [1])] in
-    let succs (n : int) : int list = match IntMap.find graph n with
-      | Some ns -> ns
-      | None -> [] in
-    let entry = 0 in
-    let actual = spanning_tree_from_graph entry succs in
-    (* this is only one of the expected spanning trees *)
-    let expected = of_children_map entry [(0, [4; 2]); (1, []); (2, []); (3, [1]); (4, [5; 3]); (5, [])] in
-    equal actual expected
-
-  let%test "spanning tree computation - other example" =
-    let entry = 1 in
-    let graph : int list IntMap.t = IntMap.of_alist_exn [(1, [2]); (2, [3; 4; 6]); (3, [5]); (4, [5]); (5, [2])] in
-    let succs (n : int) : int list = match IntMap.find graph n with
-      | Some ns -> ns
-      | None -> [] in
-    let actual = spanning_tree_from_graph entry succs in
-    let expected = of_children_map entry [(1, [2]); (2, [3; 4; 6]); (3, [5]); (4, []); (5, []); (6, [])] in
-    equal actual expected
-
-  let%test "spanning tree computation - reverse example" =
-    let entry = 6 in
-    let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(6, [2]); (5, [4; 3]); (4, [2]); (3, [2]); (2, [1; 5])] in
-    let preds (n : int) : int list = match IntMap.find rev_graph n with
-      | Some ns -> ns
-      | None -> [] in
-    let actual = spanning_tree_from_graph entry preds in
-    let expected = of_children_map entry [(6, [2]); (2, [1; 5]); (5, [3; 4]); (3, []); (4, []); (1, [])] in
-    equal actual expected
-
-  let%test "spanning tree computation - other reverse example" =
-    let entry = 7 in
-    let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(7, [6]); (6, [5]); (5, [4; 3]); (4, [3]); (3, [2]); (2, [])] in
-    let preds (n : int) : int list = match IntMap.find rev_graph n with
-      | Some ns -> ns
-      | None -> [] in
-    let actual = spanning_tree_from_graph entry preds in
-    let expected = of_children_map entry [(2, []); (3, [2]); (4, []); (5, [3; 4]); (6, [5]); (7, [6])] in
-    equal actual expected
 
   (** Extract the parent of a node in constant time *)
   let parent (tree : t) (node : int) : int option =
@@ -169,11 +121,61 @@ module Tree = struct
               Some n (* nearest common ancestor found *)
             | None -> acc)
 
-  let%test "rtree nearest common ancestor"=
-    let tree : t = of_children_map 0 [(0, [1; 2]); (1, [3; 4]); (2, [5]); (3, []); (4, []); (5, [])] in
-    (match nca tree 3 1 with Some 1 -> true | _ -> false) &&
-    (match nca tree 3 4 with Some 1 -> true | _ -> false) &&
-    (match nca tree 0 4 with Some 0 -> true | _ -> false)
+  module Test = struct
+    let%test "revert tree computation" =
+      let entry : int = 0 in
+      let tree : IntSet.t IntMap.t = IntMap.map ~f:IntSet.of_list (IntMap.of_alist_exn [(0, [1; 2]); (1, [3; 4]); (2, [5]); (3, []); (4, []); (5, [])]) in
+      let actual = revert_tree_representation entry tree in
+      let expected : int IntMap.t = IntMap.of_alist_exn [(1, 0); (3, 1); (4, 1); (2, 0); (5, 2)] in
+      IntMap.equal Int.(=) actual expected
+
+    let%test "spanning tree computation" =
+      let graph : int list IntMap.t = IntMap.of_alist_exn [(0, [4; 2]); (4, [5; 3]); (2, [5; 1]); (3, [1])] in
+      let succs (n : int) : int list = match IntMap.find graph n with
+        | Some ns -> ns
+        | None -> [] in
+      let entry = 0 in
+      let actual = spanning_tree_from_graph entry succs in
+      (* this is only one of the expected spanning trees *)
+      let expected = of_children_map entry [(0, [4; 2]); (1, []); (2, []); (3, [1]); (4, [5; 3]); (5, [])] in
+      equal actual expected
+
+    let%test "spanning tree computation - other example" =
+      let entry = 1 in
+      let graph : int list IntMap.t = IntMap.of_alist_exn [(1, [2]); (2, [3; 4; 6]); (3, [5]); (4, [5]); (5, [2])] in
+      let succs (n : int) : int list = match IntMap.find graph n with
+        | Some ns -> ns
+        | None -> [] in
+      let actual = spanning_tree_from_graph entry succs in
+      let expected = of_children_map entry [(1, [2]); (2, [3; 4; 6]); (3, [5]); (4, []); (5, []); (6, [])] in
+      equal actual expected
+
+    let%test "spanning tree computation - reverse example" =
+      let entry = 6 in
+      let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(6, [2]); (5, [4; 3]); (4, [2]); (3, [2]); (2, [1; 5])] in
+      let preds (n : int) : int list = match IntMap.find rev_graph n with
+        | Some ns -> ns
+        | None -> [] in
+      let actual = spanning_tree_from_graph entry preds in
+      let expected = of_children_map entry [(6, [2]); (2, [1; 5]); (5, [3; 4]); (3, []); (4, []); (1, [])] in
+      equal actual expected
+
+    let%test "spanning tree computation - other reverse example" =
+      let entry = 7 in
+      let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(7, [6]); (6, [5]); (5, [4; 3]); (4, [3]); (3, [2]); (2, [])] in
+      let preds (n : int) : int list = match IntMap.find rev_graph n with
+        | Some ns -> ns
+        | None -> [] in
+      let actual = spanning_tree_from_graph entry preds in
+      let expected = of_children_map entry [(2, []); (3, [2]); (4, []); (5, [3; 4]); (6, [5]); (7, [6])] in
+      equal actual expected
+
+    let%test "rtree nearest common ancestor"=
+      let tree : t = of_children_map 0 [(0, [1; 2]); (1, [3; 4]); (2, [5]); (3, []); (4, []); (5, [])] in
+      (match nca tree 3 1 with Some 1 -> true | _ -> false) &&
+      (match nca tree 3 4 with Some 1 -> true | _ -> false) &&
+      (match nca tree 0 4 with Some 0 -> true | _ -> false)
+  end
 end
 
 (** Computation of the dominator tree using the algorithm from Cooper, Harvey
@@ -196,34 +198,6 @@ let dominator_tree (entry : int) (nodes : int list) (succs : int -> int list) (p
     if changed then loop tree else tree
   in
   loop (Tree.spanning_tree_from_graph entry succs)
-
-let%test "dominator tree is correctly computed - wikipedia example" =
-  let entry = 1 in
-  let graph : int list IntMap.t = IntMap.of_alist_exn [(1, [2]); (2, [3; 4; 6]); (3, [5]); (4, [5]); (5, [2])] in
-  let succs (n : int) : int list = match IntMap.find graph n with
-    | Some ns -> ns
-    | None -> [] in
-  let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(6, [2]); (5, [4; 3]); (4, [2]); (3, [2]); (2, [1; 5])] in
-  let preds (n : int) : int list = match IntMap.find rev_graph n with
-    | Some ns -> ns
-    | None -> [] in
-  let actual : Tree.t = dominator_tree entry [1; 2; 3; 4; 5; 6] succs preds in
-  let expected : Tree.t = Tree.of_children_map 1 [(1, [2]); (2, [3; 4; 5; 6]); (3, []); (4, []); (5, []); (6, [])] in
-  Tree.equal actual expected
-
-let%test "post-dominator tree is correctly computed by reversing the order of the graph - wikipedia example" =
-  let graph : int list IntMap.t = IntMap.of_alist_exn [(1, [2]); (2, [3; 4; 6]); (3, [5]); (4, [5]); (5, [2])] in
-  let succs (n : int) : int list = match IntMap.find graph n with
-    | Some ns -> ns
-    | None -> [] in
-  let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(6, [2]); (5, [4; 3]); (4, [2]); (3, [2]); (2, [1; 5])] in
-  let preds (n : int) : int list = match IntMap.find rev_graph n with
-    | Some ns -> ns
-    | None -> [] in
-  (* Note the reverse succs/preds argument, as well as the entry point being 6 *)
-  let actual = dominator_tree 6 [1; 2; 3; 4; 5; 6] preds succs in
-  let expected = Tree.of_children_map 6 [(6, [2]); (2, [1; 5]); (5, [3; 4]); (1, []); (3, []); (4, [])] in
-  Tree.equal actual expected
 
 (** A dominator tree. TODO: use Tree.t instead *)
 type domtree =
@@ -278,8 +252,37 @@ let cfg_post_dominator (cfg : Spec.t Cfg.t) : Tree.t =
   (* Note that we invert succs and preds here, and start from exit, in order to have the post-dominator tree *)
   dominator_tree exit nodes preds succs
 
-let%test "post dominator computation" =
-  let module_ = Wasm_module.of_string "(module
+module Test = struct
+  let%test "dominator tree is correctly computed - wikipedia example" =
+    let entry = 1 in
+    let graph : int list IntMap.t = IntMap.of_alist_exn [(1, [2]); (2, [3; 4; 6]); (3, [5]); (4, [5]); (5, [2])] in
+    let succs (n : int) : int list = match IntMap.find graph n with
+      | Some ns -> ns
+      | None -> [] in
+    let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(6, [2]); (5, [4; 3]); (4, [2]); (3, [2]); (2, [1; 5])] in
+    let preds (n : int) : int list = match IntMap.find rev_graph n with
+      | Some ns -> ns
+      | None -> [] in
+    let actual : Tree.t = dominator_tree entry [1; 2; 3; 4; 5; 6] succs preds in
+    let expected : Tree.t = Tree.of_children_map 1 [(1, [2]); (2, [3; 4; 5; 6]); (3, []); (4, []); (5, []); (6, [])] in
+    Tree.equal actual expected
+
+  let%test "post-dominator tree is correctly computed by reversing the order of the graph - wikipedia example" =
+    let graph : int list IntMap.t = IntMap.of_alist_exn [(1, [2]); (2, [3; 4; 6]); (3, [5]); (4, [5]); (5, [2])] in
+    let succs (n : int) : int list = match IntMap.find graph n with
+      | Some ns -> ns
+      | None -> [] in
+    let rev_graph : int list IntMap.t = IntMap.of_alist_exn [(6, [2]); (5, [4; 3]); (4, [2]); (3, [2]); (2, [1; 5])] in
+    let preds (n : int) : int list = match IntMap.find rev_graph n with
+      | Some ns -> ns
+      | None -> [] in
+    (* Note the reverse succs/preds argument, as well as the entry point being 6 *)
+    let actual = dominator_tree 6 [1; 2; 3; 4; 5; 6] preds succs in
+    let expected = Tree.of_children_map 6 [(6, [2]); (2, [1; 5]); (5, [3; 4]); (1, []); (3, []); (4, [])] in
+    Tree.equal actual expected
+
+  let%test "post dominator computation" =
+    let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     block
@@ -294,8 +297,8 @@ let%test "post dominator computation" =
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-  let actual = cfg_post_dominator cfg in
-  let expected = Tree.of_children_map 7 [(2, []); (3, [2]); (4, []); (5, [3; 4]); (6, [5]); (7, [6])] in
-  Tree.equal actual expected
-
+    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    let actual = cfg_post_dominator cfg in
+    let expected = Tree.of_children_map 7 [(2, []); (3, [2]); (4, []); (5, [3; 4]); (6, [5]); (7, [6])] in
+    Tree.equal actual expected
+end

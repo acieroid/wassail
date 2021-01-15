@@ -116,6 +116,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                          else
                            { state with vstack = [] })
     | Unreachable -> `Simple { state with vstack = [] }
+    | Merge -> `Simple state
     | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr))
 
   let merge

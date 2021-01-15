@@ -43,11 +43,16 @@ module Map = struct
     String.concat ~sep:", " (List.map (to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s -> %s" (to_string k) (f v)))
 end
 module Set = struct
-  include Set.Make(T)
+  module S = struct
+    include Set.Make(T)
+    let to_string (v : t) : string =
+      String.concat ~sep:"," (List.map ~f:to_string (to_list v))
+  end
+  include S
+  include Test.Helpers(S)
+
   let of_option (v : T.t option) : t =
     match v with
     | Some v -> singleton v
     | None -> empty
-  let to_string (v : t) : string =
-    String.concat ~sep:"," (List.map ~f:to_string (to_list v))
 end
