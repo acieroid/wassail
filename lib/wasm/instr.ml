@@ -4,12 +4,14 @@ module Label = struct
   (** The section in which an instruction is contained *)
   type section =
     | Function of Int32.t (** Instruction is part of the function with the given index *)
-    | Elem of Int32.t
+    | Elem of Int32.t (** Instruction is part of table elements with the given index *)
+    | MergeInFunction of Int32.t (** Instruction is a merge instruction in the given function *)
   [@@deriving sexp, compare, equal]
 
   let section_to_string (s : section) = match s with
     | Function n -> Printf.sprintf "%ld" n
     | Elem n -> Printf.sprintf "elem%ld" n
+    | MergeInFunction n -> Printf.sprintf "m%ld" n
 
   module T = struct
     (** A label is a unique identifier for an instruction *)
@@ -94,6 +96,7 @@ module T = struct
     | BrTable of Int32.t list * Int32.t
     | Return
     | Unreachable
+    | Merge (* Special instruction not existing in Wasm, used to handle control-flow merges *)
 
   (** Labelled control instructions *)
   and 'a labelled_control = ('a control, 'a) labelled
@@ -152,6 +155,7 @@ let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (inst
   | If (_, _, instrs1, instrs2) -> Printf.sprintf "if%s%s%selse%s%s" sep
                                (list_to_string instrs1 annot_to_string ~indent:(i+2) ~sep:sep) sep sep
                                (list_to_string instrs2 annot_to_string ~indent:(i+2) ~sep:sep)
+  | Merge -> "merge"
 
 (** Converts an instruction to its string representation *)
 and to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) (instr : 'a t) (annot_to_string : 'a -> string): string =
@@ -203,8 +207,8 @@ let to_mnemonic (instr : 'a t) : string = match instr with
       | BrTable (_, _) -> "br_table"
       | Return -> "return"
       | Unreachable -> "unreachable"
+      | Merge -> "merge"
     end
-
 
 (** Create an instruction from a WebAssembly instruction *)
 let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.Ast.instr) : unit t =
@@ -409,7 +413,8 @@ and map_annotation_control (i : ('a control, 'a) labelled) ~(f : 'a t ->  'b * '
              | BrIf n -> BrIf n
              | BrTable (l, n) -> BrTable (l, n)
              | Return -> Return
-             | Unreachable -> Unreachable }
+             | Unreachable -> Unreachable
+             | Merge -> Merge}
 
 let clear_annotation (i : 'a t) : unit t =
   map_annotation i ~f:(fun _ -> (), ())
@@ -478,6 +483,7 @@ and in_arity_control (i : ('a control, 'a) labelled) : int =
   | BrTable (_, _) -> 1
   | Return -> 0 (* this actually depends on the function, but strictly speaking, return does not expect anything *)
   | Unreachable -> 0
+  | Merge -> 0
 
 let instructions_contained_in (i : 'a t) : 'a t list = match i with
   | Data _ -> []

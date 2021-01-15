@@ -30,9 +30,8 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
     | Branch of state * state (** Upon a `brif`, there are two successor states: one where the condition holds, and where where it does not hold. This is used to model that. *)
   [@@deriving compare]
 
-  (** The results of an intra analysis are a mapping from indices (block or instructions) to their in and out values *)
-  type intra_results_block = (result * result) IntMap.t
-  type intra_results_instr = (result * result) Instr.Label.Map.t
+  (** The results of an intra analysis are a mapping from instruction labels to their in and out values *)
+  type intra_results = (result * result) Instr.Label.Map.t
 
   (** Converts a result to a state. May require joining output states in case of branching *)
   let result_to_state (cfg : annot_expected Cfg.t) (r : result) : state = match r with
@@ -48,14 +47,14 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
   (** Analyzes a CFG. Returns the final state after computing the transfer of the entire function. That final state is a pair where the first element are the results per block, and the second element are the results per instructions.
       @param module_ is the overall WebAssembly module, needed to access type information, tables, etc.
       @param cfg is the CFG to analyze *)
-  let analyze_ (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : intra_results_block * intra_results_instr =
+  let analyze_ (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : intra_results =
     let bottom = Uninitialized in
     (* Data of the analysis, per block *)
-    let block_data : intra_results_block ref =
+    let block_data : (result * result) IntMap.t ref =
       ref (IntMap.of_alist_exn (List.map (IntSet.to_list (Cfg.all_block_indices cfg))
                                   ~f:(fun idx -> (idx, (bottom, bottom))))) in
     (* Data of the analysis, per instruction *)
-    let instr_data : intra_results_instr ref =
+    let instr_data : intra_results ref =
       ref (Instr.Label.Map.of_alist_exn (List.map (Instr.Label.Set.to_list (Cfg.all_instruction_labels cfg))
                                   ~f:(fun idx -> (idx, (bottom, bottom))))) in
 
@@ -73,8 +72,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
           | `Branch (s1, s2) -> Branch (s1, s2)
         in
         instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple state, poststate);
-        poststate
-      | ControlMerge -> Simple state in
+        poststate in
 
     (* Analyzes one block, returning the pre and post states *)
     let analyze_block (block_idx : int) : Transfer.state * result =
@@ -155,32 +153,28 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
     in
     fixpoint (IntSet.singleton cfg.entry_block) 1;
     (* _narrow (IntMap.keys cfg.basic_blocks); *)
-    (!block_data, !instr_data)
+    !instr_data
 
   let analyze (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : state Cfg.t =
     let to_state (results_pair : result * result) : (state * state) =
       (result_to_state cfg (fst results_pair), result_to_state cfg (snd results_pair)) in
-    let (block_data, instr_data) = analyze_ module_ cfg in
+    let instr_data = analyze_ module_ cfg in
     Cfg.map_annotations cfg
-      ~fblock:(fun b -> to_state (IntMap.find_exn block_data b.idx))
-      ~finstr:(fun i -> to_state (Instr.Label.Map.find_exn instr_data (Instr.label i)))
+      ~f:(fun i -> to_state (Instr.Label.Map.find_exn instr_data (Instr.label i)))
 
   let analyze_keep (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : (annot_expected * state) Cfg.t =
     let to_state_keep (previous : annot_expected * annot_expected) (results_pair : result * result) : ((annot_expected * state) * (annot_expected * state)) =
       ((fst previous, result_to_state cfg (fst results_pair)),
        (snd previous, result_to_state cfg (snd results_pair))) in
-    let (block_data, instr_data) = analyze_ module_ cfg in
+    let instr_data = analyze_ module_ cfg in
     Cfg.map_annotations cfg
-      ~fblock:(fun b -> to_state_keep (b.annotation_before, b.annotation_after) (IntMap.find_exn block_data b.idx))
-      ~finstr:(fun i -> to_state_keep (Instr.annotation_before i, Instr.annotation_after i) (Instr.Label.Map.find_exn instr_data (Instr.label i)))
+      ~f:(fun i -> to_state_keep (Instr.annotation_before i, Instr.annotation_after i) (Instr.Label.Map.find_exn instr_data (Instr.label i)))
 
   (** Extract the out state from intra-procedural results *)
   let final_state (cfg : state Cfg.t) : state =
-    let final = IntMap.find_exn cfg.basic_blocks cfg.exit_block in
-    final.annotation_after
+    Cfg.state_after_block cfg cfg.exit_block
 
   let final_state_kept (cfg : (annot_expected * state) Cfg.t) : state =
-    let final = IntMap.find_exn cfg.basic_blocks cfg.exit_block in
-    snd (final.annotation_after)
+    snd (Cfg.state_after_block cfg cfg.exit_block)
 
 end

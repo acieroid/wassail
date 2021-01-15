@@ -82,11 +82,35 @@ let outgoing_edges (cfg : 'a t) (idx : int) : Edge.t list =
 let successors (cfg : 'a t) (idx : int) : int list =
   List.map (outgoing_edges cfg idx) ~f:fst
 
+let rec non_empty_successors (cfg :'a t) (idx : int) : int list =
+  let succs = successors cfg idx in
+  let non_empty = List.filter succs ~f:(fun succ ->
+      let block = find_block_exn cfg succ in
+      match block.content with
+      | Data [] -> false
+      | _ -> true) in
+  if List.is_empty non_empty then
+    List.concat_map succs ~f:(non_empty_successors cfg)
+  else
+    non_empty
+
 let incoming_edges (cfg : 'a t) (idx : int) : Edge.t list =
   Edges.from cfg.back_edges idx
 
 let predecessors (cfg : 'a t) (idx : int) : int list =
   List.map (incoming_edges cfg idx) ~f:fst
+
+let rec non_empty_predecessors (cfg :'a t) (idx : int) : int list =
+  let preds = predecessors cfg idx in
+  let non_empty = List.filter preds ~f:(fun pred ->
+      let block = find_block_exn cfg pred in
+      match block.content with
+      | Data [] -> false
+      | _ -> true) in
+  if List.is_empty non_empty then
+    List.concat_map preds ~f:(non_empty_predecessors cfg)
+  else
+    non_empty
 
 let callees (cfg : 'a t) : Int32Set.t =
   (* Loop through all the blocks of the cfg, collecting the targets of call instructions *)
@@ -105,6 +129,14 @@ let callers (cfgs : 'a t Int32Map.t) (cfg : 'a t) : Int32Set.t =
       else
         callers)
 
+let find_enclosing_block (cfg : 'a t) (instr : 'a Instr.t) : 'a Basic_block.t =
+  let label = Instr.label instr in
+  match List.find (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, block) ->
+      let labels = Basic_block.all_instruction_labels block in
+      Instr.Label.Set.mem labels label) with
+  | Some (_, b) -> b
+  | None -> failwith "find_enclosing_block did not find a block"
+
 let all_instructions (cfg : 'a t) : 'a Instr.t list =
   List.map ~f:snd (Instr.Label.Map.to_alist cfg.instructions)
 
@@ -114,7 +146,7 @@ let all_blocks (cfg : 'a t) : 'a Basic_block.t list =
 let all_merge_blocks (cfg : 'a t) : 'a Basic_block.t list =
   IntMap.fold cfg.basic_blocks ~init:[] ~f:(fun ~key:_ ~data:block l ->
       match block.content with
-      | ControlMerge -> block :: l
+      | Control { instr = Merge; _ } -> block :: l
       | _ -> l)
 
 let all_block_indices (cfg : 'a t) : IntSet.t =
@@ -127,7 +159,32 @@ let all_instruction_labels (cfg : 'a t) : Instr.Label.Set.t =
 let all_annots (cfg : 'a t) : 'a list =
   IntMap.fold cfg.basic_blocks ~init:[] ~f:(fun ~key:_ ~data:block l -> (Basic_block.all_annots block) @ l)
 
-let map_annotations (cfg : 'a t) ~(fblock : 'a Basic_block.t -> 'b * 'b) ~(finstr : 'a Instr.t -> 'b * 'b) : 'b t =
+let map_annotations (cfg : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
   { cfg with
-    basic_blocks = IntMap.map ~f:(fun b -> Basic_block.map_annotations b ~fblock ~finstr) cfg.basic_blocks;
-    instructions = Instr.Label.Map.map ~f:(fun i -> Instr.map_annotation i ~f:finstr) cfg.instructions; }
+    basic_blocks = IntMap.map ~f:(fun b -> Basic_block.map_annotations b ~f) cfg.basic_blocks;
+    instructions = Instr.Label.Map.map ~f:(fun i -> Instr.map_annotation i ~f) cfg.instructions; }
+
+let rec state_before_block (cfg : 'a t) (block_idx : int) : 'a =
+  let block = find_block_exn cfg block_idx in
+  match block.content with
+  | Control i -> Instr.annotation_before (Control i)
+  | Data [] -> begin match non_empty_predecessors cfg block_idx with
+      | [] -> failwith "state_before_block: no predecessor of an empty block"
+      | pred :: [] ->
+        (* The state before this block is the state after its non-empty predecessor *)
+        state_after_block cfg pred
+      | _ -> failwith "state_before_block: multiple predecessors for an empty block"
+    end
+  | Data (i :: _) -> Instr.annotation_before (Data i)
+and state_after_block (cfg : 'a t) (block_idx : int) : 'a =
+  (* This implementation is the complement of state_before_block *)
+  let block = find_block_exn cfg block_idx in
+  match block.content with
+  | Control i -> Instr.annotation_after (Control i)
+  | Data [] -> begin match non_empty_successors cfg block_idx with
+      | [] -> failwith "state_after_block: no successor of an empty block"
+      | succ :: [] ->
+        state_before_block cfg succ
+      | _ -> failwith "state_after_bloc: multiple successors for an empty block"
+    end
+  | Data (i :: _) -> Instr.annotation_after (Data i)

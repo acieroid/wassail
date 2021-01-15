@@ -351,6 +351,7 @@ let sizes (m : Wasm_module.t) : t =
           | Return -> op 0x0f
           | Call (_, x) -> op 0x10; var x
           | CallIndirect (_, x) -> op 0x11; var x; u8 0x00
+          | Merge -> ()
         end
 
 

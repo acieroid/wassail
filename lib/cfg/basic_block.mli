@@ -1,13 +1,10 @@
 type 'a block_content =
   | Control of ('a Instr.control, 'a) Instr.labelled
   | Data of (Instr.data, 'a) Instr.labelled list
-  | ControlMerge
 
 type 'a t = {
   idx: int;
   content: 'a block_content;
-  annotation_before: 'a;
-  annotation_after: 'a;
 }
 
 val equal : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
@@ -24,7 +21,7 @@ val all_instruction_labels : 'a t -> Instr.Label.Set.t
 
 val all_annots : 'a t -> 'a list
 
-val map_annotations : 'a t -> fblock:('a t -> 'b * 'b) -> finstr:('a Instr.t -> 'b * 'b) -> 'b t
+val map_annotations : 'a t -> f:('a Instr.t -> 'b * 'b) -> 'b t
 
 val clear_annotation : 'a t -> unit t
 

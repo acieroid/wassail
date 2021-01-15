@@ -30,10 +30,10 @@ let vars (cfg : annot_expected Cfg.t) : Var.Set.t =
         Var.Set.union acc (annot_vars annot))
 
 let entry_vars (cfg : annot_expected Cfg.t) : Var.Set.t =
-  annot_vars (Cfg.find_block_exn cfg cfg.entry_block).annotation_before
+  annot_vars (Cfg.state_before_block cfg cfg.entry_block)
 
 let exit_vars (cfg : annot_expected Cfg.t) : Var.Set.t =
-  annot_vars (Cfg.find_block_exn cfg cfg.exit_block).annotation_after
+  annot_vars (Cfg.state_after_block cfg cfg.exit_block)
 
 let reachable_vars (instr : annot_expected Instr.t) : Var.Set.t =
   Var.Set.union (annot_vars (Instr.annotation_before instr)) (annot_vars (Instr.annotation_after instr))
@@ -56,18 +56,16 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block :
     | _ ->
       (* one or multiple states *)
       begin match block.content with
-        | ControlMerge ->
+        | Control { instr = Merge; _ } ->
           (* block is a control-flow merge *)
-          let spec = block.annotation_after in
+          let spec = Cfg.state_after_block cfg block.idx in
           let states' = List.map states ~f:(fun (idx, s) ->
               (* Similar to what is done in data_instr_transfer: restrict the vars to only the important ones *)
               let s = if !remove_vars then
-                  Domain.change_vars s (Var.Set.union_list [annot_vars (block.annotation_before);
-                                                            annot_vars (block.annotation_after);
-                                                            entry_vars cfg; exit_vars cfg])
+                  Domain.change_vars s (Var.Set.union_list [annot_vars spec; entry_vars cfg; exit_vars cfg])
                 else s in
               (* get the spec after that state *)
-              let spec' = (IntMap.find_exn cfg.basic_blocks idx).annotation_after in
+              let spec' = Cfg.state_after_block cfg idx in
               (* equate all different variables in the post-state with the ones in the pre-state *)
               Domain.add_equality_constraints s (Spec_inference.extract_different_vars spec spec')) in
           (* And finally joins all the states *)
@@ -305,14 +303,14 @@ let memvars (annot : annot_expected) : Var.t list =
   List.concat_map (Var.OffsetMap.to_alist annot.memory) ~f:(fun ((x, _), y) -> [x; y])
 
 let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
-  let entry_block = IntMap.find_exn cfg.basic_blocks cfg.entry_block in
-  let exit_block = IntMap.find_exn cfg.basic_blocks cfg.exit_block in
-    Relational_summary.make cfg out_state
-      (if List.length cfg.return_types = 1 then (List.hd exit_block.annotation_after.vstack) else None)
-      (memvars entry_block.annotation_before)
-      (memvars exit_block.annotation_after)
-      exit_block.annotation_after.globals
+  let spec_entry = Cfg.state_before_block cfg cfg.entry_block in
+  let spec_exit = Cfg.state_after_block cfg cfg.exit_block in
+  Relational_summary.make cfg out_state
+    (if List.length cfg.return_types = 1 then (List.hd spec_exit.vstack) else None)
+    (memvars spec_entry)
+    (memvars spec_exit)
+    spec_exit.globals
 
 let dummy_annotate (cfg : 'a Cfg.t) : ('a * state) Cfg.t =
   let bot = Relational_domain.bottom Var.Set.empty in
-  Cfg.map_annotations cfg ~fblock:(fun b -> ((b.annotation_before, bot), (b.annotation_after, bot))) ~finstr:(fun i -> ((Instr.annotation_before i, bot), (Instr.annotation_after i, bot)))
+  Cfg.map_annotations cfg ~f:(fun i -> ((Instr.annotation_before i, bot), (Instr.annotation_after i, bot)))

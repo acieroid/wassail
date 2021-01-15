@@ -73,7 +73,7 @@ end
 
 (** Return the list of variables defined by an instruction *)
 (* TODO: this should be part of Spec_inference? *)
-let instr_def (instr : Spec.t Instr.t) : Var.t list =
+let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
   let defs = match instr with
     | Instr.Data i ->
       let top_n n = List.take i.annotation_after.vstack n in
@@ -117,6 +117,9 @@ let instr_def (instr : Spec.t Instr.t) : Var.t list =
         | If _ -> [] (* We could say that if defines its "resulting" value, but that will be handled by the merge node *)
         | Call ((_, arity_out), _) -> top_n arity_out
         | CallIndirect ((_, arity_out), _) -> top_n arity_out
+        | Merge ->
+          let block = Cfg.find_enclosing_block cfg instr in
+          List.map (Spec_inference.new_merge_variables cfg block) ~f:snd
         | Br _ | BrIf _ | BrTable _ | Return | Unreachable -> []
       end
   in
@@ -127,7 +130,7 @@ let instr_def (instr : Spec.t Instr.t) : Var.t list =
       | _ -> true)
 
 (** Return the list of variables used by an instruction *)
-let instr_use (instr : Spec.t Instr.t) : Var.t list = match instr with
+let instr_use (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list = match instr with
   | Instr.Data i ->
     let top_n n = List.take i.annotation_before.vstack n in
     begin match i.instr with
@@ -154,6 +157,9 @@ let instr_use (instr : Spec.t Instr.t) : Var.t list = match instr with
       | Call ((arity_in, _), _) -> top_n arity_in (* uses the n arguments from the stack *)
       | CallIndirect ((arity_in, __), _) -> top_n (arity_in + 1) (* + 1 because we need to pop the index that will refer to the called function, on top of the arguments *)
       | BrIf _ | BrTable _ -> top_n 1
+      | Merge ->
+        let block = Cfg.find_enclosing_block cfg instr in
+        List.map (Spec_inference.new_merge_variables cfg block) ~f:snd
       | Br _ | Return | Unreachable -> []
     end
 
@@ -184,7 +190,7 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
   let uses: Use.Set.t Var.Map.t = Var.Map.empty in
   (* Add definitions for all locals, globals, and memory variables *)
   let defs =
-    let entry_spec = (Cfg.find_block_exn cfg cfg.entry_block).annotation_before in
+    let entry_spec = Cfg.state_before_block cfg cfg.entry_block in
     let vars = Spec_inference.vars_of entry_spec in
     Var.Set.fold vars ~init:defs ~f:(fun defs var ->
         match Var.Map.add defs ~key:var ~data:(Def.Entry var) with
@@ -228,12 +234,12 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
   let (defs, uses) = List.fold_left (Cfg.all_instructions cfg)
     ~init:(defs, uses)
     ~f:(fun (defs, uses) instr ->
-        let defs = List.fold_left (instr_def instr) ~init:defs ~f:(fun defs var ->
+        let defs = List.fold_left (instr_def cfg instr) ~init:defs ~f:(fun defs var ->
             match Var.Map.add defs ~key:var ~data:(Def.Instruction (Instr.label instr, var)) with
             | `Duplicate -> failwith (Printf.sprintf "use_def: duplicate define of %s in instruction %s"
                                         (Var.to_string var) (Instr.to_string instr Spec.to_string))
             | `Ok r -> r) in
-        let uses = List.fold_left (instr_use instr) ~init:uses ~f:(fun uses var ->
+        let uses = List.fold_left (instr_use cfg instr) ~init:uses ~f:(fun uses var ->
             Var.Map.update uses var ~f:(function
                 | Some v -> Use.Set.add v (Use.Instruction (Instr.label instr, var))
                 | None -> Use.Set.singleton (Use.Instruction (Instr.label instr, var)))) in

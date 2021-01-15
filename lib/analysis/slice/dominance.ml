@@ -231,16 +231,16 @@ type domtree =
   | Jump of Spec.t Basic_block.t * domtree list
 
 (** Extract the final branch condition of a block, if there is any *)
-let branch_condition (block : Spec.t Basic_block.t) : Var.t option =
+let branch_condition (cfg : Spec.t Cfg.t) (block : Spec.t Basic_block.t) : Var.t option =
   match block.content with
   | Control c -> begin match c.instr with
       | BrIf _ | BrTable _ | If _ ->
         (* These are the only conditionals in the language, and they all depend
            on the top stack variable before their execution *)
-        List.hd block.annotation_before.vstack
+        List.hd (Cfg.state_before_block cfg block.idx).vstack
       | _ -> None
     end
-  | Data _ | ControlMerge -> None
+  | Data _ -> None
 
 (** Computes the dominator tree of a CFG . *)
 let cfg_dominator (cfg : Spec.t Cfg.t) : domtree =
@@ -258,7 +258,7 @@ let cfg_dominator (cfg : Spec.t Cfg.t) : domtree =
   let rec build_tree (node : int) : domtree =
     let successors : domtree list = List.map (IntSet.to_list (Tree.children tree node)) ~f:build_tree in
     let block = Cfg.find_block_exn cfg node in
-    match branch_condition block with
+    match branch_condition cfg block with
     | Some v -> Branch (block, v, successors)
     | None -> Jump (block, successors) in
   build_tree entry

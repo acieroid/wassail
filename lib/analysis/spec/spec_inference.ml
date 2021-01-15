@@ -137,7 +137,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
         s
     in
     match block.content with
-    | ControlMerge ->
+    | Control { instr = Merge; _ } ->
       (* Multiple cases: either we have no predecessor, we have unanalyzed predecessors, or we have only analyzed predecessors *)
       rename_exit (begin match states with
         | [] ->
@@ -205,7 +205,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
     (* Checks the validity of the merge and dispatches to `merge` *)
     begin match states with
       | _ :: _ :: _ -> begin match block.content with
-          | ControlMerge -> ()
+          | Control { instr = Merge; _ } -> ()
           | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
         end
       | _ -> ()

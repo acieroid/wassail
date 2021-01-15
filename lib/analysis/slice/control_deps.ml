@@ -23,11 +23,9 @@ let control_dep (cfg : Spec.t Cfg.t) (root : Dominance.domtree) (is_immediate_po
   (* Creates the edges from a given block, where each edge links a defined variabl to a control variable it depends on *)
   let link (block : Spec.t Basic_block.t) (pred : Pred.t) : (Var.t * Pred.t) list =
     let defined = match block.content with
-      | ControlMerge ->
-        List.map (Spec_inference.new_merge_variables cfg block) ~f:snd
-      | Control instr -> Use_def.instr_def (Instr.Control instr)
+      | Control instr -> Use_def.instr_def cfg (Instr.Control instr)
       | Data instrs -> List.fold_left instrs ~init:[] ~f:(fun acc instr ->
-          (Use_def.instr_def (Instr.Data instr)) @ acc) in
+          (Use_def.instr_def cfg (Instr.Data instr)) @ acc) in
     List.map defined ~f:(fun d -> (d, pred)) in
   (* vchildren simply recurses down the tree *)
   let rec vchildren (blocks : Dominance.domtree list) (preds : Pred.t list) : (Var.t * Pred.t) list = match blocks with
@@ -50,7 +48,7 @@ let control_dep (cfg : Spec.t Cfg.t) (root : Dominance.domtree) (is_immediate_po
 (** Construct a map from predicates at the end of a block (according to `branch_condition`), to the corrsponding block index *)
 let extract_preds (cfg : Spec.t Cfg.t) : int Var.Map.t =
   IntMap.fold cfg.basic_blocks ~init:Var.Map.empty ~f:(fun ~key:idx ~data:block acc ->
-      match Dominance.branch_condition block with
+      match Dominance.branch_condition cfg block with
       | Some pred -> Var.Map.add_exn acc ~key:pred ~data:idx
       | None -> acc)
 

@@ -182,12 +182,12 @@ module Make (* : Transfer.TRANSFER *) = struct
     | _ ->
       (* one or multiple states *)
         begin match block.content with
-          | ControlMerge ->
+          | Control { instr = Merge; _ } ->
             (* block is a control-flow merge *)
-            let spec = fst block.annotation_after in
+            let spec = fst (Cfg.state_after_block cfg block.idx) in
             let states' = List.map states ~f:(fun (idx, s) ->
                 (* get the spec after that state *)
-                let spec' = fst (IntMap.find_exn cfg.basic_blocks idx).annotation_after in
+                let spec' = fst (Cfg.state_after_block cfg idx) in
                 (* equate all different variables in the post-state with the ones in the pre-state *)
                 List.fold_left (Spec_inference.extract_different_vars spec spec')
                   ~init:s
@@ -205,7 +205,7 @@ module Make (* : Transfer.TRANSFER *) = struct
         end
 
   let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
-    let exit_spec = fst (IntMap.find_exn cfg.basic_blocks cfg.exit_block).annotation_after in
+    let exit_spec = fst (Cfg.state_after_block cfg cfg.exit_block) in
     Taint_summary.make cfg out_state
       (if List.length cfg.return_types = 1 then List.hd exit_spec.vstack else None)
       exit_spec.globals

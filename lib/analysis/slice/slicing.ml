@@ -48,7 +48,9 @@ let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : SlicePart.Set.t =
       loop (SlicePart.Set.remove worklist slicepart) slice
     | Some slicepart ->
       let uses = match slicepart with
-        | Instruction instr -> Use_def.instr_use (Cfg.find_instr_exn cfg instr)
+        | Instruction instr_label ->
+          let instr = Cfg.find_instr_exn cfg instr_label in
+          Use_def.instr_use cfg instr
         | Merge block_idx ->
           (* to find uses of a merge block, we look at variables that are
              redefined: all such initial variables are then considered to be
@@ -163,10 +165,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
   let slice_instructions = Instr.Label.Set.of_list (List.filter_map (SlicePart.Set.to_list sliceparts) ~f:(function
       | Instruction i -> Some i
       | _ -> None)) in
-  let slice_merge_blocks = IntSet.of_list (List.filter_map (SlicePart.Set.to_list sliceparts) ~f:(function
-      | Merge block_idx -> Some block_idx
-      | _ -> None)) in
-  let instructions = Instr.Label.Map.map (Instr.Label.Map.filteri cfg.instructions ~f:(fun ~key:idx ~data:_ -> Instr.Label.Set.mem slice_instructions idx)) ~f:Instr.clear_annotation in
+    let instructions = Instr.Label.Map.map (Instr.Label.Map.filteri cfg.instructions ~f:(fun ~key:idx ~data:_ -> Instr.Label.Set.mem slice_instructions idx)) ~f:Instr.clear_annotation in
   let (basic_blocks, edges, back_edges) =
     IntMap.fold cfg.basic_blocks ~init:(IntMap.empty, cfg.edges, cfg.back_edges) ~f:(fun ~key:block_idx ~data:block (basic_blocks, edges, back_edges) ->
         (* Remove any annotation of the block *)
@@ -184,12 +183,6 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
             false in
         (* The new block, if it is kept *)
         let new_block : unit Basic_block.t option = match block.content with
-          | ControlMerge ->
-            (* Keep merge block if it is part of the slice *)
-            if keep_anyway || IntSet.mem slice_merge_blocks block.idx then
-              Some block
-            else
-              None
           | Control i ->
             (* Keep control block if its instruction is part of the slice *)
             if Instr.Label.Set.mem slice_instructions i.label then
@@ -210,9 +203,8 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
                   (* Instruction is not part of the slice, drop it *)
                   None) in
             if keep_anyway || not (List.is_empty instrs) then
-              (* Otherwise, keep it and clear its annotation *)
-              Some { block with content = (Basic_block.Data instrs);
-                                annotation_before = (); annotation_after = () }
+              (* Otherwise, keep it *)
+              Some { block with content = Basic_block.Data instrs; }
             else
               (* If there are no such instructions, don't keep the block *)
               None

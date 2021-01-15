@@ -101,6 +101,9 @@ val callers : 'a t Int32Map.t -> 'a t -> Int32Set.t
 (** Return all the instructions contained within this CFG (in no particular order) *)
 val all_instructions : 'a t -> 'a Instr.t list
 
+(** Return all instructions contained within this CFG, as well as the block containing them *)
+val find_enclosing_block : 'a t -> 'a Instr.t -> 'a Basic_block.t
+
 (** Return all basic blocks within this CFG (in no particular ordr) *)
 val all_blocks : 'a t -> 'a Basic_block.t list
 
@@ -117,4 +120,10 @@ val all_instruction_labels : 'a t -> Instr.Label.Set.t
 val all_annots : 'a t -> 'a list
 
 (** Map a function over all the annotations *)
-val map_annotations : 'a t -> fblock:('a Basic_block.t -> 'b * 'b) -> finstr:('a Instr.t -> 'b * 'b) -> 'b t
+val map_annotations : 'a t -> f:('a Instr.t -> 'b * 'b) -> 'b t
+
+(** Find the state at the beginning of a block in the CFG *)
+val state_before_block : 'a t -> int -> 'a
+
+(** Find state at the end of a block in the CFG *)
+val state_after_block : 'a t -> int -> 'a

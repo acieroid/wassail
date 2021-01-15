@@ -1,5 +1,0 @@
-(executable
-  (name jsbridge)
-  (modules Jsbridge)
-  (libraries wassail js_of_ocaml js_of_ocaml-ppx)
-  (preprocess (pps ppx_jane ppx_compare js_of_ocaml-ppx)))

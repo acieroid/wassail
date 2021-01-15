@@ -60,24 +60,27 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
       ~init:VarEq.Set.empty
       ~f:(fun eqs block ->
           match block.content with
-          | Control _ -> eqs (* No equality arises from control blocks *)
           | Data instrs ->
             (* Go through the instructions of the block to gather their equalities *)
             List.fold_left instrs ~init:eqs ~f:(fun eqs instr -> VarEq.Set.union eqs (eqs_data_instr instr))
-          | ControlMerge ->
+          | Control { instr = Merge; _ } ->
             (* Equate annotation after each predecessor of this merge block with the annotation after this merge block *)
             let preds = List.map ~f:(Cfg.find_block_exn cfg) (Cfg.predecessors cfg block.idx) in
+            let spec = Cfg.state_after_block cfg block.idx in
             List.fold_left preds
               ~init:eqs
               ~f:(fun eqs pred ->
-                  assert (List.length pred.annotation_after.vstack = List.length block.annotation_after.vstack);
-                  assert (List.length pred.annotation_after.locals = List.length block.annotation_after.locals);
-                  assert (List.length pred.annotation_after.globals = List.length block.annotation_after.globals);
+                  let pred_spec = Cfg.state_after_block cfg pred.idx in
+                  assert (List.length pred_spec.vstack = List.length spec.vstack);
+                  assert (List.length pred_spec.locals = List.length spec.locals);
+                  assert (List.length pred_spec.globals = List.length spec.globals);
                   VarEq.Set.union eqs
                     (VarEq.Set.of_list
-                       ((List.map2_exn ~f:VarEq.of_vars pred.annotation_after.vstack block.annotation_after.vstack) @
-                        (List.map2_exn ~f:VarEq.of_vars pred.annotation_after.locals block.annotation_after.locals) @
-                        (List.map2_exn ~f:VarEq.of_vars pred.annotation_after.globals block.annotation_after.globals)))))
+                       ((List.map2_exn ~f:VarEq.of_vars pred_spec.vstack spec.vstack) @
+                        (List.map2_exn ~f:VarEq.of_vars pred_spec.locals spec.locals) @
+                        (List.map2_exn ~f:VarEq.of_vars pred_spec.globals spec.globals))))
+          | Control _ -> eqs (* No equality arises from other control blocks *)
+)
   in
   (* Filter out tautologies *)
   let equalities = VarEq.Set.filter equalities ~f:(fun vs -> Var.Set.length vs = 2) in
@@ -137,8 +140,7 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
       | None ->
         v) in
   Cfg.map_annotations cfg
-    ~fblock:(fun b -> (fannot b.annotation_before, fannot b.annotation_after))
-    ~finstr:(fun i -> (fannot (Instr.annotation_before i), fannot (Instr.annotation_after i)))
+    ~f:(fun i -> (fannot (Instr.annotation_before i), fannot (Instr.annotation_after i)))
 
 let all_vars (cfg : Spec.t Cfg.t) : Var.Set.t =
   let vars : Var.Set.t ref = ref Var.Set.empty in
@@ -146,8 +148,7 @@ let all_vars (cfg : Spec.t Cfg.t) : Var.Set.t =
       vars := Var.Set.add !vars v;
       v) in
   let _cfg = Cfg.map_annotations cfg
-    ~fblock:(fun b -> (fannot b.annotation_before, fannot b.annotation_after))
-    ~finstr:(fun i -> (fannot (Instr.annotation_before i), fannot (Instr.annotation_after i))) in
+    ~f:(fun i -> (fannot (Instr.annotation_before i), fannot (Instr.annotation_after i))) in
   !vars
 
 let count_vars (cfg : Spec.t Cfg.t) : int =

@@ -16,13 +16,17 @@ let build (fid : Int32.t) (module_ : Wasm_module.t) : unit Cfg.t =
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
   let mk_data_block (reverse_instrs : (Instr.data, unit) Instr.labelled list) : unit Basic_block.t =
     let instrs = List.rev reverse_instrs in
-    Basic_block.{ idx = new_idx (); content = Data instrs; annotation_before = (); annotation_after = () } in
+    Basic_block.{ idx = new_idx (); content = Data instrs; } in
   let mk_control_block (instr : (unit Instr.control, unit) Instr.labelled) : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Control instr; annotation_before = (); annotation_after = () } in
+    Basic_block.{ idx = new_idx () ; content = Control instr } in
   let mk_merge_block () =
-    Basic_block.{ idx = new_idx () ; content = ControlMerge; annotation_before = (); annotation_after = () } in
+    let idx = new_idx () in
+    Basic_block.{ idx ; content = Control { instr = Merge;
+                                            label = { section = MergeInFunction fid; id = idx };
+                                            annotation_before = ();
+                                            annotation_after = () }} in
   let mk_empty_block () : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Data []; annotation_before = (); annotation_after = () } in
+    Basic_block.{ idx = new_idx () ; content = Data [] } in
   let loop_heads = ref IntSet.empty in
   let rec helper (instrs : (Instr.data, unit) Instr.labelled list) (remaining : 'a Instr.t list) : (
     (* The blocks created *)
@@ -46,6 +50,7 @@ let build (fid : Int32.t) (module_ : Wasm_module.t) : unit Cfg.t =
       (* Instruction instr is part of the block, but not the end of it so we continue *)
       helper (instr :: instrs) rest
     | Control instr :: rest -> begin match instr.instr with
+        | Merge -> failwith "cfg_builder: There should be no merge instructions before constructing the CFG"
         | BrIf level ->
           (* This is a break up to level `level` *)
           (* First, construct the current block *)
@@ -262,8 +267,7 @@ let build (fid : Int32.t) (module_ : Wasm_module.t) : unit Cfg.t =
         match block.content with
         | Control i -> Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Control i)
         | Data d -> List.fold_left d ~init:acc ~f:(fun acc i ->
-            Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Data i))
-        | ControlMerge -> acc);
+            Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Data i)));
     (* The forward edges *)
     edges = IntMap.map (IntMap.of_alist_multi (List.map actual_edges' ~f:(fun (src, dst, data) -> (src, (dst, data)))))
         ~f:(fun es -> Edge.Set.of_list es);
