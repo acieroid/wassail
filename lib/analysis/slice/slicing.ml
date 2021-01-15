@@ -312,16 +312,17 @@ let%test_unit "slicing with a block containing a single drop" =
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     block
-      local.get 0   ;; Instr 0
-      local.get 0   ;; Instr 1
-      if            ;; Instr 5
-        drop        ;; Instr 2
-        i32.const 0 ;; Instr 3
+      local.get 0   ;; Instr 0 [i0]
+      local.get 0   ;; Instr 1 [i1, i0]
+      if            ;; Instr 2 [i0]
+        drop        ;; Instr 3 []
+        i32.const 0 ;; Instr 4 [i4]
       else
-        nop         ;; Instr 4
+        nop         ;; Instr 5 [i0]
       end
-      i32.const 32  ;; Instr 6
-      i32.add       ;; Instr 7
+                    ;; [i0] and [i4] merged into [m1]
+      i32.const 32  ;; Instr 6 ;; [i6, m1]
+      i32.add       ;; Instr 7 ;; [i7]
     end)
   )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
@@ -356,7 +357,6 @@ let%test_unit "slicing with a block containing a single drop - variant" =
   Printf.printf "Sliced: %s\n" (Cfg.to_dot sliced_cfg (fun _ -> ""));
   let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
   ()
-
 
 (** Return the indices of each call_indirect instructions *)
 let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : Instr.Label.t list =

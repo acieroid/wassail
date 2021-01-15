@@ -134,5 +134,4 @@ let%test "control dependencies computation" =
   let var n = Var.Var n in
   let vars n = Var.Set.of_list [var n] in
   let expected = Var.Map.of_alist_exn [(var (lab 3), vars (lab 1)); (var (lab 5), vars (lab 1)); (var (lab 7), vars (lab 5)); (var (lab 10), vars (lab 1))] in
-  Printf.printf "actual: %s\nexpected: %s" (Var.Map.to_string actual Var.Set.to_string) (Var.Map.to_string expected Var.Set.to_string);
   Var.Map.equal Var.Set.equal actual expected
