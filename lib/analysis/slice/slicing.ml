@@ -266,43 +266,44 @@ module Test = struct
      let module_, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
-    block
-      local.get 0   ;; Instr 0 [i0]
-      local.get 0   ;; Instr 1 [i1, i0]
-      if            ;; Instr 2 [i0]
-        drop        ;; Instr 3 []
-        i32.const 0 ;; Instr 4 [i4]
+    block           ;; Instr 0
+      local.get 0   ;; Instr 1 [i0]
+      local.get 0   ;; Instr 2 [i1, i0]
+      if            ;; Instr 3 [i0]
+        drop        ;; Instr 4 []
+        i32.const 0 ;; Instr 5 [i4]
       else
-        nop         ;; Instr 5 [i0]
+        nop         ;; Instr 6 [i0]
       end
                     ;; [i0] and [i4] merged into [m1]
-      i32.const 32  ;; Instr 6 ;; [i6, m1]
-      i32.add       ;; Instr 7 ;; [i7]
+      i32.const 32  ;; Instr 7 ;; [i6, m1]
+      i32.add       ;; Instr 8 ;; [i7]
     end)
    )" in
-     let sliced_cfg = slice cfg (lab 7) in
+     let sliced_cfg = slice cfg (lab 8) in
      let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+     Printf.printf "DOT:\n%s\n" (Cfg.to_dot cfg ~annot_str:Spec.to_dot_string);
      ()
 
    let%test_unit "slicing with a block containing a single drop - variant" =
      let module_, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
-    block
-      local.get 0   ;; Instr 0
+    block           ;; Instr 0
       local.get 0   ;; Instr 1
-      if            ;; Instr 6
-        drop        ;; Instr 2
-        i32.const 0 ;; Instr 3
+      local.get 0   ;; Instr 2
+      if            ;; Instr 3
+        drop        ;; Instr 4
+        i32.const 0 ;; Instr 5
       else
-        i32.const 1 ;; Instr 4
-        drop        ;; Instr 5
+        i32.const 1 ;; Instr 6
+        drop        ;; Instr 7
       end
-      i32.const 32  ;; Instr 7
-      i32.add       ;; Instr 8
+      i32.const 32  ;; Instr 8
+      i32.add       ;; Instr 9
     end)
    )" in
-     let sliced_cfg = slice cfg (lab 8) in
+     let sliced_cfg = slice cfg (lab 9) in
      let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
      ()
 
