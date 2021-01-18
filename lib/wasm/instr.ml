@@ -34,7 +34,14 @@ module Label = struct
       counter := !counter + 1;
       { section; id }
 
-  module Set = Set.Make(T)
+  module Set = struct
+    module T = struct
+      include Set.Make(T)
+      let to_string (t : t) : string = String.concat ~sep:"," (List.map ~f:T.to_string (to_list t))
+    end
+    include T
+    include Test.HelpersForSet(T)
+  end
   module Map = Map.Make(T)
 
   (** Test data *)

@@ -22,7 +22,7 @@ module Helpers(T : EqualT) = struct
 end
 
 module HelpersForSet(T : SetT) = struct
-  let check_equality ~expected:(expected : T.t) ~actal:(actual : T.t) : bool =
+  let check_equality ~expected:(expected : T.t) ~actual:(actual : T.t) : bool =
     let eq = T.equal actual expected in
     begin if not eq then
         let diff = T.diff actual expected in
