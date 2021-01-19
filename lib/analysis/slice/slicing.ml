@@ -23,20 +23,25 @@ let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Instr.Label.Set.t
     | None -> (* worklist is empty *)
       slice
     | Some slicepart when Instr.Label.Set.mem slice slicepart ->
+      Log.debug (Printf.sprintf "Instruction %s already processed\n" (Instr.Label.to_string slicepart));
       (* Already seen this slice part, no need to process it again *)
       loop (Instr.Label.Set.remove worklist slicepart) slice
     | Some slicepart ->
+      Log.debug (Printf.sprintf "Processing instruction %s\n" (Instr.Label.to_string slicepart));
       let uses =  Use_def.instr_use cfg (Cfg.find_instr_exn cfg slicepart) in
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
+              Log.debug (Printf.sprintf "Use: %s\n" (Var.to_string use));
               let def = Use_def.UseDefChains.get data_dependencies (Use_def.Use.make slicepart use) in
               let data_dependencies = match def with
-                | Use_def.Def.Instruction (instr', _) -> Instr.Label.Set.singleton instr'
+                | Use_def.Def.Instruction (instr', _) ->
+                  Log.debug (Printf.sprintf "data dependency on: %s\n" (Instr.Label.to_string instr'));
+                  Instr.Label.Set.singleton instr'
                 | Use_def.Def.Entry _ -> Instr.Label.Set.empty
                 | Use_def.Def.Constant _ -> Instr.Label.Set.empty in
               let preds = Control_deps.find control_dependencies use in (* the control dependencies for the current use *)
               let control_dependencies = Control_deps.Pred.Set.fold preds ~init:Instr.Label.Set.empty ~f:(fun w (_, instr') ->
-                  (* TODO: can't merge block also have control dependencies? Maybe not relevant, as they will have data dependencies on what they redefine *)
+                  Log.debug (Printf.sprintf "control dependency on: %s" (Instr.Label.to_string instr'));
                   Instr.Label.Set.add w instr') in
               Instr.Label.Set.union w (Instr.Label.Set.union data_dependencies control_dependencies)) in
       loop (Instr.Label.Set.remove worklist' slicepart) (Instr.Label.Set.add slice slicepart) in
@@ -205,10 +210,27 @@ module Test = struct
       memory.size ;; Instr 3 -- slicing criterion
       drop        ;; Instr 4
     end
-    local.get 0)   ;; Instr 5
+    local.get 0)  ;; Instr 5
   )" in
     let actual = slicing cfg (lab 3) in
-    let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2; lab 3] in
+    (* TODO: is it {0,1,2,3} or {3}? {3} seems correct, but this test used to expect {0,1,2,3} *)
+    let expected = Instr.Label.Set.of_list [lab 3] in
+    Instr.Label.Set.check_equality ~actual:actual ~expected:expected
+
+  let%test "slicing with block and br_if -- second slicing criterion" =
+    let _, cfg = build_cfg "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    block         ;; Instr 0
+      memory.size ;; Instr 1
+      br_if 0     ;; Instr 2 -- has a data dep on 1
+      memory.size ;; Instr 3 -- has a control dep on 2
+      drop        ;; Instr 4 -- slicing criterion, has a data dep on instr 3
+    end
+    local.get 0)  ;; Instr 5
+  )" in
+    let actual = slicing cfg (lab 4) in
+    let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3; lab 4] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
   let%test "slicing with merge blocks" =

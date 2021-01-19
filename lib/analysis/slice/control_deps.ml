@@ -6,9 +6,15 @@ module Pred = struct
   module T = struct
     type t = Var.t * Instr.Label.t
     [@@deriving sexp, compare, equal]
+    let to_string (t : t) : string =
+      Printf.sprintf "%s@%s" (Var.to_string (fst t)) (Instr.Label.to_string (snd t))
   end
   include T
-  module Set = Set.Make(T)
+  module Set = struct
+    include Set.Make(T)
+    let to_string (t : t) : string =
+      String.concat ~sep:"," (List.map ~f:T.to_string (to_list t))
+  end
 end
 
 
@@ -133,3 +139,21 @@ let%test "control dependencies computation" =
   let vars n = Var.Set.of_list [var n] in
   let expected = Var.Map.of_alist_exn [(var (lab 3), vars (lab 1)); (var (lab 5), vars (lab 1)); (var (lab 7), vars (lab 5)); (var (lab 10), vars (lab 1))] in
   Var.Map.equal Var.Set.equal actual expected
+
+let%test "control deps with br_if" =
+  let open Instr.Label.Test in
+  let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    block         ;; Instr 0
+      memory.size ;; Instr 1 -- introduces var i1
+      br_if 0     ;; Instr 2
+      memory.size ;; Instr 3 -- var i3 introduced here has a control dependencies on var i1 used at instr 2
+      drop        ;; Instr 4
+    end
+    local.get 0)   ;; Instr 5
+  )" in
+  let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+  let actual = make cfg in
+  let expected = Var.Map.of_alist_exn [(Var.Var (lab 3), Pred.Set.singleton (Var.Var (lab 1), lab 2))] in
+  Var.Map.equal Pred.Set.equal actual expected
