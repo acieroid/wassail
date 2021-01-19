@@ -3,18 +3,19 @@ open Helpers
 
 module Use = struct
   module T = struct
-    (** Uses occur from instructions *)
+    (** Uses of a variable occur from instructions *)
     type t = {
-      label : Instr.Label.t;
-      var: Var.t;
+      label : Instr.Label.t; (** The label of the instruction using a variable*)
+      var: Var.t; (** The variable used *)
     }
     [@@deriving sexp, equal, compare]
+    let to_string (use : t) : string =
+      Printf.sprintf "use(%s, %s)" (Instr.Label.to_string use.label) (Var.to_string use.var)
   end
   include T
 
   module Set = Set.Make(T)
   module Map = Map.Make(T)
-  let to_string (use : t) : string = Printf.sprintf "iuse(%s, %s)" (Instr.Label.to_string use.label) (Var.to_string use.var)
   let make (label : Instr.Label.t) (var : Var.t) = { label; var; }
 end
 
@@ -25,7 +26,7 @@ module Def = struct
         - In merge nodes
         - At the entry of a function (e.g., for local, global, and memory variables) *)
     type t =
-      | Instruction of Instr.Label.t * Var.t (* Label of the instruction and variable defined *) (* TODO: the label is part of the variable *)
+      | Instruction of Instr.Label.t * Var.t (* Label of the instruction and variable defined (there can be more than one definition per instruction) *)
       | Entry of Var.t (* Only the variable defined (because use-def is intraprocedural, we know the function) *)
       | Constant of Prim_value.t (* A constant does not really have a definition *)
     [@@deriving equal, compare]
@@ -66,104 +67,6 @@ module UseDefChains = struct
     | Some def -> def
     | None -> failwith "use-def lookup did not find a definition for a use"
 end
-
-(** Return the list of variables defined by an instruction *)
-(* TODO: this should be part of Spec_inference? *)
-let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
-  let defs = match instr with
-    | Instr.Data i ->
-      let top_n n = List.take i.annotation_after.vstack n in
-      begin match i.instr with
-        | Nop | Drop | MemoryGrow -> []
-        | Select | MemorySize
-        | Unary _ | Binary _ | Compare _ | Test _ | Convert _
-        | Const _ -> top_n 1
-        | LocalGet _ ->
-          if !Spec_inference.propagate_locals then
-            []
-          else
-            top_n 1
-        | GlobalGet _ ->
-          if !Spec_inference.propagate_globals then
-            []
-          else
-            top_n 1
-        | LocalSet l | LocalTee l ->
-          if !Spec_inference.propagate_locals then
-            []
-          else
-            [get_nth i.annotation_after.locals l]
-        | GlobalSet g ->
-          if !Spec_inference.propagate_globals then
-            []
-          else
-            [get_nth i.annotation_after.globals g]
-        | Load _ -> top_n 1
-        | Store _ ->
-          []
-          (*let addr = List.nth_exn i.annotation_before.vstack 1 (* address is not the top of the stack but the element after *) in
-            [match Var.OffsetMap.find i.annotation_after.memory (addr, offset) with
-             | Some v -> v
-             | None -> failwith (Printf.sprintf "Wrong memory annotation while looking for %s+%d in memory (instr: %s), annot after: %s" (Var.to_string addr) offset (Instr.to_string instr Spec_inference.state_to_string) (Spec_inference.state_to_string i.annotation_after))] *)
-      end
-    | Instr.Control i ->
-      let top_n n = List.take i.annotation_after.vstack n in
-      begin match i.instr with
-        | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
-        | If _ -> [] (* We could say that if defines its "resulting" value, but that will be handled by the merge node *)
-        | Call ((_, arity_out), _) -> top_n arity_out
-        | CallIndirect ((_, arity_out), _) -> top_n arity_out
-        | Merge ->
-          (* Merge instruction defines new variabes *)
-          let block = Cfg.find_enclosing_block cfg instr in
-          let vars = List.map (Spec_inference.new_merge_variables cfg block) ~f:snd in
-          (* There might be duplicates. For example, i3 becomes m0 from one branch, and i4 becomes m0 from another branch.
-             If that is the case, we have two definitions of m0.
-             Hence we eliminate duplicates *)
-          Var.Set.to_list (Var.Set.of_list vars)
-        | Br _ | BrIf _ | BrTable _ | Return | Unreachable -> []
-      end
-  in
-  List.filter defs ~f:(function
-      | Var.Const _ -> false (* constants are not variables that can be defined (otherwise definitions are not unique anymore) *)
-      | Var.Local _ -> false (* locals don't have a definition point (they are part of the entry state) *)
-      | Var.Global _ -> false (* same for globals *)
-      | _ -> true)
-
-(** Return the list of variables used by an instruction *)
-let instr_use (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list = match instr with
-  | Instr.Data i ->
-    let top_n n = List.take i.annotation_before.vstack n in
-    begin match i.instr with
-      | Nop -> []
-      | Drop -> top_n 1
-      | Select -> top_n 3
-      | MemorySize -> []
-      | MemoryGrow -> top_n 1
-      | Const _ -> []
-      | Unary _ | Test _ | Convert _ -> top_n 1
-      | Binary _ | Compare _ -> top_n 2
-      | LocalGet l -> [get_nth i.annotation_before.locals l] (* use local l *)
-      | LocalSet _ | LocalTee _ -> top_n 1 (* use top of the stack to define local *)
-      | GlobalGet g -> [get_nth i.annotation_before.globals g] (* use global g *)
-      | GlobalSet _ -> top_n 1
-      | Load _ -> top_n 1 (* use memory address from the top of the stack *)
-      | Store _ -> top_n 2 (* use address and valu from the top of the stack *)
-    end
-  | Instr.Control i ->
-    let top_n n = List.take i.annotation_before.vstack n in
-    begin match i.instr with
-      | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
-      | If _ -> top_n 1 (* relies on top value to decide the branch taken *)
-      | Call ((arity_in, _), _) -> top_n arity_in (* uses the n arguments from the stack *)
-      | CallIndirect ((arity_in, __), _) -> top_n (arity_in + 1) (* + 1 because we need to pop the index that will refer to the called function, on top of the arguments *)
-      | BrIf _ | BrTable _ -> top_n 1
-      | Merge ->
-        (* Merge instruction uses the variables it redefines *)
-        let block = Cfg.find_enclosing_block cfg instr in
-        List.map (Spec_inference.new_merge_variables cfg block) ~f:fst
-      | Br _ | Return | Unreachable -> []
-    end
 
 (** Compute data dependence from the CFG of a function, and return the following elements:
     1. A map from variables to their definitions
@@ -213,43 +116,25 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
             | `Ok r -> r
           end
         | _ -> defs) in
-  (* For each merge block, update the defs and uses map *)
-  (* let (defs, uses) = List.fold_left (Cfg.all_merge_blocks cfg)
-      ~init:(defs, uses)
-      ~f:(fun (defs, uses) block ->
-          List.fold_left (Spec_inference.new_merge_variables cfg block)
-            ~init:(defs, uses)
-            ~f:(fun (defs, uses) (old_var, new_var) ->
-                (begin match Var.Map.add defs ~key:new_var ~data:(Def.Merge (block.idx, new_var)) with
-                   | `Duplicate ->
-                     (* Duplicate definitions are allowed in merge blocks, e.g.,
-                        on one branch, var i1 is on the top of the stack
-                        on another branch, var i2 is on the top of the stack
-                        as new merge variable, we get m1, which is return as (i1, m1), (i2, m1) by `new_merge_variables` *)
-                     defs
-                 | `Ok r -> r
-                 end,
-                 Var.Map.update uses old_var ~f:(function
-                     | Some v -> Use.Set.add v (Use.Merge (block.idx, old_var))
-                     | None -> Use.Set.singleton (Use.Merge (block.idx, old_var)))))) in *)
   (* For each instruction, update the defs and uses map *)
   let (defs, uses) = List.fold_left (Cfg.all_instructions cfg)
       ~init:(defs, uses)
       ~f:(fun (defs, uses) instr ->
-          let defs = List.fold_left (instr_def cfg instr) ~init:defs ~f:(fun defs var ->
-              Log.debug (Printf.sprintf "instruction %s defines %s\n" (Instr.to_string instr ~annot_str:Spec.to_string) (Var.to_string var));
+          (* Add definitions introduced by this instruction *)
+          let defs = List.fold_left (Spec_inference.instr_def cfg instr) ~init:defs ~f:(fun defs var ->
               match Var.Map.add defs ~key:var ~data:(Def.Instruction (Instr.label instr, var)) with
               | `Duplicate -> failwith (Printf.sprintf "use_def: duplicate define of %s in instruction %s, was already defined at %s"
                                           (Var.to_string var) (Instr.to_string instr ~annot_str:Spec.to_string)
                                           (Def.to_string (Var.Map.find_exn defs var)))
               | `Ok r -> r) in
-          let uses = List.fold_left (instr_use cfg instr) ~init:uses ~f:(fun uses var ->
+          (* Add uses introduced by this instruction *)
+          let uses = List.fold_left (Spec_inference.instr_use cfg instr) ~init:uses ~f:(fun uses var ->
               Log.debug (Printf.sprintf "instruction %s uses %s\n" (Instr.to_string instr ~annot_str:Spec.to_string) (Var.to_string var));
               Var.Map.update uses var ~f:(function
                   | Some v -> Use.Set.add v { label = Instr.label instr; var }
                   | None -> Use.Set.singleton { label = Instr.label instr; var })) in
           (defs, uses)) in
-  (* From this, it is a matter of folding over use to construct the DefUseMap:
+  (* From the defs and uses map, it is a matter of folding over use to construct the DefUseMap:
      Given a use of v at instruction lab, add key:(lab, v) data:(lookup defs v) *)
   let udchains = Var.Map.fold uses ~init:UseDefChains.empty ~f:(fun ~key:var ~data:uses map ->
       Use.Set.fold uses ~init:map ~f:(fun map use ->
@@ -257,7 +142,6 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
               | Some v -> v
               | None -> failwith (Printf.sprintf "Use-def chain incorrect: could not find def of variable %s" (Var.to_string var))))) in
   (defs, uses, udchains)
-
 
 module Test = struct
   let%test "simplest ud chain" =

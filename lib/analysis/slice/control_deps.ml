@@ -29,9 +29,9 @@ let control_dep (cfg : Spec.t Cfg.t) (root : Dominance.domtree) (is_immediate_po
   (* Creates the edges from a given block, where each edge links a defined variabl to a control variable it depends on *)
   let link (block : Spec.t Basic_block.t) (pred : Pred.t) : (Var.t * Pred.t) list =
     let defined = match block.content with
-      | Control instr -> Use_def.instr_def cfg (Instr.Control instr)
+      | Control instr -> Spec_inference.instr_def cfg (Instr.Control instr)
       | Data instrs -> List.fold_left instrs ~init:[] ~f:(fun acc instr ->
-          (Use_def.instr_def cfg (Instr.Data instr)) @ acc) in
+          (Spec_inference.instr_def cfg (Instr.Data instr)) @ acc) in
     List.map defined ~f:(fun d -> (d, pred)) in
   (* vchildren simply recurses down the tree *)
   let rec vchildren (blocks : Dominance.domtree list) (preds : Pred.t list) : (Var.t * Pred.t) list = match blocks with

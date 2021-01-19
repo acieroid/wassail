@@ -218,3 +218,100 @@ end
 module Intra = Intra.Make(Spec_inference)
 include Spec_inference
 
+(** Return the list of variables defined by an instruction *)
+let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
+  let defs = match instr with
+    | Instr.Data i ->
+      let top_n n = List.take i.annotation_after.vstack n in
+      begin match i.instr with
+        | Nop | Drop | MemoryGrow -> []
+        | Select | MemorySize
+        | Unary _ | Binary _ | Compare _ | Test _ | Convert _
+        | Const _ -> top_n 1
+        | LocalGet _ ->
+          if !propagate_locals then
+            []
+          else
+            top_n 1
+        | GlobalGet _ ->
+          if !propagate_globals then
+            []
+          else
+            top_n 1
+        | LocalSet l | LocalTee l ->
+          if !propagate_locals then
+            []
+          else
+            [get_nth i.annotation_after.locals l]
+        | GlobalSet g ->
+          if !propagate_globals then
+            []
+          else
+            [get_nth i.annotation_after.globals g]
+        | Load _ -> top_n 1
+        | Store _ ->
+          []
+          (*let addr = List.nth_exn i.annotation_before.vstack 1 (* address is not the top of the stack but the element after *) in
+            [match Var.OffsetMap.find i.annotation_after.memory (addr, offset) with
+             | Some v -> v
+             | None -> failwith (Printf.sprintf "Wrong memory annotation while looking for %s+%d in memory (instr: %s), annot after: %s" (Var.to_string addr) offset (Instr.to_string instr Spec_inference.state_to_string) (Spec_inference.state_to_string i.annotation_after))] *)
+      end
+    | Instr.Control i ->
+      let top_n n = List.take i.annotation_after.vstack n in
+      begin match i.instr with
+        | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
+        | If _ -> [] (* We could say that if defines its "resulting" value, but that will be handled by the merge node *)
+        | Call ((_, arity_out), _) -> top_n arity_out
+        | CallIndirect ((_, arity_out), _) -> top_n arity_out
+        | Merge ->
+          (* Merge instruction defines new variabes *)
+          let block = Cfg.find_enclosing_block cfg instr in
+          let vars = List.map (new_merge_variables cfg block) ~f:snd in
+          (* There might be duplicates. For example, i3 becomes m0 from one branch, and i4 becomes m0 from another branch.
+             If that is the case, we have two definitions of m0.
+             Hence we eliminate duplicates *)
+          Var.Set.to_list (Var.Set.of_list vars)
+        | Br _ | BrIf _ | BrTable _ | Return | Unreachable -> []
+      end
+  in
+  List.filter defs ~f:(function
+      | Var.Const _ -> false (* constants are not variables that can be defined (otherwise definitions are not unique anymore) *)
+      | Var.Local _ -> false (* locals don't have a definition point (they are part of the entry state) *)
+      | Var.Global _ -> false (* same for globals *)
+      | _ -> true)
+
+(** Return the list of variables used by an instruction *)
+let instr_use (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list = match instr with
+  | Instr.Data i ->
+    let top_n n = List.take i.annotation_before.vstack n in
+    begin match i.instr with
+      | Nop -> []
+      | Drop -> top_n 1
+      | Select -> top_n 3
+      | MemorySize -> []
+      | MemoryGrow -> top_n 1
+      | Const _ -> []
+      | Unary _ | Test _ | Convert _ -> top_n 1
+      | Binary _ | Compare _ -> top_n 2
+      | LocalGet l -> [get_nth i.annotation_before.locals l] (* use local l *)
+      | LocalSet _ | LocalTee _ -> top_n 1 (* use top of the stack to define local *)
+      | GlobalGet g -> [get_nth i.annotation_before.globals g] (* use global g *)
+      | GlobalSet _ -> top_n 1
+      | Load _ -> top_n 1 (* use memory address from the top of the stack *)
+      | Store _ -> top_n 2 (* use address and valu from the top of the stack *)
+    end
+  | Instr.Control i ->
+    let top_n n = List.take i.annotation_before.vstack n in
+    begin match i.instr with
+      | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
+      | If _ -> top_n 1 (* relies on top value to decide the branch taken *)
+      | Call ((arity_in, _), _) -> top_n arity_in (* uses the n arguments from the stack *)
+      | CallIndirect ((arity_in, __), _) -> top_n (arity_in + 1) (* + 1 because we need to pop the index that will refer to the called function, on top of the arguments *)
+      | BrIf _ | BrTable _ -> top_n 1
+      | Merge ->
+        (* Merge instruction uses the variables it redefines *)
+        let block = Cfg.find_enclosing_block cfg instr in
+        List.map (new_merge_variables cfg block) ~f:fst
+      | Br _ | Return | Unreachable -> []
+    end
+
