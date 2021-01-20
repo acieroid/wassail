@@ -28,7 +28,7 @@ let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Instr.Label.Set.t
       loop (Instr.Label.Set.remove worklist slicepart) slice
     | Some slicepart ->
       Log.debug (Printf.sprintf "Processing instruction %s\n" (Instr.Label.to_string slicepart));
-      let uses =  Use_def.instr_use cfg (Cfg.find_instr_exn cfg slicepart) in
+      let uses =  Spec_inference.instr_use cfg (Cfg.find_instr_exn cfg slicepart) in
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
               Log.debug (Printf.sprintf "Use: %s\n" (Var.to_string use));
@@ -302,7 +302,9 @@ module Test = struct
       i32.add       ;; Instr 8 ;; [i7]
     end)
    )" in
+     Log.debug_enabled := true;
      let sliced_cfg = slice cfg (lab 8) in
+     Log.debug_enabled := false;
      let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
      Printf.printf "DOT:\n%s\n" (Cfg.to_dot cfg ~annot_str:Spec.to_dot_string);
      ()

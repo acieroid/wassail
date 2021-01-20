@@ -17,7 +17,6 @@ module Pred = struct
   end
 end
 
-
 (** Algorithm for control dependencies, adapted from https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/ProgramSlicing.pdf *)
 let control_dep (cfg : Spec.t Cfg.t) (root : Dominance.domtree) (is_immediate_post_dom : Dominance.domtree -> Var.t -> bool) : (Var.t * Pred.t) list =
   let push (tree : Dominance.domtree) (preds : Pred.t list) : Pred.t list = match tree with
@@ -101,7 +100,7 @@ let make (cfg : Spec.t Cfg.t) : Pred.Set.t Var.Map.t =
   let deps = control_dep cfg (Dominance.cfg_dominator cfg) (fun tree pred ->
       (* Check if tree is the post-dominator of pred: look in pdom if (the node that contains) pred is a child of tree *)
       let tree_idx : int = match tree with Branch (b, _, _) | Jump (b, _) -> b.idx in
-      let children : IntSet.t = Dominance.Tree.children pdom tree_idx in
+      let children : IntSet.t = Tree.children pdom tree_idx in
       let children_idx : int = match Var.Map.find preds pred with Some idx -> idx | None -> failwith "make failed when accessing children index" in
       IntSet.mem children children_idx) in
   Var.Map.map (Var.Map.of_alist_multi deps) ~f:Pred.Set.of_list
