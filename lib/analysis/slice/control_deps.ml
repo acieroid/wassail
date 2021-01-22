@@ -18,13 +18,17 @@ module Pred = struct
 end
 
 (** Algorithm for control dependencies, adapted from https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/ProgramSlicing.pdf *)
-let control_dep (cfg : Spec.t Cfg.t) (root : Dominance.domtree) (is_immediate_post_dom : Dominance.domtree -> Var.t -> bool) : (Var.t * Pred.t) list =
-  let push (tree : Dominance.domtree) (preds : Pred.t list) : Pred.t list = match tree with
-    | Branch (b, p,_) -> begin match b.content with
-        | Control i -> (p, i.label) :: preds
-        | _ -> failwith "control_dep: pushing a non-control block predicate"
+let control_dep (cfg : Spec.t Cfg.t) (is_immediate_post_dom : int -> Var.t -> bool) : (Var.t * Pred.t) list =
+  let tree : Tree.t = Dominance.cfg_dominator cfg in
+  let push (block : Spec.t Basic_block.t) (preds : Pred.t list) : Pred.t list =
+    match Dominance.branch_condition cfg block with
+    | Some pred -> (* It is a branch *)
+      begin match block.content with
+        | Control i -> (pred, i.label) :: preds
+        | _ -> failwith "conrtol_dep: pushing a non-control block predicate"
       end
-    | Jump (_, _) -> preds in
+    | None -> preds
+  in
   (* Creates the edges from a given block, where each edge links a defined variabl to a control variable it depends on *)
   let link (block : Spec.t Basic_block.t) (pred : Pred.t) : (Var.t * Pred.t) list =
     let defined = match block.content with
@@ -33,22 +37,22 @@ let control_dep (cfg : Spec.t Cfg.t) (root : Dominance.domtree) (is_immediate_po
           (Spec_inference.instr_def cfg (Instr.Data instr)) @ acc) in
     List.map defined ~f:(fun d -> (d, pred)) in
   (* vchildren simply recurses down the tree *)
-  let rec vchildren (blocks : Dominance.domtree list) (preds : Pred.t list) : (Var.t * Pred.t) list = match blocks with
+  let rec vchildren (block_indices : int list) (preds : Pred.t list) : (Var.t * Pred.t) list = match block_indices with
     | [] -> []
     | (n :: ns) -> vnode n preds @ vchildren ns preds
   (* vnode visits a tree node *)
-  and vnode (tree : Dominance.domtree) (preds : Pred.t list) : (Var.t * Pred.t) list =
+  and vnode (block_idx : int) (preds : Pred.t list) : (Var.t * Pred.t) list =
     (* Extract the block and its children from the root of the tree *)
-    let (block, children) = match tree with
-    | Branch (block, _, children) -> (block, children)
-    | Jump (block, children) -> (block, children) in
+    let block = Cfg.find_block_exn cfg block_idx in
+    let children = IntSet.to_list (Tree.children tree block_idx) in
     match preds with
-    | h :: t when is_immediate_post_dom tree (fst h) ->
-      vnode tree t
-    | [] -> vchildren children (push tree preds)
+    | h :: t when is_immediate_post_dom block_idx (fst h) ->
+      vnode block_idx t
+    | [] -> vchildren children (push block preds)
     | h :: _ ->
-      link block h @ vchildren children (push tree preds) in
-  vnode root []
+      link block h @ vchildren children (push block preds) in
+  vnode tree.entry []
+
 
 (** Construct a map from predicates at the end of a block (according to `branch_condition`), to the corrsponding block index *)
 let extract_preds (cfg : Spec.t Cfg.t) : int Var.Map.t =
@@ -97,10 +101,9 @@ let%test "extract_preds when there are preds" =
 let make (cfg : Spec.t Cfg.t) : Pred.Set.t Var.Map.t =
   let pdom = Dominance.cfg_post_dominator cfg in
   let preds : int Var.Map.t = extract_preds cfg in
-  let deps = control_dep cfg (Dominance.cfg_dominator cfg) (fun tree pred ->
+  let deps = control_dep cfg (fun block_idx pred ->
       (* Check if tree is the post-dominator of pred: look in pdom if (the node that contains) pred is a child of tree *)
-      let tree_idx : int = match tree with Branch (b, _, _) | Jump (b, _) -> b.idx in
-      let children : IntSet.t = Tree.children pdom tree_idx in
+      let children : IntSet.t = Tree.children pdom block_idx in
       let children_idx : int = match Var.Map.find preds pred with Some idx -> idx | None -> failwith "make failed when accessing children index" in
       IntSet.mem children children_idx) in
   Var.Map.map (Var.Map.of_alist_multi deps) ~f:Pred.Set.of_list

@@ -110,11 +110,6 @@ let graph_of_cfg (cfg : 'a Cfg.t) : int Graph.t =
     List.map back_edges ~f:fst in
   { entry; exit; nodes; succs; preds; }
 
-(** A dominator tree. TODO: use Tree.t instead *)
-type domtree =
-  | Branch of Spec.t Basic_block.t * Var.t * domtree list
-  | Jump of Spec.t Basic_block.t * domtree list
-
 (** Extract the final branch condition of a block, if there is any *)
 let branch_condition (cfg : Spec.t Cfg.t) (block : Spec.t Basic_block.t) : Var.t option =
   match block.content with
@@ -128,15 +123,8 @@ let branch_condition (cfg : Spec.t Cfg.t) (block : Spec.t Basic_block.t) : Var.t
   | Data _ -> None
 
 (** Computes the dominator tree of a CFG . *)
-let cfg_dominator (cfg : Spec.t Cfg.t) : domtree =
-  let tree : Tree.t = Graph.dominator_tree (graph_of_cfg cfg) in
-  let rec build_tree (node : int) : domtree =
-    let successors : domtree list = List.map (IntSet.to_list (Tree.children tree node)) ~f:build_tree in
-    let block = Cfg.find_block_exn cfg node in
-    match branch_condition cfg block with
-    | Some v -> Branch (block, v, successors)
-    | None -> Jump (block, successors) in
-  build_tree tree.entry
+let cfg_dominator (cfg : Spec.t Cfg.t) : Tree.t =
+  Graph.dominator_tree (graph_of_cfg cfg)
 
 (** Computes the post-dominator tree of a CFG *)
 let cfg_post_dominator (cfg : Spec.t Cfg.t) : Tree.t =
