@@ -85,7 +85,9 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block :
       @return the resulting state (poststate).
 *)
 let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_data) (state : state) : state =
-  let ret (i : annot_expected Instr.labelled_data) : Var.t = List.hd_exn i.annotation_after.vstack in
+  let ret (i : annot_expected Instr.labelled_data) : Var.t = match List.hd i.annotation_after.vstack with
+    | Some r -> r
+    | None -> failwith "Relational data_instr_transfer: no return value" in
   let state = if !remove_vars then Domain.change_vars state (Var.Set.union_list [reachable_vars (Data i); entry_vars cfg; exit_vars cfg]) else state in
   match i.instr with
   | Nop -> state

@@ -23,25 +23,20 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
     | None -> (* worklist is empty *)
       slice
     | Some slicepart when Instr.Label.Set.mem slice slicepart ->
-      Log.debug (Printf.sprintf "Instruction %s already processed\n" (Instr.Label.to_string slicepart));
       (* Already seen this slice part, no need to process it again *)
       loop (Instr.Label.Set.remove worklist slicepart) slice
     | Some slicepart ->
-      Log.debug (Printf.sprintf "Processing instruction %s\n" (Instr.Label.to_string slicepart));
       let uses =  Spec_inference.instr_use cfg (Cfg.find_instr_exn cfg slicepart) in
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
-              Log.debug (Printf.sprintf "Use: %s\n" (Var.to_string use));
               let def = Use_def.UseDefChains.get data_dependencies (Use_def.Use.make slicepart use) in
               let data_dependencies = match def with
                 | Use_def.Def.Instruction (instr', _) ->
-                  Log.debug (Printf.sprintf "data dependency on: %s\n" (Instr.Label.to_string instr'));
                   Instr.Label.Set.singleton instr'
                 | Use_def.Def.Entry _ -> Instr.Label.Set.empty
                 | Use_def.Def.Constant _ -> Instr.Label.Set.empty in
               let preds = Control_deps.find control_dependencies use in (* the control dependencies for the current use *)
               let control_dependencies = Control_deps.Pred.Set.fold preds ~init:Instr.Label.Set.empty ~f:(fun w (_, instr') ->
-                  Log.debug (Printf.sprintf "control dependency on: %s" (Instr.Label.to_string instr'));
                   Instr.Label.Set.add w instr') in
               Instr.Label.Set.union w (Instr.Label.Set.union data_dependencies control_dependencies)) in
       loop (Instr.Label.Set.remove worklist' slicepart) (Instr.Label.Set.add slice slicepart) in
@@ -52,33 +47,37 @@ let block_effect_on_stack_size (cfg : Spec.t Cfg.t) (block_idx : int) : int =
   (List.length ((Cfg.state_after_block cfg block_idx).vstack)) - (List.length ((Cfg.state_before_block cfg block_idx).vstack))
 
 (** Like block_effect_on_stack_size, but for lists of instructions *)
-let instrs_effect_on_stack_size (instrs : (Instr.data, Spec.t) Instr.labelled list) : int =
-  if List.is_empty instrs then
-    0
-  else
-    let first = List.hd_exn instrs in
+let instrs_effect_on_stack_size (instrs : (Instr.data, Spec.t) Instr.labelled list) : int = match instrs with
+  | [] -> 0
+  | first :: _ ->
     let last = List.last_exn instrs in
     (List.length last.annotation_after.vstack) - (List.length first.annotation_before.vstack)
 
-
 (** Construct a dummy list of instruction that has the given net effect on the stack size *)
-let dummy_instrs (net_effect : int) : (Instr.data, unit) Instr.labelled list =
-  let dummy_label (i : int) : Instr.Label.t = { section = Instr.Label.Function (-1l); id = i } in
+let dummy_instrs (net_effect : int) (next_label : unit -> int) : (Instr.data, unit) Instr.labelled list =
+  let dummy_label () : Instr.Label.t = { section = Instr.Label.Function (-1l); id = next_label () } in
   if net_effect = 0 then []
-  else if net_effect < 0 then List.init (- net_effect) ~f:(fun i -> { Instr.instr = Instr.Drop; label = dummy_label i; annotation_before = (); annotation_after = (); })
-  else List.init net_effect ~f:(fun i -> { Instr.instr = Instr.Const (Prim_value.I32 0l); label = dummy_label i; annotation_before = (); annotation_after = () })
+  else if net_effect < 0 then List.init (- net_effect) ~f:(fun _ -> { Instr.instr = Instr.Drop; label = dummy_label (); annotation_before = (); annotation_after = (); })
+  else List.init net_effect ~f:(fun _ -> { Instr.instr = Instr.Const (Prim_value.I32 0l); label = dummy_label (); annotation_before = (); annotation_after = () })
 
 (** Construct a dummy block that has the given net effect on the stack
    size. Uses the given block for every field that is not the list of
    instructions, in order to construct the new block. This enables keeping the
    same index. *)
-let dummy_data_block (net_effect : int) (block : 'a Basic_block.t) : unit Basic_block.t =
-  let instrs = dummy_instrs net_effect in
+let dummy_data_block (net_effect : int) (next_label : unit -> int) (block : 'a Basic_block.t) : unit Basic_block.t =
+  let instrs = dummy_instrs net_effect next_label in
   Basic_block.clear_annotation { block with content = Basic_block.Data instrs }
 
 (** Performs backwards slicing on `cfg`, relying on `slicing` defined above.
     Returns the slice as a modified CFG *)
 let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
+  let next_label : unit -> int =
+    let counter : int ref = ref 0 in
+    fun () ->
+      let v = !counter in
+      counter := v+1;
+      v
+  in
   let sliceparts = instructions_to_keep cfg criterion in
   let instructions = Instr.Label.Map.map (Instr.Label.Map.filteri cfg.instructions ~f:(fun ~key:idx ~data:_ -> Instr.Label.Set.mem sliceparts idx)) ~f:Instr.clear_annotation in
   let (basic_blocks, edges, back_edges) =
@@ -95,9 +94,12 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
           else if block_idx = cfg.exit_block then
             true (* List.length (Cfg.predecessors cfg block_idx) > 1 *)
           else
-            false in
+            List.length (Cfg.predecessors cfg block_idx) > 1 (* was: false *) in
         (* The new block, if it is kept *)
         let new_block : unit Basic_block.t option = match block.content with
+          | Control { instr = Merge; _ } ->
+            (* Keep merge blocks *)
+            Some (Basic_block.clear_annotation block)
           | Control i ->
             (* Keep control block if its instruction is part of the slice *)
             if Instr.Label.Set.mem sliceparts i.label then
@@ -106,7 +108,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
               let net_effect = block_effect_on_stack_size cfg block.idx in
               if keep_anyway || net_effect <> 0 then
                 (* Block needs to be kept but not its content, change it to a data block with the same effect on the stack *)
-                Some (dummy_data_block net_effect block)
+                Some (dummy_data_block net_effect next_label block)
               else
                 None
           | Data instrs ->
@@ -114,15 +116,13 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
                All annotations are removed. *)
             let (slice_instrs, to_remove_final) = List.fold_left instrs ~init:([], []) ~f:(fun (slice_instrs, to_remove) instr ->
                 let instr_is_part_of_slice = Instr.Label.Set.mem sliceparts instr.label in
-                Log.debug (Printf.sprintf "Instr %s is part of the slice: %b\n" (Instr.Label.to_string instr.label) instr_is_part_of_slice);
                 if instr_is_part_of_slice then begin
-                  Log.debug (Printf.sprintf "effect on stack size: %d\n" (instrs_effect_on_stack_size to_remove));
-                  let dummy_instrs_that_preserve_stack_shape = dummy_instrs (instrs_effect_on_stack_size to_remove) in
+                  let dummy_instrs_that_preserve_stack_shape = dummy_instrs (instrs_effect_on_stack_size to_remove) next_label in
                   (slice_instrs @ dummy_instrs_that_preserve_stack_shape @ [Instr.clear_annotation_data instr],
                    [])
                 end else
                   (slice_instrs, to_remove @ [instr])) in
-            let slice_instrs = slice_instrs @ dummy_instrs (instrs_effect_on_stack_size to_remove_final) in
+            let slice_instrs = slice_instrs @ dummy_instrs (instrs_effect_on_stack_size to_remove_final) next_label in
             if keep_anyway || not (List.is_empty slice_instrs) then
               (* Otherwise, keep it *)
               Some { block with content = Basic_block.Data slice_instrs; }
@@ -387,23 +387,20 @@ module Test = struct
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
      let cfg = Spec_analysis.analyze_intra1 module_ 14l in
-     Printf.printf "--------------\n";
-     Printf.printf "DOT:\n%s\n" (Cfg.to_dot cfg ~annot_str:Spec.to_dot_string);
-     Printf.printf "number of vars of trmm(14): %d\n" (Var_prop.count_vars cfg);
+     let vars_before_slicing = Var_prop.count_vars cfg in
      List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
         (* instr_idx is the label of a call_indirect instruction, slice it *)
         Spec_inference.propagate_locals := false;
         Spec_inference.propagate_globals := false;
         Spec_inference.use_const := false;
         let sliced_cfg = slice cfg instr_idx in
-        Printf.printf "-------------------\n";
-        Printf.printf "DOT after slicing:\n%s\n" (Cfg.to_dot sliced_cfg);
         (* We should be able to re-annotate the graph *)
         Spec_inference.propagate_locals := true;
         Spec_inference.propagate_globals := true;
         Spec_inference.use_const := true;
-        let _annotated_slice_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-        Printf.printf "trmm(14) vars after slicing: %d\n" (Var_prop.count_vars (Var_prop.var_prop _annotated_slice_cfg));
+        let annotated_slice_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+        let vars_after_slicing = Var_prop.count_vars (Var_prop.var_prop annotated_slice_cfg) in
+        assert (vars_after_slicing < vars_before_slicing);
         ())
 
    let%test_unit "slicing function 22 of trmm" =
@@ -412,19 +409,20 @@ module Test = struct
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
      let cfg = Spec_analysis.analyze_intra1 module_ 22l in
-     Printf.printf "number of vars of trmm(22): %d\n" (Var_prop.count_vars cfg);
+     let vars_before_slicing = Var_prop.count_vars cfg in
      List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
-        (* instr_idx is the label of a call_indirect instruction, slice it *)
-        Spec_inference.propagate_locals := false;
-        Spec_inference.propagate_globals := false;
-        Spec_inference.use_const := false;
-        let sliced_cfg = slice cfg instr_idx in
-        (* We should be able to re-annotate the graph *)
-          Spec_inference.propagate_locals := true;
-        Spec_inference.propagate_globals := true;
-        Spec_inference.use_const := true;
-        let _annotated_slice_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-        Printf.printf "trmm(22) vars after slicing: %d\n" (Var_prop.count_vars (Var_prop.var_prop _annotated_slice_cfg));
+         (* instr_idx is the label of a call_indirect instruction, slice it *)
+         Spec_inference.propagate_locals := false;
+         Spec_inference.propagate_globals := false;
+         Spec_inference.use_const := false;
+         let sliced_cfg = slice cfg instr_idx in
+         (* We should be able to re-annotate the graph *)
+         Spec_inference.propagate_locals := true;
+         Spec_inference.propagate_globals := true;
+         Spec_inference.use_const := true;
+         let annotated_slice_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+         let vars_after_slicing = Var_prop.count_vars (Var_prop.var_prop annotated_slice_cfg) in
+         assert (vars_after_slicing < vars_before_slicing);
         ())
 
 end

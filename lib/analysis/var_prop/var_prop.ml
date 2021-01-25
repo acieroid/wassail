@@ -16,7 +16,9 @@ module VarEq = struct
     let other_side (eq : t) (v : Var.t) : Var.t =
       let without_v = Var.Set.remove eq v in
       if Var.Set.length without_v = 1 then
-        List.hd_exn (Var.Set.to_list without_v)
+        match List.hd (Var.Set.to_list without_v) with
+        | Some r -> r
+        | None -> failwith "should not happen"
       else
         failwith "VarEq.other_side had an incorrect variable or equality"
     let contains (eq : t) (v : Var.t) : bool =
@@ -42,14 +44,20 @@ let eqs_data_instr (instr : (Instr.data, Spec.t) Instr.labelled) : VarEq.Set.t =
   match instr.instr with
   | Nop | Drop | Select | MemorySize | MemoryGrow
   | Unary _ | Binary _ | Compare _ | Test _ | Convert _ -> VarEq.Set.empty
-  | Const n -> VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top instr.annotation_after.vstack) (Var.Const n))
-  | LocalGet l -> VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top instr.annotation_after.vstack) (Spec_inference.get l instr.annotation_before.locals))
-  | LocalSet l -> VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get l instr.annotation_after.locals) (Spec_inference.top instr.annotation_before.vstack))
-  | LocalTee l -> VarEq.Set.of_list
+  | Const n ->
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top instr.annotation_after.vstack) (Var.Const n))
+  | LocalGet l ->
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top instr.annotation_after.vstack) (Spec_inference.get l instr.annotation_before.locals))
+  | LocalSet l ->
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get l instr.annotation_after.locals) (Spec_inference.top instr.annotation_before.vstack))
+  | LocalTee l ->
+    VarEq.Set.of_list
                     [VarEq.of_vars (Spec_inference.get l instr.annotation_after.locals) (Spec_inference.top instr.annotation_before.vstack);
                      VarEq.of_vars (Spec_inference.top instr.annotation_after.vstack) (Spec_inference.get l instr.annotation_before.locals)]
-  | GlobalGet g -> VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top instr.annotation_after.vstack) (Spec_inference.get g instr.annotation_before.globals))
-  | GlobalSet g -> VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get g instr.annotation_after.globals) (Spec_inference.top instr.annotation_before.vstack))
+  | GlobalGet g ->
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top instr.annotation_after.vstack) (Spec_inference.get g instr.annotation_before.globals))
+  | GlobalSet g ->
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get g instr.annotation_after.globals) (Spec_inference.top instr.annotation_before.vstack))
   | Load _ -> VarEq.Set.empty (* TODO (it is sound to ignore them, but shouldn't be too complicated to deal with this) *)
   | Store _ -> VarEq.Set.empty (* TODO: same *)
 

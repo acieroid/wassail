@@ -86,7 +86,9 @@ module Spec = struct
         (extract_different_vars state_before state_after) @ acc)
 
   let ret (i : t Instr.t) : Var.t =
-    List.hd_exn (Instr.annotation_after i).vstack
+    match List.hd (Instr.annotation_after i).vstack with
+    | Some ret -> ret
+    | None -> failwith "Spec.ret: no value on the vstack"
 end
 
 include Spec

@@ -28,7 +28,9 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
     end else
       List.drop vstack n
 
-  let top (l : Var.t list) = List.hd_exn l
+  let top (l : Var.t list) = match List.hd l with
+    | Some v -> v
+    | None -> failwith "Spec_inference.top: var list is empty"
 
   let get (n : Int32.t) (l : Var.t list) = List.nth_exn l (Int32.to_int_exn n)
 
@@ -82,10 +84,10 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
     | Drop -> { state with vstack = drop 1 state.vstack }
     | Select -> { state with vstack = ret :: (drop 3 state.vstack) }
     | LocalGet l -> { state with vstack = (if !propagate_locals then get l state.locals else ret) :: state.vstack }
-    | LocalSet l -> { state with vstack = drop 1 state.vstack; locals = set l state.locals (if !propagate_locals then (List.hd_exn state.vstack) else ret) }
-    | LocalTee l -> { state with locals = set l state.locals (if !propagate_locals then (List.hd_exn state.vstack) else ret) }
+    | LocalSet l -> { state with vstack = drop 1 state.vstack; locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
+    | LocalTee l -> { state with locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
     | GlobalGet g -> { state with vstack = (if !propagate_globals then get g state.globals else ret) :: state.vstack }
-    | GlobalSet g -> { state with globals = set g state.globals (if !propagate_globals then (List.hd_exn state.vstack) else ret) }
+    | GlobalSet g -> { state with globals = set g state.globals (if !propagate_globals then top state.vstack else ret) }
     | Const n -> { state with vstack = (if !use_const then (Var.Const n) else ret) :: state.vstack }
     | Compare _ -> { state with vstack = ret :: (drop 2 state.vstack) }
     | Binary _ -> { state with vstack = ret :: (drop 2 state.vstack) }
@@ -112,7 +114,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                { state with vstack = drop 1 state.vstack })
     | BrTable _ -> `Simple { state with vstack = drop 1 state.vstack }
     | Return -> `Simple (if List.length cfg.return_types = 1 then
-                           { state with vstack = [List.hd_exn state.vstack] }
+                           { state with vstack = [top state.vstack] }
                          else
                            { state with vstack = [] })
     | Unreachable -> `Simple { state with vstack = [] }
@@ -153,11 +155,11 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
           begin match List.filter states ~f:(fun s -> not (equal_state s bot)) with
             | [] -> failwith "No predecessor of a merge node have been analyzed, should not happen"
             | s :: [] -> (* only one non-bottom predecessor *) s
-            | states ->
+            | state :: states ->
               (* multiple predecessors to merge *)
               (* First compute the state with holes where we will need to put merge variables *)
               let with_holes = List.fold_left states
-                  ~init:(List.hd_exn states)
+                  ~init:state
                   ~f:(fun acc s ->
                       let f opt v = match opt with
                         | v' when Var.equal v v' -> v'

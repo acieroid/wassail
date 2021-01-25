@@ -34,7 +34,10 @@ let indirect_call_targets_refined summaries (wasm_mod : Wasm_module.t) (fidx : I
   Relational.Intra.init_summaries summaries;
   let res = Relational.Intra.analyze wasm_mod annotated_sliced_cfg in
   let annotated_instr = Instr.Label.Map.find_exn annotated_sliced_cfg.instructions slicing_criteria in
-  let var_of_call_target = List.hd_exn (Instr.annotation_before annotated_instr).vstack in
+  let var_of_call_target = match List.hd (Instr.annotation_before annotated_instr).vstack with
+    | Some spec -> spec
+    | None -> failwith "indirect_call_targets_refined List.hd"
+  in
   let relational_instr = Instr.Label.Map.find_exn res.instructions slicing_criteria in
   let domain_of_call_target = Instr.annotation_before relational_instr in
   List.filter targets ~f:(fun target ->

@@ -36,7 +36,9 @@ module Make (* : Transfer.TRANSFER *) = struct
       (i : annot_expected Instr.labelled_data)
       (state : state)
     : state =
-    let ret (i : annot_expected Instr.labelled_data) : Var.t = List.hd_exn (fst i.annotation_after).vstack in
+    let ret (i : annot_expected Instr.labelled_data) : Var.t = match List.hd (fst i.annotation_after).vstack with
+      | Some r -> r
+      | None -> failwith "Taint: no return value" in
     match i.instr with
     | Nop | MemorySize | Drop | MemoryGrow -> state
     | Select ->
