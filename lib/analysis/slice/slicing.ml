@@ -1,11 +1,11 @@
 open Core_kernel
 open Helpers
 
-(** Performs backwards slicing on `cfg`, using the slicing criterion
-    `criterion`, encoded as an instruction index. Returns the set
-    of instructions that are part of the slice, as a list of instruction
-    indices. *)
-let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Instr.Label.Set.t =
+(** Identify instructions to keep in a backwards slice on `cfg`, using the
+   slicing criterion `criterion`, encoded as an instruction index. Returns the
+   set of instructions that are part of the slice, as a set of instruction
+   labels. *)
+let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Instr.Label.Set.t =
   let control_dependencies = Control_deps.make cfg in
   let (_, _, data_dependencies) = Use_def.make cfg in
   let rec loop (worklist : Instr.Label.Set.t) (slice : Instr.Label.Set.t) : Instr.Label.Set.t =
@@ -47,15 +47,44 @@ let slicing (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Instr.Label.Set.t
       loop (Instr.Label.Set.remove worklist' slicepart) (Instr.Label.Set.add slice slicepart) in
   loop (Instr.Label.Set.singleton criterion) Instr.Label.Set.empty
 
+(** Return the net effect of a block on the stack size: positive if the block adds values on the stack, negative if it removes them *)
+let block_effect_on_stack_size (cfg : Spec.t Cfg.t) (block_idx : int) : int =
+  (List.length ((Cfg.state_after_block cfg block_idx).vstack)) - (List.length ((Cfg.state_before_block cfg block_idx).vstack))
+
+(** Like block_effect_on_stack_size, but for lists of instructions *)
+let instrs_effect_on_stack_size (instrs : (Instr.data, Spec.t) Instr.labelled list) : int =
+  if List.is_empty instrs then
+    0
+  else
+    let first = List.hd_exn instrs in
+    let last = List.last_exn instrs in
+    (List.length last.annotation_after.vstack) - (List.length first.annotation_before.vstack)
+
+
+(** Construct a dummy list of instruction that has the given net effect on the stack size *)
+let dummy_instrs (net_effect : int) : (Instr.data, unit) Instr.labelled list =
+  let dummy_label (i : int) : Instr.Label.t = { section = Instr.Label.Function (-1l); id = i } in
+  if net_effect = 0 then []
+  else if net_effect < 0 then List.init (- net_effect) ~f:(fun i -> { Instr.instr = Instr.Drop; label = dummy_label i; annotation_before = (); annotation_after = (); })
+  else List.init net_effect ~f:(fun i -> { Instr.instr = Instr.Const (Prim_value.I32 0l); label = dummy_label i; annotation_before = (); annotation_after = () })
+
+(** Construct a dummy block that has the given net effect on the stack
+   size. Uses the given block for every field that is not the list of
+   instructions, in order to construct the new block. This enables keeping the
+   same index. *)
+let dummy_data_block (net_effect : int) (block : 'a Basic_block.t) : unit Basic_block.t =
+  let instrs = dummy_instrs net_effect in
+  Basic_block.clear_annotation { block with content = Basic_block.Data instrs }
+
 (** Performs backwards slicing on `cfg`, relying on `slicing` defined above.
     Returns the slice as a modified CFG *)
 let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
-  let sliceparts = slicing cfg criterion in
+  let sliceparts = instructions_to_keep cfg criterion in
   let instructions = Instr.Label.Map.map (Instr.Label.Map.filteri cfg.instructions ~f:(fun ~key:idx ~data:_ -> Instr.Label.Set.mem sliceparts idx)) ~f:Instr.clear_annotation in
   let (basic_blocks, edges, back_edges) =
     IntMap.fold cfg.basic_blocks ~init:(IntMap.empty, cfg.edges, cfg.back_edges) ~f:(fun ~key:block_idx ~data:block (basic_blocks, edges, back_edges) ->
         (* Remove any annotation of the block *)
-        let block = Basic_block.clear_annotation block in
+        (* let block = Basic_block.clear_annotation block in *)
         (* The block could be empty after slicing and not to keep,
            EXCEPT if it is the entry block or if it is the exit block.
            NOTE: this could be refined to remove entry/exit block only if
@@ -72,27 +101,33 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
           | Control i ->
             (* Keep control block if its instruction is part of the slice *)
             if Instr.Label.Set.mem sliceparts i.label then
-              Some block
-            else if keep_anyway then
-              (* Block needs to be kept but not its content, change it to a data block *)
-              Some { block with content = Basic_block.Data [] }
+              Some (Basic_block.clear_annotation block)
             else
-              None
+              let net_effect = block_effect_on_stack_size cfg block.idx in
+              if keep_anyway || net_effect <> 0 then
+                (* Block needs to be kept but not its content, change it to a data block with the same effect on the stack *)
+                Some (dummy_data_block net_effect block)
+              else
+                None
           | Data instrs ->
-            (* Only keep instructions that are part of the slice.
+            (* Only keep instructions that are part of the slice, making sure to preserve the stack structure.
                All annotations are removed. *)
-            let instrs = List.filter_map instrs ~f:(fun instr ->
-                if Instr.Label.Set.mem sliceparts instr.label then
-                  (* Instruction is part of the slice, annotation is emptied *)
-                  Some {instr with annotation_before = (); annotation_after = () }
-                else
-                  (* Instruction is not part of the slice, drop it *)
-                  None) in
-            if keep_anyway || not (List.is_empty instrs) then
+            let (slice_instrs, to_remove_final) = List.fold_left instrs ~init:([], []) ~f:(fun (slice_instrs, to_remove) instr ->
+                let instr_is_part_of_slice = Instr.Label.Set.mem sliceparts instr.label in
+                Log.debug (Printf.sprintf "Instr %s is part of the slice: %b\n" (Instr.Label.to_string instr.label) instr_is_part_of_slice);
+                if instr_is_part_of_slice then begin
+                  Log.debug (Printf.sprintf "effect on stack size: %d\n" (instrs_effect_on_stack_size to_remove));
+                  let dummy_instrs_that_preserve_stack_shape = dummy_instrs (instrs_effect_on_stack_size to_remove) in
+                  (slice_instrs @ dummy_instrs_that_preserve_stack_shape @ [Instr.clear_annotation_data instr],
+                   [])
+                end else
+                  (slice_instrs, to_remove @ [instr])) in
+            let slice_instrs = slice_instrs @ dummy_instrs (instrs_effect_on_stack_size to_remove_final) in
+            if keep_anyway || not (List.is_empty slice_instrs) then
               (* Otherwise, keep it *)
-              Some { block with content = Basic_block.Data instrs; }
+              Some { block with content = Basic_block.Data slice_instrs; }
             else
-              (* If there are no such instructions, don't keep the block *)
+              (* If there are no instructions to keep, don't keep the block *)
               None
         in
         match new_block with
@@ -177,7 +212,7 @@ module Test = struct
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6
   )" in
-    let actual = slicing cfg (lab 2) in
+    let actual = instructions_to_keep cfg (lab 2) in
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -196,7 +231,7 @@ module Test = struct
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6 -- slicing criterion
   )" in
-    let actual = slicing cfg (lab 6) in
+    let actual = instructions_to_keep cfg (lab 6) in
     let expected = Instr.Label.Set.of_list [lab 4; lab 5; lab 6] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -212,7 +247,7 @@ module Test = struct
     end
     local.get 0)  ;; Instr 5
   )" in
-    let actual = slicing cfg (lab 3) in
+    let actual = instructions_to_keep cfg (lab 3) in
     (* TODO: is it {0,1,2,3} or {3}? {3} seems correct, but this test used to expect {0,1,2,3} *)
     let expected = Instr.Label.Set.of_list [lab 3] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
@@ -229,7 +264,7 @@ module Test = struct
     end
     local.get 0)  ;; Instr 5
   )" in
-    let actual = slicing cfg (lab 4) in
+    let actual = instructions_to_keep cfg (lab 4) in
     let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3; lab 4] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -253,7 +288,7 @@ module Test = struct
     memory.size     ;; Instr 8
     i32.add)        ;; Instr 9 -- slicing criterion
   )" in
-    let actual = slicing cfg (lab 9) in
+    let actual = instructions_to_keep cfg (lab 9) in
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2; lab 3; merge 4; lab 8; lab 9] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -302,11 +337,8 @@ module Test = struct
       i32.add       ;; Instr 8 ;; [i7]
     end)
    )" in
-     Log.debug_enabled := true;
      let sliced_cfg = slice cfg (lab 8) in
-     Log.debug_enabled := false;
      let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-     Printf.printf "DOT:\n%s\n" (Cfg.to_dot cfg ~annot_str:Spec.to_dot_string);
      ()
 
    let%test_unit "slicing with a block containing a single drop - variant" =
@@ -355,6 +387,8 @@ module Test = struct
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
      let cfg = Spec_analysis.analyze_intra1 module_ 14l in
+     Printf.printf "--------------\n";
+     Printf.printf "DOT:\n%s\n" (Cfg.to_dot cfg ~annot_str:Spec.to_dot_string);
      Printf.printf "number of vars of trmm(14): %d\n" (Var_prop.count_vars cfg);
      List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
         (* instr_idx is the label of a call_indirect instruction, slice it *)
@@ -362,6 +396,8 @@ module Test = struct
         Spec_inference.propagate_globals := false;
         Spec_inference.use_const := false;
         let sliced_cfg = slice cfg instr_idx in
+        Printf.printf "-------------------\n";
+        Printf.printf "DOT after slicing:\n%s\n" (Cfg.to_dot sliced_cfg);
         (* We should be able to re-annotate the graph *)
         Spec_inference.propagate_locals := true;
         Spec_inference.propagate_globals := true;

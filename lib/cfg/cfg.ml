@@ -69,7 +69,7 @@ let to_dot ?annot_str:(annot_str : ('a -> string) = fun _ -> "") (cfg : 'a t) : 
 let find_block_exn (cfg : 'a t) (idx : int) : 'a Basic_block.t =
   match IntMap.find cfg.basic_blocks idx with
   | Some b -> b
-  | None -> failwith "Cfg.find_block_exn did not find block"
+  | None -> failwith (Printf.sprintf "Cfg.find_block_exn did not find block %d" idx)
 
 let find_instr_exn (cfg : 'a t) (label : Instr.Label.t) : 'a Instr.t =
   match Instr.Label.Map.find cfg.instructions label with
