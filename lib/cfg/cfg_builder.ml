@@ -7,7 +7,7 @@ let build (fid : Int32.t) (module_ : Wasm_module.t) : unit Cfg.t =
   let rec check_no_rest (rest : 'a Instr.t list) : unit = match rest with
     | [] -> ()
     | Control { instr = Unreachable; _ } :: rest -> check_no_rest rest
-    | _ -> Log.warn (Printf.sprintf "Ignoring unreachable instructions after jump: %s" (Instr.list_to_string rest (fun _ -> "")))
+    | _ -> Log.info (Printf.sprintf "Ignoring unreachable instructions after jump: %s" (Instr.list_to_string rest (fun _ -> "")))
   in
   let simplify = true in
   let funcinst = Wasm_module.get_funcinst module_ fid in
@@ -213,9 +213,16 @@ let build (fid : Int32.t) (module_ : Wasm_module.t) : unit Cfg.t =
   (* Create the return block *)
   let return_block = mk_merge_block () in
   let blocks' = return_block :: blocks in
-  (* Connect the return block, and remove all edges that start from a return block (as they are unreachable) *)
-  let edges' = (exit_idx, return_block.idx, None) :: List.map returns ~f:(fun from -> (from, return_block.idx, None)) @ (List.filter edges ~f:(fun (src, _, _) -> not (List.mem returns src ~equal:Stdlib.(=)))) in
-  assert (List.is_empty breaks); (* there shouldn't be any breaks outside the function *)
+  (* There can still be breaks to the exit of the function *)
+  let breaks_to_exit, remaining_breaks = List.partition_tf breaks ~f:(fun (_, lvl, _) -> Int32.(lvl = 0l)) in
+  begin if not (List.is_empty remaining_breaks) then
+      (* there shouldn't be any breaks outside the function *)
+      Log.warn (Printf.sprintf "There are %d breaks outside of function %ld" (List.length breaks) fid)
+  end;
+  (* Connect the return block and the remaining breaks to it, and remove all edges that start from a return block (as they are unreachable) *)
+  let edges' = (exit_idx, return_block.idx, None) ::
+               List.map breaks_to_exit ~f:(fun (block_idx, _, data) -> (block_idx, return_block.idx, data)) @
+               List.map returns ~f:(fun from -> (from, return_block.idx, None)) @ (List.filter edges ~f:(fun (src, _, _) -> not (List.mem returns src ~equal:Stdlib.(=)))) in
   (* We now filter empty normal blocks *)
   let (actual_blocks, filtered_blocks) = List.partition_tf blocks' ~f:(fun block -> match block.content with
       | Data [] -> not simplify (* only filter if we need to simplify *)
