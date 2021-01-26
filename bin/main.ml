@@ -113,9 +113,6 @@ let callgraph =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         let cg = Call_graph.make wasm_mod in
-        let schedule = Call_graph.analysis_schedule cg wasm_mod.nimports in
-        List.iter schedule ~f:(fun elems ->
-            Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:Int32.to_string)));
         Out_channel.with_file file_out
           ~f:(fun ch ->
               Out_channel.output_string ch (Call_graph.to_dot cg)))
@@ -289,15 +286,24 @@ let find_indirect_calls =
 let () =
   Command.run ~version:"0.0"
     (Command.group ~summary:"Static analysis of WebAssembly"
-       [ "load", load
+       [
+
+       (* General utilities that only required to load the WebAssmbly files *)
+         "load", load
        ; "imports", imports
        ; "exports", exports
        ; "instructions", instructions
-       ; "callgraph", callgraph
        ; "sizes", sizes
+
+       (* Utilities that require building the CFGs *)
        ; "cfg", cfg
        ; "cfgs", cfgs
+
+       (* Utilities that requires building the call graph *)
+       ; "callgraph", callgraph
        ; "schedule", schedule
+
+       (* Other *)
        ; "spec-inference", spec_inference
        ; "count-vars", count_vars
        ; "taint-intra", taint_intra

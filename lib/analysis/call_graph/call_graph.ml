@@ -1,6 +1,8 @@
 open Core_kernel
 open Helpers
 
+let refined : bool ref = ref false
+
 (** A call graph *)
 type t = {
   nodes : Int32Set.t; (** Nodes of the call graphs are function indices *)
@@ -49,7 +51,11 @@ let indirect_call_targets_refined summaries (wasm_mod : Wasm_module.t) (fidx : I
 
 (** Builds a call graph for a module *)
 let make (wasm_mod : Wasm_module.t) : t =
-  let find_targets = indirect_call_targets_refined (Relational.Summary.initial_summaries (Cfg_builder.build_all wasm_mod) wasm_mod `Top) in
+  let find_targets = if !refined then
+      indirect_call_targets_refined (Relational.Summary.initial_summaries (Cfg_builder.build_all wasm_mod) wasm_mod `Top)
+    else
+      indirect_call_targets
+  in
   let nodes = Int32Set.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> Int32.of_int_exn i)) in
   let rec collect_calls (f : Int32.t) (instr : 'a Instr.t) (edges : Int32Set.t Int32Map.t) : Int32Set.t Int32Map.t = match instr with
     | Control { instr = Call (_, f'); _ } ->
