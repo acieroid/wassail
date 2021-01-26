@@ -3,12 +3,11 @@ open Helpers
 
 (** Constructs a CFG for function `fid` in a module. *)
 let build (fid : Int32.t) (module_ : Wasm_module.t) : unit Cfg.t =
-  (* TODO: this implementation is really not ideal and should be clean *)
-  (* true to simplify the CFG, false to disable simplification *)
+  (* TODO: this implementation is really not ideal and should be cleaned *)
   let rec check_no_rest (rest : 'a Instr.t list) : unit = match rest with
     | [] -> ()
     | Control { instr = Unreachable; _ } :: rest -> check_no_rest rest
-    | _ -> failwith "Invalid CFG: instructions found where none expected!"
+    | _ -> Log.warn (Printf.sprintf "Ignoring unreachable instructions after jump: %s" (Instr.list_to_string rest (fun _ -> "")))
   in
   let simplify = true in
   let funcinst = Wasm_module.get_funcinst module_ fid in
