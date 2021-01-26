@@ -6,12 +6,14 @@ module Label = struct
     | Function of Int32.t (** Instruction is part of the function with the given index *)
     | Elem of Int32.t (** Instruction is part of table elements with the given index *)
     | MergeInFunction of Int32.t (** Instruction is a merge instruction in the given function *)
+    | Dummy (** Dummy section, introduced by an extra processing phase (e.g., slicing) *)
   [@@deriving sexp, compare, equal]
 
   let section_to_string (s : section) = match s with
     | Function n -> Printf.sprintf "%ld" n
     | Elem n -> Printf.sprintf "elem%ld" n
     | MergeInFunction n -> Printf.sprintf "m%ld" n
+    | Dummy -> "d"
 
   module T = struct
     (** A label is a unique identifier for an instruction *)

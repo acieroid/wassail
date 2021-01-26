@@ -8,7 +8,7 @@ type t = {
 }
 [@@deriving sexp, compare, equal]
 
-let indirect_call_targets (wasm_mod : Wasm_module.t) (_fidx : Int32.t) (_instr : 'a Instr.t) (typ : Int32.t) : Int32.t list =
+let indirect_call_targets (wasm_mod : Wasm_module.t) (_fidx : Int32.t) (_instr : Instr.Label.t) (typ : Int32.t) : Int32.t list =
   let ftype = Wasm_module.get_type wasm_mod typ in
   let table = List.nth_exn wasm_mod.table_insts 0 in
   let funs = List.map (Table_inst.indices table) ~f:(fun idx -> Table_inst.get table idx) in
@@ -20,16 +20,16 @@ let indirect_call_targets (wasm_mod : Wasm_module.t) (_fidx : Int32.t) (_instr :
 (* TODO: call with
  Relational.Summary.initial_summaries (Cfg_builder.build_all module_) module_ `Top
    in order to get the right signature *)
-let indirect_call_targets_refined summaries (wasm_mod : Wasm_module.t) (fidx : Int32.t) (instr : 'a Instr.t) (typ : Int32.t) : Int32.t list =
+let indirect_call_targets_refined summaries (wasm_mod : Wasm_module.t) (fidx : Int32.t) (instr : Instr.Label.t) (typ : Int32.t) : Int32.t list =
   let targets = indirect_call_targets wasm_mod fidx instr typ in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
   Spec_inference.use_const := false;
   let cfg = Spec_analysis.analyze_intra1 wasm_mod fidx in
-  let slicing_criteria = Instr.label instr in
+  let slicing_criteria = instr in
   Printf.printf "slicing criteria is: %s\n" (Instr.Label.to_string slicing_criteria);
   let sliced_cfg = Slicing.slice cfg slicing_criteria in
-  Printf.printf "Rerunning spec inference\n";
+  Printf.printf "Rerunning spec inference\n%!";
   let annotated_sliced_cfg = Spec_inference.Intra.analyze wasm_mod sliced_cfg in
   Relational.Intra.init_summaries summaries;
   let res = Relational.Intra.analyze wasm_mod annotated_sliced_cfg in
@@ -44,7 +44,7 @@ let indirect_call_targets_refined summaries (wasm_mod : Wasm_module.t) (fidx : I
       match Relational.Domain.is_equal domain_of_call_target var_of_call_target target with
       | true, _ -> true (* can be equal *)
       | false, _ ->
-        Printf.printf "Filtered one call!\n";
+        Printf.printf "Filtered one call!\n%!";
         false (* can't be equal *))
 
 (** Builds a call graph for a module *)
@@ -57,7 +57,7 @@ let make (wasm_mod : Wasm_module.t) : t =
           | None -> Int32Set.singleton f'
           | Some fs -> Int32Set.add fs f')
     | Control { instr = CallIndirect (_, typ); _ } ->
-      List.fold_left (find_targets wasm_mod f instr typ)
+      List.fold_left (find_targets wasm_mod f (Instr.label instr) typ)
         ~init:edges
         ~f:(fun edges f' ->
             Int32Map.update edges f ~f:(function

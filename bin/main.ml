@@ -7,6 +7,17 @@ let int32_comma_separated_list =
   Command.Arg_type.create (fun ids ->
       List.map (String.split ids ~on:',') ~f:Int32.of_string)
 
+let load =
+  Command.basic
+    ~summary:"Load a module and quits"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string) in
+      fun () ->
+        try
+          let _module : Wasm_module.t = Wasm_module.of_file file_in in
+          Printf.printf "Successfully loaded %s\n" file_in
+        with e -> Printf.printf "Error when loading %s: %s" file_in (Exn.to_string e); exit 1)
+
 let imports =
   Command.basic
     ~summary:"List functions imported by a WebAssembly module"
@@ -122,7 +133,6 @@ let schedule =
             Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:Int32.to_string)));
         Printf.printf "\n")
 
-
 let mk_intra (desc : string) (analysis : Wasm_module.t -> Int32.t list -> 'a Int32Map.t) (print : Int32.t -> 'a -> unit) =
   Command.basic
     ~summary:desc
@@ -219,54 +229,68 @@ let report_time (msg : string) (t0 : Time.t) (t1 : Time.t) : unit =
 
 let slice_cfg =
   Command.basic
-    ~summary:"Slice a CFG at each call_indirect instruction"
+    ~summary:"Slice a CFG at the given instruction"
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string)
-      and idx = anon ("fun" %: int32) in
+      and funidx = anon ("fun" %: int32)
+      and instr = anon ("instr" %: int) in
       fun () ->
-        Printf.printf "Reading module\n%!";
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
         Spec_inference.use_const := false;
         let module_ = Wasm_module.of_file filename in
-        let summaries = Relational.Summary.initial_summaries (Cfg_builder.build_all module_) module_ `Top in
-        let cfg = Spec_analysis.analyze_intra1 module_ idx in
-        Printf.printf "outputting initial CFG in initial.dot\n%!";
-        Out_channel.with_file "initial.dot"
+        let cfg = Spec_analysis.analyze_intra1 module_ funidx in
+        let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
+        let sliced_cfg = Slicing.slice cfg slicing_criterion in
+        let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+        let dot_filename = Printf.sprintf "sliced-%ld-%d.dot" funidx instr in
+        Printf.printf "outputting sliced cfg to %s\n" dot_filename;
+        Out_channel.with_file dot_filename
           ~f:(fun ch ->
-              Out_channel.output_string ch (Cfg.to_dot cfg));
-        let slicing_criteria = Slicing.find_call_indirect_instructions cfg in
-        List.iter slicing_criteria ~f:(fun instr_idx ->
-            (* instr_idx is the label of a call_indirect instruction, slice it *)
-            Printf.printf "Slicing for instruction %s\n%!" (Instr.Label.to_string instr_idx);
-            let sliced_cfg = Slicing.slice cfg instr_idx in
-            Printf.printf "outputting sliced cfg to sliced-%s.dot\n%!" (Instr.Label.to_string instr_idx);
-            Out_channel.with_file (Printf.sprintf "sliced-%s.dot" (Instr.Label.to_string instr_idx))
-                ~f:(fun ch ->
-                  Out_channel.output_string ch (Cfg.to_dot sliced_cfg ~annot_str:(fun _ -> "")));
-            let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-            Printf.printf "Analyzing resulting CFG...\n%!";
-            let t0 = Time.now () in
-            Relational.Intra.init_summaries summaries;
-            let res = Relational.Intra.analyze module_ annotated_sliced_cfg in
-            let t1 = Time.now () in
-            report_time "relational analysis" t0 t1;
-            let annotated_instr = Instr.Label.Map.find_exn annotated_sliced_cfg.instructions instr_idx in
-            let var_of_call_target = List.hd_exn (Instr.annotation_before annotated_instr).vstack in
-            let relational_instr = Instr.Label.Map.find_exn res.instructions instr_idx in
-            let domain_of_call_target = Instr.annotation_before relational_instr in
-            (* The box conversion is useluss, we want to compare to actual possible values for target (by checking subsumption) *)
-            let box = Apron.Abstract1.to_box Relational.Domain.manager domain_of_call_target.constraints in
-            let dim = Apron.Environment.dim_of_var box.box1_env (Apron.Var.of_string (Var.to_string var_of_call_target)) in
-            let itv = Array.get box.interval_array dim in
-            let itvstr = Printf.sprintf "[%s,%s]" (Apron.Scalar.to_string itv.inf) (Apron.Scalar.to_string itv.sup) in
-            Printf.printf "var: %s, itv: %s\n" (Var.to_string var_of_call_target) itvstr;
-            ()))
+              Out_channel.output_string ch (Cfg.to_dot annotated_sliced_cfg ~annot_str:Spec.to_dot_string));
+
+        Printf.printf "Analyzing resulting CFG...\n%!";
+        let summaries = Relational.Summary.initial_summaries (Cfg_builder.build_all module_) module_ `Top in
+        let t0 = Time.now () in
+        Relational.Intra.init_summaries summaries;
+        let res = Relational.Intra.analyze module_ annotated_sliced_cfg in
+        let t1 = Time.now () in
+        report_time "relational analysis" t0 t1;
+        let annotated_instr = Instr.Label.Map.find_exn annotated_sliced_cfg.instructions slicing_criterion in
+        let var_of_call_target = List.hd_exn (Instr.annotation_before annotated_instr).vstack in
+        let relational_instr = Instr.Label.Map.find_exn res.instructions slicing_criterion in
+        let typ = match relational_instr with
+          | Control { instr = CallIndirect (_, typ); _ } -> typ
+          | _ -> failwith "TODO" in
+        let domain_of_call_target = Instr.annotation_before relational_instr in
+        Printf.printf "domain of call target: %s\n" (Relational.Domain.to_string domain_of_call_target);
+        Printf.printf "var of call target: %s\n" (Var.to_string var_of_call_target);
+        let targets = Call_graph.indirect_call_targets module_ funidx slicing_criterion typ in
+        Printf.printf "indirect call targets: %s\n" (String.concat ~sep:"," (List.map targets ~f:Int32.to_string));
+        List.iter targets ~f:(fun target ->
+            let b1, b2 = Relational.Domain.is_equal domain_of_call_target var_of_call_target target in
+            Printf.printf "target %ld: (%b, %b)\n" target b1 b2
+          );
+        ())
+
+let find_indirect_calls =
+  Command.basic
+    ~summary:"Find call_indirect instructions and shows the function in which they appear as well as their label"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string) in
+      fun() ->
+        let module_ = Wasm_module.of_file filename in
+        List.iter module_.funcs ~f:(fun finst ->
+            let cfg = Spec_analysis.analyze_intra1 module_ finst.idx in
+            let indirect_calls = Slicing.find_call_indirect_instructions cfg in
+            List.iter indirect_calls ~f:(fun label ->
+                Printf.printf "function %ld, instruction %s\n" finst.idx (Instr.Label.to_string label))))
 
 let () =
   Command.run ~version:"0.0"
     (Command.group ~summary:"Static analysis of WebAssembly"
-       [ "imports", imports
+       [ "load", load
+       ; "imports", imports
        ; "exports", exports
        ; "instructions", instructions
        ; "callgraph", callgraph
@@ -280,4 +304,5 @@ let () =
        ; "taint-inter", taint_inter
        ; "reltaint-intra", reltaint_intra
        ; "relational-intra", relational_intra
-       ; "slice", slice_cfg])
+       ; "slice", slice_cfg
+       ; "find-indirect-calls", find_indirect_calls])

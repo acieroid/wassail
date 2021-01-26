@@ -8,7 +8,7 @@
   (func (;1;) (type 4)
     (local i32)
     call 4
-    locael.tee 0
+    local.tee 0
     if  ;; label = @1
       local.get 0
       call 0

@@ -55,7 +55,7 @@ let instrs_effect_on_stack_size (instrs : (Instr.data, Spec.t) Instr.labelled li
 
 (** Construct a dummy list of instruction that has the given net effect on the stack size *)
 let dummy_instrs (net_effect : int) (next_label : unit -> int) : (Instr.data, unit) Instr.labelled list =
-  let dummy_label () : Instr.Label.t = { section = Instr.Label.Function (-1l); id = next_label () } in
+  let dummy_label () : Instr.Label.t = { section = Instr.Label.Dummy; id = next_label () } in
   if net_effect = 0 then []
   else if net_effect < 0 then List.init (- net_effect) ~f:(fun _ -> { Instr.instr = Instr.Drop; label = dummy_label (); annotation_before = (); annotation_after = (); })
   else List.init net_effect ~f:(fun _ -> { Instr.instr = Instr.Const (Prim_value.I32 0l); label = dummy_label (); annotation_before = (); annotation_after = () })
