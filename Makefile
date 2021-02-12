@@ -3,8 +3,8 @@ TEST_EXECUTABLE=./_build/default/lib/.wassail.inline-tests/inline_test_runner_wa
 all: bin
 
 bin:
-	opam exec -- dune build ./bin/main.exe
-	ln -sf _build/default/bin/main.exe main.exe
+	opam exec -- dune build ./bin/wassai.exe
+	# ln -sf _build/default/bin/main.exe main.exe
 
 js:
 	opam exec -- dune build ./js/jsbridge.bc.js
@@ -19,6 +19,5 @@ clean:
 install:
 	opam exec -- dune build @install
 	opam exec -- dune install
-
 
 .PHONY: bin js test clean install all
