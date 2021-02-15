@@ -1,8 +1,8 @@
 (executable
-  (package wassai)
- (name wassai)
+  (package main)
+ (name main)
  (public_name wassail)
- (modules Wassai)
+ (modules Main)
  (libraries wassail core wasm)
  ;; (link_flags :standard -cclib -static) ;; uncomment to enable static executable
  (preprocess (pps ppx_jane ppx_compare)))

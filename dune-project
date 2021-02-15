@@ -2,7 +2,7 @@
 (allow_approximate_merlin)
 (name "wassail")
 (package
- (name "wassai"))
+ (name "main"))
 (package
  (name "wassail"))
 

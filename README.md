@@ -6,29 +6,15 @@
   - [Contributing](#contributing)
 
 # Installation
-## Dependencies
-
 0. Install [opam](https://opam.ocaml.org/)
 
-1. Install dependencies for this project
-
-```sh
-opam install core core_kernel ppx_compare ppx_inline_test ppx_jane wasm sexplib apron
-```
-
-(This list of dependencies may be outdated, you can find it by running `dune external-lib-deps ./bin/main.exe`)
-
-## Building
-
-```sh
-make
-```
+1. Run `opam install .`
 
 # Usage
 Wassail can perform a number of tasks on WebAssembly modules, both in their textual representation (`.wat` files) or in their binary representation (`.wasm`)
 ## Listing imports
 ```sh
-$ ./main.exe imports foo.wasm
+$ wassail imports foo.wasm
 0	time	i32 -> i32
 1	ctime	i32 -> i32
 2	roundf	f32 -> f32
@@ -36,7 +22,7 @@ $ ./main.exe imports foo.wasm
 ```
 ## Listing exports
 ```sh
-$ ./main.exe exports foo.wasm
+$ wassail exports foo.wasm
 11563	atof	i32 -> f64
 11586	strlen	i32 -> i32
 11483	fopen	i32, i32 -> i32
@@ -46,7 +32,7 @@ $ ./main.exe exports foo.wasm
 ## Listing section sizes
 Section sizes are reported in bytes.
 ```sh
-$ ./main.exe sizes foo.wasm
+$ wassail sizes foo.wasm
 1962	type
 8724	import
 13120	func
@@ -64,7 +50,7 @@ $ ./main.exe sizes foo.wasm
 To generate the call graph for a module `foo.dot`:
 
 ```sh
-$ ./main.exe callgraph benchmarks/benchmarksgame/fankuchredux.wat foo.dot
+$ wassail callgraph benchmarks/benchmarksgame/fankuchredux.wat foo.dot
 ```
 
 Output graph:
@@ -75,13 +61,13 @@ Output graph:
 You can either generate a single CFG, for example to generate the CFG of function 1 from file `foo.wat` into `foo.dot`:
 
 ```sh
-$ ./main.exe cfg foo.wat 1 foo.dot
+$ wassail cfg foo.wat 1 foo.dot
 ```
 
 Or you can generate all CFGs in a given directory:
 
 ```sh
-$ ./main.exe cfgs foo.wat out/
+$ wassail cfgs foo.wat out/
 ```
 
 Example output:
@@ -107,4 +93,4 @@ $ make test
 # References
 
 Wassail has been described in the following publication:
-  - [Compositional Information Flow Analysis for WebAssembly Programs](http://soft.vub.ac.be/~qstieven/scam2020wasm/), SCAM 2020. ([pdf](http://soft.vub.ac.be/Publications/2020/vub-tr-soft-20-11.pdf))
+  - [Compositional Information Flow Analysis for WebAssembly Programs](http://soft.vub.ac.be/~qstieven/scam2020wasm/), SCAM 2020. ([pdf](http://soft.vub.ac.be/Publications/2020/vub-tr-soft-20-11.pdf), [video](https://www.youtube.com/watch?v=IX8swyZ4TPI))
