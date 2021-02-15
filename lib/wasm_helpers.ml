@@ -29,11 +29,12 @@ let arity_of_fun (m : Ast.module_) (f : Ast.var) : int * int =
   let n = Int32.of_int_exn (nimports m) in
   if Int32.(f.it < n) then
     (* imported function, arity is in import desc *)
-    match (Lib.List32.nth m.it.imports f.it).it.idesc.it with
-    | FuncImport v -> arity_of_fun_type m v
-    | TableImport _ -> failwith "table import not supported"
-    | MemoryImport _ -> failwith "memory import not supported"
-    | GlobalImport _ -> failwith "global import not supported"
+    let rec iter (count : int32) (l : Ast.import list) : int * int = match l with
+      | [] -> failwith (Printf.sprintf "Cannot find function %ld" f.it)
+      | { it = { idesc = { it = FuncImport v; _ }; _}; _} :: _ when Int32.(count = f.it) -> arity_of_fun_type m v
+      | { it = { idesc = { it = FuncImport _; _}; _}; _} :: rest -> iter Int32.(count + 1l) rest
+      | _ :: rest -> iter count rest (* other imports don't count towards increasing function indice *)in
+    iter 0l m.it.imports
   else
     (* defined function, get arity from function list *)
     arity_of_fun_type m (Lib.List32.nth m.it.funcs Int32.(f.it - n)).it.ftype
