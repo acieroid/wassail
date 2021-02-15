@@ -1,6 +1,7 @@
 (include_subdirs unqualified)
 (library
  (name wassail)
+ (public_name wassail)
  (modules
    Wassail
    Helpers Tree Test Log

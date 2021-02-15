@@ -1,8 +1,11 @@
 (executable
-  (package main)
+ (package wassail)
  (name main)
  (public_name wassail)
  (modules Main)
  (libraries wassail core wasm)
  ;; (link_flags :standard -cclib -static) ;; uncomment to enable static executable
  (preprocess (pps ppx_jane ppx_compare)))
+(include_subdirs unqualified)
+
+
