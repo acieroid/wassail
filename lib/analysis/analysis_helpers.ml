@@ -9,7 +9,7 @@ let mk_intra
   List.fold_left funs
     ~init:(init_summaries cfgs wasm_mod)
     ~f:(fun summaries fid ->
-        if Int32.(fid < wasm_mod.nimports) then begin
+        if Int32.(fid < wasm_mod.nfuncimports) then begin
           summaries
         end else
           let cfg = match Int32Map.find cfgs fid with

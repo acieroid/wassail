@@ -9,7 +9,7 @@ module T = struct
     globals : Global.t list; (** The globals *)
     global_types : Type.t list; (** The types for the globals *)
     nglobals : Int32.t; (** The number of globals *)
-    nimports : Int32.t; (** The number of function imported *)
+    nfuncimports : Int32.t; (** The number of functions imported *)
     imports : Import.t list;
     imported_funcs : (Int32.t * string * (Type.t list * Type.t list)) list; (** The description of the imported function: their id, name, and type *)
     exports : Export.t list;
@@ -40,7 +40,7 @@ let get_type (m : t) (tid : Int32.t) : Type.t list * Type.t list =
 
 (** Get the type of the function with index fidx *)
 let get_func_type (m : t) (fidx : Int32.t) : Type.t list * Type.t list =
-  (Wasm.Lib.List32.nth m.funcs Int32.(fidx-m.nimports)).typ
+  (Wasm.Lib.List32.nth m.funcs Int32.(fidx-m.nfuncimports)).typ
 
 (** Constructs a Wasm_module *)
 let of_wasm (m : Wasm.Ast.module_) : t =
@@ -53,17 +53,17 @@ let of_wasm (m : Wasm.Ast.module_) : t =
               | {it = Wasm.Types.FuncType (a, b); _} ->
                 (List.map a ~f:Type.of_wasm, List.map b ~f:Type.of_wasm))
       | _ -> None) in
-  let nimports = Wasm.Lib.List32.length imported_funcs in
+  let nfuncimports = Wasm.Lib.List32.length imported_funcs in
   let globals = List32.mapi m.it.globals ~f:(Global.of_wasm m) in
   let nglobals = Wasm.Lib.List32.length m.it.globals in
   let global_types = List.map m.it.globals ~f:(fun g -> match g.it.gtype with
       | Wasm.Types.GlobalType (t, _) -> Type.of_wasm t) in
-  let funcs = List32.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m minst Int32.(i+nimports) f) in
-  let ftype (fidx : Int32.t) : Type.t list * Type.t list = if Int32.(fidx < nimports) then
+  let funcs = List32.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m minst Int32.(i+nfuncimports) f) in
+  let ftype (fidx : Int32.t) : Type.t list * Type.t list = if Int32.(fidx < nfuncimports) then
       match Wasm.Lib.List32.nth imported_funcs fidx with
       | (_, _, typ) -> typ
     else
-      let f =  Wasm.Lib.List32.nth funcs Int32.(fidx-nimports) in
+      let f =  Wasm.Lib.List32.nth funcs Int32.(fidx-nfuncimports) in
       assert Int32.(f.idx = fidx);
       f.typ in
   let exports = List.map m.it.exports ~f:Export.of_wasm in
@@ -87,7 +87,7 @@ let of_wasm (m : Wasm.Ast.module_) : t =
   let elems = List32.mapi m.it.elems ~f:(Segment.ElemSegment.of_wasm m) in
   ({
     start;
-    imports; nimports; imported_funcs;
+    imports; nfuncimports; imported_funcs;
     exports; exported_funcs;
     funcs;
     data; elems;

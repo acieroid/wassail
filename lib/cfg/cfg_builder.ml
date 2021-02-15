@@ -290,7 +290,7 @@ let build (fid : Int32.t) (module_ : Wasm_module.t) : unit Cfg.t =
 
 let build_all (mod_ : Wasm_module.t) : unit Cfg.t Int32Map.t =
   Int32Map.of_alist_exn (List.mapi mod_.funcs ~f:(fun i _ ->
-      let faddr = Int32.(mod_.nimports + (Int32.of_int_exn i)) in
+      let faddr = Int32.(mod_.nfuncimports + (Int32.of_int_exn i)) in
       (faddr, build faddr mod_)))
 
 module Test = struct
@@ -300,7 +300,7 @@ module Test = struct
     let wasm_mod = Wasm_module.of_file file in
     List.iteri wasm_mod.funcs
       ~f:(fun i _ ->
-          let faddr = Int32.(wasm_mod.nimports + (Int32.of_int_exn i)) in
+          let faddr = Int32.(wasm_mod.nfuncimports + (Int32.of_int_exn i)) in
           let _ : unit Cfg.t = build faddr wasm_mod in
           ())
 

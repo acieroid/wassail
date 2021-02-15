@@ -31,7 +31,7 @@ module Make (Intra : Intra.INTRA) (*: INTER*) = struct
       else
         (* Next CFG to analyze *)
         let cfg_idx = Int32Set.min_elt_exn worklist in
-        if Int32.(cfg_idx < module_.nimports) then begin
+        if Int32.(cfg_idx < module_.nfuncimports) then begin
           (* Should not happen *)
           Log.info
             (Printf.sprintf "Not analyzing cfg %s (it is an imported function)" (Int32.to_string cfg_idx));
