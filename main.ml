@@ -79,7 +79,7 @@ let cfg =
       and file_out = anon ("out" %: string) in
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
-        if Int32.(fid < wasm_mod.nimports) then
+        if Int32.(fid < wasm_mod.nfuncimports) then
           Printf.printf "Can't build CFG for function %ld: it is an imported function" fid
         else
           let cfg = Cfg_builder.build fid wasm_mod in
@@ -98,7 +98,7 @@ let cfgs =
         Core.Unix.mkdir_p out_dir;
         List.iteri wasm_mod.funcs
           ~f:(fun i _ ->
-              let faddr = Int32.(wasm_mod.nimports + (Int32.of_int_exn i)) in
+              let faddr = Int32.(wasm_mod.nfuncimports + (Int32.of_int_exn i)) in
               let cfg = Cfg_builder.build faddr wasm_mod in
               Out_channel.with_file (Printf.sprintf "%s/%ld.dot" out_dir faddr)
                 ~f:(fun ch ->
@@ -125,7 +125,7 @@ let schedule =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         let cg = Call_graph.make wasm_mod in
-        let schedule = Call_graph.analysis_schedule cg wasm_mod.nimports in
+        let schedule = Call_graph.analysis_schedule cg wasm_mod.nfuncimports in
         List.iter schedule ~f:(fun elems ->
             Printf.printf "%s " (String.concat ~sep:"," (List.map elems ~f:Int32.to_string)));
         Printf.printf "\n")

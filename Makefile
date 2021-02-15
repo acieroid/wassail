@@ -3,11 +3,7 @@ TEST_EXECUTABLE=./_build/default/lib/.wassail.inline-tests/inline_test_runner_wa
 all: bin
 
 bin:
-	opam exec -- dune build ./bin/main.exe
-
-js:
-	opam exec -- dune build ./js/jsbridge.bc.js
-	cp -f _build/default/js/jsbridge.bc.js interface/jsbridge.bc.js
+	opam exec -- dune build
 
 test:
 	opam exec -- dune runtest
