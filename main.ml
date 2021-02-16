@@ -40,6 +40,30 @@ let exports =
             Printf.printf "%ld\t%s\t%s\n"
               idx name (Type.funtype_to_string ftype)))
 
+let mem_exports =
+  Command.basic
+    ~summary:"Outputs the number of memories exported by this module"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string) in
+      fun () ->
+        let wasm_mod = Wasm_module.of_file file_in in
+        let count = List.count wasm_mod.exports ~f:(fun export -> match export.edesc with
+            | MemoryExport _ -> true
+            | _ -> false) in
+        Printf.printf "%d\n" count)
+
+let mem_imports =
+  Command.basic
+    ~summary:"Outputs the number of memories exported by this module"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string) in
+      fun () ->
+        let wasm_mod = Wasm_module.of_file file_in in
+        let count = List.count wasm_mod.imports ~f:(fun import -> match import.idesc with
+            | MemoryImport _ -> true
+            | _ -> false) in
+        Printf.printf "%d\n" count)
+
 let instructions =
   Command.basic
     ~summary:"List instructions used by a WebAssembly module, and how many time each instruction appears"
@@ -294,6 +318,8 @@ let () =
        ; "exports", exports
        ; "instructions", instructions
        ; "sizes", sizes
+       ; "mem-imports", mem_imports
+       ; "mem-exports", mem_exports
 
        (* Utilities that require building the CFGs *)
        ; "cfg", cfg

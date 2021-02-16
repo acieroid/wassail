@@ -6,6 +6,8 @@ module Log = Log
 
 module Wasm_module = Wasm_module
 module Instr = Instr
+module Import = Import
+module Export = Export
 module Var = Var
 module Type = Type
 
