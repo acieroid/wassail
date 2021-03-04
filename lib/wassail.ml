@@ -30,6 +30,7 @@ module Reltaint = Reltaint
 
 module Slicing = Slicing
 module Use_def = Use_def
+module Control_deps = Control_deps
 
 module Instruction_counter = Instruction_counter
 module Sizes = Sizes

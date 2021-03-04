@@ -5,7 +5,7 @@ all: bin
 bin:
 	opam exec -- dune build
 
-test:
+test: bin
 	opam exec -- dune runtest
 
 clean:

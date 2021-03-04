@@ -113,6 +113,25 @@ let find (cdeps : Pred.Set.t Var.Map.t) (var : Var.t) : Pred.Set.t =
   | Some preds -> preds
   | None -> Pred.Set.empty
 
+let annotate (cfg : Spec.t Cfg.t) : string =
+  let deps = make cfg in
+  (* the "to" of the arrow is easy: it is the instruction of which the label is in Pred.
+     the "from" is more difficult: we identify variables only here... so we need to go over the CFG and see each var used by each instruction *)
+  let instrs = Cfg.all_instructions cfg in
+  String.concat ~sep:"\n"
+    (List.concat_map instrs
+       ~f:(fun instr ->
+           let label = Instr.label instr in
+           let uses = Spec_inference.instr_use cfg instr in
+           List.concat_map uses ~f:(fun var ->
+               List.map (Pred.Set.to_list (find deps var))
+                 ~f:(fun (_var, label') ->
+                     Printf.sprintf "block%d:instr%s -> block%d:instr%s [color=green]"
+                       (Cfg.find_enclosing_block_exn cfg label).idx
+                       (Instr.Label.to_string label)
+                       (Cfg.find_enclosing_block_exn cfg label').idx
+                       (Instr.Label.to_string label')))))
+
 let%test "control dependencies computation" =
   let open Instr.Label.Test in
   let module_ = Wasm_module.of_string "(module

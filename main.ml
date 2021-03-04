@@ -270,7 +270,9 @@ let slice_cfg =
           ~f:(fun ch ->
               Out_channel.output_string ch (Cfg.to_dot annotated_sliced_cfg
                                               ~annot_str:Spec.to_dot_string
-                                           ~extra_data:(Use_def.annotate annotated_sliced_cfg)));
+                                              ~extra_data:((Use_def.annotate annotated_sliced_cfg) ^
+                                                           (* TODO: we're using cfg because currently the sliced CFG has a dangling block (the return block), which breaks the control dependency computation *)
+                                                           (Control_deps.annotate cfg))));
     )
 
 let relslice_cfg =
