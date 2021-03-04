@@ -15,7 +15,7 @@ val to_string : ?annot_str:('a -> string) -> 'a t -> string
 
 val to_dot : ?annot_str:('a -> string) -> 'a t -> string
 
-val all_instructions : 'a t -> 'a Instr.t list
+val all_direct_instruction_labels : 'a t -> Instr.Label.Set.t
 
 val all_instruction_labels : 'a t -> Instr.Label.Set.t
 

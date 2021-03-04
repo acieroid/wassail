@@ -267,7 +267,7 @@ let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
         | CallIndirect ((_, arity_out), _) -> top_n arity_out
         | Merge ->
           (* Merge instruction defines new variabes *)
-          let block = Cfg.find_enclosing_block cfg instr in
+          let block = Cfg.find_enclosing_block_exn cfg (Instr.label instr) in
           let vars = List.map (new_merge_variables cfg block) ~f:snd in
           (* There might be duplicates. For example, i3 becomes m0 from one branch, and i4 becomes m0 from another branch.
              If that is the case, we have two definitions of m0.
@@ -312,7 +312,7 @@ let instr_use (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list = match
       | BrIf _ | BrTable _ -> top_n 1
       | Merge ->
         (* Merge instruction uses the variables it redefines *)
-        let block = Cfg.find_enclosing_block cfg instr in
+        let block = Cfg.find_enclosing_block_exn cfg (Instr.label instr) in
         List.map (new_merge_variables cfg block) ~f:fst
       | Br _ | Return | Unreachable -> []
     end

@@ -67,7 +67,7 @@ val equal : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
 val to_string : 'a t -> string
 
 (** Return the DOT graph representatino of a CFG *)
-val to_dot : ?annot_str:('a -> string) -> 'a t -> string
+val to_dot : ?annot_str:('a -> string) -> ?extra_data:string -> 'a t -> string
 
 (** Find a basic block given its index *)
 val find_block_exn : 'a t -> int -> 'a Basic_block.t
@@ -95,14 +95,11 @@ val callees : 'a t -> Int32Set.t
 (** Find the callers of this function *)
 val callers : 'a t Int32Map.t -> 'a t -> Int32Set.t
 
-(** Return all the instructions within this CFG *)
-(* val all_block_indices : 'a t -> IntSet.t *)
-
 (** Return all the instructions contained within this CFG (in no particular order) *)
 val all_instructions : 'a t -> 'a Instr.t list
 
 (** Return all instructions contained within this CFG, as well as the block containing them *)
-val find_enclosing_block : 'a t -> 'a Instr.t -> 'a Basic_block.t
+val find_enclosing_block_exn : 'a t -> Instr.Label.t -> 'a Basic_block.t
 
 (** Return all basic blocks within this CFG (in no particular ordr) *)
 val all_blocks : 'a t -> 'a Basic_block.t list

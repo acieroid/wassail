@@ -268,6 +268,31 @@ let slice_cfg =
         Printf.printf "outputting sliced cfg to %s\n" dot_filename;
         Out_channel.with_file dot_filename
           ~f:(fun ch ->
+              Out_channel.output_string ch (Cfg.to_dot annotated_sliced_cfg
+                                              ~annot_str:Spec.to_dot_string
+                                           ~extra_data:(Use_def.annotate annotated_sliced_cfg)));
+    )
+
+let relslice_cfg =
+  Command.basic
+    ~summary:"Slice a CFG at the given instruction, before performing an extra relational analysis"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and funidx = anon ("fun" %: int32)
+      and instr = anon ("instr" %: int) in
+      fun () ->
+        Spec_inference.propagate_globals := false;
+        Spec_inference.propagate_locals := false;
+        Spec_inference.use_const := false;
+        let module_ = Wasm_module.of_file filename in
+        let cfg = Spec_analysis.analyze_intra1 module_ funidx in
+        let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
+        let sliced_cfg = Slicing.slice cfg slicing_criterion in
+        let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+        let dot_filename = Printf.sprintf "sliced-%ld-%d.dot" funidx instr in
+        Printf.printf "outputting sliced cfg to %s\n" dot_filename;
+        Out_channel.with_file dot_filename
+          ~f:(fun ch ->
               Out_channel.output_string ch (Cfg.to_dot annotated_sliced_cfg ~annot_str:Spec.to_dot_string));
 
         Printf.printf "Analyzing resulting CFG...\n%!";
@@ -337,4 +362,5 @@ let () =
        ; "reltaint-intra", reltaint_intra
        ; "relational-intra", relational_intra
        ; "slice", slice_cfg
+       ; "relslice", relslice_cfg
        ; "find-indirect-calls", find_indirect_calls])

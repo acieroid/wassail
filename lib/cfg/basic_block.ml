@@ -26,22 +26,49 @@ let to_string ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : s
 
 (** Convert a basic block to its dot representation *)
 let to_dot ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : string =
+  (* TODO: also add block annotations *)
   match b.content with
   | Data instrs ->
-    Printf.sprintf "block%d [shape=record, label=\"{Data block %d:\\l\\l%s\\l}\"];"
+    let first_annot = match List.hd instrs with
+      | Some instr ->
+        begin match annot_str instr.annotation_before with
+          | "" -> ""
+          | s -> Printf.sprintf "{%s}|" s
+        end
+      | None -> "" in
+    Printf.sprintf "block%d [shape=record, label=\"{Data block %d|%s%s}\"];"
       b.idx b.idx
-      (String.concat ~sep:"\\l"
+      first_annot
+      (String.concat ~sep:"|"
          (List.map instrs
             ~f:(fun instr ->
-                Printf.sprintf "%s:%s ;; %s → %s" (Instr.Label.to_string instr.label) (Instr.data_to_string instr.instr) (annot_str instr.annotation_before) (annot_str instr.annotation_after))))
-  | Control instr ->
-    Printf.sprintf "block%d [shape=ellipse, label = \"Control block %d:\\l\\l%s:%s ;; %s → %s\"];" b.idx b.idx (Instr.Label.to_string instr.label) (Instr.control_to_short_string instr.instr) (annot_str instr.annotation_before) (annot_str instr.annotation_after)
+                let annot_after = match annot_str instr.annotation_after with
+                  | "" -> ""
+                  | s -> Printf.sprintf "|{%s}" s in
+                Printf.sprintf "{<instr%s>%s:%s\\l}%s"
+                  (Instr.Label.to_string instr.label)
+                  (Instr.Label.to_string instr.label)
+                  (Instr.data_to_string instr.instr)
+                  annot_after)))
 
-(** Return all the instructions contained within this block (in no particular order) *)
-let all_instructions (b : 'a t) : 'a Instr.t list =
+  | Control instr ->
+    Printf.sprintf "block%d [shape=Mrecord, label=\"{Control block %d|%s<instr%s>%s:%s%s}\"];"
+      b.idx b.idx
+      (match annot_str instr.annotation_before with
+       | "" -> ""
+       | s -> Printf.sprintf "{%s}|" s)
+      (Instr.Label.to_string instr.label)
+      (Instr.Label.to_string instr.label)
+      (Instr.control_to_short_string instr.instr)
+      (match annot_str instr.annotation_after with
+       | "" -> ""
+       | s -> Printf.sprintf "|{%s}" s)
+
+(** Return all the labels of the instructions directly contained in this block *)
+let all_direct_instruction_labels (b : 'a t) : Instr.Label.Set.t =
   match b.content with
-  | Control i -> [Instr.Control i]
-  | Data d -> List.map d ~f:(fun i -> Instr.Data i)
+  | Control i -> Instr.Label.Set.singleton i.label
+  | Data d -> Instr.Label.Set.of_list (List.map d ~f:(fun i -> i.label))
 
 (** Return all the labels of the instructions contained within this block *)
 let all_instruction_labels (b : 'a t) : Instr.Label.Set.t =

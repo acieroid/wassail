@@ -19,10 +19,10 @@ module Spec = struct
       (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v))))
 
   let to_dot_string (s : t) : string =
-    Printf.sprintf "[%s] [%s]"
-      (String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
+    (String.concat ~sep:"|" (List.map s.vstack ~f:(fun v ->
+         Printf.sprintf "<%s>%s" (Var.to_string v) (Var.to_string v))))
   (* (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))*)
-  (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v))))
+  (* (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v)))) *)
 
 
   let map_vars (s : t) ~(f : Var.t -> Var.t) : t =

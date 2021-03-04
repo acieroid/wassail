@@ -56,8 +56,11 @@ type 'a t = {
 
 let to_string (cfg : 'a t) : string = Printf.sprintf "CFG of function %s" (Int32.to_string cfg.idx)
 
-let to_dot ?annot_str:(annot_str : ('a -> string) = fun _ -> "") (cfg : 'a t) : string =
-  Printf.sprintf "digraph \"CFG of function %s\" {\n%s\n%s}\n"
+let to_dot
+    ?annot_str:(annot_str : ('a -> string) = fun _ -> "")
+    ?extra_data:(extra_data : string = "")
+    (cfg : 'a t) : string =
+  Printf.sprintf "digraph \"CFG of function %s\" {\n%s\n%s\n%s}\n"
     (Int32.to_string cfg.idx)
     (String.concat ~sep:"\n" (List.map (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, b) -> Basic_block.to_dot ~annot_str b)))
     (String.concat ~sep:"\n" (List.concat_map (IntMap.to_alist cfg.edges) ~f:(fun (src, dsts) ->
@@ -65,6 +68,7 @@ let to_dot ?annot_str:(annot_str : ('a -> string) = fun _ -> "") (cfg : 'a t) : 
              | Some true -> "t"
              | Some false -> "f"
              | None -> "")))))
+    extra_data
 
 let find_block_exn (cfg : 'a t) (idx : int) : 'a Basic_block.t =
   match IntMap.find cfg.basic_blocks idx with
@@ -129,10 +133,9 @@ let callers (cfgs : 'a t Int32Map.t) (cfg : 'a t) : Int32Set.t =
       else
         callers)
 
-let find_enclosing_block (cfg : 'a t) (instr : 'a Instr.t) : 'a Basic_block.t =
-  let label = Instr.label instr in
+let find_enclosing_block_exn (cfg : 'a t) (label : Instr.Label.t) : 'a Basic_block.t =
   match List.find (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, block) ->
-      let labels = Basic_block.all_instruction_labels block in
+      let labels = Basic_block.all_direct_instruction_labels block in
       Instr.Label.Set.mem labels label) with
   | Some (_, b) -> b
   | None -> failwith "find_enclosing_block did not find a block"

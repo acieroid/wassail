@@ -29,6 +29,7 @@ module Taint = Taint
 module Reltaint = Reltaint
 
 module Slicing = Slicing
+module Use_def = Use_def
 
 module Instruction_counter = Instruction_counter
 module Sizes = Sizes

@@ -16,6 +16,7 @@ module Use = struct
   module Set = Set.Make(T)
   module Map = Map.Make(T)
   let make (label : Instr.Label.t) (var : Var.t) = { label; var; }
+  let to_dot_label (cfg : 'a Cfg.t) (use : t) = Printf.sprintf "block%d:instr%s" (Cfg.find_enclosing_block_exn cfg use.label).idx (Instr.Label.to_string use.label)
 end
 
 module Def = struct
@@ -34,6 +35,10 @@ module Def = struct
       | Instruction (n, v) -> Printf.sprintf "idef(%s, %s)" (Instr.Label.to_string n) (Var.to_string v)
       | Entry v -> Printf.sprintf "edef(%s)" (Var.to_string v)
       | Constant v -> Printf.sprintf "const(%s)" (Prim_value.to_string v)
+    let to_dot_label (cfg : 'a Cfg.t) (def : t) : string = match def with
+      | Instruction (n, _) -> Printf.sprintf "block%d:instr%s" (Cfg.find_enclosing_block_exn cfg n).idx (Instr.Label.to_string n)
+      | Entry v -> Printf.sprintf "entry_var:%s" (Var.to_string v)
+      | Constant v -> Printf.sprintf "const:%s" (Prim_value.to_string v)
   end
   include T
 end
@@ -141,6 +146,14 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
               | Some v -> v
               | None -> failwith (Printf.sprintf "Use-def chain incorrect: could not find def of variable %s" (Var.to_string var))))) in
   (defs, uses, udchains)
+
+(** Return the edges that can be used to annotate a CFG with data dependencies *)
+let annotate (cfg : Spec.t Cfg.t) : string =
+  let (_, _, chains) = make cfg in
+  String.concat ~sep:"\n"
+    (List.map (Use.Map.keys chains)
+       ~f:(fun use ->
+          Printf.sprintf "%s -> %s [color=blue]" (Use.to_dot_label cfg use) (Def.to_dot_label cfg (UseDefChains.get chains use))))
 
 module Test = struct
   let%test "simplest ud chain" =

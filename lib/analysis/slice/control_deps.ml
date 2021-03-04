@@ -53,7 +53,6 @@ let control_dep (cfg : Spec.t Cfg.t) (is_immediate_post_dom : int -> Var.t -> bo
       link block h @ vchildren children (push block preds) in
   vnode tree.entry []
 
-
 (** Construct a map from predicates at the end of a block (according to `branch_condition`), to the corrsponding block index *)
 let extract_preds (cfg : Spec.t Cfg.t) : int Var.Map.t =
   IntMap.fold cfg.basic_blocks ~init:Var.Map.empty ~f:(fun ~key:idx ~data:block acc ->
