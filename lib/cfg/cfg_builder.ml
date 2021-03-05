@@ -204,8 +204,8 @@ let build (fid : Int32.t) (module_ : Wasm_module.t) : unit Cfg.t =
           let unreachable_block = mk_control_block instr in
           let (blocks, edges, breaks, returns, _entry', exit') = helper [] rest in
           (block :: unreachable_block :: blocks,
-           (block.idx, unreachable_block.idx, None) :: edges (* The unreachable block is not connected to the rest of the CFG *),
-           breaks, returns, block.idx, exit')
+           (block.idx, unreachable_block.idx, None) :: edges (* The unreachable block is not connected to anything except to the "return" block of the CFG *),
+           breaks, unreachable_block.idx :: returns, block.idx, exit')
 
       end
   in

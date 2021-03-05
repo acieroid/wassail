@@ -148,7 +148,6 @@ let refined_callgraph =
       let%map_open file_in = anon ("in" %: string)
       and file_out = anon ("out" %: string) in
       fun () ->
-        Printf.printf "Analyzing %s" file_in;
         let wasm_mod = Wasm_module.of_file file_in in
         Call_graph.refined := true;
         let cg = Call_graph.make wasm_mod in
