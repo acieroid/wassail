@@ -29,9 +29,9 @@ let indirect_call_targets_refined summaries (wasm_mod : Wasm_module.t) (fidx : I
   Spec_inference.use_const := false;
   let cfg = Spec_analysis.analyze_intra1 wasm_mod fidx in
   let slicing_criteria = instr in
-  Printf.printf "slicing criteria is: %s\n" (Instr.Label.to_string slicing_criteria);
+  (* Printf.printf "slicing criteria is: %s\n" (Instr.Label.to_string slicing_criteria); *)
   let sliced_cfg = Slicing.slice cfg slicing_criteria in
-  Printf.printf "Rerunning spec inference\n%!";
+  (* Printf.printf "Rerunning spec inference\n%!"; *)
   let annotated_sliced_cfg = Spec_inference.Intra.analyze wasm_mod sliced_cfg in
   Relational.Intra.init_summaries summaries;
   let res = Relational.Intra.analyze wasm_mod annotated_sliced_cfg in
