@@ -141,6 +141,20 @@ let callgraph =
           ~f:(fun ch ->
               Out_channel.output_string ch (Call_graph.to_dot cg)))
 
+let refined_callgraph =
+  Command.basic
+    ~summary:"Generate a refined call graph for the module from file [in], outputs as DOT to file [out]"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string)
+      and file_out = anon ("out" %: string) in
+      fun () ->
+        let wasm_mod = Wasm_module.of_file file_in in
+        Call_graph.refined := true;
+        let cg = Call_graph.make wasm_mod in
+        Out_channel.with_file file_out
+          ~f:(fun ch ->
+              Out_channel.output_string ch (Call_graph.to_dot cg)))
+
 let schedule =
   Command.basic
     ~summary:"Generate the analysis schedule for the module from file [in]"
@@ -354,6 +368,7 @@ let () =
 
        (* Utilities that requires building the call graph *)
        ; "callgraph", callgraph
+       ; "refined_callgraph", refined_callgraph
        ; "schedule", schedule
 
        (* Other *)
