@@ -15,4 +15,9 @@ install:
 	opam exec -- dune build @install
 	opam exec -- dune install
 
+coverage:
+	dune runtest --instrument-with bisect_ppx --force
+	bisect-ppx-report html
+	echo 'Coverage produced in _coverage/index.html'
+
 .PHONY: bin js test clean install all
