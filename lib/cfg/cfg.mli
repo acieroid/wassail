@@ -12,6 +12,9 @@ module Edges : sig
   type t = Edge.Set.t IntMap.t
   [@@deriving sexp, compare, equal]
 
+  (** Find an edge between two nodes *)
+  val find_exn : t -> int -> int -> Edge.t
+
   (** Return all edges going out of a given node *)
   val from : t -> int -> Edge.t list
 
@@ -133,3 +136,7 @@ val replace_block : 'a t -> 'a Basic_block.t -> 'a t
 (** Remove a block from the CFG, adapting the edges.
     The block removed is specified by its index *)
 val remove_block_rewrite_edges : 'a t -> int -> 'a t
+
+(** Insert a block between two other blocks (specified by their index) in the CFG.
+    Edges are rerouted to go through the new block *)
+val insert_block_between : 'a t -> int -> int -> 'a Basic_block.t -> 'a t

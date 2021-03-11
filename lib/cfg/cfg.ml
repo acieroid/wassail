@@ -22,6 +22,9 @@ module Edges = struct
     | Some es -> Edge.Set.to_list es
     | None -> []
 
+  let find_exn (edges : t) (src : int) (dst : int) : Edge.t =
+    List.find_exn (from edges src) ~f:(fun (idx, _) -> idx = dst)
+
   let add (edges : t) (from : int) (edge : Edge.t) : t =
     IntMap.update edges from ~f:(function
         | None -> Edge.Set.singleton edge
@@ -203,4 +206,60 @@ let replace_block (cfg : 'a t) (block : 'a Basic_block.t) : 'a t =
         | None -> failwith "Cfg.replace_block called with a block that did not exist in the previous CFG"
         | Some _ -> block) }
 
-let remove_block_rewrite_edges (_cfg : 'a t) (_block_idx : int) : 'a t = failwith "TODO"
+let remove_block_rewrite_edges (cfg : 'a t) (block_idx : int) : 'a t =
+  assert (block_idx <> cfg.entry_block);
+  assert (block_idx <> cfg.exit_block);
+  (* A block is removed, and edges for that block need to be rewritten:
+     - for each incoming edge, merge it with each outgoing edge
+     - in case there is a branching edge, keep the branching information
+  *)
+  let without_edges =
+    let edges' = Edges.remove_from cfg.edges block_idx in (* Remove all edges starting from the current block *)
+    let srcs = Edges.from cfg.back_edges block_idx in (* Find all edges that go to this node *)
+    List.fold_left srcs ~init:edges' ~f:(fun edges (src, _) ->
+        (* and remove them *)
+        Edges.remove edges src block_idx) in
+  let outgoing_edges = Edges.from cfg.edges block_idx in
+  let incoming_edges = Edges.from cfg.back_edges block_idx in
+  (* Connect each incoming edge to each outgoing edge *)
+  let new_edges = List.fold_left incoming_edges ~init:without_edges ~f:(fun edges (src, cond) ->
+      List.fold_left outgoing_edges ~init:edges ~f:(fun edges (dst, _) ->
+          if src <> dst then begin
+            Edges.add edges src (dst, cond (* Keep the first condition as the second block can't be executed anymore *))
+          end else
+            (* No self-cycle. *)
+            edges)) in
+  let without_back_edges =
+    let back_edges' = Edges.remove_from cfg.back_edges block_idx in
+    let dsts = Edges.from cfg.edges block_idx in
+    List.fold_left dsts ~init:back_edges' ~f:(fun back_edges (dst, _) ->
+        let after = Edges.remove back_edges dst block_idx in
+        after
+      ) in
+  let outgoing_edges = Edges.from cfg.edges block_idx in
+  let incoming_edges = Edges.from cfg.back_edges block_idx in
+  let new_back_edges = List.fold_left incoming_edges ~init:without_back_edges ~f:(fun back_edges (src, cond) ->
+      List.fold_left outgoing_edges ~init:back_edges ~f:(fun back_edges (dst, _) ->
+          if src <> dst then
+            Edges.add back_edges dst (src, cond)
+          else
+            back_edges)) in
+  { cfg with
+    edges = new_edges;
+    back_edges = new_back_edges;
+    basic_blocks = IntMap.remove cfg.basic_blocks block_idx }
+
+let insert_block_between (cfg : 'a t) (src : int) (dst : int) (new_block : 'a Basic_block.t) : 'a t =
+  let (_, forward_annot) = Edges.find_exn cfg.edges src dst in
+  let edges =
+    Edges.add (Edges.add (Edges.remove cfg.edges src dst)
+                 src (new_block.idx, forward_annot))
+      new_block.idx (dst, None) in
+  let (_, backward_annot) = Edges.find_exn cfg.back_edges dst src in
+  let back_edges =
+    Edges.add (Edges.add (Edges.remove cfg.back_edges dst src)
+                 dst (new_block.idx, backward_annot))
+      new_block.idx (src, None) in
+  let basic_blocks = IntMap.add_exn cfg.basic_blocks ~key:new_block.idx ~data:new_block in
+  { cfg with edges; back_edges; basic_blocks }
+

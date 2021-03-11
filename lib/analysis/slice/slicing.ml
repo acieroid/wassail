@@ -187,18 +187,13 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
   let edges = List.fold_left edges_going_to_exit
       ~init:edges
       ~f:(fun edges (src, _) -> Cfg.Edges.remove edges src cfg.exit_block) in
-  (* TODO: find a way to connect all edges without successors to the new exit *)
-  (* Phase 3: Perform a walk on the constructed CFG to remove sequences of blocks that cancel each other *)
-  (* TODO: Start from the entry of the CFG, the perform a BFS. For every "dummy" node:
-     - Either it has one successor, in that case it can safely be merged with the successor.
-       But we have to account for the fact that this successor could also be a dummy node, etc. How? -> merge it in the next, and restart from the merged ones.
-    - If it ha two successors, there should be no difference
-    - If it has a net size of 0, it can be removed (except for merge nodes?)
-     TODO: this can actually directly be done on the initial CFG... *)
+  (* Phase 3: Perform a walk on the constructed CFG to remove sequences of
+     blocks that cancel each other -> not done, see other implementation below
+     *)
   { cfg with basic_blocks; edges; back_edges }
 
 
-(*let block_net_effect (block : 'a Basic_block.t) : int =
+let block_net_effect (block : 'a Basic_block.t) : int =
   match block.content with
   | Control c ->
     (* TODO: check that return is correctly handled. It has a net effect of 0 because it does not change the stack, but in theory there might be multiple returns leading to the final block, all with a different stack *)
@@ -206,7 +201,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
   | Data instrs -> List.fold_left instrs ~init:0 ~f:(fun acc instr ->
       acc + (Instr.net_effect_data instr))
 
-let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
+let slice' (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
   let next_label : unit -> int =
     let counter : int ref = ref 0 in
     fun () ->
@@ -233,8 +228,16 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
     match block.content with
     | Basic_block.Control { instr = Merge; _ } -> true
     | _ -> false in
-  let insert_dummy_blocks_before (cfg : unit Cfg.t) (block_idx : int) (effect_to_add : int) : unit Cfg.t =
-    failwith "TODO" in
+  let next_available_block_idx (cfg : 'a Cfg.t) : int =
+    fst (IntMap.max_elt_exn cfg.basic_blocks) in
+  let insert_dummy_blocks_before (cfg : unit Cfg.t) (block_idx : int) (effect : int) : unit Cfg.t =
+    let instrs = dummy_instrs effect next_label in
+    let block = Basic_block.{ idx = next_available_block_idx cfg;
+                              content = Data instrs } in
+    List.fold_left (Cfg.predecessors cfg block_idx)
+      ~init:cfg
+      ~f:(fun cfg pred ->
+          Cfg.insert_block_between cfg pred block_idx block) in
   let rec loop (worklist : (int * int) list) (visited : IntSet.t) (cfg : unit Cfg.t) : unit Cfg.t =
     match worklist with
     | [] ->
@@ -265,7 +268,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
             (* This is a control block, we can't add dummy instructions at the beginning so we have to add a dummy data block before it *)
             insert_dummy_blocks_before cfg block_idx effect_to_add
           | Data _ ->
-            Cfg.replace_block cfg (data_block_propagate_effect_at_beginning block) in
+            Cfg.replace_block cfg (data_block_propagate_effect_at_beginning block effect_to_add) in
       let successors = Cfg.successors cfg block_idx in
       loop
         (List.map successors ~f:(fun idx -> (idx, 0)) @ rest)
@@ -277,7 +280,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
       assert(effect_to_add = 0); (* This is an invariant of our CFG, we shouldn't have back edges to the entry *)
       let block = Cfg.find_block_exn cfg block_idx in
       let net_effect = block_net_effect block in
-      let cfg' = Cfg.replace_block block_idx (dummy_data_block net_effect next_label block) in
+      let cfg' = Cfg.replace_block cfg (dummy_data_block net_effect next_label block) in
       let successors = Cfg.successors cfg block_idx in
       loop
         (List.map successors ~f:(fun idx -> (idx, 0)) @ rest)
@@ -288,7 +291,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
       (* TODO: it could be removed if it has a single predecessor that can itself be an exit block *)
       let block = Cfg.find_block_exn cfg block_idx in
       let net_effect = block_net_effect block in
-      let cfg' = Cfg.replace_block block_idx (dummy_data_block (net_effect + effect_to_add) next_label block) in
+      let cfg' = Cfg.replace_block cfg (dummy_data_block (net_effect + effect_to_add) next_label block) in
       let successors = Cfg.successors cfg block_idx in
       assert (List.length successors = 0);
       loop rest (IntSet.add visited block_idx) cfg'
@@ -326,7 +329,6 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
   in
   let remove_annotations (cfg : Spec.t Cfg.t) : unit Cfg.t = Cfg.map_annotations cfg ~f:(fun _ -> (), ()) in
   loop [(cfg.entry_block, 0)] IntSet.empty (remove_annotations cfg)
-  *)
 
 (** Return the indices of each call_indirect instructions *)
 let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : Instr.Label.t list =
