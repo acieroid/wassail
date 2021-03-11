@@ -141,20 +141,6 @@ let callgraph =
           ~f:(fun ch ->
               Out_channel.output_string ch (Call_graph.to_dot cg)))
 
-let refined_callgraph =
-  Command.basic
-    ~summary:"Generate a refined call graph for the module from file [in], outputs as DOT to file [out]"
-    Command.Let_syntax.(
-      let%map_open file_in = anon ("in" %: string)
-      and file_out = anon ("out" %: string) in
-      fun () ->
-        let wasm_mod = Wasm_module.of_file file_in in
-        Call_graph.refined := true;
-        let cg = Call_graph.make wasm_mod in
-        Out_channel.with_file file_out
-          ~f:(fun ch ->
-              Out_channel.output_string ch (Call_graph.to_dot cg)))
-
 let schedule =
   Command.basic
     ~summary:"Generate the analysis schedule for the module from file [in]"
@@ -289,52 +275,6 @@ let slice_cfg =
                                                            (Control_deps.annotate cfg))));
     )
 
-let relslice_cfg =
-  Command.basic
-    ~summary:"Slice a CFG at the given instruction, before performing an extra relational analysis"
-    Command.Let_syntax.(
-      let%map_open filename = anon ("file" %: string)
-      and funidx = anon ("fun" %: int32)
-      and instr = anon ("instr" %: int) in
-      fun () ->
-        Spec_inference.propagate_globals := false;
-        Spec_inference.propagate_locals := false;
-        Spec_inference.use_const := false;
-        let module_ = Wasm_module.of_file filename in
-        let cfg = Spec_analysis.analyze_intra1 module_ funidx in
-        let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
-        let sliced_cfg = Slicing.slice cfg slicing_criterion in
-        let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-        let dot_filename = Printf.sprintf "sliced-%ld-%d.dot" funidx instr in
-        Printf.printf "outputting sliced cfg to %s\n" dot_filename;
-        Out_channel.with_file dot_filename
-          ~f:(fun ch ->
-              Out_channel.output_string ch (Cfg.to_dot annotated_sliced_cfg ~annot_str:Spec.to_dot_string));
-
-        Printf.printf "Analyzing resulting CFG...\n%!";
-        let summaries = Relational.Summary.initial_summaries (Cfg_builder.build_all module_) module_ `Top in
-        let t0 = Time.now () in
-        Relational.Intra.init_summaries summaries;
-        let res = Relational.Intra.analyze module_ annotated_sliced_cfg in
-        let t1 = Time.now () in
-        report_time "relational analysis" t0 t1;
-        let annotated_instr = Instr.Label.Map.find_exn annotated_sliced_cfg.instructions slicing_criterion in
-        let var_of_call_target = List.hd_exn (Instr.annotation_before annotated_instr).vstack in
-        let relational_instr = Instr.Label.Map.find_exn res.instructions slicing_criterion in
-        let typ = match relational_instr with
-          | Control { instr = CallIndirect (_, typ); _ } -> typ
-          | _ -> failwith "TODO" in
-        let domain_of_call_target = Instr.annotation_before relational_instr in
-        Printf.printf "domain of call target: %s\n" (Relational.Domain.to_string domain_of_call_target);
-        Printf.printf "var of call target: %s\n" (Var.to_string var_of_call_target);
-        let targets = Call_graph.indirect_call_targets module_ funidx slicing_criterion typ in
-        Printf.printf "indirect call targets: %s\n" (String.concat ~sep:"," (List.map targets ~f:Int32.to_string));
-        List.iter targets ~f:(fun target ->
-            let b1, b2 = Relational.Domain.is_equal domain_of_call_target var_of_call_target target in
-            Printf.printf "target %ld: (%b, %b)\n" target b1 b2
-          );
-        ())
-
 let find_indirect_calls =
   Command.basic
     ~summary:"Find call_indirect instructions and shows the function in which they appear as well as their label"
@@ -368,7 +308,6 @@ let () =
 
        (* Utilities that requires building the call graph *)
        ; "callgraph", callgraph
-       ; "refined-callgraph", refined_callgraph
        ; "schedule", schedule
 
        (* Other *)
@@ -379,5 +318,4 @@ let () =
        ; "reltaint-intra", reltaint_intra
        ; "relational-intra", relational_intra
        ; "slice", slice_cfg
-       ; "relslice", relslice_cfg
        ; "find-indirect-calls", find_indirect_calls])

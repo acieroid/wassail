@@ -1,8 +1,6 @@
 open Core_kernel
 open Helpers
 
-let refined : bool ref = ref false
-
 (** A call graph *)
 type t = {
   nodes : Int32Set.t; (** Nodes of the call graphs are function indices *)
@@ -19,43 +17,9 @@ let indirect_call_targets (wasm_mod : Wasm_module.t) (_fidx : Int32.t) (_instr :
       | None -> None) in
   funs_with_matching_type
 
-(* TODO: call with
- Relational.Summary.initial_summaries (Cfg_builder.build_all module_) module_ `Top
-   in order to get the right signature *)
-let indirect_call_targets_refined summaries (wasm_mod : Wasm_module.t) (fidx : Int32.t) (instr : Instr.Label.t) (typ : Int32.t) : Int32.t list =
-  let targets = indirect_call_targets wasm_mod fidx instr typ in
-  Spec_inference.propagate_globals := false;
-  Spec_inference.propagate_locals := false;
-  Spec_inference.use_const := false;
-  let cfg = Spec_analysis.analyze_intra1 wasm_mod fidx in
-  let slicing_criteria = instr in
-  (* Printf.printf "slicing criteria is: %s\n" (Instr.Label.to_string slicing_criteria); *)
-  let sliced_cfg = Slicing.slice cfg slicing_criteria in
-  (* Printf.printf "Rerunning spec inference\n%!"; *)
-  let annotated_sliced_cfg = Spec_inference.Intra.analyze wasm_mod sliced_cfg in
-  Relational.Intra.init_summaries summaries;
-  let res = Relational.Intra.analyze wasm_mod annotated_sliced_cfg in
-  let annotated_instr = Instr.Label.Map.find_exn annotated_sliced_cfg.instructions slicing_criteria in
-  let var_of_call_target = match List.hd (Instr.annotation_before annotated_instr).vstack with
-    | Some spec -> spec
-    | None -> failwith "indirect_call_targets_refined List.hd"
-  in
-  let relational_instr = Instr.Label.Map.find_exn res.instructions slicing_criteria in
-  let domain_of_call_target = Instr.annotation_before relational_instr in
-  List.filter targets ~f:(fun target ->
-      match Relational.Domain.is_equal domain_of_call_target var_of_call_target target with
-      | true, _ -> true (* can be equal *)
-      | false, _ ->
-        Printf.printf "Filtered one call!\n%!";
-        false (* can't be equal *))
-
 (** Builds a call graph for a module *)
 let make (wasm_mod : Wasm_module.t) : t =
-  let find_targets = if !refined then
-      indirect_call_targets_refined (Relational.Summary.initial_summaries (Cfg_builder.build_all wasm_mod) wasm_mod `Top)
-    else
-      indirect_call_targets
-  in
+  let find_targets = indirect_call_targets in
   let nodes = Int32Set.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> Int32.of_int_exn i)) in
   let rec collect_calls (f : Int32.t) (instr : 'a Instr.t) (edges : Int32Set.t Int32Map.t) : Int32Set.t Int32Map.t = match instr with
     | Control { instr = Call (_, f'); _ } ->

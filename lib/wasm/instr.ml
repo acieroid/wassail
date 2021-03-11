@@ -370,44 +370,47 @@ let rec all_labels (i : 'a t) : Label.Set.t =
       | _ -> Label.Set.empty
     end) c.label
 
-(** The input arity of an expression, i.e., how many values it expects on the stack *)
-let rec in_arity (i : 'a t) : int =
-  match i with
-  | Data d -> in_arity_data d
-  | Control c -> in_arity_control c
-and in_arity_data (i : (data, 'a) labelled) : int =
+let net_effect_data (i : (data, 'a) labelled) : int =
   match i.instr with
   | Nop -> 0
-  | Drop -> 1
-  | Select -> 3
-  | MemorySize -> 0
-  | MemoryGrow -> 1
-  | Const _ -> 1
-  | Unary _ -> 1
-  | Binary _ -> 2
-  | Compare _ -> 2
-  | Test _ -> 1
-  | Convert _ -> 1
-  | LocalGet _ -> 0
-  | LocalSet _ -> 1
-  | LocalTee _ -> 1
-  | GlobalGet _ -> 0
-  | GlobalSet _ -> 1
-  | Load _ -> 1
-  | Store _ -> 2
-and in_arity_control (i : ('a control, 'a) labelled) : int =
+  | Drop -> -1
+  | Select -> -2
+  | MemorySize -> +1
+  | MemoryGrow -> -1
+  | Const _ -> +1
+  | Unary _ -> 0
+  | Binary _ -> -1
+  | Compare _ -> -1
+  | Test _ -> 0
+  | Convert _ -> 0
+  | LocalGet _ -> +1
+  | LocalSet _ -> -1
+  | LocalTee _ -> 0
+  | GlobalGet _ -> +1
+  | GlobalSet _ -> -1
+  | Load _ -> 0
+  | Store _ -> -1
+
+let net_effect_control (i : ('a control, 'a) labelled) : int =
   match i.instr with
-  | Block (_, (n, _), _) -> n
-  | Loop (_, (n, _), _) -> n
-  | If (_, (n, _), _, _) -> n
-  | Call ((n, _), _) -> n
-  | CallIndirect ((n, _), _) -> n
+  | Block (_, (input, output), _)
+  | Loop (_, (input, output), _)
+  | If (_, (input, output), _, _)
+  | Call ((input, output), _)
+  | CallIndirect ((input, output), _)
+    -> output-input
   | Br _ -> 0
-  | BrIf _ -> 1
-  | BrTable (_, _) -> 1
-  | Return -> 0 (* this actually depends on the function, but strictly speaking, return does not expect anything *)
+  | BrIf _ -> -1
+  | BrTable (_, _) -> -1
+  | Return -> 0 (* TODO: this actually depends on the function, but strictly speaking, return does not change the stack *)
   | Unreachable -> 0
   | Merge -> 0
+
+(** The net effect of an instruction on the stack: positive if it expects value on the stack, negative otherwise *)
+let net_effect (i : 'a t) : int =
+  match i with
+  | Data d -> net_effect_data d
+  | Control c -> net_effect_control c
 
 let instructions_contained_in (i : 'a t) : 'a t list = match i with
   | Data _ -> []

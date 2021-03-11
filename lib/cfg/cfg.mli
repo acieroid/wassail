@@ -42,8 +42,6 @@ type 'a t = {
   return_types: Type.t list;
   (* All basic blocks contained in this CFG, indexed in a map by their index *)
   basic_blocks: 'a Basic_block.t IntMap.t;
-  (* All instructions contained in this CFG, indexed in a map by their label *)
-  instructions : 'a Instr.t Instr.Label.Map.t;
   (* The edges between basic blocks (forward direction) *)
   edges: Edges.t;
   (* The edges between basic blocks (backward direction) *)
@@ -72,9 +70,6 @@ val to_dot : ?annot_str:('a -> string) -> ?extra_data:string -> 'a t -> string
 (** Find a basic block given its index *)
 val find_block_exn : 'a t -> int -> 'a Basic_block.t
 
-(** Find an instruction given its label *)
-val find_instr_exn : 'a t -> Instr.Label.t -> 'a Instr.t
-
 (** Extract the successors of a block in the CFG, given its index.
     Return the successors as a list of their indices *)
 val successors : 'a t -> int -> int list
@@ -95,8 +90,14 @@ val callees : 'a t -> Int32Set.t
 (** Find the callers of this function *)
 val callers : 'a t Int32Map.t -> 'a t -> Int32Set.t
 
-(** Return all the instructions contained within this CFG (in no particular order) *)
-val all_instructions : 'a t -> 'a Instr.t list
+(** Return all instructions contained in the CFG *)
+val all_instructions : 'a t -> 'a Instr.t Instr.Label.Map.t
+
+(** Return all instructions contained in the CFG as a list, in no particular order *)
+val all_instructions_list : 'a t -> 'a Instr.t list
+
+(** Find an instruction given its label *)
+val find_instr_exn : 'a Instr.t Instr.Label.Map.t -> Instr.Label.t -> 'a Instr.t
 
 (** Return all instructions contained within this CFG, as well as the block containing them *)
 val find_enclosing_block_exn : 'a t -> Instr.Label.t -> 'a Basic_block.t
@@ -124,3 +125,11 @@ val state_before_block : 'a t -> int -> 'a
 
 (** Find state at the end of a block in the CFG *)
 val state_after_block : 'a t -> int -> 'a
+
+(** Replace a block without changing the shape of the CFG.
+    The block being replaced is the one that has the same index a the given block that replaces it. *)
+val replace_block : 'a t -> 'a Basic_block.t -> 'a t
+
+(** Remove a block from the CFG, adapting the edges.
+    The block removed is specified by its index *)
+val remove_block_rewrite_edges : 'a t -> int -> 'a t

@@ -45,7 +45,6 @@ type 'a t = {
   local_types: Type.t list;
   return_types: Type.t list;
   basic_blocks: 'a Basic_block.t IntMap.t;
-  instructions : 'a Instr.t Instr.Label.Map.t;
   edges: Edges.t;
   back_edges: Edges.t;
   entry_block: int;
@@ -74,11 +73,6 @@ let find_block_exn (cfg : 'a t) (idx : int) : 'a Basic_block.t =
   match IntMap.find cfg.basic_blocks idx with
   | Some b -> b
   | None -> failwith (Printf.sprintf "Cfg.find_block_exn did not find block %d" idx)
-
-let find_instr_exn (cfg : 'a t) (label : Instr.Label.t) : 'a Instr.t =
-  match Instr.Label.Map.find cfg.instructions label with
-  | Some i -> i
-  | None -> failwith "Cfg.find_instr_exn did not find instruction"
 
 let outgoing_edges (cfg : 'a t) (idx : int) : Edge.t list =
   Edges.from cfg.edges idx
@@ -140,8 +134,20 @@ let find_enclosing_block_exn (cfg : 'a t) (label : Instr.Label.t) : 'a Basic_blo
   | Some (_, b) -> b
   | None -> failwith "find_enclosing_block did not find a block"
 
-let all_instructions (cfg : 'a t) : 'a Instr.t list =
-  List.map ~f:snd (Instr.Label.Map.to_alist cfg.instructions)
+let all_instructions (cfg : 'a t) : 'a Instr.t Instr.Label.Map.t =
+  IntMap.fold cfg.basic_blocks ~init:Instr.Label.Map.empty ~f:(fun ~key:_ ~data:block acc ->
+      match block.content with
+      | Control i -> Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Control i)
+      | Data d -> List.fold_left d ~init:acc ~f:(fun acc i ->
+          Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Data i)))
+
+let all_instructions_list (cfg : 'a t) : 'a Instr.t list =
+  List.map ~f:snd (Instr.Label.Map.to_alist (all_instructions cfg))
+
+let find_instr_exn (instructions : 'a Instr.t Instr.Label.Map.t) (label : Instr.Label.t) : 'a Instr.t =
+  match Instr.Label.Map.find instructions label with
+  | Some i -> i
+  | None -> failwith "Cfg.find_instr_exn did not find instruction"
 
 let all_blocks (cfg : 'a t) : 'a Basic_block.t list =
   IntMap.data cfg.basic_blocks
@@ -164,8 +170,7 @@ let all_annots (cfg : 'a t) : 'a list =
 
 let map_annotations (cfg : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
   { cfg with
-    basic_blocks = IntMap.map ~f:(fun b -> Basic_block.map_annotations b ~f) cfg.basic_blocks;
-    instructions = Instr.Label.Map.map ~f:(fun i -> Instr.map_annotation i ~f) cfg.instructions; }
+    basic_blocks = IntMap.map ~f:(fun b -> Basic_block.map_annotations b ~f) cfg.basic_blocks }
 
 let rec state_before_block (cfg : 'a t) (block_idx : int) : 'a =
   let block = find_block_exn cfg block_idx in
@@ -191,3 +196,11 @@ and state_after_block (cfg : 'a t) (block_idx : int) : 'a =
       | _ -> failwith "state_after_bloc: multiple successors for an empty block"
     end
   | Data l -> Instr.annotation_after (Data (List.last_exn l))
+
+let replace_block (cfg : 'a t) (block : 'a Basic_block.t) : 'a t =
+  { cfg with
+    basic_blocks = IntMap.update cfg.basic_blocks block.idx ~f:(function
+        | None -> failwith "Cfg.replace_block called with a block that did not exist in the previous CFG"
+        | Some _ -> block) }
+
+let remove_block_rewrite_edges (_cfg : 'a t) (_block_idx : int) : 'a t = failwith "TODO"

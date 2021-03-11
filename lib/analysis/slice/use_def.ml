@@ -105,9 +105,10 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
         match Var.Map.add defs ~key:var ~data:(Def.Entry var) with
         | `Duplicate -> failwith "use_def: more than one entry definition for a variable"
         | `Ok r -> r) in
+  let all_instrs = Cfg.all_instructions_list cfg in
   (* Add definitions for all constants *)
   let defs =
-    let all_vars : Var.Set.t = List.fold_left (Cfg.all_instructions cfg)
+    let all_vars : Var.Set.t = List.fold_left all_instrs
         ~init:Var.Set.empty
         ~f:(fun acc instr -> Var.Set.union acc
                (Var.Set.union
@@ -121,7 +122,7 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
           end
         | _ -> defs) in
   (* For each instruction, update the defs and uses map *)
-  let (defs, uses) = List.fold_left (Cfg.all_instructions cfg)
+  let (defs, uses) = List.fold_left all_instrs
       ~init:(defs, uses)
       ~f:(fun (defs, uses) instr ->
           (* Add definitions introduced by this instruction *)

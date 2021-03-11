@@ -117,7 +117,7 @@ let annotate (cfg : Spec.t Cfg.t) : string =
   let deps = make cfg in
   (* the "to" of the arrow is easy: it is the instruction of which the label is in Pred.
      the "from" is more difficult: we identify variables only here... so we need to go over the CFG and see each var used by each instruction *)
-  let instrs = Cfg.all_instructions cfg in
+  let instrs = Cfg.all_instructions_list cfg in
   String.concat ~sep:"\n"
     (List.concat_map instrs
        ~f:(fun instr ->
