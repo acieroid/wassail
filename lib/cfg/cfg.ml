@@ -72,8 +72,11 @@ let to_dot
              | None -> "")))))
     extra_data
 
+let find_block (cfg : 'a t) (idx : int) : 'a Basic_block.t option =
+  IntMap.find cfg.basic_blocks idx
+
 let find_block_exn (cfg : 'a t) (idx : int) : 'a Basic_block.t =
-  match IntMap.find cfg.basic_blocks idx with
+  match find_block cfg idx with
   | Some b -> b
   | None -> failwith (Printf.sprintf "Cfg.find_block_exn did not find block %d" idx)
 
@@ -250,6 +253,7 @@ let remove_block_rewrite_edges (cfg : 'a t) (block_idx : int) : 'a t =
     basic_blocks = IntMap.remove cfg.basic_blocks block_idx }
 
 let insert_block_between (cfg : 'a t) (src : int) (dst : int) (new_block : 'a Basic_block.t) : 'a t =
+  Printf.printf "adding block %d between %d and %d\n" new_block.idx src dst;
   let (_, forward_annot) = Edges.find_exn cfg.edges src dst in
   let edges =
     Edges.add (Edges.add (Edges.remove cfg.edges src dst)
@@ -258,8 +262,15 @@ let insert_block_between (cfg : 'a t) (src : int) (dst : int) (new_block : 'a Ba
   let (_, backward_annot) = Edges.find_exn cfg.back_edges dst src in
   let back_edges =
     Edges.add (Edges.add (Edges.remove cfg.back_edges dst src)
-                 dst (new_block.idx, backward_annot))
-      new_block.idx (src, None) in
-  let basic_blocks = IntMap.add_exn cfg.basic_blocks ~key:new_block.idx ~data:new_block in
+                 dst (new_block.idx, None))
+      new_block.idx (src, backward_annot) in
+  let basic_blocks = match find_block cfg new_block.idx with
+    | Some _ -> (* Block already present, do not add it *)
+      cfg.basic_blocks
+    | None ->
+      IntMap.add_exn cfg.basic_blocks ~key:new_block.idx ~data:new_block
+  in
   { cfg with edges; back_edges; basic_blocks }
 
+let has_edge (cfg : 'a t) (src : int) (dst : int) : bool =
+  List.exists (Edges.from cfg.edges src) ~f:(fun (x, _) -> x = dst)

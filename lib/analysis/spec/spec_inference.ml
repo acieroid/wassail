@@ -157,6 +157,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
             | s :: [] -> (* only one non-bottom predecessor *) s
             | state :: states ->
               (* multiple predecessors to merge *)
+              Printf.printf "states: %s\n" (String.concat ~sep:"," (List.map (state :: states) ~f:state_to_string));
               (* First compute the state with holes where we will need to put merge variables *)
               let with_holes = List.fold_left states
                   ~init:state
@@ -165,6 +166,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                         | v' when Var.equal v v' -> v'
                         | _ -> Var.Hole (* this is a hole *)
                       in
+                      Printf.printf "block %d\n" block.idx;
                       assert (List.length acc.vstack = List.length s.vstack);
                       assert (List.length acc.locals = List.length s.locals);
                       assert (List.length acc.globals = List.length s.globals);

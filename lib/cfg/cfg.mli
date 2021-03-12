@@ -71,6 +71,9 @@ val to_string : 'a t -> string
 val to_dot : ?annot_str:('a -> string) -> ?extra_data:string -> 'a t -> string
 
 (** Find a basic block given its index *)
+val find_block : 'a t -> int -> 'a Basic_block.t option
+
+(** Find a basic block given its index. Throw an exception if the block is not found *)
 val find_block_exn : 'a t -> int -> 'a Basic_block.t
 
 (** Extract the successors of a block in the CFG, given its index.
@@ -140,3 +143,6 @@ val remove_block_rewrite_edges : 'a t -> int -> 'a t
 (** Insert a block between two other blocks (specified by their index) in the CFG.
     Edges are rerouted to go through the new block *)
 val insert_block_between : 'a t -> int -> int -> 'a Basic_block.t -> 'a t
+
+(** Check if there is an edge between two nodes of the CFG *)
+val has_edge : 'a t -> int -> int -> bool

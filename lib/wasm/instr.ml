@@ -389,16 +389,18 @@ let net_effect_data (i : (data, 'a) labelled) : int =
   | GlobalGet _ -> +1
   | GlobalSet _ -> -1
   | Load _ -> 0
-  | Store _ -> -1
+  | Store _ -> -2
 
 let net_effect_control (i : ('a control, 'a) labelled) : int =
   match i.instr with
-  | Block (_, (input, output), _)
-  | Loop (_, (input, output), _)
-  | If (_, (input, output), _, _)
   | Call ((input, output), _)
-  | CallIndirect ((input, output), _)
     -> output-input
+  | CallIndirect ((input, output), _) ->
+    Printf.printf "net effect of indirect call: %d\n" ((output-input)-1);
+    (output-input)-1
+  | If (_, (_, _), _, _) -> -1 (* only the net effect of the head, which drops the first element of the stack *)
+  | Block (_, (_, _), _)
+  | Loop (_, (_, _), _) -> 0 (* No net effect of the head *)
   | Br _ -> 0
   | BrIf _ -> -1
   | BrTable (_, _) -> -1

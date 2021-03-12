@@ -86,7 +86,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
           | Simple s, _ -> (idx, s)
           | Branch (t, _), Some true -> (idx, t)
           | Branch (_, f), Some false -> (idx, f)
-          | Branch _, None -> failwith "invalid branch state"
+          | Branch _, None -> failwith (Printf.sprintf "invalid branch state at block %d, from block %d" block_idx idx)
           | Uninitialized, _ -> (idx, Transfer.bottom_state cfg))) in
       let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)

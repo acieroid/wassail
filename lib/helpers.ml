@@ -23,6 +23,15 @@ module Int32Set = struct
   let to_string (s : t) : string = String.concat ~sep:"," (List.map (to_list s) ~f:Int32.to_string)
 end
 
+(** Sets of pairs of integers *)
+module IntPairSet = struct
+  include Set.Make(struct
+      type t = int * int
+      [@@deriving sexp, compare, equal]
+    end)
+  let to_string (s : t) : string = String.concat ~sep:"," (List.map (to_list s) ~f:(fun (x, y) -> Printf.sprintf "(%d,%d)" x y))
+end
+
 (** Maps of integers *)
 module IntMap = struct
   include Map.Make(I)

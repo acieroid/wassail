@@ -24,3 +24,5 @@ val all_annots : 'a t -> 'a list
 val map_annotations : 'a t -> f:('a Instr.t -> 'b * 'b) -> 'b t
 
 val clear_annotation : 'a t -> unit t
+
+val is_merge : 'a t -> bool

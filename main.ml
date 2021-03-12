@@ -263,16 +263,17 @@ let slice_cfg =
         let cfg = Spec_analysis.analyze_intra1 module_ funidx in
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
         let sliced_cfg = Slicing.slice cfg slicing_criterion in
-        let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+        (* let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in *)
         let dot_filename = Printf.sprintf "sliced-%ld-%d.dot" funidx instr in
         Printf.printf "outputting sliced cfg to %s\n" dot_filename;
         Out_channel.with_file dot_filename
           ~f:(fun ch ->
-              Out_channel.output_string ch (Cfg.to_dot annotated_sliced_cfg
-                                              ~annot_str:Spec.to_dot_string
-                                              ~extra_data:((Use_def.annotate annotated_sliced_cfg) ^
+              Out_channel.output_string ch (Cfg.to_dot sliced_cfg
+                                              (* ~annot_str:Spec.to_dot_string *)
+                                              ~extra_data:""
+                                              (* (Use_def.annotate annotated_sliced_cfg) ^
                                                            (* TODO: we're using cfg because currently the sliced CFG has a dangling block (the return block), which breaks the control dependency computation *)
-                                                           (Control_deps.annotate cfg))));
+                                                           (Control_deps.annotate cfg) *)));
     )
 
 let find_indirect_calls =

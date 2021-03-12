@@ -20,5 +20,5 @@
    Use_def Dominance Control_deps Slicing
    Instruction_counter Sizes)
  (libraries core_kernel wasm  apron apron.polkaMPQ apron.octD sexplib)
- (inline_tests (flags))
+ (inline_tests (flags -only-test "File \"lib/analysis/slice/slicing.ml\", line 627"))
  (preprocess (pps ppx_jane ppx_compare ppx_inline_test)))

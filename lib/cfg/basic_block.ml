@@ -93,3 +93,9 @@ let map_annotations (b : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
 (** Clear the annotation of the block *)
 let clear_annotation (b : 'a t) : unit t =
   map_annotations b ~f:(fun _ -> (), ())
+
+(** Check if the block is a merge block *)
+let is_merge (b : 'a t) : bool =
+  match b.content with
+  | Control { instr = Merge; _ } -> true
+  | _ -> false

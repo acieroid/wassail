@@ -71,7 +71,7 @@ let dummy_data_block (net_effect : int) (next_label : unit -> int) (block : 'a B
 
 (** Performs backwards slicing on `cfg`, relying on `slicing` defined above.
     Returns the slice as a modified CFG *)
-let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
+let slice_old (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
   let next_label : unit -> int =
     let counter : int ref = ref 0 in
     fun () ->
@@ -192,7 +192,6 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
      *)
   { cfg with basic_blocks; edges; back_edges }
 
-
 let block_net_effect (block : 'a Basic_block.t) : int =
   match block.content with
   | Control c ->
@@ -201,7 +200,7 @@ let block_net_effect (block : 'a Basic_block.t) : int =
   | Data instrs -> List.fold_left instrs ~init:0 ~f:(fun acc instr ->
       acc + (Instr.net_effect_data instr))
 
-let slice' (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
+let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
   let next_label : unit -> int =
     let counter : int ref = ref 0 in
     fun () ->
@@ -220,30 +219,84 @@ let slice' (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
     match block.content with
     | Data instrs' -> { block with content = Data (instrs @ instrs') }
     | _ -> failwith "Unexpected: not a data block" in
-  let block_is_part_of_slice (block_idx : int) : bool = IntSet.mem blocks_in_slice block_idx in
-  let block_is_merge_block (block_idx : int) : bool =
+  let block_is_part_of_slice (block_idx : int) : bool =
+    IntSet.mem blocks_in_slice block_idx ||
+    (* Treat the exit block as part of the slice *)
+    block_idx = cfg.exit_block in
+(*   let block_is_merge_block (block_idx : int) : bool =
     (* We look up in the initial CFG, which is OK because merge blocks should not be removed nor changed.
        This assumption may be relaxed later.*)
-    let block = Cfg.find_block_exn cfg block_idx in
-    match block.content with
-    | Basic_block.Control { instr = Merge; _ } -> true
-    | _ -> false in
-  let next_available_block_idx (cfg : 'a Cfg.t) : int =
-    fst (IntMap.max_elt_exn cfg.basic_blocks) in
-  let insert_dummy_blocks_before (cfg : unit Cfg.t) (block_idx : int) (effect : int) : unit Cfg.t =
+    match Cfg.find_block cfg block_idx with
+    | None -> false (* This is a new block *)
+    | Some block -> begin match block.content with
+      | Basic_block.Control { instr = Merge; _ } -> true
+      | _ -> false
+     end in *)
+  let block_idx_counter : int ref = ref (fst (IntMap.max_elt_exn cfg.basic_blocks)) in
+  let next_available_block_idx () : int =
+    block_idx_counter := !block_idx_counter + 1;
+    !block_idx_counter in
+  let insert_dummy_blocks_between (cfg : unit Cfg.t) (src : int) (dst : int) (effect : int) : unit Cfg.t =
     let instrs = dummy_instrs effect next_label in
-    let block = Basic_block.{ idx = next_available_block_idx cfg;
+    Printf.printf "inserting dummy block (effect: %d) between %d and %d\n" effect src dst;
+    let block = Basic_block.{ idx = next_available_block_idx ();
                               content = Data instrs } in
-    List.fold_left (Cfg.predecessors cfg block_idx)
+    Cfg.insert_block_between cfg src dst block in
+  let find_actual_previous (removed : IntSet.t IntMap.t) (idx : int) : IntSet.t =
+    (* Go throug the removed info to find the replacing previous block. This is a transitive process *)
+    let rec loop (worklist : IntSet.t) (stable : IntSet.t) : IntSet.t = match IntSet.choose worklist with
+      | None -> stable
+      | Some idx ->
+        let worklist = IntSet.remove worklist idx in
+        begin match IntMap.find removed idx with
+          | None -> loop worklist (IntSet.add stable idx) (* Block has not been removed *)
+          | Some prev -> loop (IntSet.union worklist prev) stable (* Block has been removed *)
+        end
+    in
+    loop (IntSet.singleton idx) IntSet.empty in
+  let is_dummy_block (block_idx : int) : bool =
+    (* A dummy block is not part of the original CFG, so we can simply check that using its index *)
+    block_idx > (fst (IntMap.max_elt_exn cfg.basic_blocks)) in
+  (* Add merge block before each block that has multiple predecessor and is itself not a merge block *)
+  let add_missing_merge_blocks (cfg : unit Cfg.t) : unit Cfg.t =
+    IntMap.fold cfg.basic_blocks
       ~init:cfg
-      ~f:(fun cfg pred ->
-          Cfg.insert_block_between cfg pred block_idx block) in
-  let rec loop (worklist : (int * int) list) (visited : IntSet.t) (cfg : unit Cfg.t) : unit Cfg.t =
+      ~f:(fun ~key:_ ~data:block cfg ->
+          if Basic_block.is_merge block then
+            (* Keep it *)
+            cfg
+          else
+            let preds = Cfg.predecessors cfg block.idx in
+            if List.length preds <= 1 then
+              (* At most one predecessor, we can keep the block as is *)
+              cfg
+            else
+              (* More than one predecessor, we need to insert a merge block *)
+              let merge_block = Basic_block.{ idx = next_available_block_idx ();
+                                                    content = Control { instr = Merge;
+                                                                        label = { section = MergeInFunction cfg.idx; id = next_label () };
+                                                                        annotation_before = ();
+                                                                        annotation_after = (); } } in
+              List.fold_left preds
+                ~init:cfg
+                ~f:(fun cfg pred ->
+                    Cfg.insert_block_between cfg pred block.idx merge_block)) in
+  let step = ref 0 in
+  let rec loop
+      (worklist : (int * int * int) list) (* Worklist is: previous block, current block, effect to add *)
+      (visited : IntPairSet.t)
+      (cfg : unit Cfg.t)
+      (edges_to_add : (int * int * int) list)
+      (removed : IntSet.t IntMap.t) (* Removed blocks and the blocks that "replace" them for the edges that were starting at the removed block *)
+    : (unit Cfg.t * (int * int * int) list * IntSet.t IntMap.t) =
+    step := !step + 1;
     match worklist with
     | [] ->
       (* Slicing finished *)
-      cfg
-    | (block_idx, _) :: rest when IntSet.mem visited block_idx ->
+      Printf.printf "Slicing finished\n";
+      cfg, edges_to_add, removed
+    | (previous_block_idx, block_idx, _) :: rest when IntPairSet.mem visited (previous_block_idx, block_idx) ->
+      Printf.printf "Already visited block: %d\n" block_idx;
       (* The block has already been visited. TODO: what should we do? This is not yet clear.
          Basically this can happen in two cases:
          - if the block is part of a cycle: this falls under the second possible case, as we will visit the node only once
@@ -253,82 +306,129 @@ let slice' (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
            Hence, nothing needs to be done.
            If that is not the case (TODO: confirm that it can happen or not), we need to introduce a predecessor to perform the adaptation (on one side, we have adapted as needed, on the other side we introduce an extra block between the current predecessor and the current block, that will perform the extra adaptation) 
         -> Conclusion: if the assumption holds that all nodes that have multiple predecessors only require one adaptation, we need to do nothing in this case (and we don't need to *)
-      loop rest visited cfg
-    | (block_idx, effect_to_add) :: rest when block_is_part_of_slice block_idx ->
+      loop rest visited cfg edges_to_add removed
+    | (_, block_idx, _) :: rest when IntMap.mem removed block_idx ->
+      Printf.printf "block has already been removed: %d\n" block_idx;
+      (* TODO: if effect to add is not 0, this can be tricky? *)
+      loop rest visited cfg edges_to_add removed
+    | (previous_block_idx, block_idx, effect_to_add) :: rest when is_dummy_block block_idx ->
+      let cfg = if effect_to_add = block_net_effect (Cfg.find_block_exn cfg block_idx) then
+          (* The block already handles the effect needed *)
+          cfg
+        else begin
+          Printf.printf "TODO: dummy block %d does not correctly handle effect (%d)\n" block_idx effect_to_add;
+          cfg
+        end in
+      let successors = Cfg.successors cfg block_idx in
+      loop
+        (rest @ List.map successors ~f:(fun idx -> (block_idx, idx, 0)))
+        (IntPairSet.add visited (previous_block_idx, block_idx))
+        cfg
+        edges_to_add
+        removed
+    | (previous_block_idx, block_idx, effect_to_add) :: rest when block_is_part_of_slice block_idx ->
+      Printf.printf "Block is part of slice: %d, effect to add: %d \n" block_idx effect_to_add;
       (* The block is part of the slice, only keep the relevant portions *)
       (* TODO: in a first approximation, we keep the block as is *)
-      let cfg' = if effect_to_add = 0 then
+      let cfg', edges_to_add' = if effect_to_add = 0 then
           (* We keep the block as is *)
-          cfg
+          cfg, edges_to_add
         else
           let block = Cfg.find_block_exn cfg block_idx in
           (* We have to propagate the effect in the block by adding dummy instructions *)
           match block.content with
           | Control _ ->
             (* This is a control block, we can't add dummy instructions at the beginning so we have to add a dummy data block before it *)
-            insert_dummy_blocks_before cfg block_idx effect_to_add
+            (* insert_dummy_blocks_between cfg (find_actual_previous removed previous_block_idx) block_idx effect_to_add *)
+            Printf.printf "block %d is a control block so we need to add an edge from %d with effect %d\n" block_idx previous_block_idx effect_to_add;
+            cfg, (previous_block_idx, block_idx, effect_to_add) :: edges_to_add (* TODO: effect need to be added. This can be done after the facts: we only have to track where we need to add the effects (before which block) and what effect it is *)
           | Data _ ->
-            Cfg.replace_block cfg (data_block_propagate_effect_at_beginning block effect_to_add) in
+            Cfg.replace_block cfg (data_block_propagate_effect_at_beginning block effect_to_add), edges_to_add in
       let successors = Cfg.successors cfg block_idx in
       loop
-        (List.map successors ~f:(fun idx -> (idx, 0)) @ rest)
-        (IntSet.add visited block_idx)
+        (rest @ List.map successors ~f:(fun idx -> (block_idx, idx, 0)))
+        (IntPairSet.add visited (previous_block_idx, block_idx))
         cfg'
-    | (block_idx, effect_to_add) :: rest when block_idx = cfg.entry_block ->
+        edges_to_add'
+        removed
+    | (previous_block_idx, block_idx, effect_to_add) :: rest when block_idx = cfg.entry_block ->
+      Printf.printf "block is entry: %d\n" block_idx;
       (* The entry block is not part of the slice, replace it with a dummy block *)
-      (* TODO: it could be removed if it has a single successor that can itself be an entry block (having no back edges) *)
+      (* TODO: it could be removed if it has a single successor that can itself be an entry block (having no back edges).
+         We could instead remove it directly, and add it back if the entry block of the CFG has either multiple succesors (or is it really a problem? Maybe not) or if it has back edges *)
       assert(effect_to_add = 0); (* This is an invariant of our CFG, we shouldn't have back edges to the entry *)
       let block = Cfg.find_block_exn cfg block_idx in
       let net_effect = block_net_effect block in
       let cfg' = Cfg.replace_block cfg (dummy_data_block net_effect next_label block) in
       let successors = Cfg.successors cfg block_idx in
       loop
-        (List.map successors ~f:(fun idx -> (idx, 0)) @ rest)
-        (IntSet.add visited block_idx)
+        (rest @ List.map successors ~f:(fun idx -> (block_idx, idx, 0)))
+        (IntPairSet.add visited (previous_block_idx, block_idx))
         cfg'
-    | (block_idx, effect_to_add) :: rest when block_idx = cfg.exit_block ->
-      (* The exit block is not part of the slice, replace it with a dummy block *)
-      (* TODO: it could be removed if it has a single predecessor that can itself be an exit block *)
-      let block = Cfg.find_block_exn cfg block_idx in
-      let net_effect = block_net_effect block in
-      let cfg' = Cfg.replace_block cfg (dummy_data_block (net_effect + effect_to_add) next_label block) in
-      let successors = Cfg.successors cfg block_idx in
-      assert (List.length successors = 0);
-      loop rest (IntSet.add visited block_idx) cfg'
-    | (block_idx, effect_to_add) :: rest when block_is_merge_block block_idx ->
+        edges_to_add
+        removed
+(*    | (previous_block_idx, block_idx, effect_to_add) :: rest when block_is_merge_block block_idx ->
+      Printf.printf "block is merge: %d\n" block_idx;
       (* The block is not part of the slice but needs to be kept to preserve the structure of the CFG
          (it is a merge block, which have multiple predecessors). *)
       let cfg' =
         if effect_to_add = 0 then
           (* Simply keep CFG unmodified *)
           cfg
-        else
+        else begin
           (* We need to insert a dummy blocks before the current block to account for the effect *)
-          insert_dummy_blocks_before cfg block_idx effect_to_add
+          insert_dummy_blocks_between cfg (find_actual_previous removed previous_block_idx) block_idx effect_to_add
+        end
       in
       let successors = Cfg.successors cfg block_idx in
-      loop (List.map successors ~f:(fun idx -> (idx, 0)) @ rest)
-        (IntSet.add visited block_idx)
+      loop (List.map successors ~f:(fun idx -> (block_idx, idx, 0)) @ rest)
+        (IntPairSet.add visited (previous_block_idx, block_idx))
         cfg'
-    | (block_idx, effect_to_add) :: rest ->
+        removed*)
+(*    | (previous_block_idx, block_idx, effect_to_add) :: rest when block_idx = cfg.exit_block ->
+      Printf.printf "block is exit: %d from %d (%s in the latest cfg)\n" block_idx previous_block_idx (IntSet.to_string (find_actual_previous removed previous_block_idx));
+      (* The exit block is not part of the slice and it is not a merge block, replace it with a dummy block *)
+      let block = Cfg.find_block_exn cfg block_idx in
+      let net_effect = block_net_effect block in
+      Printf.printf "net effect: %d + %d\n" net_effect effect_to_add;
+      let cfg' = Cfg.replace_block cfg (dummy_data_block (net_effect + effect_to_add) next_label block) in
+      let successors = Cfg.successors cfg block_idx in
+      assert (List.length successors = 0);
+      loop rest (IntPairSet.add visited (previous_block_idx, block_idx)) cfg' removed *)
+    | (previous_block_idx, block_idx, effect_to_add) :: rest ->
+      Printf.printf "block can be removed: %d\n" block_idx;
       (* The block is not part of the slice: we remove it *)
       let net_effect = block_net_effect (Cfg.find_block_exn cfg block_idx) in
-      let effect_to_propagate =
-        if net_effect = 0 then
-          effect_to_add
-        else if net_effect = -effect_to_add then
-          0
-        else
-          net_effect in
+      let effect_to_propagate = effect_to_add + net_effect in
+      Printf.printf "effect to propagate: %d\n" effect_to_propagate;
       let cfg' = Cfg.remove_block_rewrite_edges cfg block_idx in
       let successors = Cfg.successors cfg block_idx in
       loop
-        (List.map successors ~f:(fun idx -> (idx, effect_to_propagate)) @ rest)
-        (IntSet.add visited block_idx)
+        (rest @ (List.map successors ~f:(fun idx -> (block_idx, idx, effect_to_propagate))))
+        (IntPairSet.add visited (previous_block_idx, block_idx))
         cfg'
+        edges_to_add
+        (IntMap.add_exn removed ~key:block_idx ~data:(IntSet.of_list (Cfg.predecessors cfg block_idx)))
   in
+  let add_missing_edges (cfg : unit Cfg.t) (removed : IntSet.t IntMap.t) (to_add : (int * int * int) list) : unit Cfg.t =
+    (* We insert a block between src and dst to account for effect *)
+    fst (List.fold_left to_add
+      ~init:(cfg, IntPairSet.empty)
+      ~f:(fun (cfg, added) (src, dst, effect) ->
+          let actual_src = find_actual_previous removed src in
+          Printf.printf "adding dummy block between %d (actual: %s) and %d\n" src (IntSet.to_string actual_src) dst;
+          IntSet.fold actual_src ~init:(cfg, added)
+            ~f:(fun (cfg, added) src ->
+                if IntPairSet.mem added (src, dst) then
+                  (* We already added an edge, do nothing  *)
+                  (cfg, added)
+                else
+                  (* Add it *)
+                  (insert_dummy_blocks_between cfg src dst effect, IntPairSet.add added (src, dst))))) in
   let remove_annotations (cfg : Spec.t Cfg.t) : unit Cfg.t = Cfg.map_annotations cfg ~f:(fun _ -> (), ()) in
-  loop [(cfg.entry_block, 0)] IntSet.empty (remove_annotations cfg)
+  let (cfg_sliced, edges_to_add, removed) = loop [(-1, cfg.entry_block, 0)] IntPairSet.empty (remove_annotations cfg) [] IntMap.empty in
+  let cfg_with_missing_edges = add_missing_edges cfg_sliced removed edges_to_add in
+  add_missing_merge_blocks cfg_with_missing_edges
 
 (** Return the indices of each call_indirect instructions *)
 let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : Instr.Label.t list =
@@ -532,6 +632,7 @@ module Test = struct
      let cfg = Spec_analysis.analyze_intra1 module_ 14l in
      let vars_before_slicing = Var_prop.count_vars cfg in
      List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
+         Printf.printf "INSTR: %s\n" (Instr.Label.to_string instr_idx);
         (* instr_idx is the label of a call_indirect instruction, slice it *)
         Spec_inference.propagate_locals := false;
         Spec_inference.propagate_globals := false;
