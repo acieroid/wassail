@@ -253,7 +253,6 @@ let remove_block_rewrite_edges (cfg : 'a t) (block_idx : int) : 'a t =
     basic_blocks = IntMap.remove cfg.basic_blocks block_idx }
 
 let insert_block_between (cfg : 'a t) (src : int) (dst : int) (new_block : 'a Basic_block.t) : 'a t =
-  Printf.printf "adding block %d between %d and %d\n" new_block.idx src dst;
   let (_, forward_annot) = Edges.find_exn cfg.edges src dst in
   let edges =
     Edges.add (Edges.add (Edges.remove cfg.edges src dst)

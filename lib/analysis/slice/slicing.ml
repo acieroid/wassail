@@ -109,30 +109,6 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
     let block = Basic_block.{ idx = next_available_block_idx ();
                               content = Data instrs } in
     Cfg.insert_block_between cfg src dst block in
-  (* Add merge block before each block that has multiple predecessor and is itself not a merge block *)
-  let add_missing_merge_blocks (cfg : unit Cfg.t) : unit Cfg.t =
-    IntMap.fold cfg.basic_blocks
-      ~init:cfg
-      ~f:(fun ~key:_ ~data:block cfg ->
-          if Basic_block.is_merge block then
-            (* Keep it *)
-            cfg
-          else
-            let preds = Cfg.predecessors cfg block.idx in
-            if List.length preds <= 1 then
-              (* At most one predecessor, we can keep the block as is *)
-              cfg
-            else
-              (* More than one predecessor, we need to insert a merge block *)
-              let merge_block = Basic_block.{ idx = next_available_block_idx ();
-                                                    content = Control { instr = Merge;
-                                                                        label = { section = MergeInFunction cfg.idx; id = next_label () };
-                                                                        annotation_before = ();
-                                                                        annotation_after = (); } } in
-              List.fold_left preds
-                ~init:cfg
-                ~f:(fun cfg pred ->
-                    Cfg.insert_block_between cfg pred block.idx merge_block)) in
   let rec slicing_loop
       (worklist : int list) (* list of blocks *)
       (visited : IntSet.t)
@@ -147,7 +123,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
       slicing_loop rest visited cfg removed
     | block_idx :: rest when block_is_part_of_slice block_idx ->
       (* The block is part of the slice, only keep the relevant portions *)
-      (* TODO: in a first approximation, we keep the block as is *)
+      (* TODO: in a first approximation, we keep the block as is. If we want to remove this approximation, we can remove instructions but we have to watch out for the stack size *)
       let successors = Cfg.successors cfg block_idx in
       slicing_loop
         (rest @ successors)
@@ -155,11 +131,11 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
         cfg
         removed
     | block_idx :: rest when block_idx = cfg.entry_block ->
-      (* The entry block is not part of the slice, replace it with a dummy block *)
+      (* The entry block is not part of the slice, replace it with a dummy block with the same effect on stack size *)
       (* TODO: it could be removed if it has a single successor that can itself be an entry block (having no back edges).
          We could instead remove it directly, and add it back if the entry block of the CFG has either multiple succesors (or is it really a problem? Maybe not) or if it has back edges *)
       let block = Cfg.find_block_exn cfg block_idx in
-      let cfg' = Cfg.replace_block cfg (dummy_data_block 0 next_label block) in
+      let cfg' = Cfg.replace_block cfg (dummy_data_block (block_net_effect block) next_label block) in
       let successors = Cfg.successors cfg block_idx in
       slicing_loop
         (rest @ successors)
@@ -191,7 +167,6 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
       | [] -> cfg
       | (previous_block_idx, block_idx) :: rest when IntPairSet.mem visited (previous_block_idx, block_idx) ->
         (* Edge already visited *)
-        assert (stack_size_after previous_block_idx = stack_size_before block_idx);
         loop rest visited cfg
       | (previous_block_idx, block_idx) :: rest when stack_size_after previous_block_idx = stack_size_before block_idx ->
         (* Nothing needs to be done, the stack size match *)
@@ -206,12 +181,47 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
             insert_dummy_blocks_between cfg previous_block_idx block_idx effect_to_add
           | Data _ ->
             (* We can modify the data block *)
-            Cfg.replace_block cfg (data_block_propagate_effect_at_beginning block effect_to_add) in
+            let predecessors = Cfg.predecessors sliced_cfg block_idx in
+            let predecessors_stack_sizes = List.map predecessors ~f:stack_size_after in
+            let predecessors_have_same_stack_size = IntSet.length (IntSet.of_list predecessors_stack_sizes) <= 1 in
+            if predecessors_have_same_stack_size then
+              (* We can only safely modify a data block if it has a single predecessors
+                 or if all predecessors have the same stack size *)
+              Cfg.replace_block cfg (data_block_propagate_effect_at_beginning block effect_to_add)
+            else
+              (* otherwise we need to add an extra edge *)
+              insert_dummy_blocks_between cfg previous_block_idx block_idx effect_to_add
+        in
         loop (rest @ (successors block_idx)) (IntPairSet.add visited (previous_block_idx, block_idx)) cfg' in
     loop (successors sliced_cfg.entry_block) IntPairSet.empty sliced_cfg in
+  (* Add merge block before each block that has multiple predecessor and is itself not a merge block *)
+  let add_missing_merge_blocks (cfg : unit Cfg.t) : unit Cfg.t =
+    IntMap.fold cfg.basic_blocks
+      ~init:cfg
+      ~f:(fun ~key:_ ~data:block cfg ->
+          if Basic_block.is_merge block then
+            (* Keep it *)
+            cfg
+          else
+            let preds = Cfg.predecessors cfg block.idx in
+            if List.length preds <= 1 then
+              (* At most one predecessor, we can keep the block as is *)
+              cfg
+            else
+              (* More than one predecessor, we need to insert a merge block *)
+              let merge_block = Basic_block.{ idx = next_available_block_idx ();
+                                                    content = Control { instr = Merge;
+                                                                        label = { section = MergeInFunction cfg.idx; id = next_label () };
+                                                                        annotation_before = ();
+                                                                        annotation_after = (); } } in
+              List.fold_left preds
+                ~init:cfg
+                ~f:(fun cfg pred ->
+                    Cfg.insert_block_between cfg pred block.idx merge_block)) in
+
   let remove_annotations (cfg : Spec.t Cfg.t) : unit Cfg.t = Cfg.map_annotations cfg ~f:(fun _ -> (), ()) in
   let (cfg_sliced, _removed) = slicing_loop [cfg.entry_block] IntSet.empty (remove_annotations cfg) IntMap.empty in
-  adapt_blocks_for_effect cfg (add_missing_merge_blocks cfg_sliced)
+  add_missing_merge_blocks (adapt_blocks_for_effect cfg cfg_sliced)
 
 (** Return the indices of each call_indirect instructions *)
 let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : Instr.Label.t list =
@@ -415,7 +425,6 @@ module Test = struct
      let cfg = Spec_analysis.analyze_intra1 module_ 14l in
      let vars_before_slicing = Var_prop.count_vars cfg in
      List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
-         Printf.printf "INSTR: %s\n" (Instr.Label.to_string instr_idx);
         (* instr_idx is the label of a call_indirect instruction, slice it *)
         Spec_inference.propagate_locals := false;
         Spec_inference.propagate_globals := false;
