@@ -2,7 +2,7 @@ open Core_kernel
 open Helpers
 
 (** Constructs a CFG for function `fid` in a module. *)
-let build (fid : Int32.t) (module_ : Wasm_module.t) : unit Cfg.t =
+let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
   (* TODO: this implementation is really not ideal and should be cleaned *)
   let rec check_no_rest (rest : 'a Instr.t list) : unit = match rest with
     | [] -> ()
@@ -285,7 +285,7 @@ let build (fid : Int32.t) (module_ : Wasm_module.t) : unit Cfg.t =
 let build_all (mod_ : Wasm_module.t) : unit Cfg.t Int32Map.t =
   Int32Map.of_alist_exn (List.mapi mod_.funcs ~f:(fun i _ ->
       let faddr = Int32.(mod_.nfuncimports + (Int32.of_int_exn i)) in
-      (faddr, build faddr mod_)))
+      (faddr, build mod_ faddr)))
 
 module Test = struct
   (** Check that building the CFG for each function of a .wat file succeeds.
@@ -295,7 +295,7 @@ module Test = struct
     List.iteri wasm_mod.funcs
       ~f:(fun i _ ->
           let faddr = Int32.(wasm_mod.nfuncimports + (Int32.of_int_exn i)) in
-          let _ : unit Cfg.t = build faddr wasm_mod in
+          let _ : unit Cfg.t = build wasm_mod faddr in
           ())
 
   let%test_unit "CFG for simple.wat can be built" = test_cfgs "../../../test/simple.wat"

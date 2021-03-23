@@ -533,8 +533,8 @@ module Test = struct
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
-    let cfg0 = Cfg_builder.build 0l module_ in
-    let cfg1 = Cfg_builder.build 1l module_ in
+    let cfg0 = Cfg_builder.build module_ 0l in
+    let cfg1 = Cfg_builder.build module_ 1l in
     let _: t = init cfg0 (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
     let _: t = init cfg1 (Var.Set.of_list [Var.Local 0; Var.Return; Var.Global 0]) in
     ()

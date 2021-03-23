@@ -8,6 +8,7 @@ open Helpers
 let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Instr.Label.Set.t =
   let control_dependencies = Control_deps.make cfg in
   let (_, _, data_dependencies) = Use_def.make cfg in
+  let mem_dependencies = Memory_deps.make cfg in
   let cfg_instructions = Cfg.all_instructions cfg in
   let rec loop (worklist : Instr.Label.Set.t) (slice : Instr.Label.Set.t) : Instr.Label.Set.t =
     (* Perform backward slicing as follows:
@@ -19,7 +20,9 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
            for def in usedef(use):
              if def contains an istruction, add def.instr to W
            for _, instr' in cdeps(use.var):
-             add instr to W *)
+             add instr to W
+         for instr' in mem_deps(instr):
+           add instr to W *)
     match Instr.Label.Set.choose worklist with
     | None -> (* worklist is empty *)
       slice
@@ -27,21 +30,30 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
       (* Already seen this slice part, no need to process it again *)
       loop (Instr.Label.Set.remove worklist slicepart) slice
     | Some slicepart ->
+      (* Add instr to the current slice *)
+      let slice' = Instr.Label.Set.add slice slicepart in
       let uses =  Spec_inference.instr_use cfg (Cfg.find_instr_exn cfg_instructions slicepart) in
+      (* For use in instr_uses(instr) *)
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
               let def = Use_def.UseDefChains.get data_dependencies (Use_def.Use.make slicepart use) in
+              (* For def in usedef(use): if def contains an instruction, add def.insrt to W *)
               let data_dependencies = match def with
                 | Use_def.Def.Instruction (instr', _) ->
                   Instr.Label.Set.singleton instr'
                 | Use_def.Def.Entry _ -> Instr.Label.Set.empty
                 | Use_def.Def.Constant _ -> Instr.Label.Set.empty in
               let preds = Control_deps.find control_dependencies use in (* the control dependencies for the current use *)
+              (* for instr' in cdeps(use, var): add instr to W *)
               let control_dependencies = Control_deps.Pred.Set.fold preds ~init:Instr.Label.Set.empty ~f:(fun w (_, instr') ->
                   Instr.Label.Set.add w instr') in
               Instr.Label.Set.union w (Instr.Label.Set.union data_dependencies control_dependencies)) in
-      loop (Instr.Label.Set.remove worklist' slicepart) (Instr.Label.Set.add slice slicepart) in
-  loop (Instr.Label.Set.singleton criterion) Instr.Label.Set.empty
+      (* For instr' in mem_deps(instr): add instr to W *)
+      let worklist'' = Instr.Label.Set.union worklist' (Memory_deps.deps_for mem_dependencies slicepart) in
+      loop (Instr.Label.Set.remove worklist'' slicepart) slice' in
+  let initial_slice = Instr.Label.Set.singleton criterion in
+  let initial_worklist = Instr.Label.Set.empty in
+  loop initial_slice initial_worklist
 
 (** Return the net effect of a block on the stack size: positive if the block adds values on the stack, negative if it removes them *)
 let block_effect_on_stack_size (cfg : Spec.t Cfg.t) (block_idx : int) : int =
@@ -399,7 +411,7 @@ module Test = struct
      let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
      ()
 
-   let%test_unit "slicing with memory" =
+   let%test_unit "slicing with memory does not fail" =
      let module_, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
@@ -416,6 +428,20 @@ module Test = struct
      let sliced_cfg = slice cfg (lab 5) in
      let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
      ()
+
+   let%test "slicing with memory contains the load instructions" =
+     let _, cfg = build_cfg "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    memory.size     ;; Instr 0
+    memory.size     ;; Instr 1
+    i32.store       ;; Instr 2
+    memory.size     ;; Instr 3
+    i32.load)       ;; Instr 4
+  )" in
+     let sliced_cfg = slice cfg (lab 4) in
+     let instrs = Cfg.all_instructions sliced_cfg in
+     Instr.Label.Map.mem instrs (lab 2)
 
    let%test_unit "slicing function 14 of trmm" =
      let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in

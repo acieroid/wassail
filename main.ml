@@ -71,8 +71,8 @@ let instructions =
       let%map_open file_in = anon ("in" %: string) in
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
-        StringMap.iteri (Instruction_counter.count wasm_mod) ~f:(fun ~key:instr ~data:(appearances, funs) ->
-            Printf.printf "%d\t%d\t%s\n" appearances (Int32Set.length funs) instr))
+        StringMap.iteri (Instruction_counter.count wasm_mod) ~f:(fun ~key:instr ~data:count ->
+            Printf.printf "%d\t%s\n" count instr))
 
 let sizes =
   Command.basic
@@ -106,7 +106,7 @@ let cfg =
         if Int32.(fid < wasm_mod.nfuncimports) then
           Printf.printf "Can't build CFG for function %ld: it is an imported function" fid
         else
-          let cfg = Cfg_builder.build fid wasm_mod in
+          let cfg = Cfg_builder.build wasm_mod fid in
           Out_channel.with_file file_out
             ~f:(fun ch ->
                 Out_channel.output_string ch (Cfg.to_dot cfg)))
@@ -123,7 +123,7 @@ let cfgs =
         List.iteri wasm_mod.funcs
           ~f:(fun i _ ->
               let faddr = Int32.(wasm_mod.nfuncimports + (Int32.of_int_exn i)) in
-              let cfg = Cfg_builder.build faddr wasm_mod in
+              let cfg = Cfg_builder.build wasm_mod faddr in
               Out_channel.with_file (Printf.sprintf "%s/%ld.dot" out_dir faddr)
                 ~f:(fun ch ->
                     Out_channel.output_string ch (Cfg.to_dot cfg))))

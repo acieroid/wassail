@@ -238,4 +238,5 @@ module Test = struct
                                          (Use.make (lab 5) (Var.Var (lab 3)), Def.Instruction (lab 3, Var.Var (lab 3)));
                                          (Use.make (lab 5) (Var.Var (lab 4)), Def.Instruction (lab 4, Var.Var (lab 4)))] in
     UseDefChains.check_equality ~actual:actual ~expected:expected
+
 end
