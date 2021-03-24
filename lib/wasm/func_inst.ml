@@ -6,13 +6,12 @@ module T = struct
     name : string option;
     type_idx : Int32.t;
     typ : (Type.t list * Type.t list);
-    module_: Module_inst.t;
     code: Func.t;
   }
   [@@deriving sexp, compare, equal]
 end
 include T
-let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (fid : Int32.t) (f : Wasm.Ast.func) : t =
+let of_wasm (m : Wasm.Ast.module_) (fid : Int32.t) (f : Wasm.Ast.func) : t =
   let name = (List.find_map m.it.exports ~f:(fun x ->
       match x.it.edesc.it with
       | FuncExport v when Int32.(v.it = fid) -> Some (Wasm.Ast.string_of_name x.it.name)
@@ -25,7 +24,6 @@ let of_wasm (m : Wasm.Ast.module_) (minst : Module_inst.t) (fid : Int32.t) (f : 
       name = name;
       type_idx = f.it.ftype.it;
       typ = (List.map input ~f:Type.of_wasm, List.map output ~f:Type.of_wasm);
-      module_ = minst;
       code = Func.of_wasm m fid f
     }
 

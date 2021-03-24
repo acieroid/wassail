@@ -44,7 +44,6 @@ let get_func_type (m : t) (fidx : Int32.t) : Type.t list * Type.t list =
 
 (** Constructs a Wasm_module *)
 let of_wasm (m : Wasm.Ast.module_) : t =
-  let minst = Module_inst.of_wasm m in
   let imported_funcs = List.filter_mapi m.it.imports ~f:(fun idx import -> match import.it.idesc.it with
       | FuncImport v ->
         Some (Int32.of_int_exn idx, Wasm.Ast.string_of_name import.it.item_name,
@@ -58,7 +57,7 @@ let of_wasm (m : Wasm.Ast.module_) : t =
   let nglobals = Wasm.Lib.List32.length m.it.globals in
   let global_types = List.map m.it.globals ~f:(fun g -> match g.it.gtype with
       | Wasm.Types.GlobalType (t, _) -> Type.of_wasm t) in
-  let funcs = List32.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m minst Int32.(i+nfuncimports) f) in
+  let funcs = List32.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m Int32.(i+nfuncimports) f) in
   let ftype (fidx : Int32.t) : Type.t list * Type.t list = if Int32.(fidx < nfuncimports) then
       match Wasm.Lib.List32.nth imported_funcs fidx with
       | (_, _, typ) -> typ
