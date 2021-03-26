@@ -108,10 +108,25 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
     match block.content with
     | Data instrs' -> { block with content = Data (instrs @ instrs') }
     | _ -> failwith "Unexpected: not a data block" in
-  let block_is_part_of_slice (block_idx : int) : bool =
+  let rec block_is_part_of_slice (block_idx : int) : bool =
+    (* The block is part of the slice if it contains an instruction that is part of the slice *)
     IntSet.mem blocks_in_slice block_idx ||
     (* Treat the exit block as part of the slice *)
-    block_idx = cfg.exit_block in
+    block_idx = cfg.exit_block ||
+    (* The block is also part of the slice if it is a control block with a merge block as successor, which itself is part of the slice. TODO: this is a coarse overapproximation, it could be refined to only those blocks that can reach the slicing criterion *)
+    has_multiple_successors_and_merge_successor_in_slice block_idx
+  and has_multiple_successors_and_merge_successor_in_slice (block_idx : int) : bool =
+    let successors = Cfg.successors cfg block_idx in
+    if List.length successors <= 1 then
+      false
+    else
+      match List.find successors ~f:(fun idx ->
+          let block = Cfg.find_block_exn cfg idx in
+          Basic_block.is_merge block && block_is_part_of_slice idx) with
+      | Some _ ->
+        true
+      | _ -> false
+  in
   let block_idx_counter : int ref = ref (fst (IntMap.max_elt_exn cfg.basic_blocks)) in
   let next_available_block_idx () : int =
     block_idx_counter := !block_idx_counter + 1;
@@ -144,8 +159,6 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
         removed
     | block_idx :: rest when block_idx = cfg.entry_block ->
       (* The entry block is not part of the slice, replace it with a dummy block with the same effect on stack size *)
-      (* TODO: it could be removed if it has a single successor that can itself be an entry block (having no back edges).
-         We could instead remove it directly, and add it back if the entry block of the CFG has either multiple succesors (or is it really a problem? Maybe not) or if it has back edges *)
       let block = Cfg.find_block_exn cfg block_idx in
       let cfg' = Cfg.replace_block cfg (dummy_data_block (block_net_effect block) next_label block) in
       let successors = Cfg.successors cfg block_idx in
@@ -223,14 +236,13 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
               (* More than one predecessor, we need to insert a merge block *)
               let merge_block = Basic_block.{ idx = next_available_block_idx ();
                                                     content = Control { instr = Merge;
-                                                                        label = { section = MergeInFunction cfg.idx; id = next_label () };
+                                                                        label = { section = Instr.Label.Dummy; id = next_label () };
                                                                         annotation_before = ();
                                                                         annotation_after = (); } } in
               List.fold_left preds
                 ~init:cfg
                 ~f:(fun cfg pred ->
                     Cfg.insert_block_between cfg pred block.idx merge_block)) in
-
   let remove_annotations (cfg : Spec.t Cfg.t) : unit Cfg.t = Cfg.map_annotations cfg ~f:(fun _ -> (), ()) in
   let (cfg_sliced, _removed) = slicing_loop [cfg.entry_block] IntSet.empty (remove_annotations cfg) IntMap.empty in
   add_missing_merge_blocks (adapt_blocks_for_effect cfg cfg_sliced)

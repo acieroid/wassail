@@ -29,7 +29,7 @@ let control_dep (cfg : Spec.t Cfg.t) (is_immediate_post_dom : int -> Var.t -> bo
       end
     | None -> preds
   in
-  (* Creates the edges from a given block, where each edge links a defined variabl to a control variable it depends on *)
+  (* Creates the edges from a given block, where each edge links a defined variable to a control variable it depends on *)
   let link (block : Spec.t Basic_block.t) (pred : Pred.t) : (Var.t * Pred.t) list =
     let defined = match block.content with
       | Control instr -> Spec_inference.instr_def cfg (Instr.Control instr)
@@ -57,7 +57,8 @@ let control_dep (cfg : Spec.t Cfg.t) (is_immediate_post_dom : int -> Var.t -> bo
 let extract_preds (cfg : Spec.t Cfg.t) : int Var.Map.t =
   IntMap.fold cfg.basic_blocks ~init:Var.Map.empty ~f:(fun ~key:idx ~data:block acc ->
       match Dominance.branch_condition cfg block with
-      | Some pred -> Var.Map.add_exn acc ~key:pred ~data:idx
+      | Some pred ->
+        Var.Map.add_exn acc ~key:pred ~data:idx
       | None -> acc)
 
 let%test "extract_preds when there is no pred" =

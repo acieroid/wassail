@@ -18,6 +18,12 @@ end
 include T
 include Test.Helpers(T)
 
+let to_dot (tree : t) : string =
+  Printf.sprintf "digraph \"Tree\" {\n%s\n}\n"
+    (String.concat ~sep:"\n" (List.map (IntMap.to_alist tree.children) ~f:(fun (node, children) ->
+         String.concat ~sep:"\n" (List.map (IntSet.to_list children) ~f:(fun child ->
+             Printf.sprintf "%d -> %d" node child)))))
+
 (** Return the children of a node in the tree *)
 let children (tree : t) (node : int) : IntSet.t =
   match IntMap.find tree.children node with

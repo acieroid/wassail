@@ -248,13 +248,37 @@ let taint_inter =
 let report_time (msg : string) (t0 : Time.t) (t1 : Time.t) : unit =
   Printf.printf "Time for '%s': %s\n%!" msg (Time.Span.to_string (Time.diff t1 t0))
 
+let dependencies =
+  Command.basic
+    ~summary:"Produce a PDG for a given function"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and funidx = anon ("fun" %: int32)
+      and dot_filename = anon ("out" %: string) in
+      fun () ->
+        Spec_inference.propagate_globals := false;
+        Spec_inference.propagate_locals := false;
+        Spec_inference.use_const := false;
+        let module_ = Wasm_module.of_file filename in
+        let cfg = Spec_analysis.analyze_intra1 module_ funidx in
+        Printf.printf "outputting PDG to %s\n" dot_filename;
+        let use_def_annot = (Use_def.annotate cfg) in
+        let control_annot = (Control_deps.annotate cfg) in
+        Out_channel.with_file dot_filename
+          ~f:(fun ch ->
+              Out_channel.output_string ch (Cfg.to_dot cfg
+                                              ~annot_str:Spec.to_dot_string
+                                              ~extra_data:(use_def_annot ^ control_annot)));
+    )
+
 let slice_cfg =
   Command.basic
     ~summary:"Slice a CFG at the given instruction"
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string)
       and funidx = anon ("fun" %: int32)
-      and instr = anon ("instr" %: int) in
+      and instr = anon ("instr" %: int)
+      and dot_filename = anon ("out" %: string) in
       fun () ->
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
@@ -263,17 +287,17 @@ let slice_cfg =
         let cfg = Spec_analysis.analyze_intra1 module_ funidx in
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
         let sliced_cfg = Slicing.slice cfg slicing_criterion in
-        (* let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in *)
-        let dot_filename = Printf.sprintf "sliced-%ld-%d.dot" funidx instr in
-        Printf.printf "outputting sliced cfg to %s\n" dot_filename;
+        Printf.printf "spec inference\n";
+        let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+        let annot_deps = false in
+        let use_def_annot = if annot_deps then (Use_def.annotate annotated_sliced_cfg) else "" in
+        let control_annot = if annot_deps then (Control_deps.annotate annotated_sliced_cfg) else "" in
+        Printf.printf "outputting dot\n";
         Out_channel.with_file dot_filename
           ~f:(fun ch ->
               Out_channel.output_string ch (Cfg.to_dot sliced_cfg
                                               (* ~annot_str:Spec.to_dot_string *)
-                                              ~extra_data:""
-                                              (* (Use_def.annotate annotated_sliced_cfg) ^
-                                                           (* TODO: we're using cfg because currently the sliced CFG has a dangling block (the return block), which breaks the control dependency computation *)
-                                                           (Control_deps.annotate cfg) *)));
+                                              ~extra_data:(use_def_annot ^ control_annot)));
     )
 
 let find_indirect_calls =
@@ -306,6 +330,8 @@ let () =
        (* Utilities that require building the CFGs *)
        ; "cfg", cfg
        ; "cfgs", cfgs
+
+       ; "dependencies", dependencies
 
        (* Utilities that requires building the call graph *)
        ; "callgraph", callgraph

@@ -267,9 +267,20 @@ let insert_block_between (cfg : 'a t) (src : int) (dst : int) (new_block : 'a Ba
     | Some _ -> (* Block already present, do not add it *)
       cfg.basic_blocks
     | None ->
+      
       IntMap.add_exn cfg.basic_blocks ~key:new_block.idx ~data:new_block
   in
   { cfg with edges; back_edges; basic_blocks }
 
 let has_edge (cfg : 'a t) (src : int) (dst : int) : bool =
   List.exists (Edges.from cfg.edges src) ~f:(fun (x, _) -> x = dst)
+
+let to_func_inst (cfg :'a t) : Func_inst.t =
+  let generate_code _ _ = failwith "TODO" in
+  let body: unit Instr.t list = generate_code [cfg.entry_block] IntSet.empty in
+    { idx = cfg.idx;
+      name = Some cfg.name;
+      type_idx = failwith "TODO";
+      typ = (cfg.arg_types, cfg.return_types);
+      code = { locals = cfg.local_types; body }
+    }

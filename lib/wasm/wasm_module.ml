@@ -42,6 +42,18 @@ let get_type (m : t) (tid : Int32.t) : Type.t list * Type.t list =
 let get_func_type (m : t) (fidx : Int32.t) : Type.t list * Type.t list =
   (Wasm.Lib.List32.nth m.funcs Int32.(fidx-m.nfuncimports)).typ
 
+(** Remove a function from the module *)
+let remove_func (m : t) (fidx : Int32.t) : t =
+  { m with funcs = List.filter m.funcs ~f:(fun f -> Int32.(f.idx <> fidx)) }
+
+(** Replace a function in the module *)
+let replace_func (m : t) (fidx : Int32.t) (finst : Func_inst.t) : t =
+  { m with funcs = List.map m.funcs ~f:(fun f ->
+        if Int32.(f.idx = fidx) then
+          finst
+        else
+          f) }
+
 (** Constructs a Wasm_module *)
 let of_wasm (m : Wasm.Ast.module_) : t =
   let imported_funcs = List.filter_mapi m.it.imports ~f:(fun idx import -> match import.it.idesc.it with

@@ -146,3 +146,6 @@ val insert_block_between : 'a t -> int -> int -> 'a Basic_block.t -> 'a t
 
 (** Check if there is an edge between two nodes of the CFG *)
 val has_edge : 'a t -> int -> int -> bool
+
+(** Converts a CFG to a Func_inst.t *)
+val to_func_inst : 'a t -> Func_inst.t
