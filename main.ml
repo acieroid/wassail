@@ -305,13 +305,26 @@ let find_indirect_calls =
     ~summary:"Find call_indirect instructions and shows the function in which they appear as well as their label"
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string) in
-      fun() ->
+      fun () ->
         let module_ = Wasm_module.of_file filename in
         List.iter module_.funcs ~f:(fun finst ->
             let cfg = Spec_analysis.analyze_intra1 module_ finst.idx in
             let indirect_calls = Slicing.find_call_indirect_instructions cfg in
             List.iter indirect_calls ~f:(fun label ->
                 Printf.printf "function %ld, instruction %s\n" finst.idx (Instr.Label.to_string label))))
+
+let generate =
+  Command.basic
+    ~summary:"Generate a WebAssembly module from a single function"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and funidx = anon ("fun" %: int32)
+      and _outfile = anon ("out" %: string) in
+      fun () ->
+        let module_ = Wasm_module.of_file filename in
+        let cfg = Cfg_builder.build module_ funidx in
+        let instrs = Codegen.codegen cfg in
+        List.iter ~f:(fun i -> Printf.printf "%s\n" (Instr.to_string i)) instrs)
 
 let () =
   Command.run ~version:"0.0"
@@ -336,6 +349,8 @@ let () =
        (* Utilities that requires building the call graph *)
        ; "callgraph", callgraph
        ; "schedule", schedule
+
+       ; "generate", generate
 
        (* Other *)
        ; "spec-inference", spec_inference

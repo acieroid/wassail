@@ -14,6 +14,7 @@ module Type = Type
 module Basic_block = Basic_block
 module Cfg = Cfg
 module Cfg_builder = Cfg_builder
+module Codegen = Codegen
 
 module Call_graph = Call_graph
 

@@ -37,6 +37,7 @@ module Edges = struct
 
   let remove_from (edges : t) (from : int) : t =
     IntMap.remove edges from
+
 end
 
 type 'a t = {
@@ -53,6 +54,7 @@ type 'a t = {
   entry_block: int;
   exit_block: int;
   loop_heads: IntSet.t;
+  entry_exit: int IntMap.t;
 }
 [@@deriving compare, equal]
 
@@ -283,3 +285,6 @@ let to_func_inst (cfg :'a t) : Func_inst.t =
       typ = (cfg.arg_types, cfg.return_types);
       code = { locals = cfg.local_types; body }
     }
+
+let corresponding_exit_exn (cfg : 'a t) (block_idx : int) : int =
+  IntMap.find_exn cfg.entry_exit block_idx

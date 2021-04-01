@@ -148,7 +148,7 @@ module Test = struct
     let expected = Tree.of_children_map 6 [(6, [2]); (2, [1; 5]); (5, [3; 4]); (1, []); (3, []); (4, [])] in
     Tree.check_equality ~actual ~expected
 
-  let%test "post dominator computation" =
+  let%test "post dominator computation should produce expected results on a simple function" =
     let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
@@ -166,6 +166,6 @@ module Test = struct
   (global (;0;) (mut i32) (i32.const 66560)))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let actual = cfg_post_dominator cfg in
-    let expected = Tree.of_children_map 7 [(2, []); (3, [2]); (4, []); (5, [3; 4]); (6, [5]); (7, [6])] in
+    let expected = Tree.of_children_map 7 [(1, []); (2, [1]); (3, [2]); (4, []); (5, [3; 4]); (6, [5]); (7, [6])] in
     Tree.check_equality ~actual ~expected
 end

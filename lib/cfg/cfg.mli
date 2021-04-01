@@ -55,6 +55,8 @@ type 'a t = {
   exit_block: int;
   (* The loop heads *)
   loop_heads: IntSet.t;
+  (* A mapping from block indices to their corresponding exit block, if they correspond to block/loop *)
+  entry_exit: int IntMap.t;
 }
 
 (** Equality on CFGs *)
@@ -149,3 +151,6 @@ val has_edge : 'a t -> int -> int -> bool
 
 (** Converts a CFG to a Func_inst.t *)
 val to_func_inst : 'a t -> Func_inst.t
+
+(** Get the block index corresponding to the exit of a block/loop entry *)
+val corresponding_exit_exn : 'a t -> int -> int
