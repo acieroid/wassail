@@ -15,17 +15,18 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
   let mk_data_block (reverse_instrs : (Instr.data, unit) Instr.labelled list) : unit Basic_block.t =
     let instrs = List.rev reverse_instrs in
-    Basic_block.{ idx = new_idx (); content = Data instrs; } in
+    Basic_block.{ idx = new_idx (); content = Data instrs; block_kind = None } in
   let mk_control_block (instr : (unit Instr.control, unit) Instr.labelled) : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Control instr } in
-  let mk_merge_block () =
+    Basic_block.{ idx = new_idx () ; content = Control instr; block_kind = None } in
+  let mk_merge_block (block_kind : Basic_block.block_kind option) =
     let idx = new_idx () in
     Basic_block.{ idx ; content = Control { instr = Merge;
                                             label = { section = MergeInFunction fid; id = idx };
                                             annotation_before = ();
-                                            annotation_after = () }} in
-  let mk_empty_block () : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Data [] } in
+                                            annotation_after = () };
+                  block_kind} in
+  let mk_empty_block (block_kind : Basic_block.block_kind option) : unit Basic_block.t =
+    Basic_block.{ idx = new_idx () ; content = Data []; block_kind } in
   let loop_heads = ref IntSet.empty in
   let rec helper (instrs : (Instr.data, unit) Instr.labelled list) (remaining : 'a Instr.t list) : (
     (* The blocks created *)
@@ -77,7 +78,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
           let (blocks, edges, breaks, returns, then_entry, then_exit) = helper [] instrs1 in
           let (blocks', edges', breaks', returns', else_entry, else_exit) = helper [] instrs2 in
           (* Construct the merge block *)
-          let merge_block = mk_merge_block () in
+          let merge_block = mk_merge_block None in
           (* Construct the rest of the CFG *)
           let (blocks'', edges'', breaks'', returns'', entry, exit') = helper [] rest in
           (* Compute the new break levels (just like for Block and Loop)
@@ -146,14 +147,14 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
             | Loop _ -> true
             | _ -> false in
           (* The block entry *)
-          let block_entry = if is_loop then mk_merge_block () else mk_empty_block () in
+          let block_entry = if is_loop then mk_merge_block (Some LoopEntry) else mk_empty_block (Some BlockEntry) in
           begin if is_loop then
               loop_heads := IntSet.add !loop_heads block_entry.idx
           end;
           (* Recurse inside the block *)
           let (blocks, edges, breaks, returns, entry', exit') = helper [] instrs' in
           (* Create a node for the exit of the block *)
-          let block_exit = if is_loop then mk_empty_block () else mk_merge_block () in
+          let block_exit = if is_loop then mk_empty_block (Some LoopExit) else mk_merge_block (Some BlockExit) in
           (* Recurse after the block *)
           let (blocks', edges', breaks', returns', entry'', exit'') = helper [] rest in
           (* Compute the new break levels:
@@ -211,7 +212,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
   in
   let (blocks, edges, breaks, returns, _entry_idx, exit_idx) = helper [] funcinst.code.body in
   (* Create the return block *)
-  let return_block = mk_merge_block () in
+  let return_block = mk_merge_block None in
   let blocks' = return_block :: blocks in
   (* There can still be breaks to the exit of the function *)
   let breaks_to_exit, remaining_breaks = List.partition_tf breaks ~f:(fun (_, lvl, _) -> Int32.(lvl = 0l)) in
@@ -248,7 +249,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
   let entry_block, actual_blocks', actual_edges' = match List.find actual_edges ~f:(fun (_, idx, _) -> idx = first_block) with
     | None -> first_block, actual_blocks, actual_edges
     | Some _ ->
-      let block = mk_empty_block () in
+      let block = mk_empty_block None in
       block.idx, block :: actual_blocks, (block.idx, first_block, None) :: actual_edges in
   let basic_blocks = IntMap.of_alist_exn (List.map actual_blocks' ~f:(fun b -> (b.idx, b))) in
   Cfg.{

@@ -7,10 +7,18 @@ module T = struct
     | Data of (Instr.data, 'a) Instr.labelled list
   [@@deriving sexp, compare, equal]
 
+  type block_kind =
+    | LoopEntry
+    | LoopExit
+    | BlockEntry
+    | BlockExit
+  [@@deriving sexp, compare, equal]
+
   (** A basic block *)
   type 'a t = {
     idx: int; (** Its index *)
     content: 'a block_content; (** Its content *)
+    block_kind : block_kind option (** Information on whether this block is a block/loop entry/exit *)
   }
   [@@deriving sexp, compare, equal]
 end
@@ -99,3 +107,16 @@ let is_merge (b : 'a t) : bool =
   match b.content with
   | Control { instr = Merge; _ } -> true
   | _ -> false
+
+(** Check if the block is a data block *)
+let is_data (b : 'a t) : bool =
+  match b.content with
+  | Data _ -> true
+  | _ -> false
+
+(** Check if the block is a control block *)
+let is_control (b : 'a t) : bool =
+  match b.content with
+  | Control _ -> true
+  | _ -> false
+

@@ -267,7 +267,6 @@ let insert_block_between (cfg : 'a t) (src : int) (dst : int) (new_block : 'a Ba
     | Some _ -> (* Block already present, do not add it *)
       cfg.basic_blocks
     | None ->
-      
       IntMap.add_exn cfg.basic_blocks ~key:new_block.idx ~data:new_block
   in
   { cfg with edges; back_edges; basic_blocks }

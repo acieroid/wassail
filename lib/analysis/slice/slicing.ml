@@ -134,7 +134,8 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
   let insert_dummy_blocks_between (cfg : unit Cfg.t) (src : int) (dst : int) (effect : int) : unit Cfg.t =
     let instrs = dummy_instrs effect next_label in
     let block = Basic_block.{ idx = next_available_block_idx ();
-                              content = Data instrs } in
+                              content = Data instrs;
+                              block_kind = None} in
     Cfg.insert_block_between cfg src dst block in
   let rec slicing_loop
       (worklist : int list) (* list of blocks *)
@@ -238,7 +239,8 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
                                                     content = Control { instr = Merge;
                                                                         label = { section = Instr.Label.Dummy; id = next_label () };
                                                                         annotation_before = ();
-                                                                        annotation_after = (); } } in
+                                                                        annotation_after = (); };
+                                              block_kind = None} in
               List.fold_left preds
                 ~init:cfg
                 ~f:(fun cfg pred ->
