@@ -22,6 +22,6 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Relational.Summary.t * Tai
        Log.info "---------- Taint analysis ----------";
        Taint.Options.use_relational := true;
        let result_cfg = Taint.Intra.analyze wasm_mod relational_cfg in
-       let out_state = Taint.Intra.final_state result_cfg in
+       let out_state = Taint.Intra.final_state relational_cfg result_cfg in
        let taint_summary = Taint.Intra.summary relational_cfg out_state in
        (relational_summary, taint_summary))

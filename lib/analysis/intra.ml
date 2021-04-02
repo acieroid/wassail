@@ -171,10 +171,9 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
       ~f:(fun i -> to_state_keep (Instr.annotation_before i, Instr.annotation_after i) (Instr.Label.Map.find_exn instr_data (Instr.label i)))
 
   (** Extract the out state from intra-procedural results *)
-  let final_state (cfg : state Cfg.t) : state =
-    Cfg.state_after_block cfg cfg.exit_block
+  let final_state (cfg_before : annot_expected Cfg.t) (cfg : state Cfg.t) : state =
+    Cfg.state_after_block cfg cfg.exit_block (Transfer.init_state cfg_before)
 
-  let final_state_kept (cfg : (annot_expected * state) Cfg.t) : state =
-    snd (Cfg.state_after_block cfg cfg.exit_block)
-
+  let final_state_kept (_cfg : (annot_expected * state) Cfg.t) : state =
+    failwith "TODO, was: snd (Cfg.state_after_block cfg cfg.exit_block)"
 end

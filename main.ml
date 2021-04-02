@@ -209,7 +209,7 @@ let count_vars =
               let summary _cfg st = st
             end) in
           let result = CountVarsIntra.analyze wasm_mod annotated_cfg in
-          let (vars, n) = CountVarsIntra.final_state result in
+          let (vars, n) = CountVarsIntra.final_state annotated_cfg result in
           Printf.printf "Vars: %d, max: %d\n" (Var.Set.length vars) n;
           (vars, n)))
     (fun fid summary ->

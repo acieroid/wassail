@@ -180,19 +180,27 @@ let map_annotations (cfg : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
   { cfg with
     basic_blocks = IntMap.map ~f:(fun b -> Basic_block.map_annotations b ~f) cfg.basic_blocks }
 
-let rec state_before_block (cfg : 'a t) (block_idx : int) : 'a =
+let rec state_before_block (cfg : 'a t) (block_idx : int) (entry_state : 'a) : 'a =
   let block = find_block_exn cfg block_idx in
   match block.content with
   | Control i -> Instr.annotation_before (Control i)
   | Data [] -> begin match non_empty_predecessors cfg block_idx with
-      | [] -> failwith "state_before_block: no predecessor of an empty block"
+      | [] ->
+        begin match predecessors cfg block_idx with
+          | [] ->
+            (* Can only be the entry block? *)
+            assert (block_idx = cfg.entry_block);
+            entry_state
+          | pred :: [] -> state_before_block cfg pred entry_state
+          | _ -> failwith "state_before_block: multiple predecessors for an empty block"
+        end
       | pred :: [] ->
         (* The state before this block is the state after its non-empty predecessor *)
-        state_after_block cfg pred
+        state_after_block cfg pred entry_state
       | _ -> failwith "state_before_block: multiple predecessors for an empty block"
     end
   | Data (i :: _) -> Instr.annotation_before (Data i)
-and state_after_block (cfg : 'a t) (block_idx : int) : 'a =
+and state_after_block (cfg : 'a t) (block_idx : int) (entry_state : 'a) : 'a =
   (* This implementation is the complement of state_before_block *)
   let block = find_block_exn cfg block_idx in
   match block.content with
@@ -200,7 +208,7 @@ and state_after_block (cfg : 'a t) (block_idx : int) : 'a =
   | Data [] -> begin match non_empty_successors cfg block_idx with
       | [] -> failwith "state_after_block: no successor of an empty block"
       | succ :: [] ->
-        state_before_block cfg succ
+        state_before_block cfg succ entry_state
       | _ -> failwith "state_after_bloc: multiple successors for an empty block"
     end
   | Data l -> Instr.annotation_after (Data (List.last_exn l))

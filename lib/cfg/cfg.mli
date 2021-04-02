@@ -129,10 +129,10 @@ val all_annots : 'a t -> 'a list
 val map_annotations : 'a t -> f:('a Instr.t -> 'b * 'b) -> 'b t
 
 (** Find the state at the beginning of a block in the CFG *)
-val state_before_block : 'a t -> int -> 'a
+val state_before_block : 'a t -> int -> 'a -> 'a
 
 (** Find state at the end of a block in the CFG *)
-val state_after_block : 'a t -> int -> 'a
+val state_after_block : 'a t -> int -> 'a -> 'a
 
 (** Replace a block without changing the shape of the CFG.
     The block being replaced is the one that has the same index a the given block that replaces it. *)

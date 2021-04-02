@@ -15,7 +15,7 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> Summary.t Int32Map.t =
        Intra.init_summaries summaries;
        Options.ignore_memory := false;
        let result_cfg = Intra.analyze wasm_mod cfg in
-       let out_state = Intra.final_state result_cfg in
+       let out_state = Intra.final_state cfg result_cfg in
        Intra.summary cfg out_state)
 
 let check (expected : Summary.t) (actual : Summary.t) : bool =

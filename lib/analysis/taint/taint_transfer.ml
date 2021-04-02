@@ -179,6 +179,7 @@ module Make (* : Transfer.TRANSFER *) = struct
     | _ -> `Simple state
 
   let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * state) list) : state =
+    let init_spec = (Spec_inference.init_state cfg, Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i)))) in
     match states with
     | [] -> init_state cfg
     | _ ->
@@ -186,10 +187,10 @@ module Make (* : Transfer.TRANSFER *) = struct
         begin match block.content with
           | Control { instr = Merge; _ } ->
             (* block is a control-flow merge *)
-            let spec = fst (Cfg.state_after_block cfg block.idx) in
+            let spec = fst (Cfg.state_after_block cfg block.idx init_spec) in
             let states' = List.map states ~f:(fun (idx, s) ->
                 (* get the spec after that state *)
-                let spec' = fst (Cfg.state_after_block cfg idx) in
+                let spec' = fst (Cfg.state_after_block cfg idx init_spec) in
                 (* equate all different variables in the post-state with the ones in the pre-state *)
                 List.fold_left (Spec_inference.extract_different_vars spec spec')
                   ~init:s
@@ -207,7 +208,8 @@ module Make (* : Transfer.TRANSFER *) = struct
         end
 
   let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
-    let exit_spec = fst (Cfg.state_after_block cfg cfg.exit_block) in
+    let init_spec = (Spec_inference.init_state cfg, Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i)))) in
+    let exit_spec = fst (Cfg.state_after_block cfg cfg.exit_block init_spec) in
     Taint_summary.make cfg out_state
       (if List.length cfg.return_types = 1 then List.hd exit_spec.vstack else None)
       exit_spec.globals

@@ -63,6 +63,7 @@ let eqs_data_instr (instr : (Instr.data, Spec.t) Instr.labelled) : VarEq.Set.t =
 
 (** Perform variable propagation *)
 let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
+  let init_spec = Spec_inference.init_state cfg in
   (* Go over each instruction and basic block, record all equality constraints that can be derived *)
   let equalities : VarEq.Set.t = List.fold_left (Cfg.all_blocks cfg)
       ~init:VarEq.Set.empty
@@ -73,11 +74,11 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
             List.fold_left instrs ~init:eqs ~f:(fun eqs instr -> VarEq.Set.union eqs (eqs_data_instr instr))
           | Control { instr = Merge; _ } ->
             (* Equate annotation after each predecessor of this merge block with the annotation after this merge block *)
-            let spec = Cfg.state_after_block cfg block.idx in
+            let spec = Cfg.state_after_block cfg block.idx init_spec in
             List.fold_left (Cfg.predecessors cfg block.idx)
               ~init:eqs
               ~f:(fun eqs pred ->
-                  let pred_spec = Cfg.state_after_block cfg pred in
+                  let pred_spec = Cfg.state_after_block cfg pred init_spec in
                   assert (List.length pred_spec.vstack = List.length spec.vstack);
                   assert (List.length pred_spec.locals = List.length spec.locals);
                   assert (List.length pred_spec.globals = List.length spec.globals);

@@ -55,10 +55,6 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
   let initial_worklist = Instr.Label.Set.empty in
   loop initial_slice initial_worklist
 
-(** Return the net effect of a block on the stack size: positive if the block adds values on the stack, negative if it removes them *)
-let block_effect_on_stack_size (cfg : Spec.t Cfg.t) (block_idx : int) : int =
-  (List.length ((Cfg.state_after_block cfg block_idx).vstack)) - (List.length ((Cfg.state_before_block cfg block_idx).vstack))
-
 (** Like block_effect_on_stack_size, but for lists of instructions *)
 let instrs_effect_on_stack_size (instrs : (Instr.data, Spec.t) Instr.labelled list) : int = match instrs with
   | [] -> 0
@@ -90,6 +86,7 @@ let block_net_effect (block : 'a Basic_block.t) : int =
       acc + (Instr.net_effect_data instr))
 
 let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
+  let init_spec = Spec_inference.init_state cfg in
   let next_label : unit -> int =
     let counter : int ref = ref 0 in
     fun () ->
@@ -180,10 +177,10 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
   in
   let adapt_blocks_for_effect (init_cfg : Spec.t Cfg.t) (sliced_cfg : unit Cfg.t) : unit Cfg.t =
     let stack_size_before (block_idx : int) : int =
-      let pre = Cfg.state_before_block init_cfg block_idx in
+      let pre = Cfg.state_before_block init_cfg block_idx (Spec_inference.init_state cfg) in
       List.length pre.vstack in
     let stack_size_after (block_idx : int) : int =
-      let post = Cfg.state_after_block init_cfg block_idx in
+      let post = Cfg.state_after_block init_cfg block_idx init_spec in
       List.length post.vstack in
     let successors (block_idx : int) : (int * int) list =
       List.map (Cfg.successors sliced_cfg block_idx) ~f:(fun next -> (block_idx, next)) in

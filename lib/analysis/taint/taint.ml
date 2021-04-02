@@ -19,7 +19,7 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> Summary.t Int32Map.t =
        Intra.init_summaries summaries;
        let annotated_cfg = Relational.Transfer.dummy_annotate cfg in
        let result_cfg = Intra.analyze wasm_mod annotated_cfg in
-       let final_state = Intra.final_state result_cfg in
+       let final_state = Intra.final_state annotated_cfg result_cfg  in
        let taint_summary = Intra.summary annotated_cfg final_state in
        taint_summary)
 
@@ -47,7 +47,9 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> Summary.t Int32Map.t =
        Options.use_relational := false;
        let annotated_scc = Int32Map.map scc ~f:Relational.Transfer.dummy_annotate in
        let analyzed_cfgs = Inter.analyze wasm_mod annotated_scc in
-       Int32Map.map analyzed_cfgs ~f:(fun cfg -> Intra.summary (Int32Map.find_exn annotated_scc cfg.idx) (Intra.final_state cfg)))
+       Int32Map.mapi analyzed_cfgs ~f:(fun ~key:idx ~data:cfg ->
+           Intra.summary (Int32Map.find_exn annotated_scc cfg.idx)
+             (Intra.final_state (Int32Map.find_exn annotated_scc idx) cfg)))
 
 module Test = struct
   let%test "simple function has no taint" =
