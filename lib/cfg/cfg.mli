@@ -35,6 +35,8 @@ type 'a t = {
   name: string;
   (* The index of this CFG *)
   idx: Int32.t;
+  (* The type index of this function *)
+  type_idx: Int32.t;
   (* Types of globals (they are not specific to this CFG, but useful to have here) *)
   global_types: Type.t list;
   (* Types of arguments *)
@@ -148,9 +150,6 @@ val insert_block_between : 'a t -> int -> int -> 'a Basic_block.t -> 'a t
 
 (** Check if there is an edge between two nodes of the CFG *)
 val has_edge : 'a t -> int -> int -> bool
-
-(** Converts a CFG to a Func_inst.t *)
-val to_func_inst : 'a t -> Func_inst.t
 
 (** Get the block index corresponding to the exit of a block/loop entry *)
 val corresponding_exit_exn : 'a t -> int -> int

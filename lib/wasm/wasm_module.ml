@@ -116,6 +116,87 @@ let of_file (file : string) : t =
 let of_string (string : string) : t =
   apply_to_string string of_wasm
 
+let to_string (m : t) : string =
+  let buf = Buffer.create 8192 in
+  let put (s : string) = Buffer.add_string buf s in
+  let type_ (i : int) (t : Type.t list * Type.t list) =
+    put "(type (;";
+    put (string_of_int i);
+    put ") (func";
+    if not (List.is_empty (fst t)) then begin
+      put (Printf.sprintf " (param %s)"
+             (String.concat ~sep:" " (List.map (fst t) ~f:Type.to_string)))
+    end;
+    if not (List.is_empty (snd t)) then begin
+      put (Printf.sprintf " (result %s)"
+             (String.concat ~sep:" " (List.map (fst t) ~f:Type.to_string)))
+    end;
+    put ")\n" in
+  let types () = List.iteri m.types ~f:type_ in
+  let import (i : int) (import : Import.t) =
+    put (Printf.sprintf "(import \"%s\" \"%s\" " import.module_name import.item_name);
+    begin match import.idesc with
+    | FuncImport tidx ->
+      put (Printf.sprintf "(func (;%d;) (type %ld))"
+             i tidx)
+    | _ -> failwith "Non-function import not yet supported (this is easy to add)"
+    end;
+    put ")\n" in
+  let imports () = List.iteri m.imports ~f:import in
+  let func (i : Int32.t) (f : Func_inst.t) =
+    put (Printf.sprintf "(func (;%ld;) (type %ld)\n" i f.type_idx);
+    if not (List.is_empty f.code.locals) then begin
+      put (Printf.sprintf "(local %s)\n" (String.concat ~sep:" " (List.map f.code.locals ~f:Type.to_string)))
+    end;
+    put (Instr.list_to_string f.code.body (fun () -> ""));
+    put ")\n" in
+  let funcs () = List.iteri m.funcs ~f:(fun i f -> func Int32.(m.nfuncimports + (of_int_exn i)) f) in
+  let tables () = failwith "TODO"
+  in
+  let limits (l : Limits.t) = match l with
+    | low, None -> put (Printf.sprintf "%ld" low)
+    | low, Some high -> put (Printf.sprintf "%ld %ld" low high) in
+  let memory (i : int) (memory : Memory.t) =
+    put (Printf.sprintf "(memory (;%d;)" i);
+    limits memory.mtype;
+    put ")\n" in
+  let memories () = List.iteri m.memories ~f:memory in
+  let export (export : Export.t) =
+    put (Printf.sprintf "(export \"%s\" " export.name);
+    begin match export.edesc with
+    | FuncExport n -> put (Printf.sprintf "(func %ld)" n)
+    | TableExport n -> put (Printf.sprintf "(table %ld)" n)
+    | MemoryExport n -> put (Printf.sprintf "(memory %ld)" n)
+    | GlobalExport n -> put (Printf.sprintf "(global %ld)" n)
+    end;
+    put ")\n" in
+  let exports () = List.iter m.exports ~f:export in
+  let elem (elem : Segment.ElemSegment.t) =
+    put (Printf.sprintf "(elem (;%ld;) " elem.index);
+    put (Printf.sprintf "(offset %s)" (Instr.list_to_string elem.offset (fun () -> "")));
+    (* TODO: this is not the general case, check that this is enough *)
+    put (Printf.sprintf "func %s)\n" (String.concat ~sep:" " (List.map elem.init ~f:Int32.to_string))) in
+  let elems () = List.iter m.elems ~f:elem in
+  let data (data : Segment.DataSegment.t) =
+    put (Printf.sprintf "(data (;%ld;) " data.index);
+    put (Printf.sprintf "(offset %s)" (Instr.list_to_string data.offset (fun () -> "")));
+    put data.init; (* TODO: make sure to escape what is needed *)
+    put ")\n" in
+  let datas () = List.iter m.data ~f:data in
+
+  put "(module\n";
+  types ();
+  imports ();
+  funcs ();
+  tables ();
+  memories ();
+  exports ();
+  elems ();
+  datas ();
+  put ")";
+  Buffer.contents buf;
+  
+
 module Test = struct
   let%test_unit "construct Wasm_module from .wat files without erroring" =
     List.iter [

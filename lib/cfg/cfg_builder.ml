@@ -273,6 +273,8 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     name = Option.value funcinst.name ~default:"<unexported>";
     (* The index of this block is the integer that represent the address of this function *)
     idx = fid;
+    (* The type index of this function *)
+    type_idx = funcinst.type_idx;
     (* Global types *)
     global_types = module_.global_types;
     (* Argument types *)

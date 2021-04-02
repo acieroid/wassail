@@ -44,6 +44,7 @@ type 'a t = {
   exported: bool;
   name: string;
   idx: Int32.t;
+  type_idx: Int32.t;
   global_types: Type.t list;
   arg_types: Type.t list;
   local_types: Type.t list;
@@ -283,16 +284,6 @@ let insert_block_between (cfg : 'a t) (src : int) (dst : int) (new_block : 'a Ba
 
 let has_edge (cfg : 'a t) (src : int) (dst : int) : bool =
   List.exists (Edges.from cfg.edges src) ~f:(fun (x, _) -> x = dst)
-
-let to_func_inst (cfg :'a t) : Func_inst.t =
-  let generate_code _ _ = failwith "TODO" in
-  let body: unit Instr.t list = generate_code [cfg.entry_block] IntSet.empty in
-    { idx = cfg.idx;
-      name = Some cfg.name;
-      type_idx = failwith "TODO";
-      typ = (cfg.arg_types, cfg.return_types);
-      code = { locals = cfg.local_types; body }
-    }
 
 let corresponding_exit_exn (cfg : 'a t) (block_idx : int) : int =
   IntMap.find_exn cfg.entry_exit block_idx

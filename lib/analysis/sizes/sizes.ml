@@ -1,4 +1,3 @@
-
 module T = struct
   (* Size of each section of a WebAssembly module, in bytes *)
   type t = {
@@ -29,13 +28,23 @@ let put (s : stream) (b : char) : unit = Buffer.add_char s.buf b
 let put_string (s : stream) (bs : string) : unit = Buffer.add_string s.buf bs
 let patch (s : stream) (pos : int) (b : char) : unit = s.patches := (pos, b) :: !(s.patches)
 
-let buf_size (s : stream) : int =
+let buf_to_bytes (s : stream) : bytes =
   let bs = Buffer.to_bytes s.buf in
   List.iter (fun (pos, b) -> Bytes.set bs pos b) !(s.patches);
-  Bytes.length bs
+  bs
 
-let sizes (m : Wasm_module.t) : t =
-    let s = stream () in
+let buf_size (s : stream) : int =
+  Bytes.length (buf_to_bytes s)
+
+let buf_to_file (s : stream) (filename : string) =
+  let open Core_kernel in
+  Out_channel.with_file filename
+    ~f:(fun ch ->
+        Out_channel.output_bytes ch (buf_to_bytes s))
+
+(** Generate binary and report its size. Write the binary to a file if a filename is given *)
+let generate_binary (m : Wasm_module.t) (filename : string option) : t =
+  let s = stream () in
 
   let module E = struct
     (* Generic values *)
@@ -507,4 +516,10 @@ let sizes (m : Wasm_module.t) : t =
       { type_section; import_section; func_section; table_section; memory_section;
         global_section; export_section; start_section; elem_section; code_section; data_section }
   end in
-    E.module_ m
+  let sizes = E.module_ m in
+  begin match filename with
+  | Some f -> buf_to_file s f
+  | None -> ()
+  end;
+  sizes
+

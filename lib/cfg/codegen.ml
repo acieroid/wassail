@@ -92,6 +92,15 @@ and codegen_until (cfg : unit Cfg.t) (start_block_idx : int) (stop_block_idx : i
 let codegen (cfg : unit Cfg.t) : unit Instr.t list =
   fst (codegen_until cfg cfg.entry_block (-1))
 
+let cfg_to_func_inst (cfg : unit Cfg.t) : Func_inst.t =
+  let body: unit Instr.t list = codegen cfg in
+    { idx = cfg.idx;
+      name = Some cfg.name;
+      type_idx = cfg.type_idx;
+      typ = (cfg.arg_types, cfg.return_types);
+      code = { locals = cfg.local_types; body }
+    }
+
 module Test = struct
   let data i : unit Instr.t = Data Instr.{ instr = i; label = { section = Dummy; id = 0 }; annotation_before = (); annotation_after = (); }
   let control i : unit Instr.t = Control Instr.{ instr = i; label = { section = Dummy; id = 0 }; annotation_before = (); annotation_after = (); }

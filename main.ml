@@ -81,7 +81,7 @@ let sizes =
       let%map_open file_in = anon ("in" %: string) in
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
-        let sizes = Sizes.sizes wasm_mod in
+        let sizes = Sizes.generate_binary wasm_mod None in
         Printf.printf "%d\ttype\n" sizes.type_section;
         Printf.printf "%d\timport\n" sizes.import_section;
         Printf.printf "%d\tfunc\n" sizes.func_section;
@@ -319,12 +319,17 @@ let generate =
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string)
       and funidx = anon ("fun" %: int32)
-      and _outfile = anon ("out" %: string) in
+      and outfile = anon ("out" %: string) in
       fun () ->
         let module_ = Wasm_module.of_file filename in
         let cfg = Cfg_builder.build module_ funidx in
-        let instrs = Codegen.codegen cfg in
-        List.iter ~f:(fun i -> Printf.printf "%s\n" (Instr.to_string i)) instrs)
+        let module_ = List.fold_left module_.funcs ~init:module_ ~f:(fun m f ->
+            if Int32.(f.idx = funidx) then
+              Wasm_module.replace_func m funidx (Codegen.cfg_to_func_inst cfg)
+            else
+              Wasm_module.remove_func m f.idx) in
+        let _ : Sizes.t = Sizes.generate_binary module_ (Some outfile) in
+        ())
 
 let () =
   Command.run ~version:"0.0"
