@@ -18,20 +18,19 @@ module T = struct
 end
 include T
 let to_string (op : t) : string =
-  Printf.sprintf "typ=%s offset=%d, sz=%s"
-    (Type.to_string op.typ)
+  Printf.sprintf "offset=%d %s"
     op.offset
     (match op.sz with
      | Some (pack, ext) ->
-       Printf.sprintf "%s,%s"
+       Printf.sprintf "align=%s%s"
          (match pack with
           | Pack8 -> "8"
           | Pack16 -> "16"
           | Pack32 -> "32")
          (match ext with
-          | SX -> "sx"
-          | ZX -> "zx")
-     | None -> "none")
+          | SX -> ",sx"
+          | ZX -> "")
+     | None -> "")
 let of_wasm_load (op : Ast.loadop) : t = {
   typ = Type.of_wasm op.ty;
   align = op.align;

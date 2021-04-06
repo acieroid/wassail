@@ -143,21 +143,21 @@ let data_to_string (instr : data) : string =
      | Nop -> "nop"
      | Drop -> "drop"
      | Select -> "select"
-     | MemorySize -> "memory_size"
-     | MemoryGrow -> "memory_grow"
-     | Const v -> Printf.sprintf "const %s" (Prim_value.to_string v)
-     | Binary b -> Printf.sprintf "binary %s" (Binop.to_string b)
-     | Unary u -> Printf.sprintf "unary %s" (Unop.to_string u)
-     | Compare r -> Printf.sprintf "compare %s" (Relop.to_string r)
-     | Test t -> Printf.sprintf "test %s" (Testop.to_string t)
-     | Convert t -> Printf.sprintf "cvt %s" (Convertop.to_string t)
+     | MemorySize -> "memory.size"
+     | MemoryGrow -> "memory.grow"
+     | Const v -> Printf.sprintf "%s.const %s" (Type.to_string (Prim_value.typ v)) (Prim_value.to_string v)
+     | Binary b -> Printf.sprintf "%s" (Binop.to_string b)
+     | Unary u -> Printf.sprintf "%s" (Unop.to_string u)
+     | Compare r -> Printf.sprintf "%s" (Relop.to_string r)
+     | Test t -> Printf.sprintf "%s" (Testop.to_string t)
+     | Convert t -> Printf.sprintf "%s" (Convertop.to_string t)
      | LocalGet v -> Printf.sprintf "local.get %s" (Int32.to_string v)
      | LocalSet v -> Printf.sprintf "local.set %s" (Int32.to_string v)
      | LocalTee v -> Printf.sprintf "local.tee %s" (Int32.to_string v)
      | GlobalGet v -> Printf.sprintf "global.get %s" (Int32.to_string v)
      | GlobalSet v -> Printf.sprintf "global.set %s" (Int32.to_string v)
-     | Load op -> Printf.sprintf "load %s" (Memoryop.to_string op)
-     | Store op -> Printf.sprintf "store %s" (Memoryop.to_string op)
+     | Load op -> Printf.sprintf "%s.load %s" (Type.to_string op.typ) (Memoryop.to_string op)
+     | Store op -> Printf.sprintf "%s.store %s" (Type.to_string op.typ) (Memoryop.to_string op)
 
 (** Converts a control instruction to its string representation *)
 let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot_to_string : 'a -> string = fun _ -> "") (instr : 'a control)  : string =
@@ -165,12 +165,12 @@ let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?anno
   | Call (_, v) -> Printf.sprintf "call %s" (Int32.to_string v)
   | CallIndirect (_, v) -> Printf.sprintf "call_indirect %s" (Int32.to_string v)
   | Br b -> Printf.sprintf "br %s" (Int32.to_string b)
-  | BrIf b -> Printf.sprintf "brif %s" (Int32.to_string b)
+  | BrIf b -> Printf.sprintf "br_if %s" (Int32.to_string b)
   | BrTable (t, b) -> Printf.sprintf "br_table %s %s" (String.concat ~sep:" " (List.map t ~f:Int32.to_string)) (Int32.to_string b)
   | Return -> "return"
   | Unreachable -> "unreachable"
-  | Block (_, _, instrs) -> Printf.sprintf "block%s%s" sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep)
-  | Loop (_, _, instrs) -> Printf.sprintf "loop%s%s" sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep)
+  | Block (_, _, instrs) -> Printf.sprintf "block%s%s%s%send" sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
+  | Loop (_, _, instrs) -> Printf.sprintf "loop%s%s%s%send" sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
   | If (_, _, instrs1, instrs2) -> Printf.sprintf "if%s%s%selse%s%s" sep
                                (list_to_string instrs1 annot_to_string ~indent:(i+2) ~sep:sep) sep sep
                                (list_to_string instrs2 annot_to_string ~indent:(i+2) ~sep:sep)
@@ -178,7 +178,7 @@ let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?anno
 
 (** Converts an instruction to its string representation *)
 and to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot_to_string : 'a -> string = fun _ -> "") (instr : 'a t) : string =
-  Printf.sprintf "%s:%s%s" (Label.to_string (label instr)) (String.make i ' ')
+  Printf.sprintf "%s%s" (* (Label.to_string (label instr)) *) (String.make i ' ')
     (match instr with
      | Data instr -> data_to_string instr.instr
      | Control instr -> control_to_string instr.instr ~annot_str:annot_to_string ~sep:sep ~indent:i)

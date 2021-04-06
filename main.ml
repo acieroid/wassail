@@ -328,8 +328,9 @@ let generate =
               Wasm_module.replace_func m funidx (Codegen.cfg_to_func_inst cfg)
             else
               Wasm_module.remove_func m f.idx) in
-        let _ : Sizes.t = Sizes.generate_binary module_ (Some outfile) in
-        ())
+        Out_channel.with_file outfile
+          ~f:(fun ch ->
+              Out_channel.output_string ch (Wasm_module.to_string module_)))
 
 let () =
   Command.run ~version:"0.0"
