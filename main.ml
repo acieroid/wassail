@@ -318,14 +318,14 @@ let generate =
     ~summary:"Generate a WebAssembly module from a single function"
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string)
-      and funidx = anon ("fun" %: int32)
+      and funs = anon ("funs" %: int32_comma_separated_list)
       and outfile = anon ("out" %: string) in
       fun () ->
         let module_ = Wasm_module.of_file filename in
-        let cfg = Cfg_builder.build module_ funidx in
         let module_ = List.fold_left module_.funcs ~init:module_ ~f:(fun m f ->
-            if Int32.(f.idx = funidx) then
-              Wasm_module.replace_func m funidx (Codegen.cfg_to_func_inst cfg)
+            if List.mem funs f.idx ~equal:Int32.(=)then
+              let cfg = Cfg_builder.build module_ f.idx in
+              Wasm_module.replace_func m f.idx (Codegen.cfg_to_func_inst cfg)
             else
               Wasm_module.remove_func m f.idx) in
         Out_channel.with_file outfile

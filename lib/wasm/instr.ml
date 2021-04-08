@@ -156,8 +156,8 @@ let data_to_string (instr : data) : string =
      | LocalTee v -> Printf.sprintf "local.tee %s" (Int32.to_string v)
      | GlobalGet v -> Printf.sprintf "global.get %s" (Int32.to_string v)
      | GlobalSet v -> Printf.sprintf "global.set %s" (Int32.to_string v)
-     | Load op -> Printf.sprintf "%s.load %s" (Type.to_string op.typ) (Memoryop.to_string op)
-     | Store op -> Printf.sprintf "%s.store %s" (Type.to_string op.typ) (Memoryop.to_string op)
+     | Load op -> Printf.sprintf "%s.load%s %s" (Type.to_string op.typ) (Memoryop.suffix_to_string op) (Memoryop.to_string op)
+     | Store op -> Printf.sprintf "%s.store%s %s" (Type.to_string op.typ) (Memoryop.suffix_to_string op) (Memoryop.to_string op)
 
 (** Converts a control instruction to its string representation *)
 let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot_to_string : 'a -> string = fun _ -> "") (instr : 'a control)  : string =

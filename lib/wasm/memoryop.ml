@@ -17,20 +17,29 @@ module T = struct
   [@@deriving sexp, compare, equal]
 end
 include T
+
+let suffix_to_string (op : t) : string =
+  match op.sz with
+  | None -> ""
+  | Some (Pack8, SX) -> "8_s"
+  | Some (Pack16, SX) -> "16_s"
+  | Some (Pack32, SX) -> "32_s"
+  | Some (Pack8, ZX) -> "8_u"
+  | Some (Pack16, ZX) -> "16_u"
+  | Some (Pack32, ZX) -> "32_u"
+
+let size (op : t) : int =
+  match op.sz with
+  | None -> Type.size op.typ
+  | Some (Pack8, _) -> 1
+  | Some (Pack16, _) -> 2
+  | Some (Pack32, _) -> 4
+
 let to_string (op : t) : string =
-  Printf.sprintf "offset=%d %s"
-    op.offset
-    (match op.sz with
-     | Some (pack, ext) ->
-       Printf.sprintf "align=%s%s"
-         (match pack with
-          | Pack8 -> "8"
-          | Pack16 -> "16"
-          | Pack32 -> "32")
-         (match ext with
-          | SX -> ",sx"
-          | ZX -> "")
-     | None -> "")
+  Printf.sprintf "%s%s"
+    (if op.offset = 0 then "" else Printf.sprintf "offset=%d " op.offset)
+    (if op.align = 0 || op.align = size op then "" else (Printf.sprintf "align=%d" op.align))
+
 let of_wasm_load (op : Ast.loadop) : t = {
   typ = Type.of_wasm op.ty;
   align = op.align;

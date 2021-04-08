@@ -116,8 +116,21 @@ let of_file (file : string) : t =
 let of_string (string : string) : t =
   apply_to_string string of_wasm
 
-let to_wasm_string (s : string) : string =
-  Wasm.Ast.string_of_name (List.map (String.to_list s) ~f:Char.to_int)
+let string_to_wasm_string (s : string) : string =
+  let string_of_name n =
+    let b = Buffer.create 16 in
+    let escape uc =
+       if uc < 0x20 || uc >= 0x7f then
+         Buffer.add_string b (Printf.sprintf "\\%02x" uc)
+       else begin
+        let c = Char.of_int_exn uc in
+        if Char.(c = '\"') || Char.(c = '\\') then Buffer.add_char b '\\';
+        Buffer.add_char b c
+      end
+    in
+    List.iter ~f:escape n;
+    Buffer.contents b in
+  string_of_name (List.map (String.to_list s) ~f:Char.to_int)
 
 let to_string (m : t) : string =
   let buf = Buffer.create 8192 in
@@ -132,7 +145,7 @@ let to_string (m : t) : string =
     end;
     if not (List.is_empty (snd t)) then begin
       put (Printf.sprintf " (result %s)"
-             (String.concat ~sep:" " (List.map (fst t) ~f:Type.to_string)))
+             (String.concat ~sep:" " (List.map (snd t) ~f:Type.to_string)))
     end;
     put "))\n" in
   let types () = List.iteri m.types ~f:type_ in
@@ -199,7 +212,7 @@ let to_string (m : t) : string =
     put (Printf.sprintf "(data (;%ld;) " data.index);
     put (Printf.sprintf "(offset %s)" (Instr.list_to_string data.offset (fun () -> "")));
     put "\"";
-    put (to_wasm_string data.init); (* TODO: make sure to escape what is needed *)
+    put (string_to_wasm_string data.init); (* TODO: make sure to escape what is needed *)
     put "\")\n" in
   let datas () = List.iter m.data ~f:data in
   let global (i : int) (g : Global.t) =
