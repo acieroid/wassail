@@ -32,7 +32,10 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
     | Some v -> v
     | None -> failwith "Spec_inference.top: var list is empty"
 
-  let get (n : Int32.t) (l : Var.t list) = List.nth_exn l (Int32.to_int_exn n)
+  let get (n : Int32.t) (l : Var.t list) =
+    match List.nth l (Int32.to_int_exn n) with
+    | Some v -> v
+    | _ -> failwith "Spec_inference.get: nth exception"
 
   let set (n : Int32.t) (l : Var.t list) (v : Var.t) = List.mapi l ~f:(fun i v' -> if i = (Int32.to_int_exn n) then v else v')
 
@@ -262,10 +265,6 @@ let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
         | Load _ -> top_n 1
         | Store _ ->
           []
-          (*let addr = List.nth_exn i.annotation_before.vstack 1 (* address is not the top of the stack but the element after *) in
-            [match Var.OffsetMap.find i.annotation_after.memory (addr, offset) with
-             | Some v -> v
-             | None -> failwith (Printf.sprintf "Wrong memory annotation while looking for %s+%d in memory (instr: %s), annot after: %s" (Var.to_string addr) offset (Instr.to_string instr Spec_inference.state_to_string) (Spec_inference.state_to_string i.annotation_after))] *)
       end
     | Instr.Control i ->
       let top_n n = List.take i.annotation_after.vstack n in

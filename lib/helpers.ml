@@ -51,12 +51,21 @@ module StringMap = Map.Make(S)
 
 module List32 = struct
   let nth_exn = Wasm.Lib.List32.nth
+  let rec nth xs n =
+    match n, xs with
+    | 0l, x::_ -> Some x
+    | n, _::xs' when Int32.(n > 0l) -> nth xs' Int32.(n - 1l)
+    | _ -> None
   let mapi (l : 'a list) ~(f : Int32.t -> 'a -> 'b) : 'b list =
     List.mapi l ~f:(fun x -> f (Int32.of_int_exn x))
+  let length = Wasm.Lib.List32.length
 end
 
 (** Get the nth element of a list *)
-let get_nth (l : 'a list) (n : Int32.t) : Var.t = List.nth_exn l (Int32.to_int_exn n)
+let get_nth (l : 'a list) (n : Int32.t) : Var.t =
+  match List.nth l (Int32.to_int_exn n) with
+  | Some v -> v
+  | _ -> failwith "Helpers.get_nth nth exception"
 
 (** Pop one element from a list *)
 let pop (vstack : 'a list) : 'a =

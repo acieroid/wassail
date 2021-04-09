@@ -28,19 +28,27 @@ include T
 
 (** Get the function instance for the function with index fidx *)
 let get_funcinst (m : t) (fidx : Int32.t) : Func_inst.t =
-  List32.nth_exn m.funcs Int32.(fidx-(Int32.of_int_exn (List.length m.imported_funcs)))
+  match List32.nth m.funcs Int32.(fidx-(Int32.of_int_exn (List.length m.imported_funcs))) with
+  | Some v -> v
+  | None -> failwith "get_funcinst nth exception"
 
 (** Get the memory instance for the memory with index idx *)
 let get_meminst (m : t) (idx : int) : Memory_inst.t =
-  List.nth_exn m.memory_insts idx
+  match List.nth m.memory_insts idx with
+  | Some v -> v
+  | None -> failwith "get_meminst nth exception"
 
 (** Get the type with index tid *)
 let get_type (m : t) (tid : Int32.t) : Type.t list * Type.t list =
-  List.nth_exn m.types (Int32.to_int_exn tid)
+  match List.nth m.types (Int32.to_int_exn tid) with
+  | Some v -> v
+  | None -> failwith "get_type nth exception"
 
 (** Get the type of the function with index fidx *)
 let get_func_type (m : t) (fidx : Int32.t) : Type.t list * Type.t list =
-  (Wasm.Lib.List32.nth m.funcs Int32.(fidx-m.nfuncimports)).typ
+  match List32.nth m.funcs Int32.(fidx-m.nfuncimports) with
+  | Some v -> v.typ
+  | None -> failwith "get_func_type nth exception"
 
 (** Remove a function from the module *)
 let remove_func (m : t) (fidx : Int32.t) : t =
@@ -60,9 +68,10 @@ let of_wasm (m : Wasm.Ast.module_) : t =
       | FuncImport v ->
         Some (Int32.of_int_exn idx, Wasm.Ast.string_of_name import.it.item_name,
               let type_idx = v.it in
-              match (Wasm.Lib.List32.nth m.it.types type_idx) with
-              | {it = Wasm.Types.FuncType (a, b); _} ->
-                (List.map a ~f:Type.of_wasm, List.map b ~f:Type.of_wasm))
+              match (List32.nth m.it.types type_idx) with
+              | Some {it = Wasm.Types.FuncType (a, b); _} ->
+                (List.map a ~f:Type.of_wasm, List.map b ~f:Type.of_wasm)
+              | None -> failwith "of_wasm: nth error when looking for imports")
       | _ -> None) in
   let nfuncimports = Wasm.Lib.List32.length imported_funcs in
   let globals = List32.mapi m.it.globals ~f:(Global.of_wasm m) in
@@ -71,12 +80,15 @@ let of_wasm (m : Wasm.Ast.module_) : t =
       | Wasm.Types.GlobalType (t, _) -> Type.of_wasm t) in
   let funcs = List32.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m Int32.(i+nfuncimports) f) in
   let ftype (fidx : Int32.t) : Type.t list * Type.t list = if Int32.(fidx < nfuncimports) then
-      match Wasm.Lib.List32.nth imported_funcs fidx with
-      | (_, _, typ) -> typ
+      match List32.nth imported_funcs fidx with
+      | Some (_, _, typ) -> typ
+      | None -> failwith "of_wasm: nth error when looking for imported function type"
     else
-      let f =  Wasm.Lib.List32.nth funcs Int32.(fidx-nfuncimports) in
-      assert Int32.(f.idx = fidx);
-      f.typ in
+      match List32.nth funcs Int32.(fidx-nfuncimports) with
+      | Some f ->
+        assert Int32.(f.idx = fidx);
+        f.typ
+      | None -> failwith (Printf.sprintf "of_wasm: nth error when looking for function type (function %ld unfound in type list of length %ld)" Int32.(fidx-nfuncimports) (List32.length funcs)) in
   let exports = List.map m.it.exports ~f:Export.of_wasm in
   let exported_funcs = List.filter_map m.it.exports ~f:(fun export -> match export.it.edesc.it with
       | FuncExport v ->
