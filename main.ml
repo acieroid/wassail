@@ -289,14 +289,14 @@ let slice_cfg =
         let sliced_cfg = Slicing.slice cfg slicing_criterion in
         Printf.printf "spec inference\n";
         let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-        let annot_deps = false in
+        let annot_deps = true in
         let use_def_annot = if annot_deps then (Use_def.annotate annotated_sliced_cfg) else "" in
-        let control_annot = if annot_deps then (Control_deps.annotate annotated_sliced_cfg) else "" in
+           let control_annot = if annot_deps then (Control_deps.annotate annotated_sliced_cfg) else "" in
         Printf.printf "outputting dot\n";
         Out_channel.with_file dot_filename
           ~f:(fun ch ->
-              Out_channel.output_string ch (Cfg.to_dot sliced_cfg
-                                              (* ~annot_str:Spec.to_dot_string *)
+              Out_channel.output_string ch (Cfg.to_dot annotated_sliced_cfg
+                                              ~annot_str:Spec.to_dot_string
                                               ~extra_data:(use_def_annot ^ control_annot)));
     )
 

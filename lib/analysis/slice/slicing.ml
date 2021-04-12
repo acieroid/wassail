@@ -87,13 +87,6 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
   let initial_slice = Instr.Label.Set.empty in
   loop initial_worklist initial_slice
 
-(** Like block_effect_on_stack_size, but for lists of instructions *)
-let instrs_effect_on_stack_size (instrs : (Instr.data, Spec.t) Instr.labelled list) : int = match instrs with
-  | [] -> 0
-  | first :: _ ->
-    let last = List.last_exn instrs in
-    (List.length last.annotation_after.vstack) - (List.length first.annotation_before.vstack)
-
 (** Construct a dummy list of instruction that has the given net effect on the stack size *)
 let dummy_instrs (net_effect : int) (next_label : unit -> int) : (Instr.data, unit) Instr.labelled list =
   let dummy_label () : Instr.Label.t = { section = Instr.Label.Dummy; id = next_label () } in
@@ -116,6 +109,8 @@ let block_net_effect (block : 'a Basic_block.t) : int =
     Instr.net_effect_control c
   | Data instrs -> List.fold_left instrs ~init:0 ~f:(fun acc instr ->
       acc + (Instr.net_effect_data instr))
+
+let keep_entire_blocks = ref false
 
 let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
   let init_spec = Spec_inference.init_state cfg in
@@ -142,7 +137,8 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
     IntSet.mem blocks_in_slice block_idx ||
     (* Treat the exit block as part of the slice *)
     block_idx = cfg.exit_block ||
-    (* The block is also part of the slice if it is a control block with a merge block as successor, which itself is part of the slice. TODO: this is a coarse overapproximation, it could be refined to only those blocks that can reach the slicing criterion *)
+    (* The block is also part of the slice if it is a control block with a merge block as successor, which itself is part of the slice.
+       TODO: this is a coarse overapproximation, it could be refined to only those blocks that can reach the slicing criterion *)
     has_multiple_successors_and_merge_successor_in_slice block_idx
   and has_multiple_successors_and_merge_successor_in_slice (block_idx : int) : bool =
     let successors = Cfg.successors cfg block_idx in
@@ -181,11 +177,34 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
     | block_idx :: rest when block_is_part_of_slice block_idx ->
       (* The block is part of the slice, only keep the relevant portions *)
       (* TODO: in a first approximation, we keep the block as is. If we want to remove this approximation, we can remove instructions but we have to watch out for the stack size *)
+      let cfg' =
+        if !keep_entire_blocks then
+          (* The entire block is kept, CFG remains unchanged *)
+          cfg
+        else
+          (* Only keep the relevant instructions *)
+          let block = Cfg.find_block_exn cfg block_idx in
+          let block' = match block.content with
+            | Data instrs ->
+              (* Remove all unecessary instructions, adapting instructions that need to in order to preserve stack shape *)
+              let instrs' =
+                let (pre_instrs, eff) = List.fold_left instrs ~init:([], 0) ~f:(fun (acc, effect) instr ->
+                  if Instr.Label.Set.mem instructions_in_slice instr.label then
+                    (* Instruction is part of the slice, we need to add it, but first we adapt to account for the effect *)
+                    (instr :: (dummy_instrs effect next_label @ acc), 0)
+                  else
+                    (* Instruction not part of the slice *)
+                    let cur_effect = Instr.net_effect_data instr in
+                    (acc, cur_effect + effect)) in
+                List.rev (dummy_instrs eff next_label @ pre_instrs) in
+              { block with content = Data instrs' }
+            | _ -> block in
+          Cfg.replace_block cfg block' in
       let successors = Cfg.successors cfg block_idx in
       slicing_loop
         (rest @ successors)
         (IntSet.add visited block_idx)
-        cfg
+        cfg'
         removed
     | block_idx :: rest when block_idx = cfg.entry_block ->
       (* The entry block is not part of the slice, replace it with a dummy block with the same effect on stack size *)
@@ -207,6 +226,7 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
         cfg'
         (IntMap.add_exn removed ~key:block_idx ~data:(IntSet.of_list (Cfg.predecessors cfg block_idx)))
   in
+  (* Add or remove blocks to account for size differences due to removal of blocks. This assumes blocks kept their overall effect *)
   let adapt_blocks_for_effect (init_cfg : Spec.t Cfg.t) (sliced_cfg : unit Cfg.t) : unit Cfg.t =
     let stack_size_before (block_idx : int) : int =
       let pre = Cfg.state_before_block init_cfg block_idx (Spec_inference.init_state cfg) in
@@ -410,7 +430,7 @@ module Test = struct
     (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
     ()
 
-   let%test_unit "slicing with a block containing a single drop" =
+   let%test_unit "slicing with a block containing a single drop should produce a valid slice" =
      let module_, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
@@ -429,6 +449,28 @@ module Test = struct
     end)
    )" in
      let sliced_cfg = slice cfg (lab 8) in
+     let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+     ()
+
+   let%test_unit "slicing intra-block  block containing a single drop - variant" =
+     let module_, cfg = build_cfg "(module
+   (type (;0;) (func (param i32) (result i32)))
+   (func (;test;) (type 0) (param i32) (result i32)
+    block           ;; Instr 0
+      local.get 0   ;; Instr 1
+      local.get 0   ;; Instr 2
+      if            ;; Instr 3
+        drop        ;; Instr 4
+        i32.const 0 ;; Instr 5
+      else
+        i32.const 1 ;; Instr 6
+        drop        ;; Instr 7
+      end
+      i32.const 32  ;; Instr 8
+      i32.add       ;; Instr 9
+    end)
+   )" in
+     let sliced_cfg = slice cfg (lab 9) in
      let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
      ()
 
@@ -453,6 +495,28 @@ module Test = struct
      let sliced_cfg = slice cfg (lab 9) in
      let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
      ()
+
+
+   let%test "slicing intra-block should only include the relevant instructions" =
+     let _, cfg = build_cfg "(module
+   (type (;0;) (func (param i32) (result i32)))
+   (func (;test;) (type 0) (param i32) (result i32)
+    i32.const 0     ;; Instr 0
+    i32.const 1     ;; Instr 1
+    i32.add         ;; Instr 2
+    i32.const 2     ;; Instr 3
+    i32.const 3     ;; Instr 4
+    i32.add         ;; Instr 5
+   )
+   (table (;0;) 1 1 funcref)
+   (memory (;0;) 2)
+   (global (;0;) (mut i32) (i32.const 66560)))" in
+     let sliced_cfg = slice cfg (lab 2) in
+     let instrs = Cfg.all_instructions sliced_cfg in
+     (* The slice should not contain instructions 3, 4, and 5 *)
+     not (Instr.Label.Map.mem instrs (lab 3)) &&
+     not (Instr.Label.Map.mem instrs (lab 4)) &&
+     not (Instr.Label.Map.mem instrs (lab 5))
 
    let%test_unit "slicing with memory does not fail" =
      let module_, cfg = build_cfg "(module
@@ -521,8 +585,6 @@ module Test = struct
   )" in
      let sliced_cfg = slice cfg (lab 6) in
      let instrs = Cfg.all_instructions sliced_cfg in
-     Printf.printf "instrs: %s\n" (String.concat ~sep:","
-                                     (List.map ~f:Instr.Label.to_string (Instr.Label.Map.keys instrs)));
      (* The slice should not contain instructions 2 and 3 *)
      not (Instr.Label.Map.mem instrs (lab 2)) &&
      not (Instr.Label.Map.mem instrs (lab 3))
