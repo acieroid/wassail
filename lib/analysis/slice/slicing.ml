@@ -1,16 +1,43 @@
 open Core_kernel
 open Helpers
 
+module InSlice = struct
+  module T = struct
+    (** Intermediary data structure used as part of the slicing to track which
+        instruction should be part of the slice, and for what reason *)
+    type t = {
+      label: Instr.Label.t; (** The label of the instruction that should be added to the slice *)
+      reason: Var.t option; (** The corresponding var that make this instruction part of the slice, if there is one *)
+    }
+    [@@deriving sexp, compare, equal]
+
+    let to_string (t : t) : string = match t.reason with
+      | None -> Instr.Label.to_string t.label
+      | Some var -> Printf.sprintf "%s(%s)" (Instr.Label.to_string t.label) (Var.to_string var)
+
+    let make (label : Instr.Label.t) (var : Var.t option) (instructions : 'a Instr.t Instr.Label.Map.t) =
+      { label ;
+        reason = match Cfg.find_instr_exn instructions label with
+          | Instr.Control { instr = Merge; _ } -> var
+          | _ -> None
+      }
+  end
+  module Set = Set.Make(T)
+  include T
+end
+
+
 (** Identify instructions to keep in a backwards slice on `cfg`, using the
-   slicing criterion `criterion`, encoded as an instruction index. Returns the
-   set of instructions that are part of the slice, as a set of instruction
-   labels. *)
+    slicing criterion `criterion`, encoded as an instruction index. Returns the
+    set of instructions that are part of the slice, as a set of instruction
+    labels. *)
 let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Instr.Label.Set.t =
+  let instructions = Cfg.all_instructions cfg in
   let control_dependencies = Control_deps.make cfg in
   let (_, _, data_dependencies) = Use_def.make cfg in
   let mem_dependencies = Memory_deps.make cfg in
   let cfg_instructions = Cfg.all_instructions cfg in
-  let rec loop (worklist : Instr.Label.Set.t) (slice : Instr.Label.Set.t) : Instr.Label.Set.t =
+  let rec loop (worklist : InSlice.Set.t) (slice : Instr.Label.Set.t) : Instr.Label.Set.t =
     (* Perform backward slicing as follows:
        Given an instruction as the slicing criterion (we can derive variable uses from instructions),
        perform the following fixpoint algorithm, starting with W = instr
@@ -23,37 +50,42 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
              add instr to W
          for instr' in mem_deps(instr):
            add instr to W *)
-    match Instr.Label.Set.choose worklist with
+    match InSlice.Set.choose worklist with
     | None -> (* worklist is empty *)
       slice
-    | Some slicepart when Instr.Label.Set.mem slice slicepart ->
+    | Some slicepart when Instr.Label.Set.mem slice slicepart.label ->
       (* Already seen this slice part, no need to process it again *)
-      loop (Instr.Label.Set.remove worklist slicepart) slice
+      loop (InSlice.Set.remove worklist slicepart) slice
     | Some slicepart ->
       (* Add instr to the current slice *)
-      let slice' = Instr.Label.Set.add slice slicepart in
-      let uses =  Spec_inference.instr_use cfg (Cfg.find_instr_exn cfg_instructions slicepart) in
+      let slice' = Instr.Label.Set.add slice slicepart.label in
+      let uses = Spec_inference.instr_use cfg ?var:slicepart.reason (Cfg.find_instr_exn cfg_instructions slicepart.label) in
       (* For use in instr_uses(instr) *)
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
-              let def = Use_def.UseDefChains.get data_dependencies (Use_def.Use.make slicepart use) in
-              (* For def in usedef(use): if def contains an instruction, add def.insrt to W *)
-              let data_dependencies = match def with
-                | Use_def.Def.Instruction (instr', _) ->
-                  Instr.Label.Set.singleton instr'
-                | Use_def.Def.Entry _ -> Instr.Label.Set.empty
-                | Use_def.Def.Constant _ -> Instr.Label.Set.empty in
+              (* Get the definition correspondin to the current use *)
+              let def = Use_def.UseDefChains.get data_dependencies (Use_def.Use.make slicepart.label use) in
+              (* For def in usedef(use): if def contains an instruction, add def.instr to W *)
+              let data_dependencies : InSlice.Set.t = match def with
+                | Use_def.Def.Instruction (instr', var) ->
+                  InSlice.Set.singleton (InSlice.make instr' (Some var) instructions)
+                | Use_def.Def.Entry _ -> InSlice.Set.empty
+                | Use_def.Def.Constant _ -> InSlice.Set.empty in
               let preds = Control_deps.find control_dependencies use in (* the control dependencies for the current use *)
               (* for instr' in cdeps(use, var): add instr to W *)
-              let control_dependencies = Control_deps.Pred.Set.fold preds ~init:Instr.Label.Set.empty ~f:(fun w (_, instr') ->
-                  Instr.Label.Set.add w instr') in
-              Instr.Label.Set.union w (Instr.Label.Set.union data_dependencies control_dependencies)) in
+              let control_dependencies : InSlice.Set.t =
+                Control_deps.Pred.Set.fold preds ~init:InSlice.Set.empty ~f:(fun w (var, instr') ->
+                  InSlice.Set.add w (InSlice.make instr' (Some var) instructions)) in
+              InSlice.Set.union w (InSlice.Set.union data_dependencies control_dependencies)) in
       (* For instr' in mem_deps(instr): add instr to W *)
-      let worklist'' = Instr.Label.Set.union worklist' (Memory_deps.deps_for mem_dependencies slicepart) in
-      loop (Instr.Label.Set.remove worklist'' slicepart) slice' in
-  let initial_slice = Instr.Label.Set.singleton criterion in
-  let initial_worklist = Instr.Label.Set.empty in
-  loop initial_slice initial_worklist
+      let worklist'' = InSlice.Set.union worklist'
+          (InSlice.Set.of_list
+             (List.map ~f:(fun label -> InSlice.{ label; reason = None })
+                (Instr.Label.Set.to_list (Memory_deps.deps_for mem_dependencies slicepart.label)))) in
+      loop (InSlice.Set.remove worklist'' slicepart) slice' in
+  let initial_worklist = InSlice.Set.singleton { label = criterion; reason = None } in
+  let initial_slice = Instr.Label.Set.empty in
+  loop initial_worklist initial_slice
 
 (** Like block_effect_on_stack_size, but for lists of instructions *)
 let instrs_effect_on_stack_size (instrs : (Instr.data, Spec.t) Instr.labelled list) : int = match instrs with
@@ -453,6 +485,47 @@ module Test = struct
      let sliced_cfg = slice cfg (lab 4) in
      let instrs = Cfg.all_instructions sliced_cfg in
      Instr.Label.Map.mem instrs (lab 2)
+
+   let%test "slice with merge block should not contain non-relevant instructions" =
+     let _, cfg = build_cfg "(module
+  (type (;0;) (func (param i32 i32) (result i32)))
+  (func (;test;) (type 0) (param i32 i32) (result i32)
+    local.get 0 ;; Instr 0
+    if ;; Instr 1
+      i32.const 42 ;; Instr 2
+      local.set 0 ;; Instr 3
+    end
+    local.get 1) ;; Instr 4
+  )" in
+     let sliced_cfg = slice cfg (lab 4) in
+     let instrs = Cfg.all_instructions sliced_cfg in
+     (* The slice should only contain instruction 4 among the original instructions *)
+     not (Instr.Label.Map.mem instrs (lab 0)) &&
+     not (Instr.Label.Map.mem instrs (lab 1)) &&
+     not (Instr.Label.Map.mem instrs (lab 2)) &&
+     not (Instr.Label.Map.mem instrs (lab 3))
+
+   let%test "slice with merge block should not contain non-relevant instructions, variation" =
+     let _, cfg = build_cfg "(module
+  (type (;0;) (func (param i32 i32) (result i32)))
+  (func (;test;) (type 0) (param i32 i32) (result i32)
+    local.get 0 ;; Instr 0
+    if ;; Instr 1
+      i32.const 42 ;; Instr 2
+      local.set 0 ;; Instr 3
+    else
+      i32.const 42 ;; Instr 4
+      local.set 1 ;; Instr 5
+    end
+    local.get 1) ;; Instr 6
+  )" in
+     let sliced_cfg = slice cfg (lab 6) in
+     let instrs = Cfg.all_instructions sliced_cfg in
+     Printf.printf "instrs: %s\n" (String.concat ~sep:","
+                                     (List.map ~f:Instr.Label.to_string (Instr.Label.Map.keys instrs)));
+     (* The slice should not contain instructions 2 and 3 *)
+     not (Instr.Label.Map.mem instrs (lab 2)) &&
+     not (Instr.Label.Map.mem instrs (lab 3))
 
    let%test_unit "slicing function 14 of trmm" =
      let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in

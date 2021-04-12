@@ -124,11 +124,6 @@ module T = struct
     | Control of 'a labelled_control
   [@@deriving sexp, compare, equal]
 
-  type 'a unlabelled =
-    | UData of data
-    | UControl of 'a control
-  [@@deriving sexp, compare, equal]
-
 end
 include T
 
@@ -426,8 +421,4 @@ let instructions_contained_in (i : 'a t) : 'a t list = match i with
     | Loop (_, _, instrs) -> instrs
     | If (_, _, instrs1, instrs2) -> instrs1 @ instrs2
     | _ -> []
-
-let unlabel (i : 'a t) : 'a unlabelled = match i with
-  | Data { instr; _ } -> UData instr
-  | Control { instr; _ } -> UControl instr
   

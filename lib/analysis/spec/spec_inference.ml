@@ -290,8 +290,10 @@ let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
       | Var.Global _ -> false (* same for globals *)
       | _ -> true)
 
-(** Return the list of variables used by an instruction *)
-let instr_use (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list = match instr with
+(** Return the list of variables used by an instruction.
+    If var is provided, only the use related the computation of this specific var will be return (This is only relevant for mere blocks)
+ *)
+let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Instr.t) : Var.t list = match instr with
   | Instr.Data i ->
     let top_n n = List.take i.annotation_before.vstack n in
     begin match i.instr with
@@ -321,7 +323,16 @@ let instr_use (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list = match
       | Merge ->
         (* Merge instruction uses the variables it redefines *)
         let block = Cfg.find_enclosing_block_exn cfg (Instr.label instr) in
-        List.map (new_merge_variables cfg block) ~f:fst
+        begin match var with
+          | None ->
+            List.map (new_merge_variables cfg block) ~f:fst
+          | Some v ->
+            List.filter_map (new_merge_variables cfg block) ~f:(fun (old, new_) ->
+                if Var.equal new_ v then
+                  Some old
+                else
+                  None)
+        end
       | Br _ | Return | Unreachable -> []
     end
 
