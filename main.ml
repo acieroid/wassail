@@ -137,6 +137,12 @@ let callgraph =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         let cg = Call_graph.make wasm_mod in
+        let contains_table_import = Option.is_some (
+            List.find wasm_mod.imports ~f:(fun import -> match import.idesc with
+                | TableImport _ -> true
+                | _ -> false)) in
+        if contains_table_import then
+          Log.warn "Call graph generation cannot deal with imported tables if they are used for indirect calls";
         Out_channel.with_file file_out
           ~f:(fun ch ->
               Out_channel.output_string ch (Call_graph.to_dot cg)))
