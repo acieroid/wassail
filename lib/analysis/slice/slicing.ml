@@ -37,7 +37,7 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
   let (_, _, data_dependencies) = Use_def.make cfg in
   let mem_dependencies = Memory_deps.make cfg in
   let cfg_instructions = Cfg.all_instructions cfg in
-  let rec loop (worklist : InSlice.Set.t) (slice : Instr.Label.Set.t) : Instr.Label.Set.t =
+  let rec loop (worklist : InSlice.Set.t) (slice : Instr.Label.Set.t) (visited : InSlice.Set.t) : Instr.Label.Set.t =
     (* Perform backward slicing as follows:
        Given an instruction as the slicing criterion (we can derive variable uses from instructions),
        perform the following fixpoint algorithm, starting with W = instr
@@ -53,12 +53,13 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
     match InSlice.Set.choose worklist with
     | None -> (* worklist is empty *)
       slice
-    | Some slicepart when Instr.Label.Set.mem slice slicepart.label ->
+    | Some slicepart when InSlice.Set.mem visited slicepart ->
       (* Already seen this slice part, no need to process it again *)
-      loop (InSlice.Set.remove worklist slicepart) slice
+      loop (InSlice.Set.remove worklist slicepart) slice visited
     | Some slicepart ->
       (* Add instr to the current slice *)
       let slice' = Instr.Label.Set.add slice slicepart.label in
+      let visited' = InSlice.Set.add visited slicepart in
       let uses = Spec_inference.instr_use cfg ?var:slicepart.reason (Cfg.find_instr_exn cfg_instructions slicepart.label) in
       (* For use in instr_uses(instr) *)
       let worklist' = List.fold_left uses ~init:worklist
@@ -82,10 +83,10 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
           (InSlice.Set.of_list
              (List.map ~f:(fun label -> InSlice.{ label; reason = None })
                 (Instr.Label.Set.to_list (Memory_deps.deps_for mem_dependencies slicepart.label)))) in
-      loop (InSlice.Set.remove worklist'' slicepart) slice' in
+      loop (InSlice.Set.remove worklist'' slicepart) slice' visited' in
   let initial_worklist = InSlice.Set.singleton { label = criterion; reason = None } in
   let initial_slice = Instr.Label.Set.empty in
-  loop initial_worklist initial_slice
+  loop initial_worklist initial_slice InSlice.Set.empty
 
 (** Construct a dummy list of instruction that has the given net effect on the stack size *)
 let dummy_instrs (net_effect : int) (next_label : unit -> int) : (Instr.data, unit) Instr.labelled list =

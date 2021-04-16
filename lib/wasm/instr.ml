@@ -398,7 +398,6 @@ let net_effect_control (i : ('a control, 'a) labelled) : int =
   | Call ((input, output), _)
     -> output-input
   | CallIndirect ((input, output), _) ->
-    Printf.printf "net effect of indirect call: %d\n" ((output-input)-1);
     (output-input)-1
   | If (_, (_, _), _, _) -> -1 (* only the net effect of the head, which drops the first element of the stack *)
   | Block (_, (_, _), _)

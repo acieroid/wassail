@@ -46,7 +46,6 @@ let rec codegen_block (cfg : unit Cfg.t) (block : unit Basic_block.t) (visited :
       assert (List.length successors = 1);
       let succ = List.hd_exn successors in
       let exit_block = Cfg.corresponding_exit_exn cfg block.idx in
-      Printf.printf "generating block %d, now generating until %d\n" block.idx exit_block;
       let (body, _) = codegen_until cfg succ exit_block (IntSet.add visited block.idx) in
       [control (Instr.Loop (bt, arity, body))], Some exit_block
     | Some BlockEntry (bt, arity) ->
@@ -83,7 +82,6 @@ let rec codegen_block (cfg : unit Cfg.t) (block : unit Basic_block.t) (visited :
 and codegen_until (cfg : unit Cfg.t) (start_block_idx : int) (stop_block_idx : int) (visited : IntSet.t) : unit Instr.t list * int option =
   let return l = List.concat (List.rev l) in
   let rec loop (instrs : unit Instr.t list list) (block_idx : int) (visited : IntSet.t) : unit Instr.t list * int option =
-    Printf.printf "loop on block %d\n" block_idx;
     let block = Cfg.find_block_exn cfg block_idx in
     if block_idx = stop_block_idx then begin
       (* We stop generating here *)
