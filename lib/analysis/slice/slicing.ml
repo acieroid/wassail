@@ -139,7 +139,14 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
     block_idx = cfg.exit_block ||
     (* The block is also part of the slice if it is a control block with a merge block as successor, which itself is part of the slice.
        TODO: this is a coarse overapproximation, it could be refined to only those blocks that can reach the slicing criterion *)
-    has_multiple_successors_and_merge_successor_in_slice block_idx
+    has_multiple_successors_and_merge_successor_in_slice block_idx ||
+    (* The block is an exit block, we don't want to remove it in order to preserve the CFG structure (otherwise we can't know where blocks/loops end.
+       This may lead to superfluous blocks in the CFG, but will result in an empty sequence of instruction in any case.
+ *)
+    (let block = Cfg.find_block_exn cfg block_idx in
+     match block.block_kind with
+     | Some LoopExit | Some BlockExit -> true
+     | _ -> false)
   and has_multiple_successors_and_merge_successor_in_slice (block_idx : int) : bool =
     let successors = Cfg.successors cfg block_idx in
     if List.length successors <= 1 then
@@ -452,7 +459,7 @@ module Test = struct
      let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
      ()
 
-   let%test_unit "slicing intra-block  block containing a single drop - variant" =
+   let%test_unit "slicing intra-block block containing a single drop - variant" =
      let module_, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)

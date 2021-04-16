@@ -173,6 +173,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
               ~f:(fun (idx, _, branch) -> (idx, (if is_loop then block_entry.idx else block_exit.idx), branch)) in
           (* Compute the new edges. This is different between a loop and a
              block, for the exit of the inside of the block *)
+          Printf.printf "block/loop: before: %d, entry: %d, entry': %d, exit': %d, entry'': %d\n" block.idx block_entry.idx entry' exit' exit'';
           let new_edges = if is_loop then
               [(block.idx, block_entry.idx, None); (block_entry.idx, entry', None); (exit', block_exit.idx, None); (block_exit.idx, entry'', None)]
             else

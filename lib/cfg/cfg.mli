@@ -153,3 +153,7 @@ val has_edge : 'a t -> int -> int -> bool
 
 (** Get the block index corresponding to the exit of a block/loop entry *)
 val corresponding_exit_exn : 'a t -> int -> int
+
+(** Filters out empty blocks that have no predecessors for the CFG. Useful to
+   have a single entry point to the CFG for some algorithms such a dominance. *)
+val without_empty_nodes_with_no_predecessors : 'a t -> 'a t

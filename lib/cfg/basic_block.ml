@@ -121,3 +121,8 @@ let is_control (b : 'a t) : bool =
   | Control _ -> true
   | _ -> false
 
+(** Check if the block is an empty block *)
+let is_empty (b : 'a t) : bool =
+  match b.content with
+  | Data [] -> true
+  | _ -> false

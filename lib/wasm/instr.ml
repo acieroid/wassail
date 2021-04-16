@@ -158,7 +158,7 @@ let data_to_string (instr : data) : string =
 let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot_to_string : 'a -> string = fun _ -> "") (instr : 'a control)  : string =
   match instr with
   | Call (_, v) -> Printf.sprintf "call %s" (Int32.to_string v)
-  | CallIndirect (_, v) -> Printf.sprintf "call_indirect %s" (Int32.to_string v)
+  | CallIndirect (_, v) -> Printf.sprintf "call_indirect (type %ld)" v
   | Br b -> Printf.sprintf "br %s" (Int32.to_string b)
   | BrIf b -> Printf.sprintf "br_if %s" (Int32.to_string b)
   | BrTable (t, b) -> Printf.sprintf "br_table %s %s" (String.concat ~sep:" " (List.map t ~f:Int32.to_string)) (Int32.to_string b)
@@ -166,9 +166,11 @@ let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?anno
   | Unreachable -> "unreachable"
   | Block (_, _, instrs) -> Printf.sprintf "block%s%s%s%send" sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
   | Loop (_, _, instrs) -> Printf.sprintf "loop%s%s%s%send" sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
-  | If (_, _, instrs1, instrs2) -> Printf.sprintf "if%s%s%selse%s%s" sep
-                               (list_to_string instrs1 annot_to_string ~indent:(i+2) ~sep:sep) sep sep
-                               (list_to_string instrs2 annot_to_string ~indent:(i+2) ~sep:sep)
+  | If (_, _, instrs1, []) -> Printf.sprintf "if%s%s%s%send"
+                                sep (list_to_string instrs1 annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
+  | If (_, _, instrs1, instrs2) -> Printf.sprintf "if%s%s%s%selse%s%s%s%send"
+                                     sep (list_to_string instrs1 annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
+                                     sep (list_to_string instrs2 annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
   | Merge -> "merge"
 
 (** Converts an instruction to its string representation *)

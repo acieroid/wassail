@@ -287,3 +287,12 @@ let has_edge (cfg : 'a t) (src : int) (dst : int) : bool =
 
 let corresponding_exit_exn (cfg : 'a t) (block_idx : int) : int =
   IntMap.find_exn cfg.entry_exit block_idx
+
+(* We need to sometimes keep nodes that are empty and have no predecessors, in
+   order to remember block/loop exits. This is to remove them when needed *)
+let without_empty_nodes_with_no_predecessors (cfg : 'a t) : 'a t =
+  let to_remove = IntMap.keys (IntMap.filter cfg.basic_blocks ~f:(fun block ->
+        block.idx <> cfg.entry_block &&
+        List.is_empty (predecessors cfg block.idx) &&
+        Basic_block.is_empty block)) in
+  List.fold_left to_remove ~init:cfg ~f:(fun cfg idx -> remove_block_rewrite_edges cfg idx)

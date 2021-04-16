@@ -64,6 +64,31 @@ let mem_imports =
             | _ -> false) in
         Printf.printf "%d\n" count)
 
+let functions =
+  Command.basic
+    ~summary:"Returns the indices of functions of a WebAssembly modules"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string) in
+      fun () ->
+        let wasm_mod = Wasm_module.of_file file_in in
+        List.iter wasm_mod.funcs
+          ~f:(fun f -> Printf.printf "%ld\n" f.idx))
+
+let function_instructions =
+  Command.basic
+    ~summary:"Returns the labels of instructions of a given function"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string)
+      and fidx = anon ("fidx" %: int32) in
+      fun () ->
+        let wasm_mod = Wasm_module.of_file file_in in
+        let labels = List.fold_left (List32.nth_exn wasm_mod.funcs fidx).code.body
+            ~init:Instr.Label.Set.empty
+            ~f:(fun acc instr ->
+                Instr.Label.Set.union acc (Instr.all_labels instr)) in
+        Instr.Label.Set.iter labels ~f:(fun label ->
+            Printf.printf "%s\n" (Instr.Label.to_string label)))
+
 let instructions =
   Command.basic
     ~summary:"List instructions used by a WebAssembly module, and how many time each instruction appears"
@@ -106,7 +131,7 @@ let cfg =
         if Int32.(fid < wasm_mod.nfuncimports) then
           Printf.printf "Can't build CFG for function %ld: it is an imported function" fid
         else
-          let cfg = Cfg_builder.build wasm_mod fid in
+          let cfg = Cfg.without_empty_nodes_with_no_predecessors (Cfg_builder.build wasm_mod fid) in
           Out_channel.with_file file_out
             ~f:(fun ch ->
                 Out_channel.output_string ch (Cfg.to_dot cfg)))
@@ -295,7 +320,7 @@ let slice_cfg =
         let sliced_cfg = Slicing.slice cfg slicing_criterion in
         Printf.printf "spec inference\n";
         let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-        let annot_deps = true in
+        let annot_deps = false in
         let use_def_annot = if annot_deps then (Use_def.annotate annotated_sliced_cfg) else "" in
            let control_annot = if annot_deps then (Control_deps.annotate annotated_sliced_cfg) else "" in
         Printf.printf "outputting dot\n";
@@ -305,6 +330,30 @@ let slice_cfg =
                                               ~annot_str:Spec.to_dot_string
                                               ~extra_data:(use_def_annot ^ control_annot)));
     )
+
+let slice =
+  Command.basic
+    ~summary:"Produce an executable program after slicing the given function at the given slicing criterion"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and funidx = anon ("fun" %: int32)
+      and instr = anon ("instr" %: int)
+      and outfile = anon ("output" %: string) in
+      fun () ->
+        Spec_inference.propagate_globals := false;
+        Spec_inference.propagate_locals := false;
+        Spec_inference.use_const := false;
+        let module_ = Wasm_module.of_file filename in
+        Printf.printf "Spec analysis\n";
+        let cfg = Spec_analysis.analyze_intra1 module_ funidx in
+        let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
+        Printf.printf "Slicing\n";
+        let sliced_cfg = Slicing.slice cfg slicing_criterion in
+        Printf.printf "Producing module\n";
+        let module_ = Wasm_module.replace_func module_ funidx (Codegen.cfg_to_func_inst sliced_cfg) in
+        Printf.printf "done\n";
+        Out_channel.with_file outfile
+          ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_)))
 
 let find_indirect_calls =
   Command.basic
@@ -351,6 +400,8 @@ let () =
        ; "sizes", sizes
        ; "mem-imports", mem_imports
        ; "mem-exports", mem_exports
+       ; "function-instructions", function_instructions
+       ; "functions", functions
 
        (* Utilities that require building the CFGs *)
        ; "cfg", cfg
@@ -371,5 +422,6 @@ let () =
        ; "taint-inter", taint_inter
        ; "reltaint-intra", reltaint_intra
        ; "relational-intra", relational_intra
-       ; "slice", slice_cfg
+       ; "slice-cfg", slice_cfg
+       ; "slice", slice
        ; "find-indirect-calls", find_indirect_calls])

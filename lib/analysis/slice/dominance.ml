@@ -124,12 +124,12 @@ let branch_condition (cfg : Spec.t Cfg.t) (block : Spec.t Basic_block.t) : Var.t
 
 (** Computes the dominator tree of a CFG . *)
 let cfg_dominator (cfg : Spec.t Cfg.t) : Tree.t =
-  Graph.dominator_tree (graph_of_cfg cfg)
+  Graph.dominator_tree (graph_of_cfg (Cfg.without_empty_nodes_with_no_predecessors cfg))
 
 (** Computes the post-dominator tree of a CFG *)
 let cfg_post_dominator (cfg : Spec.t Cfg.t) : Tree.t =
   (* Note that we invert succs and preds here, and start from exit, in order to have the post-dominator tree *)
-  Graph.dominator_tree (Graph.reverse (graph_of_cfg cfg))
+  Graph.dominator_tree (Graph.reverse (graph_of_cfg (Cfg.without_empty_nodes_with_no_predecessors cfg)))
 
 module Test = struct
   let%test "dominator tree is correctly computed - wikipedia example" =
@@ -168,4 +168,38 @@ module Test = struct
     let actual = cfg_post_dominator cfg in
     let expected = Tree.of_children_map 7 [(1, []); (2, [1]); (3, [2]); (4, []); (5, [3; 4]); (6, [5]); (7, [6])] in
     Tree.check_equality ~actual ~expected
+
+  let%test_unit "post dominator should work with CFGs that have empty blocks with no predecessors" =
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func))
+  (func (;6;) (type 0) ;; int main()
+    (local i32 i32 i32)
+    ;; Local 0: i
+    ;; Local 1: x
+    ;; Local 2: c
+    block
+      loop
+        local.get 0
+        i32.const 0
+        i32.ne
+        br_if 1
+        local.get 2
+        if  ;; label = @3
+          i32.const 0
+          ;; The following instruction is the slicing criterion
+          local.set 1 ;; x = result of f()
+          i32.const 0
+          local.set 2 ;; c = result of g()
+        end
+        local.get 0
+        local.set 0 ;; i = result of h(i)
+        br 0
+      end
+    end)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    let _actual = cfg_post_dominator cfg in
+    ()
 end

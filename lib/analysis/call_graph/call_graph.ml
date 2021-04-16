@@ -10,12 +10,16 @@ type t = {
 
 let indirect_call_targets (wasm_mod : Wasm_module.t) (_fidx : Int32.t) (_instr : Instr.Label.t) (typ : Int32.t) : Int32.t list =
   let ftype = Wasm_module.get_type wasm_mod typ in
-  let table = List.nth_exn wasm_mod.table_insts 0 in
-  let funs = List.map (Table_inst.indices table) ~f:(fun idx -> Table_inst.get table idx) in
-  let funs_with_matching_type = List.filter_map funs ~f:(function
-      | Some fa -> if Stdlib.(ftype = Wasm_module.get_func_type wasm_mod fa) then Some fa else None
-      | None -> None) in
-  funs_with_matching_type
+  match List.hd wasm_mod.table_insts with
+  | Some table ->
+    let funs = List.map (Table_inst.indices table) ~f:(fun idx -> Table_inst.get table idx) in
+    let funs_with_matching_type = List.filter_map funs ~f:(function
+        | Some fa -> if Stdlib.(ftype = Wasm_module.get_func_type wasm_mod fa) then Some fa else None
+        | None -> None) in
+    funs_with_matching_type
+  | None ->
+    (* No tables, so there can't be an indirect call target. (TODO: or it is a call to an imported table?) *)
+    []
 
 (** Builds a call graph for a module *)
 let make (wasm_mod : Wasm_module.t) : t =

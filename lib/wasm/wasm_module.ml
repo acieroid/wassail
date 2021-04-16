@@ -185,19 +185,8 @@ let to_string (m : t) : string =
   let table (i : int) (t : Table.t) =
     put (Printf.sprintf "(table (;%d;) " i);
     limits t.ttype;
-    put " funcref";
-    let tinst = List.nth_exn m.table_insts i in
-    if not (Array.is_empty tinst.elems) then begin
-      if Array.for_all tinst.elems ~f:(function
-          | None -> true
-          | Some x -> Printf.printf "%ld\n" x; false) then
-        ()
-      else
-        failwith "Unsupported: non-empty table: %d"
-        (* put "(elem " (* TODO: not clear from here, need more examples *)
-           put (String.concat ~sep:" " (List.map tinst.elem ~f: *)
-    end;
-    put ")\n" in
+    put " funcref)\n"
+  in
   let tables () = List.iteri m.tables ~f:table in
   let memory (i : int) (memory : Memory.t) =
     put (Printf.sprintf "(memory (;%d;) " i);
@@ -218,7 +207,7 @@ let to_string (m : t) : string =
     put (Printf.sprintf "(elem (;%ld;) " elem.index);
     put (Printf.sprintf "(offset %s)" (Instr.list_to_string elem.offset (fun () -> "")));
     (* TODO: this is not the general case, check that this is enough *)
-    put (Printf.sprintf "func %s)\n" (String.concat ~sep:" " (List.map elem.init ~f:Int32.to_string))) in
+    put (Printf.sprintf " func %s)\n" (String.concat ~sep:" " (List.map elem.init ~f:Int32.to_string))) in
   let elems () = List.iter m.elems ~f:elem in
   let data (data : Segment.DataSegment.t) =
     put (Printf.sprintf "(data (;%ld;) " data.index);
