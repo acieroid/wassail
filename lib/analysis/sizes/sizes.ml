@@ -132,7 +132,7 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
     let end_ () = op 0x0b
 
     let memop (op : Memoryop.t) =
-      vu32 (Int32.of_int op.align); vu32 (Int32.of_int op.offset)
+      vu32 op.align; vu32 (Int32.of_int op.offset)
 
     let var (x : Int32.t) = vu32 x
 

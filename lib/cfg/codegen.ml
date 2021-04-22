@@ -25,7 +25,7 @@ let relevant_successor (cfg : unit Cfg.t) (block : unit Basic_block.t) : int opt
   | Control { instr = BrTable _; _ } -> failwith "br_table not supported"
   | _ ->
     let successors = Cfg.successors cfg block.idx in
-    assert (List.length successors <= 1);
+    if (List.length successors <= 1) then Log.warn (Printf.sprintf "No successor for block %d\n" block.idx);
     List.hd successors
 
 (** Returns the list of instructions generated for this block (and possibly
@@ -160,4 +160,31 @@ module Test = struct
               control (Instr.Br 1l)]));
           data (Instr.Const (Prim_value.I32 3l))]))] in
     List.equal (Instr.equal (fun () () -> true)) actual expected
+
+  let%test "codegen for memory operations should produce the correct offset and alignment when printed" =
+    let module_str = "(module
+(type (;0;) (func (param i32) (result i32)))
+(func (;0;) (type 0)
+  i32.const 1812
+  i32.const -1
+  i32.store offset=12
+  i32.const 1812
+  i32.const -1
+  i64.store offset=8 align=4
+  i32.const 1812
+  i32.const -1
+  i32.store16 align=1
+  i32.const 1812
+  i32.load16_u align=1
+)
+(table (;0;) 1 1 funcref)
+(memory (;0;) 2)
+(global (;0;) (mut i32) (i32.const 66560))
+)" in
+    let module_ = Wasm_module.of_string module_str in
+    let cfg = Cfg_builder.build module_ 0l in
+    let module_ = Wasm_module.replace_func module_ 0l (cfg_to_func_inst cfg) in
+    let printed = Wasm_module.to_string module_ in
+    Printf.printf "GENERATED:\n%s\n" printed;
+    String.equal printed module_str
 end

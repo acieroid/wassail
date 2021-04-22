@@ -176,8 +176,8 @@ let to_string (m : t) : string =
     if not (List.is_empty f.code.locals) then begin
       put (Printf.sprintf "(local %s)\n" (String.concat ~sep:" " (List.map f.code.locals ~f:Type.to_string)))
     end;
-    put (Instr.list_to_string f.code.body ?sep:(Some "\n") (fun () -> ""));
-    put ")\n" in
+    put (Instr.list_to_string f.code.body ?indent:(Some 2) ?sep:(Some "\n") (fun () -> ""));
+    put "\n)\n" in
   let funcs () = List.iteri m.funcs ~f:(fun i f -> func Int32.(m.nfuncimports + (of_int_exn i)) f) in
   let limits (l : Limits.t) = match l with
     | low, None -> put (Printf.sprintf "%ld" low)

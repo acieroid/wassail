@@ -70,13 +70,13 @@ let to_mnemonic (t : t) : string =
      | TruncSatUF32 -> "trunc_sat_f32_u"
      | TruncSatSF64 -> "trunc_sat_f64_s"
      | TruncSatUF64 -> "trunc_sat_f64_u"
-     | ReinterpretFloat -> Printf.sprintf "reinterpret_f%d" (Type.size t.typ)
+     | ReinterpretFloat -> Printf.sprintf "reinterpret_f%ld" (Type.size t.typ)
      | ConvertSI32 -> "convert_i32_s"
      | ConvertUI32 -> "convert_i32_u"
      | ConvertSI64 -> "convert_i64_s"
      | ConvertUI64 -> "convert_i64_u"
      | PromoteF32 -> "promote_f32"
      | DemoteF64 -> "demote_f64"
-     | ReinterpretInt -> Printf.sprintf "reinterpret_i%d" (Type.size t.typ))
+     | ReinterpretInt -> Printf.sprintf "reinterpret_i%ld" (Type.size t.typ))
 
 let to_string (t : t) : string = to_mnemonic t

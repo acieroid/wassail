@@ -12,7 +12,7 @@ module T = struct
     offset: int;
     (* The extension part is only use for load operation and should be ignored for store operations *)
     sz: (pack_size * extension) option;
-    align: int;
+    align: int32;
   }
   [@@deriving sexp, compare, equal]
 end
@@ -21,28 +21,34 @@ include T
 let suffix_to_string (op : t) : string =
   match op.sz with
   | None -> ""
-  | Some (Pack8, SX) -> "8_s"
-  | Some (Pack16, SX) -> "16_s"
-  | Some (Pack32, SX) -> "32_s"
+  | Some (Pack8, SX) -> "8"
+  | Some (Pack16, SX) -> "16"
+  | Some (Pack32, SX) -> "32"
   | Some (Pack8, ZX) -> "8_u"
   | Some (Pack16, ZX) -> "16_u"
   | Some (Pack32, ZX) -> "32_u"
 
-let size (op : t) : int =
+let size (op : t) : int32 =
   match op.sz with
-  | None -> Type.size op.typ
-  | Some (Pack8, _) -> 1
-  | Some (Pack16, _) -> 2
-  | Some (Pack32, _) -> 4
+  | None -> begin match Type.size op.typ with
+      | 32l -> 4l
+      | 64l -> 8l
+      | _ -> assert(false)
+    end
+  | Some (Pack8, _) -> 1l
+  | Some (Pack16, _) -> 2l
+  | Some (Pack32, _) -> 4l
 
 let to_string (op : t) : string =
-  Printf.sprintf "%s%s"
-    (if op.offset = 0 then "" else Printf.sprintf "offset=%d " op.offset)
-    (if op.align = 0 || op.align = size op then "" else (Printf.sprintf "align=%d" op.align))
+  let offset = if op.offset = 0 then "" else Printf.sprintf "offset=%d" op.offset in
+  let align_exp = Int32.pow 2l op.align in
+  let align = if Int32.(align_exp = size op) then "" else (Printf.sprintf "align=%ld" align_exp) in
+  let sep = if String.is_empty offset || String.is_empty align then "" else " " in
+  Printf.sprintf "%s%s%s" offset sep align
 
 let of_wasm_load (op : Ast.loadop) : t = {
   typ = Type.of_wasm op.ty;
-  align = op.align;
+  align = Int32.of_int_exn op.align;
   offset = Int32.to_int_exn op.offset;
   sz = Option.map op.sz ~f:(fun (pack, ext) ->
       (match pack with
@@ -55,7 +61,7 @@ let of_wasm_load (op : Ast.loadop) : t = {
 }
 let of_wasm_store (op : Ast.storeop) : t = {
   typ = Type.of_wasm op.ty;
-  align = op.align;
+  align = Int32.of_int_exn op.align;
   offset = Int32.to_int_exn op.offset;
   sz = Option.map op.sz ~f:(function
       | Wasm.Types.Pack8 -> (Pack8, SX)
