@@ -290,17 +290,52 @@ let dependencies =
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
         Spec_inference.use_const := false;
+        Printf.printf "parsing module%!\n";
         let module_ = Wasm_module.of_file filename in
+        Printf.printf "spec analysis%!\n";
         let cfg = Spec_analysis.analyze_intra1 module_ funidx in
         Printf.printf "outputting PDG to %s\n" dot_filename;
         let use_def_annot = (Use_def.annotate cfg) in
-        let control_annot = (Control_deps.annotate cfg) in
+        let control_annot = (Control_deps.annotate_exact cfg) in
         Out_channel.with_file dot_filename
           ~f:(fun ch ->
               Out_channel.output_string ch (Cfg.to_dot cfg
                                               ~annot_str:Spec.to_dot_string
-                                              ~extra_data:(use_def_annot ^ control_annot)));
-    )
+                                              ~extra_data:(use_def_annot ^ control_annot))))
+
+let cdg =
+  Command.basic
+    ~summary:"Produce a CDG for a given function"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and funidx = anon ("fun" %: int32)
+      and dot_filename = anon ("out" %: string) in
+      fun () ->
+        Spec_inference.propagate_globals := false;
+        Spec_inference.propagate_locals := false;
+        Spec_inference.use_const := false;
+        let module_ = Wasm_module.of_file filename in
+        let cfg = Spec_analysis.analyze_intra1 module_ funidx in
+        let control_annot = (Control_deps.annotate_exact cfg) in
+        Out_channel.with_file dot_filename
+          ~f:(fun ch ->
+              Out_channel.output_string ch (Cfg.to_dot cfg
+                                              ~include_edges:false
+                                              ~extra_data:control_annot)))
+let postdom =
+  Command.basic
+    ~summary:"Visualize the post-dominator tree of a function"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and funidx = anon ("fun" %: int32)
+      and dot_filename = anon ("out" %: string) in
+      fun () ->
+        let module_ = Wasm_module.of_file filename in
+        let cfg = Spec_analysis.analyze_intra1 module_ funidx in
+        let tree : Tree.t = Dominance.cfg_post_dominator cfg in
+        Out_channel.with_file dot_filename
+          ~f:(fun ch ->
+              Out_channel.output_string ch (Tree.to_dot tree)))
 
 let slice_cfg =
   Command.basic
@@ -408,6 +443,8 @@ let () =
        ; "cfgs", cfgs
 
        ; "dependencies", dependencies
+       ; "postdom", postdom
+       ; "cdg" , cdg
 
        (* Utilities that requires building the call graph *)
        ; "callgraph", callgraph

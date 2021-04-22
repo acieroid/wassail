@@ -87,12 +87,29 @@ let set_parent (tree : t) (node : int) (new_parent : int) : t =
 
 (** Helper function used internally to fold over ancestors of a given node *)
 let fold_ancestors (tree : t) (node : int) (init : 'a) (f : 'a -> int -> 'a) : 'a =
-  let rec loop (node : int) (acc : 'a) : 'a =
-    match parent tree node with
+  let rec loop (node : int) (acc : 'a) : 'a = match parent tree node with
     | Some p -> loop p (f acc p)
     | None when node = tree.entry -> acc
     | None -> failwith (Printf.sprintf "fold_ancestors: missing parent link in tree? node %d has no parent" node) in
   loop node init
+
+(** Check if node x is an ancestor of node y in the tree *)
+let is_ancestor (tree : t) (x : int) (y : int) : bool =
+  let rec loop (node : int) : bool = match parent tree node with
+    | None -> false
+    | Some p when p = x -> true
+    | Some p -> loop p in
+  if x = y then true else loop y
+
+(** Finds all nodes between x and y, in no particular order.
+    Does so by starting from x and going up in the tree until y.
+    Does not include y. *)
+let nodes_between (tree : t) (x : int) (y : int) : int list option =
+  let rec loop (node : int) (acc : int list) : int list option = match parent tree node with
+    | None -> None
+    | Some p when p = y -> Some acc
+    | Some p -> loop p (node :: acc) in
+  if x = y then Some [] else loop x []
 
 (** Computes the nearest common ancestor of two nodes in a tree *)
 let nca (tree : t) (node1 : int) (node2 : int) : int option =

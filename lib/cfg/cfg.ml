@@ -64,15 +64,20 @@ let to_string (cfg : 'a t) : string = Printf.sprintf "CFG of function %s" (Int32
 let to_dot
     ?annot_str:(annot_str : ('a -> string) = fun _ -> "")
     ?extra_data:(extra_data : string = "")
+    ?include_edges:(include_edges : bool = true)
     (cfg : 'a t) : string =
   Printf.sprintf "digraph \"CFG of function %s\" {\n%s\n%s\n%s}\n"
     (Int32.to_string cfg.idx)
     (String.concat ~sep:"\n" (List.map (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, b) -> Basic_block.to_dot ~annot_str b)))
-    (String.concat ~sep:"\n" (List.concat_map (IntMap.to_alist cfg.edges) ~f:(fun (src, dsts) ->
-         List.map (Edge.Set.to_list dsts) ~f:(fun (dst, br) -> Printf.sprintf "block%d -> block%d [label=\"%s\"];\n" src dst (match br with
-             | Some true -> "t"
-             | Some false -> "f"
-             | None -> "")))))
+    begin if include_edges then
+        (String.concat ~sep:"\n" (List.concat_map (IntMap.to_alist cfg.edges) ~f:(fun (src, dsts) ->
+             List.map (Edge.Set.to_list dsts) ~f:(fun (dst, br) -> Printf.sprintf "block%d -> block%d [label=\"%s\"];\n" src dst (match br with
+                 | Some true -> "t"
+                 | Some false -> "f"
+                 | None -> "")))))
+      else
+        ""
+    end
     extra_data
 
 let find_block (cfg : 'a t) (idx : int) : 'a Basic_block.t option =
@@ -160,6 +165,10 @@ let find_instr_exn (instructions : 'a Instr.t Instr.Label.Map.t) (label : Instr.
 
 let all_blocks (cfg : 'a t) : 'a Basic_block.t list =
   IntMap.data cfg.basic_blocks
+
+let all_edges (cfg : 'a t) : (int * int) list =
+  List.concat_map (IntMap.to_alist cfg.edges) ~f:(fun (src, edges) ->
+      List.map (Edge.Set.to_list edges) ~f:(fun (dst, _) -> (src, dst)))
 
 let all_merge_blocks (cfg : 'a t) : 'a Basic_block.t list =
   IntMap.fold cfg.basic_blocks ~init:[] ~f:(fun ~key:_ ~data:block l ->

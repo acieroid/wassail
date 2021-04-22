@@ -12,6 +12,8 @@ module Var = Var
 module Type = Type
 
 module Basic_block = Basic_block
+module Tree = Tree
+module Dominance = Dominance
 module Cfg = Cfg
 module Cfg_builder = Cfg_builder
 module Codegen = Codegen

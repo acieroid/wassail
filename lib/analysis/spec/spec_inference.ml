@@ -156,7 +156,10 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
           (* multiple predecessors *)
           let bot = bottom_state cfg in
           begin match List.filter states ~f:(fun s -> not (equal_state s bot)) with
-            | [] -> failwith "No predecessor of a merge node have been analyzed, should not happen"
+            | [] ->
+              (* No predecessors have been analyzed. Return bottom. In practice, this should only happen if one of the predecessors is the empty entry block. TODO: it should be cleaned so that this does not arise and we can throw an exception here *)
+              Printf.printf "block %d, init state is: %s\n" block.idx (state_to_string (init_state cfg));
+              init_state cfg
             | s :: [] -> (* only one non-bottom predecessor *) s
             | state :: states ->
               (* multiple predecessors to merge *)

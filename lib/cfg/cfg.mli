@@ -72,7 +72,7 @@ val equal : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
 val to_string : 'a t -> string
 
 (** Return the DOT graph representatino of a CFG *)
-val to_dot : ?annot_str:('a -> string) -> ?extra_data:string -> 'a t -> string
+val to_dot : ?annot_str:('a -> string) -> ?extra_data:string -> ?include_edges:bool -> 'a t -> string
 
 (** Find a basic block given its index *)
 val find_block : 'a t -> int -> 'a Basic_block.t option
@@ -114,6 +114,9 @@ val find_enclosing_block_exn : 'a t -> Instr.Label.t -> 'a Basic_block.t
 
 (** Return all basic blocks within this CFG (in no particular ordr) *)
 val all_blocks : 'a t -> 'a Basic_block.t list
+
+(** Return all the edges of the CFG as (source, destination) *)
+val all_edges : 'a t -> (int * int) list
 
 (** Return all merge blocks contained within this CFG (in no particular order) *)
 val all_merge_blocks : 'a t -> 'a Basic_block.t list

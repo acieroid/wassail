@@ -16,6 +16,11 @@ module InSlice = struct
       | Some var -> Printf.sprintf "%s(%s)" (Instr.Label.to_string t.label) (Var.to_string var)
 
     let make (label : Instr.Label.t) (var : Var.t option) (instructions : 'a Instr.t Instr.Label.Map.t) =
+      Printf.printf "instr %s is part of the slice due to %s\n"
+        (Instr.Label.to_string label)
+        (match var with
+         | Some v -> Var.to_string v
+         | None -> "no var");
       { label ;
         reason = match Cfg.find_instr_exn instructions label with
           | Instr.Control { instr = Merge; _ } -> var
@@ -596,6 +601,138 @@ module Test = struct
      (* The slice should not contain instructions 2 and 3 *)
      not (Instr.Label.Map.mem instrs (lab 2)) &&
      not (Instr.Label.Map.mem instrs (lab 3))
+
+   let%test "slice on the example from Agrawal 1994 (Fig. 3) should be correct" =
+     let _, cfg = build_cfg "(module
+  (type (;0;) (func))
+  (type (;1;) (func (result i32)))
+  (type (;1;) (func (param i32) (result i32)))
+  (func (;eof;) (type 1) (result i32)
+    i32.const 0)
+  (func (;read;) (type 1) (result i32)
+    i32.const 0)
+  (func (;f;) (type 2) (param i32) (result i32)
+    local.get 0)
+  (func (;test;) (type 0)
+    (local i32 i32 i32)
+    ;; Local 0: sum
+    ;; Local 1: positive
+    ;; Local 2: x
+    block ;; block 0
+      loop ;; loop 0 (L3)
+        call 0 ;; eof()
+        br_if 1 ;; goto end of block 0 if eof()
+        block ;; block 1
+          block ;; block 2
+            call 1 ;; read()
+            local.tee 2 ;; x = read()
+            br_if 0 ;; jump to end of block 2 (L8) if x != 0 (was: x > 0)
+            local.get 2
+            call 2 ;; f(x)
+            local.get 0
+            i32.add ;; sum + f(x)
+            local.set 0 ;; sum = sum + f(x)
+            br 1 ;; jump to end of block 1 (L13)
+          end ;; end of block 2 (L8)
+          block ;; block 3
+            local.get 1
+            i32.const 1
+            i32.add
+            local.set 1 ;; positives = positives + 1
+            local.get 2
+            br_if 0 ;; jump to end of block 3 (L12) if x != 0 (was: x%2 != 0)
+            local.get 2
+            call 2 ;; f(x) (was: f2(x))
+            local.get 0
+            i32.add
+            local.set 0 ;; sum = sum + f2(x) (was + f2(x))
+            br 1 ;; jump to end of block 1 (L13)
+          end ;; end of block 3 (L12)
+          local.get 2
+          call 2
+          local.get 0
+          i32.add
+         l tocal.set 0 ;; sum = sum + f(x) (was + f3(x))
+        end ;; end of block 1 (L13)
+        br 0 ;; jump to beginning of loop 0 (L3)
+      end ;; end of loop 0
+    end ;; end of block 0 (L14)
+    local.get 0
+    call 2 ;; f(sum) (was: write(sum))
+    drop
+    local.get 1
+    ;; The following instruction is the slicing criterion, i.e., instruction number 38
+    call 2 ;; f(positives) (was: write(positives))
+    drop
+    ))" in
+     let sliced_cfg = slice cfg (lab 38) in
+     let _instrs = Cfg.all_instructions sliced_cfg in
+     failwith "TODO write test case"
+
+   let%test "slice on the example from Agrawal 1994 (Fig. 5) should be correct" =
+     let _, cfg = build_cfg "(module
+  (type (;0;) (func))
+  (type (;1;) (func (result i32)))
+  (type (;1;) (func (param i32) (result i32)))
+  (func (;eof;) (type 1) (result i32)
+    i32.const 0)
+  (func (;read;) (type 1) (result i32)
+    i32.const 0)
+  (func (;f;) (type 2) (param i32) (result i32)
+    local.get 0)
+  (func (;test;) (type 0)
+    (local i32 i32 i32)
+    ;; Local 0: sum
+    ;; Local 1: positive
+    ;; Local 2: x
+    block ;; block 0
+      loop ;; loop 0 (L3)
+        call 0 ;; eof()
+        i32.const 0
+        i32.ne
+        br_if 1 ;; goto end of block 0 if !eof()
+        call 1 ;; read()
+        local.tee 2 ;; x = read()
+        if ;; if (x != 0) (was if (x <= 0))
+          local.get 2
+          call 2 ;; f(x)
+          local.get 0
+          i32.add ;; sum + f(x)
+          local.set 0 ;; sum = sum + f(x)
+          br 1 ;; jump to the beggining of loop 0 (L3)
+        end
+        local.get 1
+        i32.const 1
+        i32.add
+        local.set 1 ;; positives = positives + 1
+        local.get 2
+        if ;; if (x != 0) (was: x%2 != 0)
+          local.get 2
+          call 2 ;; f(x) (was: f2(x))
+          local.get 0
+          i32.add
+          local.set 0 ;; sum = sum + f2(x) (was + f2(x))
+          br 1 ;; jump to beginning of loop (L3)
+        end
+        local.get 2
+        call 2
+        local.get 0
+        i32.add
+        local.set 0 ;; sum = sum + f(x) (was + f3(x))
+        br 0 ;; jump to beginning of loop 0 (L3)
+      end ;; end of loop 0
+    end ;; end of block 0 (L14)
+    local.get 0
+    call 2 ;; f(sum) (was: write(sum))
+    drop
+    local.get 1
+    ;; The following instruction is the slicing criterion, i.e., instruction number 37
+    call 2 ;; f(positives) (was: write(positives))
+    drop
+    ))" in
+     let sliced_cfg = slice cfg (lab 37) in
+     let _instrs = Cfg.all_instructions sliced_cfg in
+     failwith "TODO: write test case"
 
    let%test_unit "slicing function 14 of trmm" =
      let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
