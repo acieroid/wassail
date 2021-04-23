@@ -158,16 +158,24 @@ let all_instructions (cfg : 'a t) : 'a Instr.t Instr.Label.Map.t =
 let all_instructions_list (cfg : 'a t) : 'a Instr.t list =
   List.map ~f:snd (Instr.Label.Map.to_alist (all_instructions cfg))
 
+let find_instr (instructions : 'a Instr.t Instr.Label.Map.t) (label : Instr.Label.t) : 'a Instr.t option =
+  Instr.Label.Map.find instructions label
+
 let find_instr_exn (instructions : 'a Instr.t Instr.Label.Map.t) (label : Instr.Label.t) : 'a Instr.t =
-  match Instr.Label.Map.find instructions label with
+  match find_instr instructions label with
   | Some i -> i
-  | None -> failwith "Cfg.find_instr_exn did not find instruction"
+  | None ->
+    Printf.printf "instrucitons: %s (looking for %s)\n" (String.concat ~sep:"," (List.map (Instr.Label.Map.keys instructions)
+                                                                                   ~f:Instr.Label.to_string))
+                                                           (Instr.Label.to_string label);
+    failwith (Printf.sprintf "Cfg.find_instr_exn did not find instruction with label %s" (Instr.Label.to_string label))
 
 let all_blocks (cfg : 'a t) : 'a Basic_block.t list =
   IntMap.data cfg.basic_blocks
 
 let all_edges (cfg : 'a t) : (int * int) list =
   List.concat_map (IntMap.to_alist cfg.edges) ~f:(fun (src, edges) ->
+      Printf.printf "edge: %d -> %s\n" src (String.concat ~sep:"," (List.map ~f:Edge.to_string (Edge.Set.to_list edges)));
       List.map (Edge.Set.to_list edges) ~f:(fun (dst, _) -> (src, dst)))
 
 let all_merge_blocks (cfg : 'a t) : 'a Basic_block.t list =

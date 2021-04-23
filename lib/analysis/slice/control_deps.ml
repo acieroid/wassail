@@ -22,11 +22,14 @@ end
    mapping a -> {b} means that block with index a is control-dependent on the
    block with index b.*)
 let control_deps_exact_block (cfg : Spec.t Cfg.t) : IntSet.t IntMap.t =
+  (* We need to remove any empty block that has no predecessor in the CFG *)
+  let cfg = Cfg.without_empty_nodes_with_no_predecessors cfg in
   let pdom = Dominance.cfg_post_dominator cfg in
   let post_dominates (x : int) (y : int) : bool = Tree.is_ancestor pdom x y in
   let traverse (x : int) (y : int) : int list =
     (* Traverse the post-dominator tree backwards until we reach y's parent.
        Return the list of nodes visited *)
+    Printf.printf "traverse from %d to %d\n" x y;
     match Tree.nca pdom x y with
     | None -> Log.warn "No nca found"; []
     | Some nca -> begin match Tree.nodes_between pdom x nca with

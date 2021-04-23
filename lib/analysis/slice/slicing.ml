@@ -22,15 +22,15 @@ module InSlice = struct
          | Some v -> Var.to_string v
          | None -> "no var");
       { label ;
-        reason = match Cfg.find_instr_exn instructions label with
-          | Instr.Control { instr = Merge; _ } -> var
-          | _ -> None
+        reason = match Cfg.find_instr instructions label with
+          | Some (Instr.Control { instr = Merge; _ }) -> var
+          | Some _ -> None
+          | None -> failwith "Did not find the instruction! Should not happen"
       }
   end
   module Set = Set.Make(T)
   include T
 end
-
 
 (** Identify instructions to keep in a backwards slice on `cfg`, using the
     slicing criterion `criterion`, encoded as an instruction index. Returns the
@@ -38,7 +38,7 @@ end
     labels. *)
 let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Instr.Label.Set.t =
   let instructions = Cfg.all_instructions cfg in
-  let control_dependencies = Control_deps.make cfg in
+  let control_dependencies = Control_deps.control_deps_exact_instrs cfg in
   let (_, _, data_dependencies) = Use_def.make cfg in
   let mem_dependencies = Memory_deps.make cfg in
   let cfg_instructions = Cfg.all_instructions cfg in
@@ -69,26 +69,27 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
       (* For use in instr_uses(instr) *)
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
-              (* Get the definition correspondin to the current use *)
+              (* Get the definition corresponding to the current use *)
               let def = Use_def.UseDefChains.get data_dependencies (Use_def.Use.make slicepart.label use) in
               (* For def in usedef(use): if def contains an instruction, add def.instr to W *)
-              let data_dependencies : InSlice.Set.t = match def with
+              let data_deps : InSlice.Set.t = match def with
                 | Use_def.Def.Instruction (instr', var) ->
                   InSlice.Set.singleton (InSlice.make instr' (Some var) instructions)
                 | Use_def.Def.Entry _ -> InSlice.Set.empty
                 | Use_def.Def.Constant _ -> InSlice.Set.empty in
-              let preds = Control_deps.find control_dependencies use in (* the control dependencies for the current use *)
-              (* for instr' in cdeps(use, var): add instr to W *)
-              let control_dependencies : InSlice.Set.t =
-                Control_deps.Pred.Set.fold preds ~init:InSlice.Set.empty ~f:(fun w (var, instr') ->
-                  InSlice.Set.add w (InSlice.make instr' (Some var) instructions)) in
-              InSlice.Set.union w (InSlice.Set.union data_dependencies control_dependencies)) in
+              InSlice.Set.union w data_deps) in
+      (* Add all control dependencies of instr to W *)
+      let control_deps : InSlice.Set.t = match Instr.Label.Map.find control_dependencies slicepart.label with
+        | None -> InSlice.Set.empty
+        | Some deps -> InSlice.Set.of_list (List.map (Instr.Label.Set.to_list deps)
+                                              ~f:(fun label -> InSlice.{ label ; reason = None })) in
+      let worklist'' = InSlice.Set.union worklist' control_deps in
       (* For instr' in mem_deps(instr): add instr to W *)
-      let worklist'' = InSlice.Set.union worklist'
+      let worklist''' = InSlice.Set.union worklist''
           (InSlice.Set.of_list
              (List.map ~f:(fun label -> InSlice.{ label; reason = None })
                 (Instr.Label.Set.to_list (Memory_deps.deps_for mem_dependencies slicepart.label)))) in
-      loop (InSlice.Set.remove worklist'' slicepart) slice' visited' in
+      loop (InSlice.Set.remove worklist''' slicepart) slice' visited' in
   let initial_worklist = InSlice.Set.singleton { label = criterion; reason = None } in
   let initial_slice = Instr.Label.Set.empty in
   loop initial_worklist initial_slice InSlice.Set.empty
@@ -319,9 +320,9 @@ let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : Instr.Label.t list =
 
 module Test = struct
   open Instr.Label.Test
-  let build_cfg (program : string) : Wasm_module.t * Spec.t Cfg.t =
+  let build_cfg ?fidx:(fidx : int32 = 0l) (program : string) : Wasm_module.t * Spec.t Cfg.t =
     let module_ = Wasm_module.of_string program in
-    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    let cfg = Spec_analysis.analyze_intra1 module_ fidx in
     (module_, cfg)
 
   let%test "simple slicing - first slicing criterion, only const" =
@@ -364,16 +365,15 @@ module Test = struct
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     block         ;; Instr 0
-      memory.size ;; Instr 1
-      br_if 0     ;; Instr 2
+      memory.size ;; Instr 1 -- data dependency of instruction 2
+      br_if 0     ;; Instr 2 -- control dependency of the slicing criterion
       memory.size ;; Instr 3 -- slicing criterion
       drop        ;; Instr 4
     end
     local.get 0)  ;; Instr 5
   )" in
     let actual = instructions_to_keep cfg (lab 3) in
-    (* TODO: is it {0,1,2,3} or {3}? {3} seems correct, but this test used to expect {0,1,2,3} *)
-    let expected = Instr.Label.Set.of_list [lab 3] in
+    let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
   let%test "slicing with block and br_if -- second slicing criterion" =
@@ -603,7 +603,7 @@ module Test = struct
      not (Instr.Label.Map.mem instrs (lab 3))
 
    let%test "slice on the example from Agrawal 1994 (Fig. 3) should be correct" =
-     let _, cfg = build_cfg "(module
+     let _, cfg = build_cfg ~fidx:3l "(module
   (type (;0;) (func))
   (type (;1;) (func (result i32)))
   (type (;1;) (func (param i32) (result i32)))
@@ -652,7 +652,7 @@ module Test = struct
           call 2
           local.get 0
           i32.add
-         l tocal.set 0 ;; sum = sum + f(x) (was + f3(x))
+          local.set 0 ;; sum = sum + f(x) (was + f3(x))
         end ;; end of block 1 (L13)
         br 0 ;; jump to beginning of loop 0 (L3)
       end ;; end of loop 0
@@ -665,12 +665,12 @@ module Test = struct
     call 2 ;; f(positives) (was: write(positives))
     drop
     ))" in
-     let sliced_cfg = slice cfg (lab 38) in
+     let sliced_cfg = slice cfg (lab ~fidx:3l 38) in
      let _instrs = Cfg.all_instructions sliced_cfg in
      failwith "TODO write test case"
 
    let%test "slice on the example from Agrawal 1994 (Fig. 5) should be correct" =
-     let _, cfg = build_cfg "(module
+     let _, cfg = build_cfg ~fidx:3l "(module
   (type (;0;) (func))
   (type (;1;) (func (result i32)))
   (type (;1;) (func (param i32) (result i32)))
@@ -730,7 +730,7 @@ module Test = struct
     call 2 ;; f(positives) (was: write(positives))
     drop
     ))" in
-     let sliced_cfg = slice cfg (lab 37) in
+     let sliced_cfg = slice cfg (lab ~fidx:3l 37) in
      let _instrs = Cfg.all_instructions sliced_cfg in
      failwith "TODO: write test case"
 

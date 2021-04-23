@@ -106,7 +106,10 @@ val all_instructions : 'a t -> 'a Instr.t Instr.Label.Map.t
 (** Return all instructions contained in the CFG as a list, in no particular order *)
 val all_instructions_list : 'a t -> 'a Instr.t list
 
-(** Find an instruction given its label *)
+(** Find an instruction given its label. Returns None if it is not found. *)
+val find_instr : 'a Instr.t Instr.Label.Map.t -> Instr.Label.t -> 'a Instr.t option
+
+(** Find an instruction given its label. Throws an exception if it is not found. *)
 val find_instr_exn : 'a Instr.t Instr.Label.Map.t -> Instr.Label.t -> 'a Instr.t
 
 (** Return all instructions contained within this CFG, as well as the block containing them *)

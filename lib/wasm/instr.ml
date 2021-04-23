@@ -48,12 +48,12 @@ module Label = struct
 
   (** Test data *)
   module Test = struct
-    let lab (n : int) = {
-      section = Function 0l;
+    let lab ?fidx:(fidx : int32 = 0l) (n : int) = {
+      section = Function fidx;
       id = n;
     }
-    let merge (n : int) = {
-      section = MergeInFunction 0l;
+    let merge ?fidx:(fidx : int32 = 0l) (n : int) = {
+      section = MergeInFunction fidx;
       id = n;
     }
   end

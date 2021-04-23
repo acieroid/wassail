@@ -296,7 +296,7 @@ let dependencies =
         let cfg = Spec_analysis.analyze_intra1 module_ funidx in
         Printf.printf "outputting PDG to %s\n" dot_filename;
         let use_def_annot = (Use_def.annotate cfg) in
-        let control_annot = (Control_deps.annotate_exact cfg) in
+        let control_annot = (Control_deps.annotate_exact (Cfg.without_empty_nodes_with_no_predecessors cfg)) in
         Out_channel.with_file dot_filename
           ~f:(fun ch ->
               Out_channel.output_string ch (Cfg.to_dot cfg

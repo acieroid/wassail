@@ -217,6 +217,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
   (* Create the return block *)
   let return_block = mk_merge_block None in
   let blocks' = return_block :: blocks in
+  Printf.printf "blocks: %s\n" (String.concat ~sep:"," (List.map blocks' ~f:(fun b -> string_of_int b.idx)));
   (* There can still be breaks to the exit of the function *)
   let breaks_to_exit, remaining_breaks = List.partition_tf breaks ~f:(fun (_, lvl, _) -> Int32.(lvl = 0l)) in
   begin if not (List.is_empty remaining_breaks) then
@@ -265,6 +266,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
   let back_edges = IntMap.map (IntMap.of_alist_multi (List.map actual_edges' ~f:(fun (left, right, data) -> (right, (left, data)))))
       ~f:(fun es -> Cfg.Edge.Set.of_list es) in
 
+    Printf.printf "actual blocks: %s\n" (String.concat ~sep:"," (List.map actual_blocks' ~f:(fun b -> string_of_int b.idx)));
   let basic_blocks = IntMap.of_alist_exn (List.map actual_blocks' ~f:(fun b -> (b.idx, b))) in
   Cfg.{
     (* Exported functions have names, non-exported don't *)

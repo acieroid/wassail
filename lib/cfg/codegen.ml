@@ -185,6 +185,44 @@ module Test = struct
     let cfg = Cfg_builder.build module_ 0l in
     let module_ = Wasm_module.replace_func module_ 0l (cfg_to_func_inst cfg) in
     let printed = Wasm_module.to_string module_ in
+    String.equal printed module_str
+
+  let%test "codegen for consecutive blocks should produce the same result" =
+    let module_str = "(module
+(type (;0;) (func (param i32) (result i32)))
+(func (;0;) (type 0)
+  block
+    loop
+      i32.const 0
+      br_if 1
+      i32.const 0
+      br_if 0
+      block
+
+      end
+      block
+        i32.const 0
+        i32.const 1
+        i32.add
+        drop
+        i32.const 0
+        br_if 0
+      end
+    end
+  end
+  i32.const 0
+  drop
+  i32.const 0
+  drop
+)
+(table (;0;) 1 1 funcref)
+(memory (;0;) 2)
+(global (;0;) (mut i32) (i32.const 66560))
+)" in
+    let module_ = Wasm_module.of_string module_str in
+    let cfg = Cfg_builder.build module_ 0l in
+    let module_ = Wasm_module.replace_func module_ 0l (cfg_to_func_inst cfg) in
+    let printed = Wasm_module.to_string module_ in
     Printf.printf "GENERATED:\n%s\n" printed;
     String.equal printed module_str
 end
