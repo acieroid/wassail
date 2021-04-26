@@ -29,11 +29,11 @@ let control_deps_exact_block (cfg : Spec.t Cfg.t) : IntSet.t IntMap.t =
   let traverse (x : int) (y : int) : int list =
     (* Traverse the post-dominator tree backwards until we reach y's parent.
        Return the list of nodes visited *)
-    Printf.printf "traverse from %d to %d\n" x y;
     match Tree.nca pdom x y with
     | None -> Log.warn "No nca found"; []
-    | Some nca -> begin match Tree.nodes_between pdom x nca with
-        | Some l -> x :: l
+    | Some nca ->
+      begin match Tree.nodes_between pdom x nca with
+        | Some l -> l
         | None -> Log.warn "No nodes found"; []
       end in
   let edges = List.filter (Cfg.all_edges cfg) ~f:(fun (a, b) -> not (post_dominates b a)) in

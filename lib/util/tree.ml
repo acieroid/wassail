@@ -103,13 +103,13 @@ let is_ancestor (tree : t) (x : int) (y : int) : bool =
 
 (** Finds all nodes between x and y, in no particular order.
     Does so by starting from x and going up in the tree until y.
-    Does not include y. *)
+    Does not include x nor y. *)
 let nodes_between (tree : t) (x : int) (y : int) : int list option =
   let rec loop (node : int) (acc : int list) : int list option = match parent tree node with
     | None -> None
     | Some p when p = y -> Some acc
-    | Some p -> loop p (node :: acc) in
-  if x = y then Some [] else loop x []
+    | Some p -> loop p (p :: acc) in
+  if x = y then Some [] else loop x [x]
 
 (** Computes the nearest common ancestor of two nodes in a tree *)
 let nca (tree : t) (node1 : int) (node2 : int) : int option =

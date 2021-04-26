@@ -175,7 +175,6 @@ let all_blocks (cfg : 'a t) : 'a Basic_block.t list =
 
 let all_edges (cfg : 'a t) : (int * int) list =
   List.concat_map (IntMap.to_alist cfg.edges) ~f:(fun (src, edges) ->
-      Printf.printf "edge: %d -> %s\n" src (String.concat ~sep:"," (List.map ~f:Edge.to_string (Edge.Set.to_list edges)));
       List.map (Edge.Set.to_list edges) ~f:(fun (dst, _) -> (src, dst)))
 
 let all_merge_blocks (cfg : 'a t) : 'a Basic_block.t list =
