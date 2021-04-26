@@ -244,6 +244,13 @@ let remove_block_rewrite_edges (cfg : 'a t) (block_idx : int) : 'a t =
      - for each incoming edge, merge it with each outgoing edge
      - in case there is a branching edge, keep the branching information
   *)
+  Printf.printf "removing block %d, it is a %s block\n" block_idx (match (find_block_exn cfg block_idx).block_kind with
+      | Some LoopEntry _ -> "entry"
+      | Some LoopExit -> "exit"
+      | Some BlockEntry _ -> "bentry"
+      | Some BlockExit -> "bexit"
+      | Some IfExit -> "ifexit"
+      | None -> "normal");
   let without_edges =
     let edges' = Edges.remove_from cfg.edges block_idx in (* Remove all edges starting from the current block *)
     let srcs = Edges.from cfg.back_edges block_idx in (* Find all edges that go to this node *)

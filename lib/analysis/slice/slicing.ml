@@ -147,12 +147,13 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
     (* The block is also part of the slice if it is a control block with a merge block as successor, which itself is part of the slice.
        TODO: this is a coarse overapproximation, it could be refined to only those blocks that can reach the slicing criterion *)
     has_multiple_successors_and_merge_successor_in_slice block_idx ||
-    (* The block is an exit block, we don't want to remove it in order to preserve the CFG structure (otherwise we can't know where blocks/loops end.
-       This may lead to superfluous blocks in the CFG, but will result in an empty sequence of instruction in any case.
+    (* The block is an entry or exit block, we don't want to remove it in order to preserve the CFG structure (otherwise we can't know where blocks/loops end.
+       This may lead to superfluous blocks in the CFG, but will result in an empty sequence of instruction or in empty block end / loop end parts.
  *)
     (let block = Cfg.find_block_exn cfg block_idx in
      match block.block_kind with
      | Some LoopExit | Some BlockExit -> true
+     | Some (BlockEntry _) | Some (LoopEntry _) -> true
      | _ -> false)
   and has_multiple_successors_and_merge_successor_in_slice (block_idx : int) : bool =
     let successors = Cfg.successors cfg block_idx in
@@ -620,13 +621,13 @@ module Test = struct
     ;; Local 2: x
     block ;; block 0
       loop ;; loop 0 (L3)
-        call 0 ;; eof()
-        br_if 1 ;; goto end of block 0 if eof()
+        call 0 ;; eof() --> Instr 2 should be part of the slice
+        br_if 1 ;; goto end of block 0 if eof() --> Instr 3 should be part of the slice
         block ;; block 1
           block ;; block 2
-            call 1 ;; read()
+            call 1 ;; read() --> Inst r6 should be part of the slice
             local.tee 2 ;; x = read()
-            br_if 0 ;; jump to end of block 2 (L8) if x != 0 (was: x > 0)
+            br_if 0 ;; jump to end of block 2 (L8) if x != 0 (was: x > 0) --> Instr 8 should be part of the slice
             local.get 2
             call 2 ;; f(x)
             local.get 0
@@ -635,10 +636,10 @@ module Test = struct
             br 1 ;; jump to end of block 1 (L13)
           end ;; end of block 2 (L8)
           block ;; block 3
-            local.get 1
-            i32.const 1
-            i32.add
-            local.set 1 ;; positives = positives + 1
+            local.get 1 ;; --> Instr 16 should be part of the slice
+            i32.const 1 ;; --> Instr 17 should be part of the slice
+            i32.add     ;; --> Instr 18 should be part of the slice
+            local.set 1 ;; positives = positives + 1 --> should be part of the slice
             local.get 2
             br_if 0 ;; jump to end of block 3 (L12) if x != 0 (was: x%2 != 0)
             local.get 2
@@ -654,20 +655,24 @@ module Test = struct
           i32.add
           local.set 0 ;; sum = sum + f(x) (was + f3(x))
         end ;; end of block 1 (L13)
-        br 0 ;; jump to beginning of loop 0 (L3)
+        br 0 ;; jump to beginning of loop 0 (L3) ;; --> Instr 33 should be part of the slice (with Agrawal's algorithm, not the conventional one!)
       end ;; end of loop 0
     end ;; end of block 0 (L14)
     local.get 0
     call 2 ;; f(sum) (was: write(sum))
     drop
-    local.get 1
+    local.get 1 ;; --> Instr 37 should be part of the slice
     ;; The following instruction is the slicing criterion, i.e., instruction number 38
-    call 2 ;; f(positives) (was: write(positives))
+    call 2 ;; f(positives) (was: write(positives)) --> Instr 38 should be part of the slice
     drop
     ))" in
-     let sliced_cfg = slice cfg (lab ~fidx:3l 38) in
-     let _instrs = Cfg.all_instructions sliced_cfg in
-     failwith "TODO write test case"
+     let lab = lab ~fidx:3l in
+     let sliced_cfg = slice cfg (lab 38) in
+     let actual = Instr.Label.Set.of_list (Instr.Label.Map.keys (Cfg.all_instructions sliced_cfg)) in
+     let expected = Instr.Label.Set.of_list [lab 2; lab 3; lab 6; lab 8; lab 16; lab 17; lab 18;
+                                             (* TODO: lab 33 *)
+                                             lab 37; lab 38] in
+     Instr.Label.Set.is_subset expected ~of_:actual
 
    let%test "slice on the example from Agrawal 1994 (Fig. 5) should be correct" =
      let _, cfg = build_cfg ~fidx:3l "(module
@@ -687,24 +692,24 @@ module Test = struct
     ;; Local 2: x
     block ;; block 0
       loop ;; loop 0 (L3)
-        call 0 ;; eof()
-        i32.const 0
-        i32.ne
-        br_if 1 ;; goto end of block 0 if !eof()
-        call 1 ;; read()
+        call 0 ;; eof() ;; --> Instr 2, part of the slice
+        i32.const 0 ;; --> Instr 3, part of the slice
+        i32.ne ;; --> Instr 4, part of the slice
+        br_if 1 ;; goto end of block 0 if !eof() --> Instr 5, part of the slice
+        call 1 ;; read() ;; --> Instr 6, part of the slice
         local.tee 2 ;; x = read()
-        if ;; if (x != 0) (was if (x <= 0))
+        if ;; if (x != 0) (was if (x <= 0)) --> part of the slice
           local.get 2
           call 2 ;; f(x)
           local.get 0
           i32.add ;; sum + f(x)
           local.set 0 ;; sum = sum + f(x)
-          br 1 ;; jump to the beggining of loop 0 (L3)
+          br 1 ;; jump to the beggining of loop 0 (L3) ;; --> Instr 14, part of the slice (with Agrawal's additions)
         end
-        local.get 1
-        i32.const 1
-        i32.add
-        local.set 1 ;; positives = positives + 1
+        local.get 1 ;; --> part of the slice
+        i32.const 1 ;; --> part of the slice
+        i32.add     ;; --> part of the slice
+        local.set 1 ;; positives = positives + 1 --> Instr 18,  part of the slice
         local.get 2
         if ;; if (x != 0) (was: x%2 != 0)
           local.get 2
@@ -725,14 +730,17 @@ module Test = struct
     local.get 0
     call 2 ;; f(sum) (was: write(sum))
     drop
-    local.get 1
+    local.get 1 ;; --> Instr 36, part of the slice
     ;; The following instruction is the slicing criterion, i.e., instruction number 37
-    call 2 ;; f(positives) (was: write(positives))
+    call 2 ;; f(positives) (was: write(positives)) --> Instr 37, part of the slice
     drop
     ))" in
-     let sliced_cfg = slice cfg (lab ~fidx:3l 37) in
-     let _instrs = Cfg.all_instructions sliced_cfg in
-     failwith "TODO: write test case"
+     let lab = lab ~fidx:3l in
+     let sliced_cfg = slice cfg (lab 37) in
+     let actual = Instr.Label.Set.of_list (Instr.Label.Map.keys (Cfg.all_instructions sliced_cfg)) in
+     let expected = Instr.Label.Set.of_list [lab 2; lab 3; lab 4; lab 5; lab 6;
+                                             (* TODO: lab 14; *) lab 18; lab 36; lab 37] in
+     Instr.Label.Set.is_subset expected ~of_:actual
 
    let%test_unit "slicing function 14 of trmm" =
      let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
