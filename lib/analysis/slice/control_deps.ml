@@ -269,7 +269,12 @@ let%test "exact control deps in presence of a loop with br_if should have a depe
   )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let actual = control_deps_exact_instrs cfg in
-  let expected = Instr.Label.Map.of_alist_exn [(merge 1, Instr.Label.Set.singleton (lab 6))] in
+  let expected = Instr.Label.Map.of_alist_exn [(merge 1, Instr.Label.Set.singleton (lab 6));
+                                               (lab 1, Instr.Label.Set.singleton (lab 6));
+                                               (lab 2, Instr.Label.Set.singleton (lab 6));
+                                               (lab 3, Instr.Label.Set.singleton (lab 6));
+                                               (lab 4, Instr.Label.Set.singleton (lab 6));
+                                               (lab 5, Instr.Label.Set.singleton (lab 6))] in
   Instr.Label.Map.equal Instr.Label.Set.equal actual expected
 
 let%test "exact control deps should have control blocks control-dependent" =
@@ -289,5 +294,6 @@ let%test "exact control deps should have control blocks control-dependent" =
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let actual = control_deps_exact_instrs cfg in
   let expected = Instr.Label.Map.of_alist_exn [(lab 3, Instr.Label.Set.singleton (lab 2));
-                                               (lab 4, Instr.Label.Set.singleton (lab 2))] in
+                                               (lab 4, Instr.Label.Set.singleton (lab 2));
+                                               (merge 8, Instr.Label.Set.singleton (lab 2))] in
   Instr.Label.Map.equal Instr.Label.Set.equal actual expected

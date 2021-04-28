@@ -90,9 +90,25 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
              (List.map ~f:(fun label -> InSlice.{ label; reason = None })
                 (Instr.Label.Set.to_list (Memory_deps.deps_for mem_dependencies slicepart.label)))) in
       loop (InSlice.Set.remove worklist''' slicepart) slice' visited' in
+  let agrawal (slice : Instr.Label.Set.t) : Instr.Label.Set.t =
+    (* For each instruction in the slice, we add all br instructions that are control-dependent on it *)
+    Instr.Label.Set.fold (Instr.Label.Set.of_list (Instr.Label.Map.keys cfg_instructions))
+      ~init:slice
+      ~f:(fun slice label ->
+          let instr = Instr.Label.Map.find_exn cfg_instructions label in
+          match instr with
+          | Control { instr = Br _; _ } -> begin match Instr.Label.Map.find control_dependencies label with
+              | Some instrs -> begin match Instr.Label.Set.find_map instrs
+                                             ~f:(fun i -> if Instr.Label.Set.mem slice i then Some i else None) with
+                  | Some _ -> Instr.Label.Set.add slice label
+                  | None -> slice
+                end
+              | None -> slice
+            end
+          | _ -> slice) in
   let initial_worklist = InSlice.Set.singleton { label = criterion; reason = None } in
   let initial_slice = Instr.Label.Set.empty in
-  loop initial_worklist initial_slice InSlice.Set.empty
+  agrawal (loop initial_worklist initial_slice InSlice.Set.empty)
 
 (** Construct a dummy list of instruction that has the given net effect on the stack size *)
 let dummy_instrs (net_effect : int) (next_label : unit -> int) : (Instr.data, unit) Instr.labelled list =
@@ -670,8 +686,7 @@ module Test = struct
      let sliced_cfg = slice cfg (lab 38) in
      let actual = Instr.Label.Set.of_list (Instr.Label.Map.keys (Cfg.all_instructions sliced_cfg)) in
      let expected = Instr.Label.Set.of_list [lab 2; lab 3; lab 6; lab 8; lab 16; lab 17; lab 18;
-                                             (* TODO: lab 33 *)
-                                             lab 37; lab 38] in
+                                             lab 33; lab 37; lab 38] in
      Instr.Label.Set.is_subset expected ~of_:actual
 
    let%test "slice on the example from Agrawal 1994 (Fig. 5) should be correct" =
@@ -739,7 +754,7 @@ module Test = struct
      let sliced_cfg = slice cfg (lab 37) in
      let actual = Instr.Label.Set.of_list (Instr.Label.Map.keys (Cfg.all_instructions sliced_cfg)) in
      let expected = Instr.Label.Set.of_list [lab 2; lab 3; lab 4; lab 5; lab 6;
-                                             (* TODO: lab 14; *) lab 18; lab 36; lab 37] in
+                                             lab 14; lab 18; lab 36; lab 37] in
      Instr.Label.Set.is_subset expected ~of_:actual
 
    let%test_unit "slicing function 14 of trmm" =
