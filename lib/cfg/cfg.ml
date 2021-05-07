@@ -94,18 +94,6 @@ let outgoing_edges (cfg : 'a t) (idx : int) : Edge.t list =
 let successors (cfg : 'a t) (idx : int) : int list =
   List.map (outgoing_edges cfg idx) ~f:fst
 
-let rec non_empty_successors (cfg :'a t) (idx : int) : int list =
-  let succs = successors cfg idx in
-  let non_empty = List.filter succs ~f:(fun succ ->
-      let block = find_block_exn cfg succ in
-      match block.content with
-      | Data [] -> false
-      | _ -> true) in
-  if List.is_empty non_empty then
-    List.concat_map succs ~f:(non_empty_successors cfg)
-  else
-    non_empty
-
 let incoming_edges (cfg : 'a t) (idx : int) : Edge.t list =
   Edges.from cfg.back_edges idx
 
@@ -201,6 +189,7 @@ let rec state_before_block (cfg : 'a t) (block_idx : int) (entry_state : 'a) : '
   let block = find_block_exn cfg block_idx in
   match block.content with
   | Control i -> Instr.annotation_before (Control i)
+  | Data (i :: _) -> Instr.annotation_before (Data i)
   | Data [] -> begin match non_empty_predecessors cfg block_idx with
       | [] ->
         begin match predecessors cfg block_idx with
@@ -216,16 +205,23 @@ let rec state_before_block (cfg : 'a t) (block_idx : int) (entry_state : 'a) : '
         state_after_block cfg pred entry_state
       | _ -> failwith "state_before_block: multiple predecessors for an empty block"
     end
-  | Data (i :: _) -> Instr.annotation_before (Data i)
 and state_after_block (cfg : 'a t) (block_idx : int) (entry_state : 'a) : 'a =
   (* This implementation is the complement of state_before_block *)
   let block = find_block_exn cfg block_idx in
   match block.content with
   | Control i -> Instr.annotation_after (Control i)
-  | Data [] -> begin match non_empty_successors cfg block_idx with
-      | [] -> failwith "state_after_block: no successor of an empty block"
-      | succ :: [] ->
-        state_before_block cfg succ entry_state
+  | Data [] -> begin match non_empty_predecessors cfg block_idx with
+      | [] -> begin match predecessors cfg block_idx with
+          | [] ->
+            assert (block_idx = cfg.entry_block);
+            entry_state
+          | pred :: [] ->
+            state_after_block cfg pred entry_state
+          | _ -> failwith "state_after_block: multiple predecessors of an empty block"
+        end
+      | pred :: [] ->
+        (* INCORRECT: go one more block before *)
+        state_after_block cfg pred entry_state
       | _ -> failwith "state_after_bloc: multiple successors for an empty block"
     end
   | Data l -> Instr.annotation_after (Data (List.last_exn l))

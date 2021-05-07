@@ -233,6 +233,7 @@ let new_merge_variables (cfg : t Cfg.t) (merge_block : t Basic_block.t) : (Var.t
   let state_after = Cfg.state_after_block cfg merge_block.idx (init_state cfg) in
   List.fold_left preds ~init:[] ~f:(fun acc pred_idx ->
       let state_before = Cfg.state_after_block cfg pred_idx (init_state cfg) in
+      Printf.printf "state before %d from %d: %s\n" merge_block.idx pred_idx (to_string state_before);
       (extract_different_vars state_before state_after) @ acc)
 
 (** Return the list of variables defined by an instruction *)
@@ -331,6 +332,7 @@ let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Ins
             List.map (new_merge_variables cfg block) ~f:fst
           | Some v ->
             List.filter_map (new_merge_variables cfg block) ~f:(fun (old, new_) ->
+                Printf.printf "(block %d) var: %s -> %s\n" block.idx (Var.to_string old) (Var.to_string new_);
                 if Var.equal new_ v then
                   Some old
                 else

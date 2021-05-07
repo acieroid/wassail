@@ -66,6 +66,7 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
       let slice' = Instr.Label.Set.add slice slicepart.label in
       let visited' = InSlice.Set.add visited slicepart in
       let uses = Spec_inference.instr_use cfg ?var:slicepart.reason (Cfg.find_instr_exn cfg_instructions slicepart.label) in
+      Printf.printf "uses of %s: %s\n" (Instr.Label.to_string slicepart.label) (Var.list_to_string uses);
       (* For use in instr_uses(instr) *)
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
@@ -82,12 +83,12 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
       let control_deps : InSlice.Set.t = match Instr.Label.Map.find control_dependencies slicepart.label with
         | None -> InSlice.Set.empty
         | Some deps -> InSlice.Set.of_list (List.map (Instr.Label.Set.to_list deps)
-                                              ~f:(fun label -> InSlice.{ label ; reason = None })) in
+                                              ~f:(fun label -> InSlice.make label None instructions)) in
       let worklist'' = InSlice.Set.union worklist' control_deps in
       (* For instr' in mem_deps(instr): add instr to W *)
       let worklist''' = InSlice.Set.union worklist''
           (InSlice.Set.of_list
-             (List.map ~f:(fun label -> InSlice.{ label; reason = None })
+             (List.map ~f:(fun label -> InSlice.make label None instructions)
                 (Instr.Label.Set.to_list (Memory_deps.deps_for mem_dependencies slicepart.label)))) in
       loop (InSlice.Set.remove worklist''' slicepart) slice' visited' in
   let agrawal (slice : Instr.Label.Set.t) : Instr.Label.Set.t =
@@ -100,7 +101,9 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
           | Control { instr = Br _; _ } -> begin match Instr.Label.Map.find control_dependencies label with
               | Some instrs -> begin match Instr.Label.Set.find_map instrs
                                              ~f:(fun i -> if Instr.Label.Set.mem slice i then Some i else None) with
-                  | Some _ -> Instr.Label.Set.add slice label
+                  | Some _ ->
+                    Printf.printf "Agrawal tells us to add %s to the slice\n" (Instr.Label.to_string label);
+                    Instr.Label.Set.add slice label
                   | None -> slice
                 end
               | None -> slice

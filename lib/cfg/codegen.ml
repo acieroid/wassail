@@ -25,7 +25,7 @@ let relevant_successor (cfg : unit Cfg.t) (block : unit Basic_block.t) : int opt
   | Control { instr = BrTable _; _ } -> failwith "br_table not supported"
   | _ ->
     let successors = Cfg.successors cfg block.idx in
-    if (List.length successors <= 1) then Log.warn (Printf.sprintf "No successor for block %d\n" block.idx);
+    if (List.length successors <= 1) then Log.warn (Printf.sprintf "No successor for block %d" block.idx);
     List.hd successors
 
 (** Returns the list of instructions generated for this block (and possibly
