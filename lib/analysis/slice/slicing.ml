@@ -66,7 +66,6 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
       let slice' = Instr.Label.Set.add slice slicepart.label in
       let visited' = InSlice.Set.add visited slicepart in
       let uses = Spec_inference.instr_use cfg ?var:slicepart.reason (Cfg.find_instr_exn cfg_instructions slicepart.label) in
-      Printf.printf "uses of %s: %s\n" (Instr.Label.to_string slicepart.label) (Var.list_to_string uses);
       (* For use in instr_uses(instr) *)
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
@@ -343,7 +342,7 @@ module Test = struct
   let build_cfg ?fidx:(fidx : int32 = 0l) (program : string) : Wasm_module.t * Spec.t Cfg.t =
     let module_ = Wasm_module.of_string program in
     let cfg = Spec_analysis.analyze_intra1 module_ fidx in
-    (module_, cfg)
+    (module_, Cfg.without_empty_nodes_with_no_predecessors cfg)
 
   let%test "simple slicing - first slicing criterion, only const" =
     let _, cfg = build_cfg "(module

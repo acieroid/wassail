@@ -350,7 +350,7 @@ let slice_cfg =
         Spec_inference.propagate_locals := false;
         Spec_inference.use_const := false;
         let module_ = Wasm_module.of_file filename in
-        let cfg = Spec_analysis.analyze_intra1 module_ funidx in
+        let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
         let sliced_cfg = Slicing.slice cfg slicing_criterion in
         Printf.printf "spec inference\n";
@@ -380,7 +380,7 @@ let slice =
         Spec_inference.use_const := false;
         let module_ = Wasm_module.of_file filename in
         Printf.printf "Spec analysis\n";
-        let cfg = Spec_analysis.analyze_intra1 module_ funidx in
+        let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
         Printf.printf "Slicing\n";
         let sliced_cfg = Slicing.slice cfg slicing_criterion in
