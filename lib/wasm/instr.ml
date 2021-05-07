@@ -45,6 +45,7 @@ module Label = struct
     include Test.HelpersForSet(T)
   end
   module Map = Map.Make(T)
+  let x = Set.to_array
 
   (** Test data *)
   module Test = struct

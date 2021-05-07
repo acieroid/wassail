@@ -390,6 +390,35 @@ let slice =
         Out_channel.with_file outfile
           ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_)))
 
+let random_slice_report =
+  Command.basic
+    ~summary:"Computes a slice of a random function with a random slicing criterion from the given file, outputs the size of the slice as a percentage of the size of the original function, in terms of number of instructions"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string) in
+      let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
+        List.fold_left instrs
+            ~init:Instr.Label.Set.empty
+            ~f:(fun acc instr ->
+                Instr.Label.Set.union acc (Instr.all_labels instr)) in
+      fun () ->
+        try
+          Spec_inference.propagate_globals := false;
+          Spec_inference.propagate_locals := false;
+          Spec_inference.use_const := false;
+          let wasm_mod = Wasm_module.of_file filename in
+          let funcs = Array.of_list wasm_mod.funcs in
+          let func = Array.get funcs (Random.int (Array.length funcs)) in
+          let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
+          let slicing_criterion = Array.get labels (Random.int (Array.length labels)) in
+          try
+            let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
+            let sliced_cfg = Slicing.slice cfg slicing_criterion in
+            let sliced_func = Codegen.cfg_to_func_inst sliced_cfg in
+            let sliced_labels = all_labels sliced_func.code.body in
+            Printf.printf "success\t%s\t%ld\t%s\t%d/%d" filename func.idx (Instr.Label.to_string slicing_criterion) (Instr.Label.Set.length sliced_labels) (Array.length labels)
+          with e -> begin Printf.printf "error\t%s\t%ld\t%s\t%s\n" filename func.idx (Instr.Label.to_string slicing_criterion) (Exn.to_string e); exit 1 end
+        with e -> begin Printf.printf "error\t%s\t-\t-\t%s\n" filename (Exn.to_string e); exit 1 end)
+
 let find_indirect_calls =
   Command.basic
     ~summary:"Find call_indirect instructions and shows the function in which they appear as well as their label"
@@ -461,4 +490,5 @@ let () =
        ; "relational-intra", relational_intra
        ; "slice-cfg", slice_cfg
        ; "slice", slice
+       ; "random-slice", random_slice_report
        ; "find-indirect-calls", find_indirect_calls])
