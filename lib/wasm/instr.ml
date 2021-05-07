@@ -257,8 +257,8 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
   | Nop -> data_labelled Nop
   | Drop -> data_labelled Drop
   | Block (st, instrs) ->
-    let block_type = Wasm_helpers.type_of_block st in
-    let (arity_in, arity_out) = Wasm_helpers.arity_of_block st in
+    let block_type = Wasm_helpers.type_of_block m st in
+    let (arity_in, arity_out) = Wasm_helpers.arity_of_block m st in
     assert (arity_in = 0); (* what does it mean to have arity_in > 0? *)
     assert (arity_out <= 1);
     let label = new_label () in
@@ -293,18 +293,18 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
   | Select ->
     data_labelled (Select)
   | Loop (st, instrs) ->
-    let (arity_in, arity_out) = Wasm_helpers.arity_of_block st in
+    let (arity_in, arity_out) = Wasm_helpers.arity_of_block m st in
     assert (arity_in = 0); (* what does it mean to have arity_in > 0 for a loop? *)
     assert (arity_out <= 1); (* TODO: support any arity out? *)
     let label = new_label () in
     let body = seq_of_wasm m new_label instrs in
-    control_labelled ~label:label (Loop (Wasm_helpers.type_of_block st, (arity_in, arity_out), body))
+    control_labelled ~label:label (Loop (Wasm_helpers.type_of_block m st, (arity_in, arity_out), body))
   | If (st, instrs1, instrs2) ->
-    let (arity_in, arity_out) = Wasm_helpers.arity_of_block st in
+    let (arity_in, arity_out) = Wasm_helpers.arity_of_block m st in
     let label = new_label () in
     let body1 = seq_of_wasm m new_label instrs1 in
     let body2 = seq_of_wasm m new_label instrs2 in
-    control_labelled ~label:label (If (Wasm_helpers.type_of_block st, (arity_in, arity_out), body1, body2))
+    control_labelled ~label:label (If (Wasm_helpers.type_of_block m st, (arity_in, arity_out), body1, body2))
   | CallIndirect f ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_fun_type m f in
     assert (arity_out <= 1);

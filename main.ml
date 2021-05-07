@@ -16,7 +16,7 @@ let load =
         try
           let _module : Wasm_module.t = Wasm_module.of_file file_in in
           Printf.printf "Successfully loaded %s\n" file_in
-        with e -> Printf.printf "Error when loading %s: %s" file_in (Exn.to_string e); exit 1)
+        with e -> Printf.printf "Error when loading %s: %s\n" file_in (Exn.to_string e); exit 1)
 
 let imports =
   Command.basic
@@ -415,7 +415,7 @@ let random_slice_report =
             let sliced_cfg = Slicing.slice cfg slicing_criterion in
             let sliced_func = Codegen.cfg_to_func_inst sliced_cfg in
             let sliced_labels = all_labels sliced_func.code.body in
-            Printf.printf "success\t%s\t%ld\t%s\t%d/%d" filename func.idx (Instr.Label.to_string slicing_criterion) (Instr.Label.Set.length sliced_labels) (Array.length labels)
+            Printf.printf "success\t%s\t%ld\t%s\t%d/%d\n" filename func.idx (Instr.Label.to_string slicing_criterion) (Instr.Label.Set.length sliced_labels) (Array.length labels)
           with e -> begin Printf.printf "error\t%s\t%ld\t%s\t%s\n" filename func.idx (Instr.Label.to_string slicing_criterion) (Exn.to_string e); exit 1 end
         with e -> begin Printf.printf "error\t%s\t-\t-\t%s\n" filename (Exn.to_string e); exit 1 end)
 
