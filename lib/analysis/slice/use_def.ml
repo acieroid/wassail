@@ -150,7 +150,7 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
       Use.Set.fold uses ~init:map ~f:(fun map use ->
           UseDefChains.add map use (match Var.Map.find defs var with
               | Some v -> v
-              | None -> failwith (Printf.sprintf "Use-def chain incorrect: could not find def of variable %s" (Var.to_string var))))) in
+              | None -> failwith (Printf.sprintf "Use-def chain incorrect: could not find def of a variable" (* (Var.to_string var) *) )))) in
   (defs, uses, udchains)
 
 (** Return the edges that can be used to annotate a CFG with data dependencies *)

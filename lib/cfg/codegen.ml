@@ -22,7 +22,7 @@ let relevant_successor (cfg : unit Cfg.t) (block : unit Basic_block.t) : int opt
   | Control { instr = Br _; _ } ->
     (* No relevant successor, as we want to stay in the block *)
     None
-  | Control { instr = BrTable _; _ } -> failwith "br_table not supported"
+  | Control { instr = BrTable _; _ } -> failwith "unsupported: br_table"
   | _ ->
     let successors = Cfg.successors cfg block.idx in
     (* if (List.length successors <= 1) then Log.warn (Printf.sprintf "No successor for block %d" block.idx); *)
@@ -88,7 +88,9 @@ let rec codegen_block (cfg : unit Cfg.t) (block : unit Basic_block.t) (visited :
 and codegen_until (cfg : unit Cfg.t) (start_block_idx : int) (stop_block_idx : int) (visited : IntSet.t) : unit Instr.t list * int option =
   let return l = List.concat (List.rev l) in
   let rec loop (instrs : unit Instr.t list list) (block_idx : int) (visited : IntSet.t) : unit Instr.t list * int option =
-    let block = Cfg.find_block_exn cfg block_idx in
+    match Cfg.find_block cfg block_idx with
+    | None -> failwith (Printf.sprintf "codegen: can't find a block" (* block_idx *));
+    | Some block ->
     if block_idx = stop_block_idx then begin
       (* We stop generating here *)
       return instrs, relevant_successor cfg block
@@ -232,6 +234,5 @@ module Test = struct
     let cfg = Cfg_builder.build module_ 0l in
     let module_ = Wasm_module.replace_func module_ 0l (cfg_to_func_inst cfg) in
     let printed = Wasm_module.to_string module_ in
-    Printf.printf "GENERATED:\n%s\n" printed;
     String.equal printed module_str
 end

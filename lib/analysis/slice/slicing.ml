@@ -65,7 +65,10 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
       (* Add instr to the current slice *)
       let slice' = Instr.Label.Set.add slice slicepart.label in
       let visited' = InSlice.Set.add visited slicepart in
-      let uses = Spec_inference.instr_use cfg ?var:slicepart.reason (Cfg.find_instr_exn cfg_instructions slicepart.label) in
+      let uses =
+        match Cfg.find_instr cfg_instructions slicepart.label with
+        | None -> failwith (Printf.sprintf "slicing: cannot find instruction") (*  "with label %s\n" (Instr.Label.to_string slicepart.label) *)
+        | Some instr -> Spec_inference.instr_use cfg ?var:slicepart.reason instr in
       (* For use in instr_uses(instr) *)
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->

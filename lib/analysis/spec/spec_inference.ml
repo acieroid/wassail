@@ -86,14 +86,10 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
     | MemoryGrow -> { state with vstack = ret :: drop 1 state.vstack }
     | Drop -> { state with vstack = drop 1 state.vstack }
     | Select -> { state with vstack = ret :: (drop 3 state.vstack) }
-    | LocalGet l ->
-      Printf.printf "localget %ld\n" l;
-      { state with vstack = (if !propagate_locals then get l state.locals else ret) :: state.vstack }
+    | LocalGet l -> { state with vstack = (if !propagate_locals then get l state.locals else ret) :: state.vstack }
     | LocalSet l -> { state with vstack = drop 1 state.vstack; locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
     | LocalTee l -> { state with locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
-    | GlobalGet g ->
-      Printf.printf "globalget %ld\n" g;
-      { state with vstack = (if !propagate_globals then get g state.globals else ret) :: state.vstack }
+    | GlobalGet g -> { state with vstack = (if !propagate_globals then get g state.globals else ret) :: state.vstack }
     | GlobalSet g -> { state with vstack = drop 1 state.vstack; globals = set g state.globals (if !propagate_globals then top state.vstack else ret) }
     | Const n -> { state with vstack = (if !use_const then (Var.Const n) else ret) :: state.vstack }
     | Compare _ -> { state with vstack = ret :: (drop 2 state.vstack) }
@@ -162,7 +158,6 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
           begin match List.filter states ~f:(fun s -> not (equal_state s bot)) with
             | [] ->
               (* No predecessors have been analyzed. Return bottom. In practice, this should only happen if one of the predecessors is the empty entry block. TODO: it should be cleaned so that this does not arise and we can throw an exception here *)
-              Printf.printf "block %d, init state is: %s\n" block.idx (state_to_string (init_state cfg));
               init_state cfg
             | s :: [] -> (* only one non-bottom predecessor *) s
             | state :: states ->
@@ -176,7 +171,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                         | _ -> Var.Hole (* this is a hole *)
                       in
                       if (List.length acc.vstack <> List.length s.vstack) then
-                        failwith (Printf.sprintf "Incompatible stack lengths at block %d between state %s and state %s\n" block.idx (to_string acc) (to_string s));
+                        failwith (Printf.sprintf "spec_inference: incompatible stack lengths at block %d\n" block.idx);
                       assert (List.length acc.locals = List.length s.locals);
                       assert (List.length acc.globals = List.length s.globals);
                       { vstack = List.map2_exn acc.vstack s.vstack ~f:f;

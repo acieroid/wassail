@@ -71,9 +71,9 @@ let control_deps_exact_instrs (cfg : Spec.t Cfg.t) : Instr.Label.Set.t Instr.Lab
 (** Algorithm for control dependencies, adapted from https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/ProgramSlicing.pdf *)
 (* TODO: the results of this algorithm do not seem correct. The implementation may contain a mistake *)
 let control_dep (cfg : Spec.t Cfg.t) (is_immediate_post_dom : int -> Var.t -> bool) : (Var.t * Pred.t) list =
+  Log.warn "using incorrect control_dep algorithm";
   let tree : Tree.t = Dominance.cfg_dominator cfg in
   let push (block : Spec.t Basic_block.t) (preds : Pred.t list) : Pred.t list =
-    Printf.printf "push %d %s\n" block.idx (String.concat ~sep:"," (List.map preds ~f:Pred.to_string));
     match Dominance.branch_condition cfg block with
     | Some pred -> (* It is a branch *)
       begin match block.content with
@@ -84,7 +84,6 @@ let control_dep (cfg : Spec.t Cfg.t) (is_immediate_post_dom : int -> Var.t -> bo
   in
   (* Creates the edges from a given block, where each edge links a defined variable to a control variable it depends on *)
   let link (block : Spec.t Basic_block.t) (pred : Pred.t) : (Var.t * Pred.t) list =
-    Printf.printf "link %d %s\n" block.idx (Pred.to_string pred);
     let defined = match block.content with
       | Control instr -> Spec_inference.instr_def cfg (Instr.Control instr)
       | Data instrs -> List.fold_left instrs ~init:[] ~f:(fun acc instr ->
@@ -92,15 +91,11 @@ let control_dep (cfg : Spec.t Cfg.t) (is_immediate_post_dom : int -> Var.t -> bo
     List.map defined ~f:(fun d -> (d, pred)) in
   (* vchildren simply recurses down the tree *)
   let rec vchildren (block_indices : int list) (preds : Pred.t list) : (Var.t * Pred.t) list =
-    Printf.printf "Visiting childrens (%s) with preds: %s\n"
-      (String.concat ~sep:"," (List.map block_indices ~f:string_of_int))
-      (String.concat ~sep:"," (List.map preds ~f:Pred.to_string));
     match block_indices with
     | [] -> []
     | (n :: ns) -> vnode n preds @ vchildren ns preds
   (* vnode visits a tree node *)
   and vnode (block_idx : int) (preds : Pred.t list) : (Var.t * Pred.t) list =
-    Printf.printf "visiting block %d with preds: %s\n" block_idx (String.concat ~sep:"," (List.map preds ~f:Pred.to_string));
     (* Extract the block and its children from the root of the tree *)
     let block = Cfg.find_block_exn cfg block_idx in
     let children = IntSet.to_list (Tree.children tree block_idx) in
@@ -164,10 +159,7 @@ let make (cfg : Spec.t Cfg.t) : Pred.Set.t Var.Map.t =
       (* Checkch if tree is the post-dominator of pred: look in pdom if (the node that contains) pred is a child of tree *)
       let children : IntSet.t = Tree.children pdom block_idx in
       let children_idx : int = match Var.Map.find preds pred with Some idx -> idx | None -> failwith "make failed when accessing children index" in
-      let res = IntSet.mem children children_idx in
-      if res then Printf.printf "%d is post-dom of %s\n" block_idx (Var.to_string pred);
-      res
-    ) in
+      IntSet.mem children children_idx) in
   Var.Map.map (Var.Map.of_alist_multi deps) ~f:Pred.Set.of_list
 
 (** Return the control dependencies for a variable *)
