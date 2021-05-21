@@ -13,7 +13,7 @@ let analyze_intra1 (module_ : Wasm_module.t) (idx : Int32.t) : Spec.t Cfg.t =
 
 
 module Test = struct
-  let%test_unit "spec analysis does not error" =
+  let%test_unit "spec analysis does not error on trivial code" =
     let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
@@ -21,6 +21,23 @@ module Test = struct
     i32.const 512
     i32.const 0
     select)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+    let _ : Spec.t Cfg.t = analyze_intra1 module_ 0l in
+    ()
+
+  let%test_unit "spec analysis suceeds on simple program with if and globals" =
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func))
+  (func (;test;) (type 0)
+    global.get 0
+    if
+      global.get 0
+      i32.const 1
+      i32.sub
+      global.set 0
+    end)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in

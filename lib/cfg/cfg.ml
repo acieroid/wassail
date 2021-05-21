@@ -153,9 +153,6 @@ let find_instr_exn (instructions : 'a Instr.t Instr.Label.Map.t) (label : Instr.
   match find_instr instructions label with
   | Some i -> i
   | None ->
-    Printf.printf "instrucitons: %s (looking for %s)\n" (String.concat ~sep:"," (List.map (Instr.Label.Map.keys instructions)
-                                                                                   ~f:Instr.Label.to_string))
-                                                           (Instr.Label.to_string label);
     failwith (Printf.sprintf "Cfg.find_instr_exn did not find instruction with label %s" (Instr.Label.to_string label))
 
 let all_blocks (cfg : 'a t) : 'a Basic_block.t list =

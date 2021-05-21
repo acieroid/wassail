@@ -90,7 +90,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
     | LocalSet l -> { state with vstack = drop 1 state.vstack; locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
     | LocalTee l -> { state with locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
     | GlobalGet g -> { state with vstack = (if !propagate_globals then get g state.globals else ret) :: state.vstack }
-    | GlobalSet g -> { state with globals = set g state.globals (if !propagate_globals then top state.vstack else ret) }
+    | GlobalSet g -> { state with vstack = drop 1 state.vstack; globals = set g state.globals (if !propagate_globals then top state.vstack else ret) }
     | Const n -> { state with vstack = (if !use_const then (Var.Const n) else ret) :: state.vstack }
     | Compare _ -> { state with vstack = ret :: (drop 2 state.vstack) }
     | Binary _ -> { state with vstack = ret :: (drop 2 state.vstack) }
@@ -171,7 +171,8 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                         | v' when Var.equal v v' -> v'
                         | _ -> Var.Hole (* this is a hole *)
                       in
-                      assert (List.length acc.vstack = List.length s.vstack);
+                      if (List.length acc.vstack <> List.length s.vstack) then
+                        failwith (Printf.sprintf "Incompatible stack lengths at block %d between state %s and state %s\n" block.idx (to_string acc) (to_string s));
                       assert (List.length acc.locals = List.length s.locals);
                       assert (List.length acc.globals = List.length s.globals);
                       { vstack = List.map2_exn acc.vstack s.vstack ~f:f;
@@ -338,4 +339,3 @@ let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Ins
         end
       | Br _ | Return | Unreachable -> []
     end
-

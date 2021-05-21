@@ -284,7 +284,8 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
     control_labelled (BrTable (List.map table ~f:(fun v -> v.it), label.it))
   | Call f ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_fun m f in
-    assert (arity_out <= 1);
+    if arity_out > 1 then
+      failwith "Unsupported: direct function call with more than one return value";
     control_labelled (Call ((arity_in, arity_out), f.it))
   | Return ->
     control_labelled (Return)
@@ -307,7 +308,9 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
     control_labelled ~label:label (If (Wasm_helpers.type_of_block m st, (arity_in, arity_out), body1, body2))
   | CallIndirect f ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_fun_type m f in
-    assert (arity_out <= 1);
+    if arity_out > 1 then
+      failwith "Unsupported: indirect function call with more than one return value"
+    else
     control_labelled (CallIndirect ((arity_in, arity_out), f.it))
   | GlobalGet g ->
     data_labelled (GlobalGet g.it)

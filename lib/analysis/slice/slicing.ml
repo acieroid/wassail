@@ -16,11 +16,11 @@ module InSlice = struct
       | Some var -> Printf.sprintf "%s(%s)" (Instr.Label.to_string t.label) (Var.to_string var)
 
     let make (label : Instr.Label.t) (var : Var.t option) (instructions : 'a Instr.t Instr.Label.Map.t) =
-      Printf.printf "instr %s is part of the slice due to %s\n"
+      Log.info (Printf.sprintf "instr %s is part of the slice due to %s\n"
         (Instr.Label.to_string label)
         (match var with
          | Some v -> Var.to_string v
-         | None -> "no var");
+         | None -> "no var"));
       { label ;
         reason = match Cfg.find_instr instructions label with
           | Some (Instr.Control { instr = Merge; _ }) -> var
@@ -101,7 +101,7 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
               | Some instrs -> begin match Instr.Label.Set.find_map instrs
                                              ~f:(fun i -> if Instr.Label.Set.mem slice i then Some i else None) with
                   | Some _ ->
-                    Printf.printf "Agrawal tells us to add %s to the slice\n" (Instr.Label.to_string label);
+                    Log.info (Printf.sprintf "Agrawal tells us to add %s to the slice\n" (Instr.Label.to_string label));
                     Instr.Label.Set.add slice label
                   | None -> slice
                 end
@@ -137,7 +137,7 @@ let block_net_effect (block : 'a Basic_block.t) : int =
 
 let keep_entire_blocks = ref false
 
-let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
+let slice (cfg : Spec.t Cfg.t) ?instrs:(instructions_in_slice : Instr.Label.Set.t = Instr.Label.Set.empty) (criterion : Instr.Label.t) : unit Cfg.t =
   let init_spec = Spec_inference.init_state cfg in
   let next_label : unit -> int =
     let counter : int ref = ref 0 in
@@ -146,7 +146,11 @@ let slice (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : unit Cfg.t =
       counter := v+1;
       v
   in
-  let instructions_in_slice : Instr.Label.Set.t = instructions_to_keep cfg criterion in
+  let instructions_in_slice : Instr.Label.Set.t =
+    if Instr.Label.Set.is_empty instructions_in_slice then
+      instructions_to_keep cfg criterion
+    else
+      instructions_in_slice in
   let blocks_in_slice: IntSet.t = IntSet.filter (IntSet.of_list (IntMap.keys cfg.basic_blocks)) ~f:(fun block_idx ->
       not (Instr.Label.Set.is_empty
              (Instr.Label.Set.inter

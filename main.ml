@@ -82,7 +82,8 @@ let function_instructions =
       and fidx = anon ("fidx" %: int32) in
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
-        let labels = List.fold_left (List32.nth_exn wasm_mod.funcs fidx).code.body
+        let labels = List.fold_left
+            (List.find_exn wasm_mod.funcs ~f:(fun f -> Int32.(f.idx = fidx))).code.body
             ~init:Instr.Label.Set.empty
             ~f:(fun acc instr ->
                 Instr.Label.Set.union acc (Instr.all_labels instr)) in
@@ -399,6 +400,7 @@ let random_slice_report =
         List.fold_left instrs
             ~init:Instr.Label.Set.empty
             ~f:(fun acc instr ->
+                Log.debug (Printf.sprintf "instr: %s, labels: %s" (Instr.to_string instr) (Instr.Label.Set.to_string (Instr.all_labels instr)));
                 Instr.Label.Set.union acc (Instr.all_labels instr)) in
       fun () ->
         try
@@ -407,15 +409,27 @@ let random_slice_report =
           Spec_inference.use_const := false;
           let wasm_mod = Wasm_module.of_file filename in
           let funcs = Array.of_list wasm_mod.funcs in
+          if Array.length funcs = 0 then
+            begin Printf.printf "ignored\t%s\tno function\n" filename; exit 1 end;
           let func = Array.get funcs (Random.int (Array.length funcs)) in
           let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
+          if Array.length labels = 0 then
+            begin Printf.printf "ignored\t%s\t%ld\tno instruction\n" filename func.idx; exit 1 end;
           let slicing_criterion = Array.get labels (Random.int (Array.length labels)) in
           try
             let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
-            let sliced_cfg = Slicing.slice cfg slicing_criterion in
+            let instrs_to_keep = Slicing.instructions_to_keep cfg slicing_criterion in
+            let sliced_cfg = Slicing.slice cfg ~instrs:instrs_to_keep slicing_criterion in
             let sliced_func = Codegen.cfg_to_func_inst sliced_cfg in
             let sliced_labels = all_labels sliced_func.code.body in
-            Printf.printf "success\t%s\t%ld\t%s\t%d/%d\n" filename func.idx (Instr.Label.to_string slicing_criterion) (Instr.Label.Set.length sliced_labels) (Array.length labels)
+            Printf.printf "success\t%s\t%ld\t%s\t%d/%d\t%d/%d\n"
+              filename
+              func.idx
+              (Instr.Label.to_string slicing_criterion)
+              (Instr.Label.Set.length instrs_to_keep)
+              (Array.length labels)
+              (Instr.Label.Set.length sliced_labels)
+              (Array.length labels)
           with e -> begin Printf.printf "error\t%s\t%ld\t%s\t%s\n" filename func.idx (Instr.Label.to_string slicing_criterion) (Exn.to_string e); exit 1 end
         with e -> begin Printf.printf "error\t%s\t-\t-\t%s\n" filename (Exn.to_string e); exit 1 end)
 
