@@ -150,9 +150,10 @@ let slice (cfg : Spec.t Cfg.t) ?instrs:(instructions_in_slice : Instr.Label.Set.
       v
   in
   let instructions_in_slice : Instr.Label.Set.t =
-    if Instr.Label.Set.is_empty instructions_in_slice then
+    if Instr.Label.Set.is_empty instructions_in_slice then begin
+      Log.debug "Computing instructions to keep";
       instructions_to_keep cfg criterion
-    else
+    end else
       instructions_in_slice in
   let blocks_in_slice: IntSet.t = IntSet.filter (IntSet.of_list (IntMap.keys cfg.basic_blocks)) ~f:(fun block_idx ->
       not (Instr.Label.Set.is_empty
@@ -335,7 +336,9 @@ let slice (cfg : Spec.t Cfg.t) ?instrs:(instructions_in_slice : Instr.Label.Set.
                 ~f:(fun cfg pred ->
                     Cfg.insert_block_between cfg pred block.idx merge_block)) in
   let remove_annotations (cfg : Spec.t Cfg.t) : unit Cfg.t = Cfg.map_annotations cfg ~f:(fun _ -> (), ()) in
+  Log.debug "Performing slicing loop";
   let (cfg_sliced, _removed) = slicing_loop [cfg.entry_block] IntSet.empty (remove_annotations cfg) IntMap.empty in
+  Log.debug "Performing final adaptations";
   add_missing_merge_blocks (adapt_blocks_for_effect cfg cfg_sliced)
 
 (** Return the indices of each call_indirect instructions *)

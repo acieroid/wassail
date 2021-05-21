@@ -139,7 +139,7 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
               | `Ok r -> r) in
           (* Add uses introduced by this instruction *)
           let uses = List.fold_left (Spec_inference.instr_use cfg instr) ~init:uses ~f:(fun uses var ->
-              Log.debug (Printf.sprintf "instruction %s uses %s\n" (Instr.to_string instr ~annot_str:Spec.to_string) (Var.to_string var));
+              (* Log.debug (Printf.sprintf "instruction %s uses %s" (Instr.to_string instr ~annot_str:Spec.to_string) (Var.to_string var)); *)
               Var.Map.update uses var ~f:(function
                   | Some v -> Use.Set.add v { label = Instr.label instr; var }
                   | None -> Use.Set.singleton { label = Instr.label instr; var })) in

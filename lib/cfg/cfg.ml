@@ -210,7 +210,8 @@ and state_after_block (cfg : 'a t) (block_idx : int) (entry_state : 'a) : 'a =
   | Data [] -> begin match non_empty_predecessors cfg block_idx with
       | [] -> begin match predecessors cfg block_idx with
           | [] ->
-            assert (block_idx = cfg.entry_block);
+            if block_idx <> cfg.entry_block then
+              failwith "state_after_block: state is empty and has no predecessor";
             entry_state
           | pred :: [] ->
             state_after_block cfg pred entry_state

@@ -379,15 +379,16 @@ let slice =
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
         Spec_inference.use_const := false;
+        Log.enable_debug ();
         let module_ = Wasm_module.of_file filename in
-        Printf.printf "Spec analysis\n";
+        Log.debug "Performing specification analysis";
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
-        Printf.printf "Slicing\n";
+        Log.debug "Performing slicing";
         let sliced_cfg = Slicing.slice cfg slicing_criterion in
-        Printf.printf "Producing module\n";
+        Log.debug "Producing module";
         let module_ = Wasm_module.replace_func module_ funidx (Codegen.cfg_to_func_inst sliced_cfg) in
-        Printf.printf "done\n";
+        Log.debug "Saving to file";
         Out_channel.with_file outfile
           ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_)))
 

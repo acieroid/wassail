@@ -171,7 +171,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                         | _ -> Var.Hole (* this is a hole *)
                       in
                       if (List.length acc.vstack <> List.length s.vstack) then
-                        failwith (Printf.sprintf "spec_inference: incompatible stack lengths at block %d\n" block.idx);
+                        failwith (Printf.sprintf "spec_inference: incompatible stack lengths" (* block.idx *));
                       assert (List.length acc.locals = List.length s.locals);
                       assert (List.length acc.globals = List.length s.globals);
                       { vstack = List.map2_exn acc.vstack s.vstack ~f:f;
