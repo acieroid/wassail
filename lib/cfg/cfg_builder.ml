@@ -276,7 +276,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     (* The type index of this function *)
     type_idx = funcinst.type_idx;
     (* Global types *)
-    global_types = module_.global_types;
+    global_types = module_.imported_global_types @ module_.global_types;
     (* Argument types *)
     arg_types = fst funcinst.typ;
     (* Return types *)

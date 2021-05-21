@@ -86,10 +86,14 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
     | MemoryGrow -> { state with vstack = ret :: drop 1 state.vstack }
     | Drop -> { state with vstack = drop 1 state.vstack }
     | Select -> { state with vstack = ret :: (drop 3 state.vstack) }
-    | LocalGet l -> { state with vstack = (if !propagate_locals then get l state.locals else ret) :: state.vstack }
+    | LocalGet l ->
+      Printf.printf "localget %ld\n" l;
+      { state with vstack = (if !propagate_locals then get l state.locals else ret) :: state.vstack }
     | LocalSet l -> { state with vstack = drop 1 state.vstack; locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
     | LocalTee l -> { state with locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
-    | GlobalGet g -> { state with vstack = (if !propagate_globals then get g state.globals else ret) :: state.vstack }
+    | GlobalGet g ->
+      Printf.printf "globalget %ld\n" g;
+      { state with vstack = (if !propagate_globals then get g state.globals else ret) :: state.vstack }
     | GlobalSet g -> { state with vstack = drop 1 state.vstack; globals = set g state.globals (if !propagate_globals then top state.vstack else ret) }
     | Const n -> { state with vstack = (if !use_const then (Var.Const n) else ret) :: state.vstack }
     | Compare _ -> { state with vstack = ret :: (drop 2 state.vstack) }

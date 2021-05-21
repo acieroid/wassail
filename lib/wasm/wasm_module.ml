@@ -6,6 +6,8 @@ module T = struct
   type t = {
     start : Int32.t option;
     types : (Type.t list * Type.t list) list; (** The types declared in the module *)
+    imported_globals : Global.t list; (** The imported globals *)
+    imported_global_types : Type.t list; (** The types of the imported globals *)
     globals : Global.t list; (** The globals *)
     global_types : Type.t list; (** The types for the globals *)
     nglobals : Int32.t; (** The number of globals *)
@@ -73,9 +75,14 @@ let of_wasm (m : Wasm.Ast.module_) : t =
                 (List.map a ~f:Type.of_wasm, List.map b ~f:Type.of_wasm)
               | None -> failwith "of_wasm: nth error when looking for imports")
       | _ -> None) in
-  let nfuncimports = Wasm.Lib.List32.length imported_funcs in
-  let globals = List32.mapi m.it.globals ~f:(Global.of_wasm m) in
-  let nglobals = Wasm.Lib.List32.length m.it.globals in
+  let nfuncimports = List32.length imported_funcs in
+  let imported_globals = List.filter_map m.it.imports ~f:(fun import -> match import.it.idesc.it with
+      | GlobalImport t -> Some (Global.of_wasm_import t)
+      | _ -> None ) in
+  let nimported_globals = List32.length imported_globals in
+  let imported_global_types = List.map imported_globals ~f:(fun g -> g.gtype.typ) in
+  let globals = List32.mapi m.it.globals ~f:(fun idx g -> Global.of_wasm m Int32.(idx+nimported_globals) g) in
+  let nglobals = List32.length m.it.globals in
   let global_types = List.map m.it.globals ~f:(fun g -> match g.it.gtype with
       | Wasm.Types.GlobalType (t, _) -> Type.of_wasm t) in
   let funcs = List32.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m Int32.(i+nfuncimports) f) in
@@ -114,7 +121,7 @@ let of_wasm (m : Wasm.Ast.module_) : t =
     exports; exported_funcs;
     funcs;
     data; elems;
-    global_types; nglobals; globals;
+    imported_globals; imported_global_types; global_types; nglobals; globals;
     memories; memory_insts;
     tables; table_insts;
     types = List.map m.it.types ~f:(fun t -> match t.it with

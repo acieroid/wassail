@@ -43,4 +43,17 @@ module Test = struct
   (global (;0;) (mut i32) (i32.const 66560)))" in
     let _ : Spec.t Cfg.t = analyze_intra1 module_ 0l in
     ()
+
+  let%test_unit "spec analysis suceeds with imported globals" =
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func))
+  (import \"env\" \"DYNAMICTOP_PTR\" (global (;0;) i32))
+  (func (;test;) (type 0)
+    global.get 1
+    global.set 0)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" in
+    let _ : Spec.t Cfg.t = analyze_intra1 module_ 0l in
+    ()
 end
