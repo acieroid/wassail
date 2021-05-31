@@ -120,7 +120,9 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                            { state with vstack = [top state.vstack] }
                          else
                            { state with vstack = [] })
-    | Unreachable -> `Simple { state with vstack = [] }
+    | Unreachable ->
+      failwith (Printf.sprintf "unsupported: unreachable") (*  in function %ld cfg.idx *)
+    (* `Simple state *)
     | Merge -> `Simple state
     | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr))
 
@@ -231,6 +233,7 @@ let new_merge_variables (cfg : t Cfg.t) (merge_block : t Basic_block.t) : (Var.t
   (* The predecessors of merge_block *)
   let preds = Cfg.predecessors cfg merge_block.idx in
   let state_after = Cfg.state_after_block cfg merge_block.idx (init_state cfg) in
+  Log.debug (Printf.sprintf "computing new merge vars at block %d" merge_block.idx);
   List.fold_left preds ~init:[] ~f:(fun acc pred_idx ->
       let state_before = Cfg.state_after_block cfg pred_idx (init_state cfg) in
       (extract_different_vars state_before state_after) @ acc)
@@ -241,10 +244,10 @@ let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
     | Instr.Data i ->
       let top_n n = List.take i.annotation_after.vstack n in
       begin match i.instr with
-        | Nop | Drop | MemoryGrow -> []
+        | Nop | Drop -> []
         | Select | MemorySize
         | Unary _ | Binary _ | Compare _ | Test _ | Convert _
-        | Const _ -> top_n 1
+        | Const _ | MemoryGrow-> top_n 1
         | LocalGet _ ->
           if !propagate_locals then
             []

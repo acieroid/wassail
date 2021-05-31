@@ -396,13 +396,13 @@ let random_slice_report =
   Command.basic
     ~summary:"Computes a slice of a random function with a random slicing criterion from the given file, outputs the size of the slice as a percentage of the size of the original function, in terms of number of instructions"
     Command.Let_syntax.(
+      Log.enable_debug ();
       let%map_open filename = anon ("file" %: string) in
       let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
         List.fold_left instrs
             ~init:Instr.Label.Set.empty
             ~f:(fun acc instr ->
-                Log.debug (Printf.sprintf "instr: %s, labels: %s" (Instr.to_string instr) (Instr.Label.Set.to_string (Instr.all_labels instr)));
-                Instr.Label.Set.union acc (Instr.all_labels instr)) in
+                Instr.Label.Set.union acc (Instr.all_labels_no_blocks instr)) in
       fun () ->
         try
           Spec_inference.propagate_globals := false;
@@ -432,7 +432,9 @@ let random_slice_report =
               (Instr.Label.Set.length sliced_labels)
               (Array.length labels)
           with e -> begin Printf.printf "error\t%s\t%ld\t%s\t%s\n" filename func.idx (Instr.Label.to_string slicing_criterion) (Exn.to_string e); exit 1 end
-        with e -> begin Printf.printf "error\t%s\t-\t-\t%s\n" filename (Exn.to_string e); exit 1 end)
+        with
+        | Failure s -> begin Printf.printf "error\t%s\t-\t-\t%s\n" filename s; exit 1 end
+        | e -> begin Printf.printf "error\t%s\t-\t-\t%s\n" filename (Exn.to_string e); exit 1 end)
 
 let find_indirect_calls =
   Command.basic

@@ -128,6 +128,12 @@ module T = struct
 end
 include T
 
+let is_block (instr : 'a t) : bool = match instr with
+  | Control { instr = Block _; _ } -> true
+  | Control { instr = Loop _; _ } -> true
+  | Control { instr = If _; _ } -> true
+  | _ -> false
+
 (** Return the label of an instruction *)
 let label (instr : 'a t) : Label.t = match instr with
   | Data i -> i.label
@@ -374,6 +380,19 @@ let annotation_after (i : 'a t) : 'a =
   match i with
   | Data d -> d.annotation_after
   | Control c -> c.annotation_after
+
+let rec all_labels_no_blocks (i : 'a t) : Label.Set.t =
+  match i with
+  | Data d -> Label.Set.singleton d.label
+  | Control c -> begin match c.instr with
+      | Block (_, _, instrs)
+      | Loop (_, _, instrs) -> List.fold_left instrs ~init:Label.Set.empty ~f:(fun acc i ->
+          Label.Set.union acc (all_labels_no_blocks i))
+      | If (_, _, instrs1, instrs2) ->
+        List.fold_left (instrs1 @ instrs2) ~init:Label.Set.empty ~f:(fun acc i ->
+          Label.Set.union acc (all_labels_no_blocks i))
+      | _ -> Label.Set.singleton c.label
+    end
 
 let rec all_labels (i : 'a t) : Label.Set.t =
   match i with

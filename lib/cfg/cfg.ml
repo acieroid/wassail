@@ -206,7 +206,9 @@ and state_after_block (cfg : 'a t) (block_idx : int) (entry_state : 'a) : 'a =
   (* This implementation is the complement of state_before_block *)
   let block = find_block_exn cfg block_idx in
   match block.content with
-  | Control i -> Instr.annotation_after (Control i)
+  | Control i ->
+    Log.debug (Printf.sprintf "annotation after %s\n" (Instr.control_to_string i.instr));
+    Instr.annotation_after (Control i)
   | Data [] -> begin match non_empty_predecessors cfg block_idx with
       | [] -> begin match predecessors cfg block_idx with
           | [] ->

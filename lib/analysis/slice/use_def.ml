@@ -248,4 +248,19 @@ module Test = struct
                                          (Use.make (lab 5) (Var.Var (lab 4)), Def.Instruction (lab 4, Var.Var (lab 4)))] in
     UseDefChains.check_equality ~actual:actual ~expected:expected
 
+  let%test "use-def with memory.grow" =
+    let open Instr.Label.Test in
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result)))
+  (func (;test;) (type 0) (param i32)
+    memory.size ;; Instr 0, Var 0
+    memory.grow ;; Instr 1, Var 1, uses var 0
+    drop        ;; Instr 2, uses var 1
+   )
+  )" in
+    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    let _, _, actual = make cfg in
+    let expected = Use.Map.of_alist_exn [(Use.make (lab 1) (Var.Var (lab 0)), Def.Instruction (lab 0, Var.Var (lab 0)));
+                                         (Use.make (lab 2) (Var.Var (lab 1)), Def.Instruction (lab 1, Var.Var (lab 1)))] in
+    UseDefChains.check_equality ~actual:actual ~expected:expected
 end

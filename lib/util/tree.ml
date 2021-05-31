@@ -49,12 +49,12 @@ let of_children_map (entry : int) (children_map : (int * int list) list) : t =
     let all_keys = IntSet.of_list (List.map children_map ~f:fst) in
     let all_children = List.fold_left children_map ~init:IntSet.empty ~f:(fun acc (_, cs) -> IntSet.union acc (IntSet.of_list cs)) in
     if not (IntSet.for_all all_children ~f:(fun c -> IntSet.mem all_keys c)) then
-      failwith (Printf.sprintf "of_children_map: invalid tree spec  where not all nodes are specified: %s" (String.concat ~sep:" | " (List.map children_map ~f:(fun (p, cs) -> Printf.sprintf "%d -> %s" p (String.concat ~sep:"," (List.map cs ~f:string_of_int))))));
+      failwith (Printf.sprintf "of_children_map: invalid tree spec" (* "  where not all nodes are specified: %s" (String.concat ~sep:" | " (List.map children_map ~f:(fun (p, cs) -> Printf.sprintf "%d -> %s" p (String.concat ~sep:"," (List.map cs ~f:string_of_int))))) *));
     (* - Every node is the children of only one node. We actually check that when concatenating all children, every element is unique. *)
     let all_children_l = List.fold_left children_map ~init:[] ~f:(fun acc (_, cs) -> cs @ acc) in
     if not ((IntSet.length all_children) = List.length all_children_l) then
       (* if both sizes are the same, then the list only contains unique elements *)
-      failwith (Printf.sprintf "of_children_map: invalid tree spec where some children have multiple parents: %s" (String.concat ~sep:" | " (List.map children_map ~f:(fun (p, cs) -> Printf.sprintf "%d -> %s" p (String.concat ~sep:"," (List.map cs ~f:string_of_int))))));
+      failwith (Printf.sprintf "of_children_map: invalid tree spec 2" (* "where some children have multiple parents: %s" (String.concat ~sep:" | " (List.map children_map ~f:(fun (p, cs) -> Printf.sprintf "%d -> %s" p (String.concat ~sep:"," (List.map cs ~f:string_of_int))))) *));
   end;
   let children = IntMap.map (IntMap.of_alist_exn children_map) ~f:IntSet.of_list in
   { children;
@@ -90,7 +90,7 @@ let fold_ancestors (tree : t) (node : int) (init : 'a) (f : 'a -> int -> 'a) : '
   let rec loop (node : int) (acc : 'a) : 'a = match parent tree node with
     | Some p -> loop p (f acc p)
     | None when node = tree.entry -> acc
-    | None -> failwith (Printf.sprintf "fold_ancestors: missing parent link in tree? node %d has no parent" node) in
+    | None -> failwith (Printf.sprintf "fold_ancestors: missing parent link in tree" (* "node %d has no parent" node *)) in
   loop node init
 
 (** Check if node x is an ancestor of node y in the tree *)
