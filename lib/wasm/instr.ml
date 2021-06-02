@@ -407,6 +407,17 @@ let rec all_labels (i : 'a t) : Label.Set.t =
       | _ -> Label.Set.empty
     end) c.label
 
+let rec contains ~f:(f : 'a t -> bool) (instr : 'a t) : bool =
+  if (f instr) then true
+  else match instr with
+    | Control { instr = Block (_, _, instrs); _ }
+    | Control { instr = Loop (_, _, instrs); _ } ->
+      Option.is_some (List.find instrs ~f:(contains ~f))
+    | Control { instr = If (_, _, instrs1, instrs2); _ } ->
+      Option.is_some (List.find (instrs1 @ instrs2) ~f:(contains ~f))
+    | _ -> false
+
+
 let net_effect_data (i : (data, 'a) labelled) : int =
   match i.instr with
   | Nop -> 0

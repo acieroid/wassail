@@ -79,8 +79,18 @@ let rec codegen_block (cfg : unit Cfg.t) (block : unit Basic_block.t) (visited :
             let exit_block = Cfg.corresponding_exit_exn cfg block.idx in
             let (t_code, exit_block_idx) = codegen_until cfg t exit_block (IntSet.add visited block.idx) in
             let (f_code, exit_block_idx') = codegen_until cfg f exit_block (IntSet.add visited block.idx) in
-            assert (Option.equal (=) exit_block_idx exit_block_idx');
-            [control (If (bt, arity, t_code, f_code))], exit_block_idx
+            [control (If (bt, arity, t_code, f_code))],
+            begin match exit_block_idx, exit_block_idx' with
+              (* We check that both branches exit at the same block, or that at least once exits to a previous visited block.
+                 If both exit in "future" blocks, we need to find where to continue compilin from (TODO) *)
+              | Some b1, Some b2 when b1 = b2 ->
+                Some b1
+              | Some b1, Some b2 when IntSet.mem visited b1 ->
+                Some b2
+              | Some b1, Some b2 when IntSet.mem visited b2 ->
+                Some b1
+              | _ -> failwith "Unsupported program structure in code gen: if where both branch jump forward at different places"
+            end
           | _ -> failwith "Should not happen"
         end
       | Control { instr; _ } ->
@@ -89,7 +99,7 @@ and codegen_until (cfg : unit Cfg.t) (start_block_idx : int) (stop_block_idx : i
   let return l = List.concat (List.rev l) in
   let rec loop (instrs : unit Instr.t list list) (block_idx : int) (visited : IntSet.t) : unit Instr.t list * int option =
     match Cfg.find_block cfg block_idx with
-    | None -> failwith (Printf.sprintf "codegen: can't find a block" (* block_idx *));
+    | None -> failwith (Printf.sprintf "codegen: can't find block %d" block_idx);
     | Some block ->
     if block_idx = stop_block_idx then begin
       (* We stop generating here *)
@@ -230,6 +240,78 @@ module Test = struct
 (memory (;0;) 2)
 (global (;0;) (mut i32) (i32.const 66560))
 )" in
+    let module_ = Wasm_module.of_string module_str in
+    let cfg = Cfg_builder.build module_ 0l in
+    let module_ = Wasm_module.replace_func module_ 0l (cfg_to_func_inst cfg) in
+    let printed = Wasm_module.to_string module_ in
+    String.equal printed module_str
+
+  let%test "codegen should support infinite loops" =
+    let module_str = "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    (local i32)
+    i32.const 1
+    local.set 1
+    block  ;; label = @1
+      loop  ;; label = @2
+        local.get 0
+        i32.eqz
+        br_if 1 (;@1;)
+        local.get 1
+        local.get 0
+        i32.mul
+        local.set 1
+        local.get 0
+        i32.const 1
+        i32.sub
+        local.set 0
+        br 0 (;@2;)
+      end
+    end
+    local.get 1)
+  )" in
+    let module_ = Wasm_module.of_string module_str in
+    let cfg = Cfg_builder.build module_ 0l in
+    let module_ = Wasm_module.replace_func module_ 0l (cfg_to_func_inst cfg) in
+    let printed = Wasm_module.to_string module_ in
+    String.equal printed module_str
+
+  let%test "codegen should support empty ifs" =
+    (* If this test passes, we should also make sure it passes when slicing on instr 3 *)
+    let module_str = "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    local.get 0
+    i32.const -1
+    i32.eq
+    if
+    end
+    local.get 0)
+  )" in
+    let module_ = Wasm_module.of_string module_str in
+    let cfg = Cfg_builder.build module_ 0l in
+    let module_ = Wasm_module.replace_func module_ 0l (cfg_to_func_inst cfg) in
+    let printed = Wasm_module.to_string module_ in
+    String.equal printed module_str
+
+  let%test "codegen should support if branches that jump to different places" =
+    (* If this test passes, we should also make sure it passes when slicing on instr 3 *)
+    let module_str = "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    block
+      local.get 0
+      block
+        if
+          br 0
+        else
+          br 1
+        end
+      end
+      local.get 0
+     end)
+  )" in
     let module_ = Wasm_module.of_string module_str in
     let cfg = Cfg_builder.build module_ 0l in
     let module_ = Wasm_module.replace_func module_ 0l (cfg_to_func_inst cfg) in

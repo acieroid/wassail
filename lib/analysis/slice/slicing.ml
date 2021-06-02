@@ -811,7 +811,49 @@ module Test = struct
          let annotated_slice_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
          let vars_after_slicing = Var_prop.count_vars (Var_prop.var_prop annotated_slice_cfg) in
          assert (vars_after_slicing < vars_before_slicing);
-        ())
+         ())
 
+   let%test "slicing should produce code that can be generated with codegen" =
+     let _, cfg = build_cfg "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    (local i32)
+    local.get 0
+    i32.const 40503
+    i32.mul
+    i32.const 255
+    i32.and
+    i32.const 1
+    i32.shl
+    local.set 1
+    loop  ;; label = @1
+      local.get 0
+      local.get 1
+      i32.load16_u
+      i32.ne
+      if  ;; label = @2
+        local.get 1
+        i32.const 2
+        i32.add
+        local.tee 1
+        i32.const 512
+        i32.ge_s
+        if  ;; label = @3
+          i32.const 255
+          return
+        end
+        br 1 (;@1;)
+      end
+    end
+    local.get 1
+    i32.const 1
+    i32.shr_s
+    i32.load8_u offset=512)
+   )" in
+     let sliced_cfg = slice cfg (lab 1) in
+     let actual = Instr.Label.Set.of_list (Instr.Label.Map.keys (Cfg.all_instructions sliced_cfg)) in
+     let expected = Instr.Label.Set.of_list [] in
+     (* This should not throw an exception *)
+     let _generated = Codegen.codegen (Cfg.map_annotations ~f:(fun _ -> (), ()) sliced_cfg) in
+     Instr.Label.Set.is_subset expected ~of_:actual
 end
-

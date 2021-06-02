@@ -36,8 +36,9 @@ module Graph = struct
       else
         let children = graph.succs node in
         let new_children = List.filter children ~f:(fun child -> not (IntSet.mem added child)) in
-        let tree_with_children_connected = IntMap.add_exn tree ~key:node ~data:new_children in
-        let added' = IntSet.union added (IntSet.of_list new_children) in
+        let new_children_no_duplicate = IntSet.to_list (IntSet.of_list new_children) in
+        let tree_with_children_connected = IntMap.add_exn tree ~key:node ~data:new_children_no_duplicate in
+        let added' = IntSet.union added (IntSet.of_list new_children_no_duplicate) in
         List.fold_left children ~init:(tree_with_children_connected, added') ~f:(fun (tree, added) node -> dfs tree added node)
     in
     Tree.of_children_map graph.entry (IntMap.to_alist (fst (dfs IntMap.empty IntSet.empty graph.entry)))
@@ -75,12 +76,21 @@ module Graph = struct
     let expected = Tree.of_children_map exit [(2, []); (3, [2]); (4, []); (5, [3; 4]); (6, [5]); (7, [6])] in
     Tree.check_equality ~actual ~expected
 
+  let%test "spanning tree computation - loop" =
+    let entry = 1 in
+    let exit = 13 in (* does not matter here *)
+    let graph = of_alist_exn entry exit [(1, [2]); (2, [3]); (3, [4; 11]); (11, [13]); (4, [5]); (5, [6]); (6, [7]); (7, [5])] in
+    let actual = spanning_tree graph in
+    let expected = Tree.of_children_map entry [(1, [2]); (2, [3]); (3, [4; 11]); (11, [13]); (4, [5]); (5, [6]); (6, [7]); (7, []); (13, [])] in
+    Tree.check_equality ~actual ~expected
+
   (** Computation of the dominator tree using the algorithm from Cooper, Harvey
       and Kennedy (2001), based on the description made here:
-      https://www.cs.au.dk/~gerth/advising/thesis/henrik-knakkegaard-christensen.pdf. *)
+      . *)
   let dominator_tree (graph : 'a t) : Tree.t =
     let rec loop (tree : Tree.t) : Tree.t =
-      let (tree, changed) = List.fold_left graph.nodes ~init:(tree, false) ~f:(fun (tree, changed) node1 ->
+      let (tree, changed) =
+        List.fold_left graph.nodes ~init:(tree, false) ~f:(fun (tree, changed) node1 ->
           List.fold_left (graph.preds node1) ~init:(tree, changed) ~f:(fun (tree, changed) node2 ->
               let parent_n1 = match Tree.parent tree node1 with
                 | Some p -> p
@@ -199,6 +209,34 @@ module Test = struct
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
+    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    let _actual = cfg_post_dominator cfg in
+    ()
+
+  let%test_unit "post-dominator tree works on a CFG that has one node with two edges to the same successor" =
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (result i32)))
+  (func (;0;) (type 0) (result i32)
+    block  ;; label = @1
+      i32.const 33
+      drop
+      i32.const 1
+      br_if 0 (;@1;)
+    end
+    block (result i32)  ;; label = @1
+      i32.const 42
+      i32.const 1
+      br_if 1 (;@0;)
+      drop
+      i32.const 11
+    end
+    drop
+    loop (result i32)  ;; label = @1
+      i32.const 0
+      br_if 0 (;@1;)
+      i32.const 99
+    end
+    return))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let _actual = cfg_post_dominator cfg in
     ()

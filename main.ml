@@ -413,6 +413,11 @@ let random_slice_report =
           if Array.length funcs = 0 then
             begin Printf.printf "ignored\t%s\tno function\n" filename; exit 1 end;
           let func = Array.get funcs (Random.int (Array.length funcs)) in
+          (* We don't support unreachable expressions *)
+          if Option.is_some (List.find func.code.body ~f:(Instr.contains ~f:(function
+              | Instr.Control { instr = Unreachable; _ } -> true
+              | _ -> false))) then
+            begin Printf.printf "ignored\t%s\t%ld\tunreachable\n" filename func.idx; exit 1 end;
           let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
           if Array.length labels = 0 then
             begin Printf.printf "ignored\t%s\t%ld\tno instruction\n" filename func.idx; exit 1 end;

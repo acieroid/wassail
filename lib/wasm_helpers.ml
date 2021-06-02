@@ -6,7 +6,7 @@ let type_of_block (m : Ast.module_) (bt : Ast.block_type) : Type.t option = matc
   | Ast.VarBlockType v -> begin match Ast.func_type_for m v with
       | Wasm.Types.FuncType ([], []) -> None
       | Wasm.Types.FuncType ([], [t]) -> Some (Type.of_wasm t)
-      | Wasm.Types.FuncType _ -> failwith "TODO: unsupported block type"
+      | Wasm.Types.FuncType _ -> failwith "Unsupported block type with parameters or more than one return value"
     end
   | Ast.ValBlockType None -> None
   | Ast.ValBlockType (Some t) -> Some (Type.of_wasm t)

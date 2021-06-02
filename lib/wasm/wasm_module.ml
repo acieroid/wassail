@@ -168,13 +168,30 @@ let to_string (m : t) : string =
     end;
     put "))\n" in
   let types () = List.iteri m.types ~f:type_ in
+  let limits (l : Limits.t) = match l with
+    | low, None -> put (Printf.sprintf "%ld" low)
+    | low, Some high -> put (Printf.sprintf "%ld %ld" low high) in
+  let last_memory_import = ref 0 in
+  let next_memory_import () : int =
+    last_memory_import := !last_memory_import + 1;
+    !last_memory_import in
+  let last_global_import = ref 0 in
+  let next_global_import () : int =
+    last_global_import := !last_global_import + 1;
+    !last_global_import in
   let import (i : int) (import : Import.t) =
     put (Printf.sprintf "(import \"%s\" \"%s\" " import.module_name import.item_name);
     begin match import.idesc with
     | FuncImport tidx ->
       put (Printf.sprintf "(func (;%d;) (type %ld))"
              i tidx)
-    | _ -> failwith "Non-function import not yet supported (this is easy to add)"
+    | TableImport _ -> failwith "Unsupported: table import" (* should be easy to add, just need an example *)
+    | MemoryImport l ->
+      put (Printf.sprintf "(memory (;%d;) " (next_memory_import ()));
+      limits l;
+      put ")"
+    | GlobalImport { typ; _ } ->
+      put (Printf.sprintf "(global (;%d;) %s)" (next_global_import ()) (Type.to_string typ));
     end;
     put ")\n" in
   let imports () = List.iteri m.imports ~f:import in
@@ -186,9 +203,6 @@ let to_string (m : t) : string =
     put (Instr.list_to_string f.code.body ?indent:(Some 2) ?sep:(Some "\n") (fun () -> ""));
     put "\n)\n" in
   let funcs () = List.iteri m.funcs ~f:(fun i f -> func Int32.(m.nfuncimports + (of_int_exn i)) f) in
-  let limits (l : Limits.t) = match l with
-    | low, None -> put (Printf.sprintf "%ld" low)
-    | low, Some high -> put (Printf.sprintf "%ld %ld" low high) in
   let table (i : int) (t : Table.t) =
     put (Printf.sprintf "(table (;%d;) " i);
     limits t.ttype;
