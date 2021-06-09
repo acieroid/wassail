@@ -126,6 +126,7 @@ module T = struct
   [@@deriving sexp, compare, equal]
 
 end
+
 include T
 
 let is_block (instr : 'a t) : bool = match instr with
@@ -200,6 +201,21 @@ and to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot
      | Control instr -> control_to_string instr.instr ~annot_str:annot_to_string ~sep:sep ~indent:i)
 and list_to_string ?indent:(i : int = 0) ?sep:(sep : string = ", ") (l : 'a t list) (annot_to_string : 'a -> string) : string =
   String.concat ~sep:sep (List.map l ~f:(fun instr -> to_string instr ~annot_str:annot_to_string ?sep:(Some sep) ?indent:(Some i)))
+
+module Set = struct
+  module TUnit = struct
+    type t = unit T.t
+    [@@deriving sexp, compare, equal]
+    let to_string (instr : unit T.t) = to_string instr
+  end
+  module T = struct
+    include Set.Make(TUnit)
+    let to_string (t : t) : string = String.concat ~sep:"," (List.map ~f:TUnit.to_string (to_list t))
+  end
+  include T
+    include Test.HelpersForSet(T)
+  end
+
 
 (** Converts a control expression to a shorter string *)
 let control_to_short_string (instr : 'a control) : string =
@@ -363,6 +379,29 @@ and map_annotation_control (i : ('a control, 'a) labelled) ~(f : 'a t ->  'b * '
              | Return -> Return
              | Unreachable -> Unreachable
              | Merge -> Merge}
+
+let rec drop_labels (i : 'a t) : 'a t =
+  match i with
+  | Data d -> Data (drop_labels_data d)
+  | Control c -> Control (drop_labels_control c)
+and drop_labels_data (i : (data, 'a) labelled) : (data, 'a) labelled =
+  { i with label = Label.{ section = Dummy; id = 0 } }
+and drop_labels_control (i : ('a control, 'a) labelled) : ('a control, 'a) labelled =
+  { i with label = Label.{ section = Dummy; id = 0 };
+           instr = match i.instr with
+             | Block (bt, arity, instrs) -> Block (bt, arity, List.map instrs ~f:drop_labels)
+             | Loop (bt, arity, instrs) -> Loop (bt, arity, List.map instrs ~f:drop_labels)
+             | If (bt, arity, then_, else_) -> If (bt, arity,
+                                               List.map then_ ~f:drop_labels,
+                                                   List.map else_ ~f:drop_labels)
+             | Call (arity, f) -> Call (arity, f)
+             | CallIndirect (arity, f) -> CallIndirect (arity, f)
+             | Br n -> Br n
+             | BrIf n -> BrIf n
+             | BrTable (l, n) -> BrTable (l, n)
+             | Return -> Return
+             | Unreachable -> Unreachable
+             | Merge -> Merge }
 
 let clear_annotation (i : 'a t) : unit t =
   map_annotation i ~f:(fun _ -> (), ())

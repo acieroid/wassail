@@ -64,6 +64,10 @@ let of_children_map (entry : int) (children_map : (int * int list) list) : t =
     entry;
     nodes = IntSet.of_list (IntMap.keys children) }
 
+(** Constructs a tree from a single node without any child *)
+let of_node (node : int) : t =
+  of_children_map node [(node, [])]
+
 (** Extract the parent of a node in constant time *)
 let parent (tree : t) (node : int) : int option =
   if node = tree.entry then
@@ -74,6 +78,14 @@ let parent (tree : t) (node : int) : int option =
 let parent_exn (tree : t) (node : int) : int = match parent tree node with
   | Some p -> p
   | None -> failwith "Node has no parent"
+
+(** Changes the parent of the tree *)
+let set_root_parent (new_parent : int) (tree : t) : t = {
+  entry = new_parent;
+  nodes = IntSet.add tree.nodes new_parent;
+  parent = IntMap.add_exn tree.parent ~key:tree.entry ~data:new_parent;
+  children = IntMap.add_exn tree.children ~key:new_parent ~data:(IntSet.singleton tree.entry);
+}
 
 (** Changes the parent of a node *)
 let set_parent (tree : t) (node : int) (new_parent : int) : t =
@@ -133,7 +145,36 @@ let nca (tree : t) (node1 : int) (node2 : int) : int option =
             Some n (* nearest common ancestor found *)
           | None -> acc)
 
+(** Merge multiple distinct trees, constructing a new tree with the given (new) node as parent *)
+let merge (ts : t list) (parent : int) : t = match ts with
+  | [] -> of_node parent
+  | t :: [] -> set_root_parent parent t
+  | _ :: _ ->
+    let roots = List.map ts ~f:(fun t -> t.entry) in
+    let temp_tree = List.reduce_exn ts ~f:(fun t1 t2 -> {
+          children = IntMap.merge t1.children t2.children ~f:(fun ~key:_ v -> match v with
+              | `Both _ -> failwith "Tree.merge cannot merge trees that share nodes"
+              | `Left v | `Right v -> Some v);
+          parent = IntMap.merge t1.parent t2.parent ~f:(fun ~key:_ v -> match v with
+              | `Both _ -> failwith "Tree.merge cannot merge trees that share nodes"
+              | `Left v | `Right v -> Some v);
+          entry = parent;
+          nodes = IntSet.union t1.nodes t2.nodes
+        }) in
+    {
+      entry = parent;
+      nodes = IntSet.add temp_tree.nodes parent;
+      children = IntMap.add_exn temp_tree.children ~key:parent ~data:(IntSet.of_list roots);
+      parent = List.fold_left roots ~init:temp_tree.parent ~f:(fun t root ->
+          IntMap.add_exn t ~key:root ~data:parent);
+    }
+
 module Test = struct
+  let%test "tree construction from a single node" =
+    let actual = of_node 0 in
+    let expected = of_children_map 0 [(0, [])] in
+    check_equality ~actual ~expected
+
   let%test "revert tree computation" =
     let entry : int = 0 in
     let tree : IntSet.t IntMap.t = IntMap.map ~f:IntSet.of_list (IntMap.of_alist_exn [(0, [1; 2]); (1, [3; 4]); (2, [5]); (3, []); (4, []); (5, [])]) in
@@ -141,9 +182,18 @@ module Test = struct
     let expected : int IntMap.t = IntMap.of_alist_exn [(1, 0); (3, 1); (4, 1); (2, 0); (5, 2)] in
     IntMap.equal Int.(=) actual expected
 
-  let%test "rtree nearest common ancestor"=
+  let%test "rtree nearest common ancestor" =
     let tree : t = of_children_map 0 [(0, [1; 2]); (1, [3; 4]); (2, [5]); (3, []); (4, []); (5, [])] in
     (match nca tree 3 1 with Some 1 -> true | _ -> false) &&
     (match nca tree 3 4 with Some 1 -> true | _ -> false) &&
     (match nca tree 0 4 with Some 0 -> true | _ -> false)
+
+  let%test "merging two different trees" =
+    let t1 = of_children_map 0 [(0, [1; 2]); (1, [3]); (2, []); (3, [])] in
+    let t2 = of_children_map 4 [(4, [5]); (5, [6; 7]); (6, []); (7, [])] in
+    let actual = merge [t1; t2] 8 in
+    let expected = of_children_map 8 [(0, [1; 2]); (1, [3]); (2, []); (3, []);
+                                      (4, [5]); (5, [6; 7]); (6, []); (7, []);
+                                      (8, [0; 4])] in
+    check_equality ~actual ~expected
 end

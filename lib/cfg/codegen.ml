@@ -40,7 +40,8 @@ let new_label () : Instr.Label.t =
    There can be multiple successor for blocks such as br_if etc., but only one
    is returned: the one that is important for generating the code in the right
    order (e.g., the one that does not perform the jump).  *)
-let rec codegen_block (cfg : unit Cfg.t) (block : unit Basic_block.t) (visited : IntSet.t) : unit Instr.t list * int option =
+let rec codegen_block (_cfg : unit Cfg.t) (_block : unit Basic_block.t) (_visited : IntSet.t) : unit Instr.t list * int option =
+  failwith "TODO" (* 
   if IntSet.mem visited block.idx then
     [], None
   else
@@ -51,7 +52,7 @@ let rec codegen_block (cfg : unit Cfg.t) (block : unit Basic_block.t) (visited :
       let successors = Cfg.successors cfg block.idx in
       assert (List.length successors = 1);
       let succ = List.hd_exn successors in
-      let exit_block = Cfg.corresponding_exit_exn cfg block.idx in
+      let exit_block = Lexical_successor_tree.block_exit cfg block.idx in
       let (body, _) = codegen_until cfg succ exit_block (IntSet.add visited block.idx) in
       [control (Instr.Loop (bt, arity, body))], Some exit_block
     | Some BlockEntry (bt, arity) ->
@@ -94,7 +95,7 @@ let rec codegen_block (cfg : unit Cfg.t) (block : unit Basic_block.t) (visited :
           | _ -> failwith "Should not happen"
         end
       | Control { instr; _ } ->
-        [control instr], relevant_successor cfg block
+        [control instr], relevant_successor cfg block *)
 and codegen_until (cfg : unit Cfg.t) (start_block_idx : int) (stop_block_idx : int) (visited : IntSet.t) : unit Instr.t list * int option =
   let return l = List.concat (List.rev l) in
   let rec loop (instrs : unit Instr.t list list) (block_idx : int) (visited : IntSet.t) : unit Instr.t list * int option =

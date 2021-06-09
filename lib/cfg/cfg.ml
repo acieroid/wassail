@@ -55,7 +55,7 @@ type 'a t = {
   entry_block: int;
   exit_block: int;
   loop_heads: IntSet.t;
-  entry_exit: int IntMap.t;
+  lst: Lexical_successor_tree.t;
 }
 [@@deriving compare, equal]
 
@@ -296,9 +296,6 @@ let insert_block_between (cfg : 'a t) (src : int) (dst : int) (new_block : 'a Ba
 
 let has_edge (cfg : 'a t) (src : int) (dst : int) : bool =
   List.exists (Edges.from cfg.edges src) ~f:(fun (x, _) -> x = dst)
-
-let corresponding_exit_exn (cfg : 'a t) (block_idx : int) : int =
-  IntMap.find_exn cfg.entry_exit block_idx
 
 (* We need to sometimes keep nodes that are empty and have no predecessors, in
    order to remember block/loop exits. This is to remove them when needed *)

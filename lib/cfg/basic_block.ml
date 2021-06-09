@@ -19,7 +19,8 @@ module T = struct
   type 'a t = {
     idx: int; (** Its index *)
     content: 'a block_content; (** Its content *)
-    block_kind : block_kind option (** Information on whether this block is a block/loop entry/exit *)
+    block_kind : block_kind option; (** Information on whether this block is a block/loop entry/exit *)
+    label : Instr.Label.t option; (** If the basic block corresponds to a block/loop/if, this is the corresponding label *)
   }
   [@@deriving sexp, compare, equal]
 end
