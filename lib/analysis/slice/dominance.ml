@@ -174,8 +174,11 @@ module Test = struct
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
+    Printf.printf "spec analysis\n";
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    Printf.printf "post dom\n";
     let actual = cfg_post_dominator cfg in
+    Printf.printf "expected\n";
     let expected = Tree.of_children_map 7 [(1, []); (2, [1]); (3, [2]); (4, []); (5, [3; 4]); (6, [5]); (7, [6])] in
     Tree.check_equality ~actual ~expected
 

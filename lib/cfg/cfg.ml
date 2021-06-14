@@ -57,7 +57,7 @@ type 'a t = {
   loop_heads: IntSet.t;
   lst: Lexical_successor_tree.t;
   instructions: Instr.Label.t list;
-  label_to_instr: 'a Instr.t Instr.Label.Map.t;
+  label_to_instr: unit Instr.t Instr.Label.Map.t;
 }
 [@@deriving compare, equal]
 
@@ -183,13 +183,12 @@ let all_annots (cfg : 'a t) : 'a list =
 let map_annotations (cfg : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
   { cfg with
     basic_blocks = IntMap.map ~f:(fun b -> Basic_block.map_annotations b ~f) cfg.basic_blocks;
-    label_to_instr = Instr.Label.Map.map ~f:(fun instr -> Instr.map_annotation instr ~f) cfg.label_to_instr;
   }
 
 let clear_annotations (cfg : 'a t) : unit t =
   map_annotations cfg ~f:(fun _ -> (), ())
 
-let body (cfg : 'a t) : 'a Instr.t list =
+let body (cfg : 'a t) : unit Instr.t list =
   List.map cfg.instructions ~f:(fun l -> Instr.Label.Map.find_exn cfg.label_to_instr l)
 
 let rec state_before_block (cfg : 'a t) (block_idx : int) (entry_state : 'a) : 'a =
