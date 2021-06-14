@@ -342,11 +342,13 @@ let slice_cfg =
   Command.basic
     ~summary:"Slice a CFG at the given instruction"
     Command.Let_syntax.(
-      let%map_open filename = anon ("file" %: string)
-      and funidx = anon ("fun" %: int32)
-      and instr = anon ("instr" %: int)
-      and dot_filename = anon ("out" %: string) in
+      let%map_open _filename = anon ("file" %: string)
+      and _funidx = anon ("fun" %: int32)
+      and _instr = anon ("instr" %: int)
+      and _dot_filename = anon ("out" %: string) in
       fun () ->
+        failwith "TODO: produce the slice, reparse it into a CFG"
+          (*
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
         Spec_inference.use_const := false;
@@ -365,6 +367,7 @@ let slice_cfg =
               Out_channel.output_string ch (Cfg.to_dot annotated_sliced_cfg
                                               ~annot_str:Spec.to_dot_string
                                               ~extra_data:(use_def_annot ^ control_annot)));
+*)
     )
 
 let slice =
@@ -385,15 +388,9 @@ let slice =
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
         Log.debug "Performing slicing";
-        let instructions = Slicing.slice_alternative (Cfg.body (Cfg.clear_annotations cfg)) (Slicing.instructions_to_keep cfg slicing_criterion) in
+        let funcinst = Slicing.slice_alternative_to_funcinst cfg slicing_criterion in
         Log.debug "Producing module";
-        let module_ = Wasm_module.replace_func module_ funidx
-            { idx = cfg.idx;
-              name = Some cfg.name;
-              type_idx = cfg.type_idx;
-              typ = (cfg.arg_types, cfg.return_types);
-              code = { locals = cfg.local_types; body = instructions } }
-        in
+        let module_ = Wasm_module.replace_func module_ funidx funcinst in
         Log.debug "Saving to file";
         Out_channel.with_file outfile
           ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_)))
@@ -430,9 +427,8 @@ let random_slice_report =
           let slicing_criterion = Array.get labels (Random.int (Array.length labels)) in
           try
             let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
-            let instrs_to_keep = Slicing.instructions_to_keep cfg slicing_criterion in
-            let sliced_cfg = Slicing.slice cfg ~instrs:instrs_to_keep slicing_criterion in
-            let sliced_func = Codegen.cfg_to_func_inst sliced_cfg in
+            let instrs_to_keep = Slicing.instructions_to_keep cfg slicing_criterion in (* TODO: these are computed again on the next line, manage to have the computation happen only once *)
+            let sliced_func = Slicing.slice_alternative_to_funcinst cfg slicing_criterion in
             let sliced_labels = all_labels sliced_func.code.body in
             Printf.printf "success\t%s\t%ld\t%s\t%d/%d\t%d/%d\n"
               filename

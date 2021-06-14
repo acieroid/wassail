@@ -1,5 +1,4 @@
 open Core_kernel
-open Helpers
 
 module InSlice = struct
   module T = struct
@@ -155,6 +154,15 @@ let rec slice_alternative (original_instructions : unit Instr.t list) (instructi
       loop rest (instr :: to_remove_rev) in
   loop original_instructions []
 
+let slice_alternative_to_funcinst (cfg : Spec.t Cfg.t) (slicing_criterion : Instr.Label.t) : Func_inst.t =
+  let instructions = slice_alternative (Cfg.body (Cfg.clear_annotations cfg)) (instructions_to_keep cfg slicing_criterion) in
+  { idx = cfg.idx;
+    name = Some cfg.name;
+    type_idx = cfg.type_idx;
+    typ = (cfg.arg_types, cfg.return_types);
+    code = { locals = cfg.local_types; body = instructions } }
+
+(* 
 (** Construct a dummy block that has the given net effect on the stack
    size. Uses the given block for every field that is not the list of
    instructions, in order to construct the new block. This enables keeping the
@@ -369,7 +377,8 @@ let slice (cfg : Spec.t Cfg.t) ?instrs:(instructions_in_slice : Instr.Label.Set.
   let (cfg_sliced, _removed) = slicing_loop [cfg.entry_block] IntSet.empty (remove_annotations cfg) IntMap.empty in
   Log.debug "Performing final adaptations";
   add_missing_merge_blocks (adapt_blocks_for_effect cfg cfg_sliced)
-
+*)
+  
 (** Return the indices of each call_indirect instructions *)
 let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : Instr.Label.t list =
   List.filter_map (Cfg.all_instructions_list cfg) ~f:(fun instr -> match instr with
@@ -490,7 +499,7 @@ module Test = struct
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-    let module_, cfg = build_cfg "(module
+    let _, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
     memory.size     ;; Instr 0
@@ -511,8 +520,7 @@ module Test = struct
    (table (;0;) 1 1 funcref)
    (memory (;0;) 2)
    (global (;0;) (mut i32) (i32.const 66560)))" in
-    let sliced_cfg = slice cfg (lab 9) in
-    let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+    let _funcinst = slice_alternative_to_funcinst cfg (lab 9) in
     (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
     ()
 
@@ -520,7 +528,7 @@ module Test = struct
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-     let module_, cfg = build_cfg "(module
+     let _, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
     block           ;; Instr 0
@@ -537,15 +545,14 @@ module Test = struct
       i32.add       ;; Instr 8 ;; [i7]
     end)
    )" in
-     let sliced_cfg = slice cfg (lab 8) in
-     let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+     let _funcinst = slice_alternative_to_funcinst cfg (lab 8) in
      ()
 
    let%test_unit "slicing intra-block block containing a single drop - variant" =
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-     let module_, cfg = build_cfg "(module
+     let _, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
     block           ;; Instr 0
@@ -562,15 +569,14 @@ module Test = struct
       i32.add       ;; Instr 9
     end)
    )" in
-     let sliced_cfg = slice cfg (lab 9) in
-     let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+     let _funcinst = slice_alternative_to_funcinst cfg (lab 9) in
      ()
 
    let%test_unit "slicing with a block containing a single drop - variant" =
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-     let module_, cfg = build_cfg "(module
+     let _, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
     block           ;; Instr 0
@@ -587,15 +593,27 @@ module Test = struct
       i32.add       ;; Instr 9
     end)
    )" in
-     let sliced_cfg = slice cfg (lab 9) in
-     let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
+     let _funcinst = slice_alternative_to_funcinst cfg (lab 9) in
      ()
 
-   let%test "slicing intra-block should only include the relevant instructions" =
+   let check_slice original sliced fidx criterion =
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-     let _, cfg = build_cfg "(module
+     let _, cfg = build_cfg ~fidx original in
+     let expected = (slice_alternative_to_funcinst cfg (lab ~fidx criterion)).code.body in
+     let _, expected_cfg = build_cfg ~fidx sliced in
+     let actual = Cfg.body expected_cfg in
+     List.equal (fun x y ->
+         if Instr.equal (fun () () -> true) (Instr.drop_labels x) (Instr.drop_labels y) then
+           true
+         else begin
+           Printf.printf "instruction not equal: %s != %s\n" (Instr.to_string x) (Instr.to_string y);
+           false
+         end) expected actual
+
+   let%test "slicing intra-block should only include the relevant instructions" =
+     let original = "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
     i32.const 0     ;; Instr 0
@@ -608,18 +626,20 @@ module Test = struct
    (table (;0;) 1 1 funcref)
    (memory (;0;) 2)
    (global (;0;) (mut i32) (i32.const 66560)))" in
-     let sliced_cfg = slice cfg (lab 2) in
-     let instrs = Cfg.all_instructions sliced_cfg in
-     (* The slice should not contain instructions 3, 4, and 5 *)
-     not (Instr.Label.Map.mem instrs (lab 3)) &&
-     not (Instr.Label.Map.mem instrs (lab 4)) &&
-     not (Instr.Label.Map.mem instrs (lab 5))
+     let sliced = "(module
+   (type (;0;) (func (param i32) (result i32)))
+   (func (;test;) (type 0) (param i32) (result i32)
+    i32.const 0     ;; Instr 0
+    i32.const 1     ;; Instr 1
+    i32.add         ;; Instr 2
+   )
+   (table (;0;) 1 1 funcref)
+   (memory (;0;) 2)
+   (global (;0;) (mut i32) (i32.const 66560)))" in
+     check_slice original sliced 0l 2
 
-   let%test_unit "slicing with memory does not fail" =
-     Spec_inference.propagate_globals := false;
-     Spec_inference.propagate_locals := false;
-     Spec_inference.use_const := false;
-     let module_, cfg = build_cfg "(module
+   let%test "slicing with memory does not fail" =
+     let original =  "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
     memory.size     ;; Instr 0
@@ -632,12 +652,20 @@ module Test = struct
    (table (;0;) 1 1 funcref)
    (memory (;0;) 2)
    (global (;0;) (mut i32) (i32.const 66560)))" in
-     let sliced_cfg = slice cfg (lab 5) in
-     let _annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-     ()
+     let sliced = "(module
+   (type (;0;) (func (param i32) (result i32)))
+   (func (;test;) (type 0) (param i32) (result i32)
+    memory.size     ;; Instr 3
+    memory.size     ;; Instr 4
+    i32.store       ;; Instr 5
+   )
+   (table (;0;) 1 1 funcref)
+   (memory (;0;) 2)
+   (global (;0;) (mut i32) (i32.const 66560)))" in
+     check_slice original sliced 0l 5
 
-   let%test "slicing with memory contains the load instructions" =
-     let _, cfg = build_cfg "(module
+   let%test "slicing with memory contains the relevant store instruction" =
+     let original = "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     memory.size     ;; Instr 0
@@ -646,15 +674,10 @@ module Test = struct
     memory.size     ;; Instr 3
     i32.load)       ;; Instr 4
   )" in
-     let sliced_cfg = slice cfg (lab 4) in
-     let instrs = Cfg.all_instructions sliced_cfg in
-     Instr.Label.Map.mem instrs (lab 2)
+     check_slice original original (* all instructions are kept *) 0l 4
 
-   let%test "slice with merge block should not contain non-relevant instructions" =
-     Spec_inference.propagate_globals := false;
-     Spec_inference.propagate_locals := false;
-     Spec_inference.use_const := false;
-     let _, cfg = build_cfg "(module
+   let%test "slice with merge block should not contain irrelevant instructions" =
+     let original = "(module
   (type (;0;) (func (param i32 i32) (result i32)))
   (func (;test;) (type 0) (param i32 i32) (result i32)
     local.get 0 ;; Instr 0
@@ -664,19 +687,19 @@ module Test = struct
     end
     local.get 1) ;; Instr 4
   )" in
-     let sliced_cfg = slice cfg (lab 4) in
-     let instrs = Cfg.all_instructions sliced_cfg in
-     (* The slice should only contain instruction 4 among the original instructions *)
-     not (Instr.Label.Map.mem instrs (lab 0)) &&
-     not (Instr.Label.Map.mem instrs (lab 1)) &&
-     not (Instr.Label.Map.mem instrs (lab 2)) &&
-     not (Instr.Label.Map.mem instrs (lab 3))
+     (* The slice should only contain instruction 4 among the original instructions.
+     It can contain an empty block/if though. *)
+     let sliced = "(module
+  (type (;0;) (func (param i32 i32) (result i32)))
+  (func (;test;) (type 0) (param i32 i32) (result i32)
+    if ;; Instr 1
+    end
+    local.get 1) ;; Instr 4
+  )" in
+     check_slice original sliced 0l 4
 
    let%test "slice with merge block should not contain non-relevant instructions, variation" =
-     Spec_inference.propagate_globals := false;
-     Spec_inference.propagate_locals := false;
-     Spec_inference.use_const := false;
-     let _, cfg = build_cfg "(module
+     let original = "(module
   (type (;0;) (func (param i32 i32) (result i32)))
   (func (;test;) (type 0) (param i32 i32) (result i32)
     local.get 0 ;; Instr 0
@@ -689,17 +712,23 @@ module Test = struct
     end
     local.get 1) ;; Instr 6
   )" in
-     let sliced_cfg = slice cfg (lab 6) in
-     let instrs = Cfg.all_instructions sliced_cfg in
      (* The slice should not contain instructions 2 and 3 *)
-     not (Instr.Label.Map.mem instrs (lab 2)) &&
-     not (Instr.Label.Map.mem instrs (lab 3))
+     let sliced =
+       "(module
+  (type (;0;) (func (param i32 i32) (result i32)))
+  (func (;test;) (type 0) (param i32 i32) (result i32)
+    local.get 0 ;; Instr 0
+    if ;; Instr 1
+    else
+      i32.const 42 ;; Instr 4
+      local.set 1 ;; Instr 5
+    end
+    local.get 1) ;; Instr 6
+  )" in
+     check_slice original sliced 0l 6
 
    let%test "slice on the example from Agrawal 1994 (Fig. 3) should be correct" =
-     Spec_inference.propagate_globals := false;
-     Spec_inference.propagate_locals := false;
-     Spec_inference.use_const := false;
-     let _, cfg = build_cfg ~fidx:3l "(module
+     let original = "(module
   (type (;0;) (func))
   (type (;1;) (func (result i32)))
   (type (;1;) (func (param i32) (result i32)))
@@ -761,18 +790,72 @@ module Test = struct
     call 2 ;; f(positives) (was: write(positives)) --> Instr 38 should be part of the slice
     drop
     ))" in
-     let lab = lab ~fidx:3l in
-     let sliced_cfg = slice cfg (lab 38) in
-     let actual = Instr.Label.Set.of_list (Instr.Label.Map.keys (Cfg.all_instructions sliced_cfg)) in
-     let expected = Instr.Label.Set.of_list [lab 2; lab 3; lab 6; lab 8; lab 16; lab 17; lab 18;
-                                             lab 33; lab 37; lab 38] in
-     Instr.Label.Set.is_subset expected ~of_:actual
+     let sliced = "(module
+  (type (;0;) (func))
+  (type (;1;) (func (result i32)))
+  (type (;1;) (func (param i32) (result i32)))
+  (func (;eof;) (type 1) (result i32)
+    i32.const 0)
+  (func (;read;) (type 1) (result i32)
+    i32.const 0)
+  (func (;f;) (type 2) (param i32) (result i32)
+    local.get 0)
+  (func (;test;) (type 0)
+    (local i32 i32 i32)
+    ;; Local 0: sum
+    ;; Local 1: positive
+    ;; Local 2: x
+    block ;; block 0
+      loop ;; loop 0 (L3)
+        call 0 ;; eof() --> Instr 2 should be part of the slice
+        br_if 1 ;; goto end of block 0 if eof() --> Instr 3 should be part of the slice
+        block ;; block 1
+          block ;; block 2
+            call 1 ;; read() --> Instr 6 should be part of the slice
+            ;; local.tee 2 ;; x = read()
+            br_if 0 ;; jump to end of block 2 (L8) if x != 0 (was: x > 0) --> Instr 8 should be part of the slice
+            ;; local.get 2
+            ;; call 2 ;; f(x)
+            ;; local.get 0
+            ;; i32.add ;; sum + f(x)
+            ;; local.set 0 ;; sum = sum + f(x)
+            ;; br 1 ;; jump to end of block 1 (L13)
+          end ;; end of block 2 (L8)
+          block ;; block 3
+            local.get 1 ;; --> Instr 16 should be part of the slice
+            i32.const 1 ;; --> Instr 17 should be part of the slice
+            i32.add     ;; --> Instr 18 should be part of the slice
+            ;; local.set 1 ;; positives = positives + 1 --> should be part of the slice
+            ;; local.get 2
+            ;; br_if 0 ;; jump to end of block 3 (L12) if x != 0 (was: x%2 != 0)
+            ;; local.get 2
+            ;; call 2 ;; f(x) (was: f2(x))
+            ;; local.get 0
+            ;; i32.add
+            ;; local.set 0 ;; sum = sum + f2(x) (was + f2(x))
+            ;; br 1 ;; jump to end of block 1 (L13)
+          end ;; end of block 3 (L12)
+          ;; local.get 2
+          ;; call 2
+          ;; local.get 0
+          ;; i32.add
+          ;; local.set 0 ;; sum = sum + f(x) (was + f3(x))
+        end ;; end of block 1 (L13)
+        br 0 ;; jump to beginning of loop 0 (L3) ;; --> Instr 33 should be part of the slice (with Agrawal's algorithm, not the conventional one!)
+      end ;; end of loop 0
+    end ;; end of block 0 (L14)
+    ;; local.get 0
+    ;; call 2 ;; f(sum) (was: write(sum))
+    drop
+    local.get 1 ;; --> Instr 37 should be part of the slice
+    ;; The following instruction is the slicing criterion, i.e., instruction number 38
+    call 2 ;; f(positives) (was: write(positives)) --> Instr 38 should be part of the slice
+    drop
+    ))" in
+     check_slice original sliced 3l 38
 
    let%test "slice on the example from Agrawal 1994 (Fig. 5) should be correct" =
-     Spec_inference.propagate_globals := false;
-     Spec_inference.propagate_locals := false;
-     Spec_inference.use_const := false;
-     let _, cfg = build_cfg ~fidx:3l "(module
+     let original = "(module
   (type (;0;) (func))
   (type (;1;) (func (result i32)))
   (type (;1;) (func (param i32) (result i32)))
@@ -832,12 +915,67 @@ module Test = struct
     call 2 ;; f(positives) (was: write(positives)) --> Instr 37, part of the slice
     drop
     ))" in
-     let lab = lab ~fidx:3l in
-     let sliced_cfg = slice cfg (lab 37) in
-     let actual = Instr.Label.Set.of_list (Instr.Label.Map.keys (Cfg.all_instructions sliced_cfg)) in
-     let expected = Instr.Label.Set.of_list [lab 2; lab 3; lab 4; lab 5; lab 6;
-                                             lab 14; lab 18; lab 36; lab 37] in
-     Instr.Label.Set.is_subset expected ~of_:actual
+     let sliced = "(module
+  (type (;0;) (func))
+  (type (;1;) (func (result i32)))
+  (type (;1;) (func (param i32) (result i32)))
+  (func (;eof;) (type 1) (result i32)
+    i32.const 0)
+  (func (;read;) (type 1) (result i32)
+    i32.const 0)
+  (func (;f;) (type 2) (param i32) (result i32)
+    local.get 0)
+  (func (;test;) (type 0)
+    (local i32 i32 i32)
+    ;; Local 0: sum
+    ;; Local 1: positive
+    ;; Local 2: x
+    block ;; block 0
+      loop ;; loop 0 (L3)
+        call 0 ;; eof() ;; --> Instr 2, part of the slice
+        i32.const 0 ;; --> Instr 3, part of the slice
+        i32.ne ;; --> Instr 4, part of the slice
+        br_if 1 ;; goto end of block 0 if !eof() --> Instr 5, part of the slice
+        call 1 ;; read() ;; --> Instr 6, part of the slice
+        local.tee 2 ;; x = read()
+        if ;; if (x != 0) (was if (x <= 0)) --> part of the slice
+          ;; local.get 2
+          ;; call 2 ;; f(x)
+          ;; local.get 0
+          ;; i32.add ;; sum + f(x)
+          ;; local.set 0 ;; sum = sum + f(x)
+          br 1 ;; jump to the beggining of loop 0 (L3) ;; --> Instr 14, part of the slice (with Agrawal's additions)
+        end
+        local.get 1 ;; --> part of the slice
+        i32.const 1 ;; --> part of the slice
+        i32.add     ;; --> part of the slice
+        local.set 1 ;; positives = positives + 1 --> Instr 18,  part of the slice
+        ;; local.get 2
+        if ;; if (x != 0) (was: x%2 != 0)
+          ;; local.get 2
+          ;; call 2 ;; f(x) (was: f2(x))
+          ;; local.get 0
+          ;; i32.add
+          ;; local.set 0 ;; sum = sum + f2(x) (was + f2(x))
+          ;; br 1 ;; jump to beginning of loop (L3)
+        end
+        ;; local.get 2
+        ;; call 2
+        ;; local.get 0
+        ;; i32.add
+        ;; local.set 0 ;; sum = sum + f(x) (was + f3(x))
+        ;; br 0 ;; jump to beginning of loop 0 (L3)
+      end ;; end of loop 0
+    end ;; end of block 0 (L14)
+    ;; local.get 0
+    ;; call 2 ;; f(sum) (was: write(sum))
+    ;; drop
+    local.get 1 ;; --> Instr 36, part of the slice
+    ;; The following instruction is the slicing criterion, i.e., instruction number 37
+    call 2 ;; f(positives) (was: write(positives)) --> Instr 37, part of the slice
+    ;; drop
+    ))" in
+     check_slice original sliced 3l 37
 
    let%test_unit "slicing function 14 of trmm" =
      let module_ = Wasm_module.of_file "../../../benchmarks/polybench-clang/trmm.wat" in
@@ -845,20 +983,18 @@ module Test = struct
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
      let cfg = Spec_analysis.analyze_intra1 module_ 14l in
-     let vars_before_slicing = Var_prop.count_vars cfg in
      List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
         (* instr_idx is the label of a call_indirect instruction, slice it *)
         Spec_inference.propagate_locals := false;
         Spec_inference.propagate_globals := false;
         Spec_inference.use_const := false;
-        let sliced_cfg = slice cfg instr_idx in
+        let funcinst = slice_alternative_to_funcinst cfg instr_idx in
+        let module_ = Wasm_module.replace_func module_ 14l funcinst in
         (* We should be able to re-annotate the graph *)
         Spec_inference.propagate_locals := true;
         Spec_inference.propagate_globals := true;
         Spec_inference.use_const := true;
-        let annotated_slice_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-        let vars_after_slicing = Var_prop.count_vars (Var_prop.var_prop annotated_slice_cfg) in
-        assert (vars_after_slicing < vars_before_slicing);
+        let _new_cfg = Spec_analysis.analyze_intra1 module_ 14l in
         ())
 
    let%test_unit "slicing function 22 of trmm" =
@@ -867,75 +1003,22 @@ module Test = struct
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
      let cfg = Spec_analysis.analyze_intra1 module_ 22l in
-     let vars_before_slicing = Var_prop.count_vars cfg in
      List.iter (find_call_indirect_instructions cfg) ~f:(fun instr_idx ->
          (* instr_idx is the label of a call_indirect instruction, slice it *)
          Spec_inference.propagate_locals := false;
          Spec_inference.propagate_globals := false;
          Spec_inference.use_const := false;
-         let sliced_cfg = slice cfg instr_idx in
+         let funcinst = slice_alternative_to_funcinst cfg instr_idx in
+         let module_ = Wasm_module.replace_func module_ 22l funcinst in
          (* We should be able to re-annotate the graph *)
          Spec_inference.propagate_locals := true;
          Spec_inference.propagate_globals := true;
          Spec_inference.use_const := true;
-         let annotated_slice_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-         let vars_after_slicing = Var_prop.count_vars (Var_prop.var_prop annotated_slice_cfg) in
-         assert (vars_after_slicing < vars_before_slicing);
+         let _new_cfg = Spec_analysis.analyze_intra1 module_ 22l in
          ())
 
-   let%test "slicing should produce code that can be generated with codegen" =
-     Spec_inference.propagate_globals := false;
-     Spec_inference.propagate_locals := false;
-     Spec_inference.use_const := false;
-     let _, cfg = build_cfg "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;0;) (type 0) (param i32) (result i32)
-    (local i32)
-    local.get 0
-    i32.const 40503
-    i32.mul
-    i32.const 255
-    i32.and
-    i32.const 1
-    i32.shl
-    local.set 1
-    loop  ;; label = @1
-      local.get 0
-      local.get 1
-      i32.load16_u
-      i32.ne
-      if  ;; label = @2
-        local.get 1
-        i32.const 2
-        i32.add
-        local.tee 1
-        i32.const 512
-        i32.ge_s
-        if  ;; label = @3
-          i32.const 255
-          return
-        end
-        br 1 (;@1;)
-      end
-    end
-    local.get 1
-    i32.const 1
-    i32.shr_s
-    i32.load8_u offset=512)
-   )" in
-     let sliced_cfg = slice cfg (lab 1) in
-     let actual = Instr.Label.Set.of_list (Instr.Label.Map.keys (Cfg.all_instructions sliced_cfg)) in
-     let expected = Instr.Label.Set.of_list [] in
-     (* This should not throw an exception *)
-     let _generated = Codegen.codegen (Cfg.map_annotations ~f:(fun _ -> (), ()) sliced_cfg) in
-     Instr.Label.Set.is_subset expected ~of_:actual
-
    let%test "slicing of SCAM mug example (variant 1) should produce the full program as the slice" =
-     Spec_inference.propagate_globals := false;
-     Spec_inference.propagate_locals := false;
-     Spec_inference.use_const := false;
-     let fidx = 5l in
-     let _, cfg = build_cfg ~fidx "(module
+     let original = "(module
   (type (;0;) (func))
   (type (;1;) (func (result i32)))
   (type (;2;) (func (param i32) (result i32)))
@@ -976,17 +1059,10 @@ module Test = struct
       end
     end)
    )" in
-     let sliced_cfg = slice cfg (lab ~fidx 8) in
-     let expected = Codegen.codegen (Cfg.map_annotations ~f:(fun _ -> (), ()) cfg) in
-     let actual = Codegen.codegen (Cfg.map_annotations ~f:(fun _ -> (), ()) sliced_cfg) in
-     List.equal (Instr.equal (fun () () -> true)) expected actual
+     check_slice original original 5l 8
 
    let%test "slicing of SCAM mug example (variant 2) should produce the full program as the slice" =
-     Spec_inference.propagate_globals := false;
-     Spec_inference.propagate_locals := false;
-     Spec_inference.use_const := false;
-     let fidx = 5l in
-     let _, cfg = build_cfg ~fidx "(module
+     let original = "(module
   (type (;0;) (func))
   (type (;1;) (func (result i32)))
   (type (;2;) (func (param i32) (result i32)))
@@ -1028,17 +1104,10 @@ module Test = struct
       end
     end)
   )" in
-     let sliced_cfg = slice cfg (lab ~fidx 11) in
-     let expected = Codegen.codegen (Cfg.map_annotations ~f:(fun _ -> (), ()) cfg) in
-     let actual = Codegen.codegen (Cfg.map_annotations ~f:(fun _ -> (), ()) sliced_cfg) in
-     List.equal (Instr.equal (fun () () -> true)) expected actual
+     check_slice original original 5l 11
 
    let%test "slicing of Montréal boat example should produce the full program as the slice" =
-     Spec_inference.propagate_globals := false;
-     Spec_inference.propagate_locals := false;
-     Spec_inference.use_const := false;
-     let fidx = 5l in
-     let _, cfg = build_cfg ~fidx "(module
+     let original = "(module
   (type (;0;) (func))
   (type (;1;) (func (result i32)))
   (type (;2;) (func (param i32) (result i32)))
@@ -1081,27 +1150,7 @@ module Test = struct
       local.get 0 ;; Slicing criterion
       drop
     end))" in
-     let sliced_cfg = slice cfg (lab ~fidx 19) in
-     let expected = Codegen.codegen (Cfg.map_annotations ~f:(fun _ -> (), ()) cfg) in
-     let actual = Codegen.codegen (Cfg.map_annotations ~f:(fun _ -> (), ()) sliced_cfg) in
-     List.equal (Instr.equal (fun () () -> true)) expected actual
-
-   let check_slice original sliced fidx criterion =
-     Spec_inference.propagate_globals := false;
-     Spec_inference.propagate_locals := false;
-     Spec_inference.use_const := false;
-     let _, cfg = build_cfg ~fidx original in
-     let sliced_cfg = slice cfg (lab ~fidx criterion) in
-     let _, expected_cfg = build_cfg ~fidx sliced in
-     let expected = Codegen.codegen (Cfg.map_annotations ~f:(fun _ -> (), ()) expected_cfg) in
-     let actual = Codegen.codegen sliced_cfg in
-     List.equal (fun x y ->
-         if Instr.equal (fun () () -> true) (Instr.drop_labels x) (Instr.drop_labels y) then
-           true
-         else begin
-           Printf.printf "instruction not equal: %s != %s\n" (Instr.to_string x) (Instr.to_string y);
-           false
-         end) expected actual
+     check_slice original original 5l 19
 
    let word_count ="(module
   (type (;0;) (func))
