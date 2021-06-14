@@ -145,7 +145,7 @@ let rec slice_alternative (original_instructions : unit Instr.t list) (instructi
       (* We keep all kinds of blocks as we don't want to recompute indices (but it would be feasible) *)
       (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = Block (bt, arity, slice_alternative body instructions_to_keep) }] @ loop rest []
     | (Control ({ instr = Loop (bt, arity, body); _ } as instr)) :: rest ->
-      (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = Block (bt, arity, slice_alternative body instructions_to_keep) }] @ loop rest []
+      (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = Loop (bt, arity, slice_alternative body instructions_to_keep) }] @ loop rest []
     | (Control ({ instr = If (bt, arity, then_, else_); _ } as instr)) :: rest ->
       (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = If (bt, arity, slice_alternative then_ instructions_to_keep, slice_alternative else_ instructions_to_keep) }] @ loop rest []
     | instr :: rest when Instr.Label.Set.mem instructions_to_keep (Instr.label instr) ->
@@ -604,6 +604,11 @@ module Test = struct
      let expected = (slice_alternative_to_funcinst cfg (lab ~fidx criterion)).code.body in
      let _, expected_cfg = build_cfg ~fidx sliced in
      let actual = Cfg.body expected_cfg in
+     Printf.printf "expected\n";
+     List.iter expected ~f:(fun i -> Printf.printf "%s\n" (Instr.to_string i));
+     Printf.printf "actual\n";
+     List.iter actual ~f:(fun i -> Printf.printf "%s\n" (Instr.to_string i));
+     Printf.printf "length: %d vs. %d\n" (List.length expected) (List.length actual);
      List.equal (fun x y ->
          if Instr.equal (fun () () -> true) (Instr.drop_labels x) (Instr.drop_labels y) then
            true
@@ -612,6 +617,9 @@ module Test = struct
            false
          end) expected actual
 
+
+
+
    let%test "slicing intra-block should only include the relevant instructions" =
      let original = "(module
    (type (;0;) (func (param i32) (result i32)))
@@ -619,9 +627,10 @@ module Test = struct
     i32.const 0     ;; Instr 0
     i32.const 1     ;; Instr 1
     i32.add         ;; Instr 2
-    i32.const 2     ;; Instr 3
-    i32.const 3     ;; Instr 4
-    i32.add         ;; Instr 5
+    drop            ;; Instr 3
+    i32.const 2     ;; Instr 4
+    i32.const 3     ;; Instr 5
+    i32.add         ;; Instr 6
    )
    (table (;0;) 1 1 funcref)
    (memory (;0;) 2)
@@ -692,6 +701,7 @@ module Test = struct
      let sliced = "(module
   (type (;0;) (func (param i32 i32) (result i32)))
   (func (;test;) (type 0) (param i32 i32) (result i32)
+    i32.const 0
     if ;; Instr 1
     end
     local.get 1) ;; Instr 4
@@ -802,54 +812,28 @@ module Test = struct
     local.get 0)
   (func (;test;) (type 0)
     (local i32 i32 i32)
-    ;; Local 0: sum
-    ;; Local 1: positive
-    ;; Local 2: x
-    block ;; block 0
-      loop ;; loop 0 (L3)
-        call 0 ;; eof() --> Instr 2 should be part of the slice
-        br_if 1 ;; goto end of block 0 if eof() --> Instr 3 should be part of the slice
-        block ;; block 1
-          block ;; block 2
-            call 1 ;; read() --> Instr 6 should be part of the slice
-            ;; local.tee 2 ;; x = read()
-            br_if 0 ;; jump to end of block 2 (L8) if x != 0 (was: x > 0) --> Instr 8 should be part of the slice
-            ;; local.get 2
-            ;; call 2 ;; f(x)
-            ;; local.get 0
-            ;; i32.add ;; sum + f(x)
-            ;; local.set 0 ;; sum = sum + f(x)
-            ;; br 1 ;; jump to end of block 1 (L13)
+    block
+      loop
+        call 0
+        br_if 1
+        block
+          block
+            call 1
+            br_if 0
+            br 1
           end ;; end of block 2 (L8)
-          block ;; block 3
-            local.get 1 ;; --> Instr 16 should be part of the slice
-            i32.const 1 ;; --> Instr 17 should be part of the slice
-            i32.add     ;; --> Instr 18 should be part of the slice
-            ;; local.set 1 ;; positives = positives + 1 --> should be part of the slice
-            ;; local.get 2
-            ;; br_if 0 ;; jump to end of block 3 (L12) if x != 0 (was: x%2 != 0)
-            ;; local.get 2
-            ;; call 2 ;; f(x) (was: f2(x))
-            ;; local.get 0
-            ;; i32.add
-            ;; local.set 0 ;; sum = sum + f2(x) (was + f2(x))
-            ;; br 1 ;; jump to end of block 1 (L13)
-          end ;; end of block 3 (L12)
-          ;; local.get 2
-          ;; call 2
-          ;; local.get 0
-          ;; i32.add
-          ;; local.set 0 ;; sum = sum + f(x) (was + f3(x))
-        end ;; end of block 1 (L13)
-        br 0 ;; jump to beginning of loop 0 (L3) ;; --> Instr 33 should be part of the slice (with Agrawal's algorithm, not the conventional one!)
-      end ;; end of loop 0
-    end ;; end of block 0 (L14)
-    ;; local.get 0
-    ;; call 2 ;; f(sum) (was: write(sum))
-    drop
-    local.get 1 ;; --> Instr 37 should be part of the slice
-    ;; The following instruction is the slicing criterion, i.e., instruction number 38
-    call 2 ;; f(positives) (was: write(positives)) --> Instr 38 should be part of the slice
+          block
+            local.get 1
+            i32.const 1
+            i32.add
+            local.set 1
+          end
+        end
+        br 0
+      end
+    end
+    local.get 1
+    call 2
     drop
     ))" in
      check_slice original sliced 3l 38
@@ -927,54 +911,28 @@ module Test = struct
     local.get 0)
   (func (;test;) (type 0)
     (local i32 i32 i32)
-    ;; Local 0: sum
-    ;; Local 1: positive
-    ;; Local 2: x
-    block ;; block 0
-      loop ;; loop 0 (L3)
-        call 0 ;; eof() ;; --> Instr 2, part of the slice
-        i32.const 0 ;; --> Instr 3, part of the slice
-        i32.ne ;; --> Instr 4, part of the slice
-        br_if 1 ;; goto end of block 0 if !eof() --> Instr 5, part of the slice
-        call 1 ;; read() ;; --> Instr 6, part of the slice
-        local.tee 2 ;; x = read()
-        if ;; if (x != 0) (was if (x <= 0)) --> part of the slice
-          ;; local.get 2
-          ;; call 2 ;; f(x)
-          ;; local.get 0
-          ;; i32.add ;; sum + f(x)
-          ;; local.set 0 ;; sum = sum + f(x)
-          br 1 ;; jump to the beggining of loop 0 (L3) ;; --> Instr 14, part of the slice (with Agrawal's additions)
-        end
-        local.get 1 ;; --> part of the slice
-        i32.const 1 ;; --> part of the slice
-        i32.add     ;; --> part of the slice
-        local.set 1 ;; positives = positives + 1 --> Instr 18,  part of the slice
-        ;; local.get 2
-        if ;; if (x != 0) (was: x%2 != 0)
-          ;; local.get 2
-          ;; call 2 ;; f(x) (was: f2(x))
-          ;; local.get 0
-          ;; i32.add
-          ;; local.set 0 ;; sum = sum + f2(x) (was + f2(x))
-          ;; br 1 ;; jump to beginning of loop (L3)
-        end
-        ;; local.get 2
-        ;; call 2
-        ;; local.get 0
-        ;; i32.add
-        ;; local.set 0 ;; sum = sum + f(x) (was + f3(x))
-        ;; br 0 ;; jump to beginning of loop 0 (L3)
-      end ;; end of loop 0
-    end ;; end of block 0 (L14)
-    ;; local.get 0
-    ;; call 2 ;; f(sum) (was: write(sum))
-    ;; drop
-    local.get 1 ;; --> Instr 36, part of the slice
-    ;; The following instruction is the slicing criterion, i.e., instruction number 37
-    call 2 ;; f(positives) (was: write(positives)) --> Instr 37, part of the slice
-    ;; drop
-    ))" in
+  block
+    loop
+      call 0
+      i32.const 0
+      i32.ne
+      br_if 1
+      call 1
+      if
+        br 1
+      end
+      local.get 1
+      i32.const 1
+      i32.add
+      local.set 1
+      i32.const 0
+      if
+      end
+    end
+  end
+  local.get 1
+  call 2
+  drop))" in
      check_slice original sliced 3l 37
 
    let%test_unit "slicing function 14 of trmm" =
@@ -1238,6 +1196,9 @@ module Test = struct
   i32.ne ;; c != EOF
   if
     loop
+      i32.const 0 ;; superfluous (due to empty if)
+      if ;; superfluous (empty if)
+      end ;; superflous (empty if)
       local.get 0 ;; c
       i32.const 32 ;; ' '
       i32.eq ;; c == ' '
@@ -1285,7 +1246,16 @@ module Test = struct
       i32.add
       local.set 3  ;; nc = nc + 1
       i32.const 0 ;; superfluous
-      drop ;; superfluous
+      if ;; superfluous (empty if)
+      end ;; superfluous (empty if)
+      i32.const 0
+      if 
+      else
+        i32.const 0
+        if
+        end
+      end ;; end of sperfluous instructions
+
       call 0 ;; getchar()
       i32.const 0
       i32.ne ;; c != EOF
@@ -1321,6 +1291,13 @@ module Test = struct
         i32.add
         local.set 1 ;; nl = nl + 1
       end
+      i32.const 0
+      if
+      else
+        i32.const 0
+        if
+        end
+      end
       call 0
       local.tee 0 ;; c = getchar()
       i32.const 0
@@ -1348,6 +1325,9 @@ module Test = struct
   i32.ne ;; c != EOF
   if
     loop
+      i32.const 0
+      if
+      end
       local.get 0
       i32.const 32
       i32.eq ;; c == ' '
@@ -1373,7 +1353,7 @@ module Test = struct
 ))" in
      check_slice word_count slice 1l 45
 
-    let%test "slicing of word count example (slicing criterion 2) should produce the expected slice" =
+    let%test "slicing of word count example (slicing criterion 5) should produce the expected slice" =
      let slice = "(module
 (type (;0;) (func))
 (type (;1;) (func (result i32)))
@@ -1388,6 +1368,16 @@ module Test = struct
   i32.ne ;; c != EOF
   if
     loop
+      i32.const 0
+      if
+      end
+      i32.const 0
+      if
+      else
+        i32.const 0
+        if
+        end
+      end
       call 0 ;; getchar()
       local.tee 0 ;; c = getchar()
       i32.const 0
