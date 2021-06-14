@@ -484,9 +484,13 @@ let net_effect_control (i : ('a control, 'a) labelled) : int =
     -> output-input
   | CallIndirect ((input, output), _) ->
     (output-input)-1
-  | If (_, (_, _), _, _) -> -1 (* only the net effect of the head, which drops the first element of the stack *)
-  | Block (_, (_, _), _)
-  | Loop (_, (_, _), _) -> 0 (* No net effect of the head *)
+  | If (_, (arity_in, arity_out), _, _) ->
+    -1 (* the net effect of the head, which drops the first element of the stack *)
+    + (arity_out - arity_in)
+  | Block (_, (arity_in, arity_out), _)
+  | Loop (_, (arity_in, arity_out), _) ->
+    0 (* No net effect of the head *)
+      + (arity_out - arity_in)
   | Br _ -> 0
   | BrIf _ -> -1
   | BrTable (_, _) -> -1

@@ -141,13 +141,26 @@ let rec slice_alternative (original_instructions : unit Instr.t list) (instructi
   let rec loop (instrs : unit Instr.t list) (to_remove_rev : unit Instr.t list) : unit Instr.t list =
     match instrs with
     | [] -> replace_with_equivalent_instructions (List.rev to_remove_rev)
-    | (Control ({ instr = Block (bt, arity, body); _ } as instr)) :: rest ->
-      (* We keep all kinds of blocks as we don't want to recompute indices (but it would be feasible) *)
-      (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = Block (bt, arity, slice_alternative body instructions_to_keep) }] @ loop rest []
-    | (Control ({ instr = Loop (bt, arity, body); _ } as instr)) :: rest ->
-      (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = Loop (bt, arity, slice_alternative body instructions_to_keep) }] @ loop rest []
-    | (Control ({ instr = If (bt, arity, then_, else_); _ } as instr)) :: rest ->
-      (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = If (bt, arity, slice_alternative then_ instructions_to_keep, slice_alternative else_ instructions_to_keep) }] @ loop rest []
+    | (Control ({ instr = Block (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
+      let sliced_body = slice_alternative body instructions_to_keep in
+      if List.is_empty sliced_body then
+        (* Block body is empty, drop the block entirely *)
+        loop rest (entire_instr :: to_remove_rev)
+      else
+        (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = Block (bt, arity, sliced_body) }] @ loop rest []
+    | (Control ({ instr = Loop (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
+      let sliced_body = slice_alternative body instructions_to_keep in
+      if List.is_empty sliced_body then
+        loop rest (entire_instr :: to_remove_rev)
+      else
+        (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = Loop (bt, arity, sliced_body) }] @ loop rest []
+    | (Control ({ instr = If (bt, arity, then_, else_); _ } as instr)) as entire_instr :: rest ->
+      let sliced_then = slice_alternative then_ instructions_to_keep in
+      let sliced_else = slice_alternative else_ instructions_to_keep in
+      if List.is_empty sliced_then && List.is_empty sliced_else then
+        loop rest (entire_instr :: to_remove_rev)
+      else
+        (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = If (bt, arity, slice_alternative then_ instructions_to_keep, slice_alternative else_ instructions_to_keep) }] @ loop rest []
     | instr :: rest when Instr.Label.Set.mem instructions_to_keep (Instr.label instr) ->
     (replace_with_equivalent_instructions to_remove_rev) @ [instr] @ loop rest []
     | instr :: rest ->
@@ -701,9 +714,6 @@ module Test = struct
      let sliced = "(module
   (type (;0;) (func (param i32 i32) (result i32)))
   (func (;test;) (type 0) (param i32 i32) (result i32)
-    i32.const 0
-    if ;; Instr 1
-    end
     local.get 1) ;; Instr 4
   )" in
      check_slice original sliced 0l 4
@@ -925,9 +935,6 @@ module Test = struct
       i32.const 1
       i32.add
       local.set 1
-      i32.const 0
-      if
-      end
     end
   end
   local.get 1
@@ -1196,9 +1203,6 @@ module Test = struct
   i32.ne ;; c != EOF
   if
     loop
-      i32.const 0 ;; superfluous (due to empty if)
-      if ;; superfluous (empty if)
-      end ;; superflous (empty if)
       local.get 0 ;; c
       i32.const 32 ;; ' '
       i32.eq ;; c == ' '
@@ -1245,17 +1249,6 @@ module Test = struct
       i32.const 1
       i32.add
       local.set 3  ;; nc = nc + 1
-      i32.const 0 ;; superfluous
-      if ;; superfluous (empty if)
-      end ;; superfluous (empty if)
-      i32.const 0
-      if 
-      else
-        i32.const 0
-        if
-        end
-      end ;; end of sperfluous instructions
-
       call 0 ;; getchar()
       i32.const 0
       i32.ne ;; c != EOF
@@ -1291,13 +1284,6 @@ module Test = struct
         i32.add
         local.set 1 ;; nl = nl + 1
       end
-      i32.const 0
-      if
-      else
-        i32.const 0
-        if
-        end
-      end
       call 0
       local.tee 0 ;; c = getchar()
       i32.const 0
@@ -1325,9 +1311,6 @@ module Test = struct
   i32.ne ;; c != EOF
   if
     loop
-      i32.const 0
-      if
-      end
       local.get 0
       i32.const 32
       i32.eq ;; c == ' '
@@ -1368,16 +1351,6 @@ module Test = struct
   i32.ne ;; c != EOF
   if
     loop
-      i32.const 0
-      if
-      end
-      i32.const 0
-      if
-      else
-        i32.const 0
-        if
-        end
-      end
       call 0 ;; getchar()
       local.tee 0 ;; c = getchar()
       i32.const 0
