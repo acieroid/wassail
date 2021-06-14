@@ -9,10 +9,7 @@ module T = struct
 
   type block_kind =
     | LoopEntry of Instr.block_type * Instr.arity
-    | LoopExit
     | BlockEntry of Instr.block_type * Instr.arity
-    | BlockExit
-    | IfExit
   [@@deriving sexp, compare, equal]
 
   (** A basic block *)

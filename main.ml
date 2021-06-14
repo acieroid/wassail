@@ -385,9 +385,15 @@ let slice =
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
         Log.debug "Performing slicing";
-        let sliced_cfg = Slicing.slice cfg slicing_criterion in
+        let instructions = Slicing.slice_alternative (Cfg.body (Cfg.clear_annotations cfg)) (Slicing.instructions_to_keep cfg slicing_criterion) in
         Log.debug "Producing module";
-        let module_ = Wasm_module.replace_func module_ funidx (Codegen.cfg_to_func_inst sliced_cfg) in
+        let module_ = Wasm_module.replace_func module_ funidx
+            { idx = cfg.idx;
+              name = Some cfg.name;
+              type_idx = cfg.type_idx;
+              typ = (cfg.arg_types, cfg.return_types);
+              code = { locals = cfg.local_types; body = instructions } }
+        in
         Log.debug "Saving to file";
         Out_channel.with_file outfile
           ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_)))

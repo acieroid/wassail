@@ -7,6 +7,7 @@ type t = {
   successors: Tree.t;
   index_to_instr: unit Instr.t IntMap.t;
   block_entries : int Instr.Label.Map.t; (* Maps block labels to their instruction's index *)
+  no_final_node : bool;
 }
 [@@deriving compare, equal]
 
@@ -64,10 +65,10 @@ let make (instrs : unit Instr.t list) : t =
   let roots, indices, entries = helper instrs [] IntMap.empty Instr.Label.Map.empty in
   match roots with
   | [] -> failwith "empty successor tree"
-  | r :: [] -> { successors = r; index_to_instr = indices; block_entries = entries};
+  | r :: [] -> { successors = r; index_to_instr = indices; block_entries = entries; no_final_node = false };
   | _ ->
     let idx = next_idx () in
-    { successors = add_parent roots idx; index_to_instr = indices; block_entries = entries }
+    { successors = add_parent roots idx; index_to_instr = indices; block_entries = entries; no_final_node = true }
 
 module Test = struct
   let lab id = Instr.Label.{ section = Instr.Label.Dummy; id }

@@ -122,6 +122,39 @@ let dummy_instrs (net_effect : int) (next_label : unit -> int) : (Instr.data, un
   else if net_effect < 0 then List.init (- net_effect) ~f:(fun _ -> { Instr.instr = Instr.Drop; label = dummy_label (); annotation_before = (); annotation_after = (); })
   else List.init net_effect ~f:(fun _ -> { Instr.instr = Instr.Const (Prim_value.I32 0l); label = dummy_label (); annotation_before = (); annotation_after = () })
 
+let instrs_net_effect (instrs : unit Instr.t list) : int =
+  (* TODO: if we want to support return, we need a preanalysis to know its actual net effect in the current CFG *)
+  List.fold_left instrs ~init:0 ~f:(fun acc instr -> acc + (Instr.net_effect instr))
+
+let counter : int ref = ref 0
+let reset_counter () : unit = counter := 0
+let next_label : unit -> int =
+    fun () ->
+      let v = !counter in
+      counter := v+1;
+      v
+
+let replace_with_equivalent_instructions (instrs : unit Instr.t list) : unit Instr.t list =
+  let net_effect = instrs_net_effect instrs in
+  List.map (dummy_instrs net_effect next_label) ~f:(fun i -> Instr.Data i)
+
+let rec slice_alternative (original_instructions : unit Instr.t list) (instructions_to_keep : Instr.Label.Set.t)  : unit Instr.t list =
+  let rec loop (instrs : unit Instr.t list) (to_remove_rev : unit Instr.t list) : unit Instr.t list =
+    match instrs with
+    | [] -> replace_with_equivalent_instructions (List.rev to_remove_rev)
+    | (Control ({ instr = Block (bt, arity, body); _ } as instr)) :: rest ->
+      (* We keep all kinds of blocks as we don't want to recompute indices (but it would be feasible) *)
+      (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = Block (bt, arity, slice_alternative body instructions_to_keep) }] @ loop rest []
+    | (Control ({ instr = Loop (bt, arity, body); _ } as instr)) :: rest ->
+      (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = Block (bt, arity, slice_alternative body instructions_to_keep) }] @ loop rest []
+    | (Control ({ instr = If (bt, arity, then_, else_); _ } as instr)) :: rest ->
+      (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = If (bt, arity, slice_alternative then_ instructions_to_keep, slice_alternative else_ instructions_to_keep) }] @ loop rest []
+    | instr :: rest when Instr.Label.Set.mem instructions_to_keep (Instr.label instr) ->
+    (replace_with_equivalent_instructions to_remove_rev) @ [instr] @ loop rest []
+    | instr :: rest ->
+      loop rest (instr :: to_remove_rev) in
+  loop original_instructions []
+
 (** Construct a dummy block that has the given net effect on the stack
    size. Uses the given block for every field that is not the list of
    instructions, in order to construct the new block. This enables keeping the
@@ -172,15 +205,7 @@ let slice (cfg : Spec.t Cfg.t) ?instrs:(instructions_in_slice : Instr.Label.Set.
     block_idx = cfg.exit_block ||
     (* The block is also part of the slice if it is a control block with a merge block as successor, which itself is part of the slice.
        TODO: this is a coarse overapproximation, it could be refined to only those blocks that can reach the slicing criterion *)
-    has_multiple_successors_and_merge_successor_in_slice block_idx ||
-    (* The block is an entry or exit block, we don't want to remove it in order to preserve the CFG structure (otherwise we can't know where blocks/loops end.
-       This may lead to superfluous blocks in the CFG, but will result in an empty sequence of instruction or in empty block end / loop end parts.
- *)
-    (let block = Cfg.find_block_exn cfg block_idx in
-     match block.block_kind with
-     | Some LoopExit | Some BlockExit -> true
-     | Some (BlockEntry _) | Some (LoopEntry _) -> true
-     | _ -> false)
+    has_multiple_successors_and_merge_successor_in_slice block_idx
   and has_multiple_successors_and_merge_successor_in_slice (block_idx : int) : bool =
     let successors = Cfg.successors cfg block_idx in
     if List.length successors <= 1 then

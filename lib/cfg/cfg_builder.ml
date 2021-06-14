@@ -83,7 +83,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
           let (blocks, edges, breaks, returns, then_entry, then_exit) = helper [] instrs1 in
           let (blocks', edges', breaks', returns', else_entry, else_exit) = helper [] instrs2 in
           (* Construct the merge block *)
-          let merge_block = mk_merge_block (Some IfExit) None in
+          let merge_block = mk_merge_block None None in
           entry_exit := (if_block.idx, merge_block.idx) :: !entry_exit;
           (* Construct the rest of the CFG *)
           let (blocks'', edges'', breaks'', returns'', entry, exit') = helper [] rest in
@@ -160,7 +160,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
           (* Recurse inside the block *)
           let (blocks, edges, breaks, returns, entry', exit') = helper [] instrs' in
           (* Create a node for the exit of the block *)
-          let block_exit = if is_loop then mk_empty_block (Some LoopExit) None else mk_merge_block (Some BlockExit) None in
+          let block_exit = if is_loop then mk_empty_block None None else mk_merge_block None None in
           entry_exit := (block_entry.idx, block_exit.idx) :: !entry_exit;
           (* Recurse after the block *)
           let (blocks', edges', breaks', returns', entry'', exit'') = helper [] rest in
@@ -268,8 +268,21 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
       ~f:(fun es -> Cfg.Edge.Set.of_list es) in
   let back_edges = IntMap.map (IntMap.of_alist_multi (List.map actual_edges' ~f:(fun (left, right, data) -> (right, (left, data)))))
       ~f:(fun es -> Cfg.Edge.Set.of_list es) in
-
   let basic_blocks = IntMap.of_alist_exn (List.map actual_blocks' ~f:(fun b -> (b.idx, b))) in
+
+  let label_to_instr =
+    let rec loop (instrs : unit Instr.t list) (acc : unit Instr.t Instr.Label.Map.t) : unit Instr.t Instr.Label.Map.t =
+      match instrs with
+      | [] -> acc
+      | (Control { instr = Block (_, _, instrs); label; _ } as i) :: rest
+      | (Control { instr = Loop (_, _, instrs); label; _ } as i) :: rest ->
+        loop (rest @ instrs) (Instr.Label.Map.add_exn acc ~key:label ~data:i)
+      | (Control { instr = If (_, _, instrs1, instrs2); label; _ } as i) :: rest ->
+        loop (rest @ instrs1 @ instrs2) (Instr.Label.Map.add_exn acc ~key:label ~data:i)
+      | i :: rest ->
+        loop rest (Instr.Label.Map.add_exn acc ~key:(Instr.label i) ~data:i)
+    in
+    loop funcinst.code.body Instr.Label.Map.empty in
   Cfg.{
     (* Exported functions have names, non-exported don't *)
     exported = Option.is_some funcinst.name;
@@ -301,6 +314,10 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     loop_heads = !loop_heads;
     (* The lexical successor tree *)
     lst = Lexical_successor_tree.make funcinst.code.body;
+    (* The instruction labels in the right order *)
+    instructions = (List.map funcinst.code.body ~f:Instr.label);
+    (* A mapping from instruction labels to instructions *)
+    label_to_instr;
   }
 
 let build_all (mod_ : Wasm_module.t) : unit Cfg.t Int32Map.t =
