@@ -312,8 +312,6 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     exit_block = return_block.idx;
     (* The loop heads *)
     loop_heads = !loop_heads;
-    (* The lexical successor tree *)
-    lst = Lexical_successor_tree.make funcinst.code.body;
     (* The instruction labels in the right order *)
     instructions = (List.map funcinst.code.body ~f:Instr.label);
     (* A mapping from instruction labels to instructions *)

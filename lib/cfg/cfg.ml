@@ -55,7 +55,6 @@ type 'a t = {
   entry_block: int;
   exit_block: int;
   loop_heads: IntSet.t;
-  lst: Lexical_successor_tree.t;
   instructions: Instr.Label.t list;
   label_to_instr: unit Instr.t Instr.Label.Map.t;
 }
