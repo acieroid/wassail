@@ -76,7 +76,6 @@ module Test = struct
   let control id i = Instr.Control { instr = i; label = lab id; annotation_before = (); annotation_after = () }
   let%test "lexical successor tree for a single instruction" =
     let t = make [data 1 (Instr.Const (Prim_value.of_int 0))] in
-    Printf.printf "tree: %s\n" (Tree.to_string t.successors);
     Tree.check_equality ~actual:t.successors ~expected:(Tree.of_node 1)
 
   let%test "lexical successor tree of a sequence of instructions" =

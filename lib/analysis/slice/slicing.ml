@@ -617,11 +617,6 @@ module Test = struct
      let expected = (slice_alternative_to_funcinst cfg (lab ~fidx criterion)).code.body in
      let _, expected_cfg = build_cfg ~fidx sliced in
      let actual = Cfg.body expected_cfg in
-     Printf.printf "expected\n";
-     List.iter expected ~f:(fun i -> Printf.printf "%s\n" (Instr.to_string i));
-     Printf.printf "actual\n";
-     List.iter actual ~f:(fun i -> Printf.printf "%s\n" (Instr.to_string i));
-     Printf.printf "length: %d vs. %d\n" (List.length expected) (List.length actual);
      List.equal (fun x y ->
          if Instr.equal (fun () () -> true) (Instr.drop_labels x) (Instr.drop_labels y) then
            true
