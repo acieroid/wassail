@@ -427,8 +427,8 @@ let random_slice_report =
           let slicing_criterion = Array.get labels (Random.int (Array.length labels)) in
           try
             let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
-            let instrs_to_keep = Slicing.instructions_to_keep cfg slicing_criterion in (* TODO: these are computed again on the next line, manage to have the computation happen only once *)
-            let sliced_func = Slicing.slice_alternative_to_funcinst cfg slicing_criterion in
+            let instrs_to_keep = Slicing.instructions_to_keep cfg slicing_criterion in
+            let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) slicing_criterion in
             let sliced_labels = all_labels sliced_func.code.body in
             Printf.printf "success\t%s\t%ld\t%s\t%d/%d\t%d/%d\n"
               filename
