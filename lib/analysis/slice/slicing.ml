@@ -747,6 +747,57 @@ module Test = struct
   )" in
      check_slice original sliced 0l 6
 
+   let%test "slice with an empty if" =
+     let original = "(module
+(type (;0;) (func (param i32) (result i32)))
+(func (;0;) (type 0)
+  local.get 0
+  i32.const -1
+  i32.eq
+  if
+  end
+  local.get 0
+)
+)" in
+     let sliced = "(module
+(type (;0;) (func (param i32) (result i32)))
+(func (;0;) (type 0)
+  local.get 0
+))" in
+     check_slice original sliced 0l 4
+
+   let%test "slice with a if that only contains br" =
+     let original = "(module
+(type (;0;) (func (param i32) (result i32)))
+(func (;0;) (type 0)
+  block
+    local.get 0
+    block
+      if
+        br 0
+      else
+        br 1
+      end
+    end
+    local.get 0
+  end
+))" in
+     (* This is not the ideal slice, but this is good enough *)
+     let sliced = "(module
+(type (;0;) (func (param i32) (result i32)))
+(func (;0;) (type 0)
+  block
+    i32.const 0
+    block
+      drop
+    end
+    local.get 0
+  end
+)
+)" in
+     check_slice original sliced 0l 6
+
+
    let%test "slice on the example from Agrawal 1994 (Fig. 3) should be correct" =
      let original = "(module
   (type (;0;) (func))
