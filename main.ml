@@ -382,16 +382,11 @@ let slice =
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
         Spec_inference.use_const := false;
-        Log.enable_debug ();
         let module_ = Wasm_module.of_file filename in
-        Log.debug "Performing specification analysis";
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
-        Log.debug "Performing slicing";
         let funcinst = Slicing.slice_alternative_to_funcinst cfg slicing_criterion in
-        Log.debug "Producing module";
         let module_ = Wasm_module.replace_func module_ funidx funcinst in
-        Log.debug "Saving to file";
         Out_channel.with_file outfile
           ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_)))
 
@@ -399,7 +394,6 @@ let random_slice_report =
   Command.basic
     ~summary:"Computes a slice of a random function with a random slicing criterion from the given file, outputs the size of the slice as a percentage of the size of the original function, in terms of number of instructions"
     Command.Let_syntax.(
-      Log.enable_debug ();
       let%map_open filename = anon ("file" %: string) in
       let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
         List.fold_left instrs

@@ -233,7 +233,6 @@ let new_merge_variables (cfg : t Cfg.t) (merge_block : t Basic_block.t) : (Var.t
   (* The predecessors of merge_block *)
   let preds = Cfg.predecessors cfg merge_block.idx in
   let state_after = Cfg.state_after_block cfg merge_block.idx (init_state cfg) in
-  Log.debug (Printf.sprintf "computing new merge vars at block %d" merge_block.idx);
   List.fold_left preds ~init:[] ~f:(fun acc pred_idx ->
       let state_before = Cfg.state_after_block cfg pred_idx (init_state cfg) in
       (extract_different_vars state_before state_after) @ acc)
