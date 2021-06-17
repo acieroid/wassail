@@ -312,3 +312,16 @@ let without_empty_nodes_with_no_predecessors (cfg : 'a t) : 'a t =
         List.is_empty (predecessors cfg block.idx) &&
         Basic_block.is_empty block)) in
   List.fold_left to_remove ~init:cfg ~f:(fun cfg idx -> remove_block_rewrite_edges cfg idx)
+
+let all_predecessors (cfg : 'a t) (block : 'a Basic_block.t) : 'a Basic_block.t list =
+  let rec loop (worklist : IntSet.t) (visited : IntSet.t) (acc : 'a Basic_block.t list) : 'a Basic_block.t list =
+    match IntSet.choose worklist with
+    | None -> acc
+    | Some block_idx when IntSet.mem visited block_idx -> loop (IntSet.remove worklist block_idx) visited acc
+    | Some block_idx ->
+      let preds = List.map ~f:fst (Edges.from cfg.back_edges block_idx) in
+      let worklist' = IntSet.union (IntSet.of_list preds) (IntSet.remove worklist block_idx) in
+      loop worklist' (IntSet.add visited block_idx) (find_block_exn cfg block_idx :: acc)
+  in
+  loop (IntSet.singleton block.idx) IntSet.empty []
+

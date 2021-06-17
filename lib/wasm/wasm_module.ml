@@ -155,7 +155,7 @@ let to_string (m : t) : string =
   let buf = Buffer.create 8192 in
   let put (s : string) = Buffer.add_string buf s in
   let type_ (i : int) (t : Type.t list * Type.t list) =
-    put "(type (;";
+    put "  (type (;";
     put (string_of_int i);
     put ";) (func";
     if not (List.is_empty (fst t)) then begin
@@ -180,7 +180,7 @@ let to_string (m : t) : string =
     last_global_import := !last_global_import + 1;
     !last_global_import in
   let import (i : int) (import : Import.t) =
-    put (Printf.sprintf "(import \"%s\" \"%s\" " import.module_name import.item_name);
+    put (Printf.sprintf "  (import \"%s\" \"%s\" " import.module_name import.item_name);
     begin match import.idesc with
     | FuncImport tidx ->
       put (Printf.sprintf "(func (;%d;) (type %ld))"
@@ -196,26 +196,35 @@ let to_string (m : t) : string =
     put ")\n" in
   let imports () = List.iteri m.imports ~f:import in
   let func (i : Int32.t) (f : Func_inst.t) =
-    put (Printf.sprintf "(func (;%ld;) (type %ld)\n" i f.type_idx);
-    if not (List.is_empty f.code.locals) then begin
-      put (Printf.sprintf "(local %s)\n" (String.concat ~sep:" " (List.map f.code.locals ~f:Type.to_string)))
+    put (Printf.sprintf "  (func (;%ld;) (type %ld)" i f.type_idx);
+    if not (List.is_empty (fst f.typ)) then begin
+      put (Printf.sprintf " (param %s)"
+             (String.concat ~sep:" " (List.map (fst f.typ) ~f:Type.to_string)))
     end;
-    put (Instr.list_to_string f.code.body ?indent:(Some 2) ?sep:(Some "\n") (fun () -> ""));
-    put "\n)\n" in
+    if not (List.is_empty (snd f.typ)) then begin
+      put (Printf.sprintf " (result %s)"
+             (String.concat ~sep:" " (List.map (snd f.typ) ~f:Type.to_string)))
+    end;
+    put "\n";
+    if not (List.is_empty f.code.locals) then begin
+      put (Printf.sprintf "    (local %s)\n" (String.concat ~sep:" " (List.map f.code.locals ~f:Type.to_string)))
+    end;
+    put (Instr.list_to_string f.code.body ?indent:(Some 4) ?sep:(Some "\n") (fun () -> ""));
+    put ")\n" in
   let funcs () = List.iteri m.funcs ~f:(fun i f -> func Int32.(m.nfuncimports + (of_int_exn i)) f) in
   let table (i : int) (t : Table.t) =
-    put (Printf.sprintf "(table (;%d;) " i);
+    put (Printf.sprintf "  (table (;%d;) " i);
     limits t.ttype;
     put " funcref)\n"
   in
   let tables () = List.iteri m.tables ~f:table in
   let memory (i : int) (memory : Memory.t) =
-    put (Printf.sprintf "(memory (;%d;) " i);
+    put (Printf.sprintf "  (memory (;%d;) " i);
     limits memory.mtype;
     put ")\n" in
   let memories () = List.iteri m.memories ~f:memory in
   let export (export : Export.t) =
-    put (Printf.sprintf "(export \"%s\" " export.name);
+    put (Printf.sprintf "  (export \"%s\" " export.name);
     begin match export.edesc with
     | FuncExport n -> put (Printf.sprintf "(func %ld)" n)
     | TableExport n -> put (Printf.sprintf "(table %ld)" n)
@@ -226,19 +235,19 @@ let to_string (m : t) : string =
   let exports () = List.iter m.exports ~f:export in
   let elem (elem : Segment.ElemSegment.t) =
     put (Printf.sprintf "(elem (;%ld;) " elem.index);
-    put (Printf.sprintf "(offset %s)" (Instr.list_to_string elem.offset (fun () -> "")));
+    put (Printf.sprintf "(%s)" (Instr.list_to_string elem.offset (fun () -> "")));
     (* TODO: this is not the general case, check that this is enough *)
     put (Printf.sprintf " func %s)\n" (String.concat ~sep:" " (List.map elem.init ~f:Int32.to_string))) in
   let elems () = List.iter m.elems ~f:elem in
   let data (data : Segment.DataSegment.t) =
-    put (Printf.sprintf "(data (;%ld;) " data.index);
+    put (Printf.sprintf "  (data (;%ld;) " data.index);
     put (Printf.sprintf "(offset %s)" (Instr.list_to_string data.offset (fun () -> "")));
     put "\"";
     put (string_to_wasm_string data.init); (* TODO: make sure to escape what is needed *)
     put "\")\n" in
   let datas () = List.iter m.data ~f:data in
   let global (i : int) (g : Global.t) =
-    put (Printf.sprintf "(global (;%d;) %s" i
+    put (Printf.sprintf "  (global (;%d;) %s" i
            (match g.gtype.mutability with
             | Mutable -> Printf.sprintf "(mut %s)" (Type.to_string g.gtype.typ)
             | Immutable -> Type.to_string g.gtype.typ));

@@ -18,12 +18,12 @@ module T = struct
 end
 include T
 
-let suffix_to_string (op : t) : string =
+let suffix_to_string (op : t) (is_load : bool) : string =
   match op.sz with
   | None -> ""
-  | Some (Pack8, SX) -> "8"
-  | Some (Pack16, SX) -> "16"
-  | Some (Pack32, SX) -> "32"
+  | Some (Pack8, SX) -> if is_load then "8_s" else "8"
+  | Some (Pack16, SX) -> if is_load then "16_s" else "16"
+  | Some (Pack32, SX) -> if is_load then "32_s" else "32"
   | Some (Pack8, ZX) -> "8_u"
   | Some (Pack16, ZX) -> "16_u"
   | Some (Pack32, ZX) -> "32_u"

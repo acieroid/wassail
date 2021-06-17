@@ -163,16 +163,20 @@ let data_to_string (instr : data) : string =
        let memop = Memoryop.to_string op in
        Printf.sprintf "%s.load%s%s%s"
          (Type.to_string op.typ)
-         (Memoryop.suffix_to_string op)
+         (Memoryop.suffix_to_string op true)
          (if String.is_empty memop then "" else " ")
          memop
      | Store op ->
        let memop = Memoryop.to_string op in
        Printf.sprintf "%s.store%s%s%s"
          (Type.to_string op.typ)
-         (Memoryop.suffix_to_string op)
+         (Memoryop.suffix_to_string op false)
          (if String.is_empty memop then "" else " ")
          memop
+
+let block_type_to_string (bt : block_type) : string = match bt with
+  | None -> ""
+  | Some t -> Printf.sprintf " (result %s)" (Type.to_string t)
 
 (** Converts a control instruction to its string representation *)
 let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot_to_string : 'a -> string = fun _ -> "") (instr : 'a control)  : string =
@@ -184,13 +188,15 @@ let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?anno
   | BrTable (t, b) -> Printf.sprintf "br_table %s %s" (String.concat ~sep:" " (List.map t ~f:Int32.to_string)) (Int32.to_string b)
   | Return -> "return"
   | Unreachable -> "unreachable"
-  | Block (_, _, instrs) -> Printf.sprintf "block%s%s%s%send" sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
-  | Loop (_, _, instrs) -> Printf.sprintf "loop%s%s%s%send" sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
-  | If (_, _, instrs1, []) -> Printf.sprintf "if%s%s%s%send"
-                                sep (list_to_string instrs1 annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
-  | If (_, _, instrs1, instrs2) -> Printf.sprintf "if%s%s%s%selse%s%s%s%send"
-                                     sep (list_to_string instrs1 annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
-                                     sep (list_to_string instrs2 annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
+  | Block (bt, _, instrs) -> Printf.sprintf "block%s%s%s%s%send" (block_type_to_string bt) sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
+  | Loop (bt, _, instrs) -> Printf.sprintf "loop%s%s%s%s%send" (block_type_to_string bt) sep (list_to_string instrs annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
+  | If (bt, _, instrs1, []) -> Printf.sprintf "if%s%s%s%s%send"
+                                 (block_type_to_string bt)
+                                 sep (list_to_string instrs1 annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
+  | If (bt, _, instrs1, instrs2) -> Printf.sprintf "if%s%s%s%s%selse%s%s%s%send"
+                                      (block_type_to_string bt)
+                                      sep (list_to_string instrs1 annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
+                                      sep (list_to_string instrs2 annot_to_string ~indent:(i+2) ~sep:sep) sep (String.make i ' ')
   | Merge -> "merge"
 
 (** Converts an instruction to its string representation *)
@@ -432,6 +438,21 @@ let rec all_labels_no_blocks (i : 'a t) : Label.Set.t =
           Label.Set.union acc (all_labels_no_blocks i))
       | _ -> Label.Set.singleton c.label
     end
+
+let rec all_labels_no_merge (i : 'a t) : Label.Set.t =
+  match i with
+  | Data d -> Label.Set.singleton d.label
+  | Control c -> begin match c.instr with
+      | Block (_, _, instrs)
+      | Loop (_, _, instrs) -> List.fold_left instrs ~init:(Label.Set.singleton c.label) ~f:(fun acc i ->
+          Label.Set.union acc (all_labels_no_merge i))
+      | If (_, _, instrs1, instrs2) ->
+        List.fold_left (instrs1 @ instrs2) ~init:(Label.Set.singleton c.label) ~f:(fun acc i ->
+          Label.Set.union acc (all_labels_no_merge i))
+      | Merge -> Label.Set.empty
+      | _ -> Label.Set.singleton c.label
+    end
+
 
 let rec all_labels (i : 'a t) : Label.Set.t =
   match i with

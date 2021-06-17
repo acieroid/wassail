@@ -7,17 +7,10 @@ module T = struct
     | Data of (Instr.data, 'a) Instr.labelled list
   [@@deriving sexp, compare, equal]
 
-  type block_kind =
-    | LoopEntry of Instr.block_type * Instr.arity
-    | BlockEntry of Instr.block_type * Instr.arity
-  [@@deriving sexp, compare, equal]
-
   (** A basic block *)
   type 'a t = {
     idx: int; (** Its index *)
     content: 'a block_content; (** Its content *)
-    block_kind : block_kind option; (** Information on whether this block is a block/loop entry/exit *)
-    label : Instr.Label.t option; (** If the basic block corresponds to a block/loop/if, this is the corresponding label *)
   }
   [@@deriving sexp, compare, equal]
 end

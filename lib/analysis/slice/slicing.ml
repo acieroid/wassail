@@ -66,7 +66,7 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
       let visited' = InSlice.Set.add visited slicepart in
       let uses =
         match Cfg.find_instr cfg_instructions slicepart.label with
-        | None -> failwith (Printf.sprintf "slicing: cannot find instruction with label %s among %s \n" (Instr.Label.to_string slicepart.label) (String.concat ~sep:"," (List.map (Instr.Label.Map.keys cfg_instructions) ~f:Instr.Label.to_string)))
+        | None -> failwith "Unsupported in slicing: cannot find an instruction. It probably is part of unreachable code."
         | Some instr -> Spec_inference.instr_use cfg ?var:slicepart.reason instr in
       (* For use in instr_uses(instr) *)
       let worklist' = List.fold_left uses ~init:worklist

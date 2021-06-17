@@ -121,8 +121,8 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                          else
                            { state with vstack = [] })
     | Unreachable ->
-      failwith (Printf.sprintf "unsupported: unreachable") (*  in function %ld cfg.idx *)
-    (* `Simple state *)
+      (* failwith (Printf.sprintf "unsupported: unreachable") (*  in function %ld cfg.idx *) *)
+      `Simple state
     | Merge -> `Simple state
     | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr))
 

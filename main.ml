@@ -338,37 +338,11 @@ let postdom =
           ~f:(fun ch ->
               Out_channel.output_string ch (Tree.to_dot tree)))
 
-let slice_cfg =
-  Command.basic
-    ~summary:"Slice a CFG at the given instruction"
-    Command.Let_syntax.(
-      let%map_open _filename = anon ("file" %: string)
-      and _funidx = anon ("fun" %: int32)
-      and _instr = anon ("instr" %: int)
-      and _dot_filename = anon ("out" %: string) in
-      fun () ->
-        failwith "TODO: produce the slice, reparse it into a CFG"
-          (*
-        Spec_inference.propagate_globals := false;
-        Spec_inference.propagate_locals := false;
-        Spec_inference.use_const := false;
-        let module_ = Wasm_module.of_file filename in
-        let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
-        let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
-        let sliced_cfg = Slicing.slice cfg slicing_criterion in
-        Printf.printf "spec inference\n";
-        let annotated_sliced_cfg = Spec_inference.Intra.analyze module_ sliced_cfg in
-        let annot_deps = false in
-        let use_def_annot = if annot_deps then (Use_def.annotate annotated_sliced_cfg) else "" in
-           let control_annot = if annot_deps then (Control_deps.annotate annotated_sliced_cfg) else "" in
-        Printf.printf "outputting dot\n";
-        Out_channel.with_file dot_filename
-          ~f:(fun ch ->
-              Out_channel.output_string ch (Cfg.to_dot annotated_sliced_cfg
-                                              ~annot_str:Spec.to_dot_string
-                                              ~extra_data:(use_def_annot ^ control_annot)));
-*)
-    )
+let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
+  List.fold_left instrs
+    ~init:Instr.Label.Set.empty
+    ~f:(fun acc instr ->
+        Instr.Label.Set.union acc (Instr.all_labels_no_merge instr))
 
 let slice =
   Command.basic
@@ -384,8 +358,12 @@ let slice =
         Spec_inference.use_const := false;
         let module_ = Wasm_module.of_file filename in
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
+        let func = List32.nth_exn module_.funcs funidx in
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
         let funcinst = Slicing.slice_alternative_to_funcinst cfg slicing_criterion in
+        let sliced_labels = all_labels funcinst.code.body in
+        Printf.printf "all: %s\n" (Instr.Label.Set.to_string (all_labels func.code.body));
+        Printf.printf "sliced: %s\n" (Instr.Label.Set.to_string sliced_labels);
         let module_ = Wasm_module.replace_func module_ funidx funcinst in
         Out_channel.with_file outfile
           ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_)))
@@ -395,11 +373,6 @@ let random_slice_report =
     ~summary:"Computes a slice of a random function with a random slicing criterion from the given file, outputs the size of the slice as a percentage of the size of the original function, in terms of number of instructions"
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string) in
-      let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
-        List.fold_left instrs
-            ~init:Instr.Label.Set.empty
-            ~f:(fun acc instr ->
-                Instr.Label.Set.union acc (Instr.all_labels_no_blocks instr)) in
       fun () ->
         try
           Spec_inference.propagate_globals := false;
@@ -410,11 +383,6 @@ let random_slice_report =
           if Array.length funcs = 0 then
             begin Printf.printf "ignored\t%s\tno function\n" filename; exit 1 end;
           let func = Array.get funcs (Random.int (Array.length funcs)) in
-          (* We don't support unreachable expressions *)
-          if Option.is_some (List.find func.code.body ~f:(Instr.contains ~f:(function
-              | Instr.Control { instr = Unreachable; _ } -> true
-              | _ -> false))) then
-            begin Printf.printf "ignored\t%s\t%ld\tunreachable\n" filename func.idx; exit 1 end;
           let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
           if Array.length labels = 0 then
             begin Printf.printf "ignored\t%s\t%ld\tno instruction\n" filename func.idx; exit 1 end;
@@ -460,11 +428,23 @@ let generate =
       fun () ->
         let module_ = Wasm_module.of_file filename in
         let module_ = List.fold_left module_.funcs ~init:module_ ~f:(fun m f ->
-            if List.mem funs f.idx ~equal:Int32.(=)then
+            if List.mem funs f.idx ~equal:Int32.(=) then
               let cfg = Cfg_builder.build module_ f.idx in
               Wasm_module.replace_func m f.idx (Codegen.cfg_to_func_inst cfg)
             else
               Wasm_module.remove_func m f.idx) in
+        Out_channel.with_file outfile
+          ~f:(fun ch ->
+              Out_channel.output_string ch (Wasm_module.to_string module_)))
+
+let generate_all =
+  Command.basic
+    ~summary:"Outputs the entire WebAssembly file without modification"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and outfile = anon ("out" %: string) in
+      fun () ->
+        let module_ = Wasm_module.of_file filename in
         Out_channel.with_file outfile
           ~f:(fun ch ->
               Out_channel.output_string ch (Wasm_module.to_string module_)))
@@ -498,6 +478,7 @@ let () =
        ; "schedule", schedule
 
        ; "generate", generate
+       ; "generate-all", generate_all
 
        (* Other *)
        ; "spec-inference", spec_inference
@@ -506,7 +487,6 @@ let () =
        ; "taint-inter", taint_inter
        ; "reltaint-intra", reltaint_intra
        ; "relational-intra", relational_intra
-       ; "slice-cfg", slice_cfg
        ; "slice", slice
        ; "random-slice", random_slice_report
        ; "find-indirect-calls", find_indirect_calls])

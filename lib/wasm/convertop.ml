@@ -59,8 +59,8 @@ let to_mnemonic (t : t) : string =
   Printf.sprintf "%s.%s"
     (Type.to_string t.typ)
     (match t.op with
-     | ExtendSI32 -> "extend32_s"
-     | ExtendUI32 -> "extend32_u"
+     | ExtendSI32 -> "extend_i32_s"
+     | ExtendUI32 -> "extend_i32_u"
      | WrapI64 -> "wrap_i64"
      | TruncSF32 -> "trunc_f32_s"
      | TruncUF32 -> "trunc_f32_u"

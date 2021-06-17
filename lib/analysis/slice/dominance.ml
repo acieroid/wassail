@@ -94,7 +94,7 @@ module Graph = struct
           List.fold_left (graph.preds node1) ~init:(tree, changed) ~f:(fun (tree, changed) node2 ->
               let parent_n1 = match Tree.parent tree node1 with
                 | Some p -> p
-                | None -> failwith "dominator_tree accessing a node without parent" in
+                | None -> failwith "Unsupported: infinite loops" in
               let nca = match Tree.nca tree node2 parent_n1 with
                 | Some n -> n
                 | None -> failwith "dominator_tree accessing nodes without common ancestor" in
@@ -176,7 +176,7 @@ module Test = struct
   (global (;0;) (mut i32) (i32.const 66560)))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let actual = cfg_post_dominator cfg in
-    let expected = Tree.of_children_map 7 [(1, []); (2, [1]); (3, [2]); (4, []); (5, [3; 4]); (6, [5]); (7, [6])] in
+    let expected = Tree.of_children_map 7 [(2, []); (3, [2]); (4, []); (5, [3; 4]); (6, [5]); (7, [6])] in
     Tree.check_equality ~actual ~expected
 
   let%test_unit "post dominator should work with CFGs that have empty blocks with no predecessors" =

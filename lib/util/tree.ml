@@ -104,7 +104,7 @@ let fold_ancestors (tree : t) (node : int) (init : 'a) (f : 'a -> int -> 'a) : '
   let rec loop (node : int) (acc : 'a) : 'a = match parent tree node with
     | Some p -> loop p (f acc p)
     | None when node = tree.entry -> acc
-    | None -> failwith (Printf.sprintf "fold_ancestors: missing parent link in tree: node %d has no parent\ntree: %s" node (to_string tree)) in
+    | None -> failwith "Unsupported: presence of infinite loops" in
   loop node init
 
 (** Check if node x is an ancestor of node y in the tree *)
