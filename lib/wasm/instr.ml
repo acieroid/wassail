@@ -104,8 +104,8 @@ module T = struct
     | Block of block_type * arity * 'a t list
     | Loop of block_type * arity * 'a t list
     | If of block_type * arity * 'a t list * 'a t list
-    | Call of arity * Int32.t
-    | CallIndirect of arity * Int32.t
+    | Call of arity * (Type.t list * Type.t list) * Int32.t
+    | CallIndirect of arity * (Type.t list * Type.t list) * Int32.t
     | Br of Int32.t
     | BrIf of Int32.t
     | BrTable of Int32.t list * Int32.t
@@ -181,8 +181,8 @@ let block_type_to_string (bt : block_type) : string = match bt with
 (** Converts a control instruction to its string representation *)
 let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot_to_string : 'a -> string = fun _ -> "") (instr : 'a control)  : string =
   match instr with
-  | Call (_, v) -> Printf.sprintf "call %s" (Int32.to_string v)
-  | CallIndirect (_, v) -> Printf.sprintf "call_indirect (type %ld)" v
+  | Call (_, _, v) -> Printf.sprintf "call %s" (Int32.to_string v)
+  | CallIndirect (_, _, v) -> Printf.sprintf "call_indirect (type %ld)" v
   | Br b -> Printf.sprintf "br %s" (Int32.to_string b)
   | BrIf b -> Printf.sprintf "br_if %s" (Int32.to_string b)
   | BrTable (t, b) -> Printf.sprintf "br_table %s %s" (String.concat ~sep:" " (List.map t ~f:Int32.to_string)) (Int32.to_string b)
@@ -257,8 +257,8 @@ let to_mnemonic (instr : 'a t) : string = match instr with
       | Block (_, _, _) -> "block"
       | Loop (_, _, _) -> "loop"
       | If (_, _, _, _) -> "if"
-      | Call (_, _) -> "call"
-      | CallIndirect (_, _) -> "call_indirect"
+      | Call (_, _, _) -> "call"
+      | CallIndirect (_, _, _) -> "call_indirect"
       | Br _ -> "br"
       | BrIf _ -> "br_if"
       | BrTable (_, _) -> "br_table"
@@ -311,10 +311,10 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
   | BrTable (table, label) ->
     control_labelled (BrTable (List.map table ~f:(fun v -> v.it), label.it))
   | Call f ->
-    let (arity_in, arity_out) = Wasm_helpers.arity_of_fun m f in
+    let ((arity_in, arity_out), t) = Wasm_helpers.arity_and_type_of_fun m f in
     if arity_out > 1 then
       failwith "Unsupported: direct function call with more than one return value";
-    control_labelled (Call ((arity_in, arity_out), f.it))
+    control_labelled (Call ((arity_in, arity_out), t, f.it))
   | Return ->
     control_labelled (Return)
   | Unreachable ->
@@ -335,11 +335,11 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
     let body2 = seq_of_wasm m new_label instrs2 in
     control_labelled ~label:label (If (Wasm_helpers.type_of_block m st, (arity_in, arity_out), body1, body2))
   | CallIndirect f ->
-    let (arity_in, arity_out) = Wasm_helpers.arity_of_fun_type m f in
+    let ((arity_in, arity_out), t) = Wasm_helpers.arity_and_type_of_fun_type m f in
     if arity_out > 1 then
       failwith "Unsupported: indirect function call with more than one return value"
     else
-    control_labelled (CallIndirect ((arity_in, arity_out), f.it))
+    control_labelled (CallIndirect ((arity_in, arity_out), t, f.it))
   | GlobalGet g ->
     data_labelled (GlobalGet g.it)
   | GlobalSet g ->
@@ -377,8 +377,8 @@ and map_annotation_control (i : ('a control, 'a) labelled) ~(f : 'a t ->  'b * '
              | If (bt, arity, then_, else_) -> If (bt, arity,
                                                List.map then_ ~f:(map_annotation ~f:f),
                                                List.map else_ ~f:(map_annotation ~f:f))
-             | Call (arity, f) -> Call (arity, f)
-             | CallIndirect (arity, f) -> CallIndirect (arity, f)
+             | Call (arity, t, f) -> Call (arity, t, f)
+             | CallIndirect (arity, t, f) -> CallIndirect (arity, t, f)
              | Br n -> Br n
              | BrIf n -> BrIf n
              | BrTable (l, n) -> BrTable (l, n)
@@ -400,8 +400,8 @@ and drop_labels_control (i : ('a control, 'a) labelled) : ('a control, 'a) label
              | If (bt, arity, then_, else_) -> If (bt, arity,
                                                List.map then_ ~f:drop_labels,
                                                    List.map else_ ~f:drop_labels)
-             | Call (arity, f) -> Call (arity, f)
-             | CallIndirect (arity, f) -> CallIndirect (arity, f)
+             | Call (arity, t, f) -> Call (arity, t, f)
+             | CallIndirect (arity, t, f) -> CallIndirect (arity, t, f)
              | Br n -> Br n
              | BrIf n -> BrIf n
              | BrTable (l, n) -> BrTable (l, n)
@@ -476,54 +476,6 @@ let rec contains ~f:(f : 'a t -> bool) (instr : 'a t) : bool =
     | Control { instr = If (_, _, instrs1, instrs2); _ } ->
       Option.is_some (List.find (instrs1 @ instrs2) ~f:(contains ~f))
     | _ -> false
-
-
-let net_effect_data (i : (data, 'a) labelled) : int =
-  match i.instr with
-  | Nop -> 0
-  | Drop -> -1
-  | Select -> -2
-  | MemorySize -> +1
-  | MemoryGrow -> -1
-  | Const _ -> +1
-  | Unary _ -> 0
-  | Binary _ -> -1
-  | Compare _ -> -1
-  | Test _ -> 0
-  | Convert _ -> 0
-  | LocalGet _ -> +1
-  | LocalSet _ -> -1
-  | LocalTee _ -> 0
-  | GlobalGet _ -> +1
-  | GlobalSet _ -> -1
-  | Load _ -> 0
-  | Store _ -> -2
-
-let net_effect_control (i : ('a control, 'a) labelled) : int =
-  match i.instr with
-  | Call ((input, output), _)
-    -> output-input
-  | CallIndirect ((input, output), _) ->
-    (output-input)-1
-  | If (_, (arity_in, arity_out), _, _) ->
-    -1 (* the net effect of the head, which drops the first element of the stack *)
-    + (arity_out - arity_in)
-  | Block (_, (arity_in, arity_out), _)
-  | Loop (_, (arity_in, arity_out), _) ->
-    0 (* No net effect of the head *)
-      + (arity_out - arity_in)
-  | Br _ -> 0
-  | BrIf _ -> -1
-  | BrTable (_, _) -> -1
-  | Return -> 0 (* TODO: this actually depends on the function, but strictly speaking, return does not change the stack *)
-  | Unreachable -> 0
-  | Merge -> 0
-
-(** The net effect of an instruction on the stack: positive if it expects value on the stack, negative otherwise *)
-let net_effect (i : 'a t) : int =
-  match i with
-  | Data d -> net_effect_data d
-  | Control c -> net_effect_control c
 
 let instructions_contained_in (i : 'a t) : 'a t list = match i with
   | Data _ -> []

@@ -1,4 +1,5 @@
 open Core_kernel
+open Helpers
 
 module InSlice = struct
   module T = struct
@@ -35,12 +36,10 @@ end
     slicing criterion `criterion`, encoded as an instruction index. Returns the
     set of instructions that are part of the slice, as a set of instruction
     labels. *)
-let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Instr.Label.Set.t =
-  let instructions = Cfg.all_instructions cfg in
+let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (criterion : Instr.Label.t) : Instr.Label.Set.t =
   let control_dependencies = Control_deps.control_deps_exact_instrs cfg in
   let (_, _, data_dependencies) = Use_def.make cfg in
   let mem_dependencies = Memory_deps.make cfg in
-  let cfg_instructions = Cfg.all_instructions cfg in
   let rec loop (worklist : InSlice.Set.t) (slice : Instr.Label.Set.t) (visited : InSlice.Set.t) : Instr.Label.Set.t =
     (* Perform backward slicing as follows:
        Given an instruction as the slicing criterion (we can derive variable uses from instructions),
@@ -76,7 +75,7 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
               (* For def in usedef(use): if def contains an instruction, add def.instr to W *)
               let data_deps : InSlice.Set.t = match def with
                 | Use_def.Def.Instruction (instr', var) ->
-                  InSlice.Set.singleton (InSlice.make instr' (Some var) instructions)
+                  InSlice.Set.singleton (InSlice.make instr' (Some var) cfg_instructions)
                 | Use_def.Def.Entry _ -> InSlice.Set.empty
                 | Use_def.Def.Constant _ -> InSlice.Set.empty in
               InSlice.Set.union w data_deps) in
@@ -84,12 +83,12 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (criterion : Instr.Label.t) : Inst
       let control_deps : InSlice.Set.t = match Instr.Label.Map.find control_dependencies slicepart.label with
         | None -> InSlice.Set.empty
         | Some deps -> InSlice.Set.of_list (List.map (Instr.Label.Set.to_list deps)
-                                              ~f:(fun label -> InSlice.make label None instructions)) in
+                                              ~f:(fun label -> InSlice.make label None cfg_instructions)) in
       let worklist'' = InSlice.Set.union worklist' control_deps in
       (* For instr' in mem_deps(instr): add instr to W *)
       let worklist''' = InSlice.Set.union worklist''
           (InSlice.Set.of_list
-             (List.map ~f:(fun label -> InSlice.make label None instructions)
+             (List.map ~f:(fun label -> InSlice.make label None cfg_instructions)
                 (Instr.Label.Set.to_list (Memory_deps.deps_for mem_dependencies slicepart.label)))) in
       loop (InSlice.Set.remove worklist''' slicepart) slice' visited' in
   let agrawal (slice : Instr.Label.Set.t) : Instr.Label.Set.t =
@@ -121,9 +120,82 @@ let dummy_instrs (net_effect : int) (next_label : unit -> int) : (Instr.data, un
   else if net_effect < 0 then List.init (- net_effect) ~f:(fun _ -> { Instr.instr = Instr.Drop; label = dummy_label (); annotation_before = (); annotation_after = (); })
   else List.init net_effect ~f:(fun _ -> { Instr.instr = Instr.Const (Prim_value.I32 0l); label = dummy_label (); annotation_before = (); annotation_after = () })
 
-let instrs_net_effect (instrs : unit Instr.t list) : int =
-  (* TODO: if we want to support return, we need a preanalysis to know its actual net effect in the current CFG *)
-  List.fold_left instrs ~init:0 ~f:(fun acc instr -> acc + (Instr.net_effect instr))
+type instr_type_element =
+  | T of Type.t
+  | Any of string
+
+let type_of_data
+    (i : (Instr.data, 'a) Instr.labelled)
+    (cfg : 'a Cfg.t)
+  : instr_type_element list * instr_type_element list =
+  match i.instr with
+  | Nop -> ([], [])
+  | Drop -> ([Any "any"], [])
+  | Select -> ([Any "a"; Any "a"; T Type.I32], [Any "a"])
+  | MemorySize -> ([], [T Type.I32])
+  | MemoryGrow -> ([T Type.I32], [T Type.I32])
+  | Const (I32 _) -> ([], [T Type.I32])
+  | Const (I64 _) -> ([], [T Type.I64])
+  | Const (F32 _) -> ([], [T Type.F32])
+  | Const (F64 _) -> ([], [T Type.F32])
+  | Unary op -> ([T op.typ], [T op.typ])
+  | Binary op -> ([T op.typ; T op.typ], [T op.typ])
+  | Compare op -> ([T op.typ; T op.typ], [T Type.I32])
+  | Test I32Eqz -> ([T Type.I32], [T Type.I32])
+  | Test I64Eqz -> ([T Type.I64], [T Type.I32])
+  | Convert op -> ([Any "a"], [T op.typ]) (* TODO: it should really be a specific type rather than any *)
+  | LocalGet l -> ([], [T (Cfg.local_type cfg l)])
+  | LocalSet l -> ([T (Cfg.local_type cfg l)], [])
+  | LocalTee l ->
+    let t = Cfg.local_type cfg l in
+    ([T t], [T t])
+  | GlobalGet g -> ([], [T (List32.nth_exn cfg.global_types g)])
+  | GlobalSet g -> ([T (List32.nth_exn cfg.global_types g)], [])
+  | Load op -> ([T Type.I32], [T op.typ])
+  | Store op -> ([T Type.I32; T op.typ], [])
+
+let type_of_control
+    (i : ('a Instr.control, 'a) Instr.labelled)
+    (cfg : unit Cfg.t)
+    (instructions_map : Spec.t Instr.t Instr.Label.Map.t)
+  : instr_type_element list * instr_type_element list =
+  match i.instr with
+  | Call (_, (in_type, out_type), _) -> (List.map in_type ~f:(fun t -> T t), List.map out_type ~f:(fun t -> T t))
+  | CallIndirect (_, (in_type, out_type), _) ->
+    ((List.map in_type ~f:(fun t -> T t)) @ [T Type.I32], (List.map out_type ~f:(fun t -> T t)))
+  | If (bt, _, _, _) ->
+    (* the net effect of the head, which drops the first element of the stack *)
+    ([T Type.I32], match bt with
+      | Some t -> [T t]
+      | None -> [])
+  | Block (bt, _, _)
+  | Loop (bt, _, _) ->
+    ([], match bt with
+      | Some t -> [T t]
+      | None -> [])
+  | Br _ -> ([], [])
+  | BrIf _ -> ([T Type.I32], [])
+  | BrTable (_, _) -> ([T Type.I32], [])
+  | Return ->
+    let annot_before = Instr.annotation_before (Cfg.find_instr_exn instructions_map i.label) in
+    let vstack = annot_before.vstack in
+    (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i)), (List.map cfg.return_types ~f:(fun t -> T t)))
+  | Unreachable -> ([], [])
+  | Merge -> ([], [])
+
+(** The net effect of an instruction on the stack: positive if it expects value on the stack, negative otherwise *)
+(* TODO: we should actually rely on the type information to add well-typed instructions *)
+let type_of (i : 'a Instr.t) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : int =
+  match i with
+  | Data d ->
+    let (input, output) = type_of_data d cfg in
+    (List.length output) - (List.length input)
+  | Control c ->
+    let (input, output) = type_of_control c cfg instructions_map in
+    (List.length output) - (List.length input)
+
+let instrs_net_effect (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : int =
+  List.fold_left instrs ~init:0 ~f:(fun acc instr -> acc + (type_of instr cfg instructions_map))
 
 let counter : int ref = ref 0
 let reset_counter () : unit = counter := 0
@@ -133,46 +205,50 @@ let next_label : unit -> int =
       counter := v+1;
       v
 
-let replace_with_equivalent_instructions (instrs : unit Instr.t list) : unit Instr.t list =
-  let net_effect = instrs_net_effect instrs in
+let replace_with_equivalent_instructions (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : unit Instr.t list =
+  let net_effect = instrs_net_effect instrs cfg instructions_map in
   List.map (dummy_instrs net_effect next_label) ~f:(fun i -> Instr.Data i)
 
-let rec slice_alternative (original_instructions : unit Instr.t list) (instructions_to_keep : Instr.Label.Set.t)  : unit Instr.t list =
+let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (original_instructions : unit Instr.t list) (instructions_to_keep : Instr.Label.Set.t)  : unit Instr.t list =
   let rec loop (instrs : unit Instr.t list) (to_remove_rev : unit Instr.t list) : unit Instr.t list =
     match instrs with
-    | [] -> replace_with_equivalent_instructions (List.rev to_remove_rev)
+    | [] -> replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions
     | (Control ({ instr = Block (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
-      let sliced_body = slice_alternative body instructions_to_keep in
+      let sliced_body = slice_alternative cfg cfg_instructions body instructions_to_keep in
       (* TODO: we could also drop the block if it is not empty but only contains instructions that are not part of the slice (basically, only dummy instructions) *)
       if List.is_empty sliced_body then
         (* Block body is empty, drop the block entirely *)
         loop rest (entire_instr :: to_remove_rev)
       else
-        (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = Block (bt, arity, sliced_body) }] @ loop rest []
+        (replace_with_equivalent_instructions to_remove_rev cfg cfg_instructions) @ [Instr.Control { instr with instr = Block (bt, arity, sliced_body) }] @ loop rest []
     | (Control ({ instr = Loop (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
-      let sliced_body = slice_alternative body instructions_to_keep in
+      let sliced_body = slice_alternative cfg cfg_instructions body instructions_to_keep in
       if List.is_empty sliced_body then
         loop rest (entire_instr :: to_remove_rev)
       else
-        (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = Loop (bt, arity, sliced_body) }] @ loop rest []
+        (replace_with_equivalent_instructions to_remove_rev cfg cfg_instructions) @ [Instr.Control { instr with instr = Loop (bt, arity, sliced_body) }] @ loop rest []
     | (Control ({ instr = If (bt, arity, then_, else_); _ } as instr)) as entire_instr :: rest ->
-      let sliced_then = slice_alternative then_ instructions_to_keep in
-      let sliced_else = slice_alternative else_ instructions_to_keep in
+      let sliced_then = slice_alternative cfg cfg_instructions then_ instructions_to_keep in
+      let sliced_else = slice_alternative cfg cfg_instructions else_ instructions_to_keep in
       if List.is_empty sliced_then && List.is_empty sliced_else then
         loop rest (entire_instr :: to_remove_rev)
       else
-        (replace_with_equivalent_instructions to_remove_rev) @ [Instr.Control { instr with instr = If (bt, arity, slice_alternative then_ instructions_to_keep, slice_alternative else_ instructions_to_keep) }] @ loop rest []
+        (replace_with_equivalent_instructions to_remove_rev cfg cfg_instructions) @
+        [Instr.Control { instr with instr = If (bt, arity,
+                                                slice_alternative cfg cfg_instructions then_ instructions_to_keep,
+                                                slice_alternative cfg cfg_instructions else_ instructions_to_keep) }] @ loop rest []
     | instr :: rest when Instr.Label.Set.mem instructions_to_keep (Instr.label instr) ->
-    (replace_with_equivalent_instructions to_remove_rev) @ [instr] @ loop rest []
+    (replace_with_equivalent_instructions to_remove_rev cfg cfg_instructions) @ [instr] @ loop rest []
     | instr :: rest ->
       loop rest (instr :: to_remove_rev) in
   loop original_instructions []
 
-let slice_alternative_to_funcinst (cfg : Spec.t Cfg.t) ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) (slicing_criterion : Instr.Label.t) : Func_inst.t =
+let slice_alternative_to_funcinst (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) (slicing_criterion : Instr.Label.t) : Func_inst.t =
   let instructions_in_slice = match instructions_in_slice with
     | Some instrs -> instrs
-    | None -> (instructions_to_keep cfg slicing_criterion) in
-  let instructions = slice_alternative (Cfg.body (Cfg.clear_annotations cfg)) instructions_in_slice  in
+    | None -> (instructions_to_keep cfg cfg_instructions slicing_criterion) in
+  let unit_cfg = Cfg.clear_annotations cfg in
+  let instructions = slice_alternative unit_cfg cfg_instructions (Cfg.body unit_cfg) instructions_in_slice  in
   { idx = cfg.idx;
     name = Some cfg.name;
     type_idx = cfg.type_idx;
@@ -207,7 +283,7 @@ module Test = struct
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6
   )" in
-    let actual = instructions_to_keep cfg (lab 2) in
+    let actual = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 2) in
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -226,7 +302,7 @@ module Test = struct
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6 -- slicing criterion
   )" in
-    let actual = instructions_to_keep cfg (lab 6) in
+    let actual = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 6) in
     let expected = Instr.Label.Set.of_list [lab 4; lab 5; lab 6] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -245,7 +321,7 @@ module Test = struct
     end
     local.get 0)  ;; Instr 5
   )" in
-    let actual = instructions_to_keep cfg (lab 3) in
+    let actual = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 3) in
     let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -264,7 +340,7 @@ module Test = struct
     end
     local.get 0)  ;; Instr 5
   )" in
-    let actual = instructions_to_keep cfg (lab 4) in
+    let actual = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 4) in
     let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3; lab 4] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -291,7 +367,7 @@ module Test = struct
     memory.size     ;; Instr 8
     i32.add)        ;; Instr 9 -- slicing criterion
   )" in
-    let actual = instructions_to_keep cfg (lab 9) in
+    let actual = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 9) in
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2; lab 3; merge 4; lab 8; lab 9] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -320,7 +396,7 @@ module Test = struct
    (table (;0;) 1 1 funcref)
    (memory (;0;) 2)
    (global (;0;) (mut i32) (i32.const 66560)))" in
-    let _funcinst = slice_alternative_to_funcinst cfg (lab 9) in
+    let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (lab 9) in
     (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
     ()
 
@@ -345,7 +421,7 @@ module Test = struct
       i32.add       ;; Instr 8 ;; [i7]
     end)
    )" in
-     let _funcinst = slice_alternative_to_funcinst cfg (lab 8) in
+     let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (lab 8) in
      ()
 
    let%test_unit "slicing intra-block block containing a single drop - variant" =
@@ -369,7 +445,7 @@ module Test = struct
       i32.add       ;; Instr 9
     end)
    )" in
-     let _funcinst = slice_alternative_to_funcinst cfg (lab 9) in
+     let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (lab 9) in
      ()
 
    let%test_unit "slicing with a block containing a single drop - variant" =
@@ -393,7 +469,7 @@ module Test = struct
       i32.add       ;; Instr 9
     end)
    )" in
-     let _funcinst = slice_alternative_to_funcinst cfg (lab 9) in
+     let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (lab 9) in
      ()
 
    let check_slice original sliced fidx criterion =
@@ -401,7 +477,7 @@ module Test = struct
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
      let _, cfg = build_cfg ~fidx original in
-     let expected = (slice_alternative_to_funcinst cfg (lab ~fidx criterion)).code.body in
+     let expected = (slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (lab ~fidx criterion)).code.body in
      let _, expected_cfg = build_cfg ~fidx sliced in
      let actual = Cfg.body expected_cfg in
      List.equal (fun x y ->
@@ -786,7 +862,7 @@ module Test = struct
         Spec_inference.propagate_locals := false;
         Spec_inference.propagate_globals := false;
         Spec_inference.use_const := false;
-        let funcinst = slice_alternative_to_funcinst cfg instr_idx in
+        let funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) instr_idx in
         let module_ = Wasm_module.replace_func module_ 14l funcinst in
         (* We should be able to re-annotate the graph *)
         Spec_inference.propagate_locals := true;
@@ -806,7 +882,7 @@ module Test = struct
          Spec_inference.propagate_locals := false;
          Spec_inference.propagate_globals := false;
          Spec_inference.use_const := false;
-         let funcinst = slice_alternative_to_funcinst cfg instr_idx in
+         let funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) instr_idx in
          let module_ = Wasm_module.replace_func module_ 22l funcinst in
          (* We should be able to re-annotate the graph *)
          Spec_inference.propagate_locals := true;

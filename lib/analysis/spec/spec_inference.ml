@@ -106,9 +106,9 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
   let control_instr_transfer (_module_ : Wasm_module.t) (cfg : 'a Cfg.t) (i : ('a Instr.control, 'a) Instr.labelled) (state : state) : [`Simple of state | `Branch of state * state] =
     let ret = Var.Var i.label in
     match i.instr with
-    | Call ((arity_in, arity_out), _) ->
+    | Call ((arity_in, arity_out), _, _) ->
       `Simple { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) }
-    | CallIndirect ((arity_in, arity_out), _) ->
+    | CallIndirect ((arity_in, arity_out), _, _) ->
       (* Like call, but reads the function index from the vstack *)
       `Simple { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) }
     | Br _ -> `Simple state
@@ -276,8 +276,8 @@ let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
       begin match i.instr with
         | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
         | If _ -> [] (* We could say that if defines its "resulting" value, but that will be handled by the merge node *)
-        | Call ((_, arity_out), _) -> top_n arity_out
-        | CallIndirect ((_, arity_out), _) -> top_n arity_out
+        | Call ((_, arity_out), _, _) -> top_n arity_out
+        | CallIndirect ((_, arity_out), _, _) -> top_n arity_out
         | Merge ->
           (* Merge instruction defines new variabes *)
           let block = Cfg.find_enclosing_block_exn cfg (Instr.label instr) in
@@ -322,8 +322,8 @@ let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Ins
     begin match i.instr with
       | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
       | If _ -> top_n 1 (* relies on top value to decide the branch taken *)
-      | Call ((arity_in, _), _) -> top_n arity_in (* uses the n arguments from the stack *)
-      | CallIndirect ((arity_in, __), _) -> top_n (arity_in + 1) (* + 1 because we need to pop the index that will refer to the called function, on top of the arguments *)
+      | Call ((arity_in, _), _, _) -> top_n arity_in (* uses the n arguments from the stack *)
+      | CallIndirect ((arity_in, _), _, _) -> top_n (arity_in + 1) (* + 1 because we need to pop the index that will refer to the called function, on top of the arguments *)
       | BrIf _ | BrTable _ -> top_n 1
       | Merge ->
         (* Merge instruction uses the variables it redefines *)

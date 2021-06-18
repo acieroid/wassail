@@ -30,29 +30,30 @@ let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
 let report_time (msg : string) (t0 : Time.t) (t1 : Time.t) : unit =
   Printf.printf "Time for '%s': %s\n%!" msg (Time.Span.to_string (Time.diff t1 t0))
 
-let random_slice (filename : string) : result =
+let random_slices (filename : string) : result list =
   try
     Spec_inference.propagate_globals := false;
     Spec_inference.propagate_locals := false;
     Spec_inference.use_const := false;
     let wasm_mod = Wasm_module.of_file filename in
-    let funcs = Array.of_list wasm_mod.funcs in
-    if Array.length funcs = 0 then
-      Ignored NoFunction
+    let funcs = wasm_mod.funcs in
+    if List.is_empty funcs then
+      [Ignored NoFunction]
     else
-      let func = Array.get funcs (Random.int (Array.length funcs)) in
-      let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
-      if Array.length labels = 0 then
-        Ignored (NoInstruction func.idx)
-      else
-        let slicing_criterion = Array.get labels (Random.int (Array.length labels)) in
-        try
-          let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
-          let t0 = Time.now () in
-          try
-            let instrs_to_keep = Slicing.instructions_to_keep cfg slicing_criterion in
+      List.map funcs ~f:(fun func ->
+          let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
+          if Array.length labels = 0 then
+            Ignored (NoInstruction func.idx)
+          else
+            let slicing_criterion = Array.get labels (Random.int (Array.length labels)) in
             try
-              let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) slicing_criterion in
+              let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
+              let cfg_instructions = Cfg.all_instructions cfg in
+              let t0 = Time.now () in
+              try
+                let instrs_to_keep = Slicing.instructions_to_keep cfg cfg_instructions slicing_criterion in
+                try
+              let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) cfg_instructions slicing_criterion in
               let t1 = Time.now () in
               let time = Time.diff t1 t0 in
               let sliced_labels = all_labels sliced_func.code.body in
@@ -66,8 +67,8 @@ let random_slice (filename : string) : result =
               }
             with e -> SliceExtensionError (func.idx, slicing_criterion, Exn.to_string e)
           with e -> SliceError (func.idx, slicing_criterion, Exn.to_string e)
-        with e -> CfgError (func.idx, slicing_criterion, Exn.to_string e)
-  with e -> LoadError (Exn.to_string e)
+        with e -> CfgError (func.idx, slicing_criterion, Exn.to_string e))
+  with e -> [LoadError (Exn.to_string e)]
 
 let output (file : string) (fields : string list) =
   Out_channel.with_file file ~append:true ~f:(fun ch ->
@@ -77,7 +78,7 @@ let evaluate_files (files : string list) =
   let total = List.length files in
   List.iteri files ~f:(fun i filename ->
       Printf.printf "\r%d/%d%!" i total;
-      match random_slice filename with
+      List.iter (random_slices filename) ~f:(function
       | Success r ->
         output "data.txt" [filename; Int32.to_string r.function_sliced; Instr.Label.to_string r.slicing_criterion;
                            string_of_int r.initial_number_of_instrs;
@@ -98,7 +99,7 @@ let evaluate_files (files : string list) =
         output "error.txt" [filename; Int32.to_string f; Instr.Label.to_string criterion;
                             "cfg"; reason]
       | LoadError _ ->
-        output "loaderror.txt" [filename])
+        output "loaderror.txt" [filename]))
 
 let evaluate =
   Command.basic

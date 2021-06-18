@@ -362,7 +362,7 @@ let slice =
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
         let func = List32.nth_exn module_.funcs Int32.(funidx - module_.nfuncimports) in
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
-        let funcinst = Slicing.slice_alternative_to_funcinst cfg slicing_criterion in
+        let funcinst = Slicing.slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) slicing_criterion in
         let sliced_labels = all_labels funcinst.code.body in
         Printf.printf "all: %s\n" (Instr.Label.Set.to_string (all_labels func.code.body));
         Printf.printf "sliced: %s\n" (Instr.Label.Set.to_string sliced_labels);
@@ -391,8 +391,9 @@ let random_slice_report =
           let slicing_criterion = Array.get labels (Random.int (Array.length labels)) in
           try
             let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
-            let instrs_to_keep = Slicing.instructions_to_keep cfg slicing_criterion in
-            let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) slicing_criterion in
+            let cfg_instructions = Cfg.all_instructions cfg in
+            let instrs_to_keep = Slicing.instructions_to_keep cfg cfg_instructions slicing_criterion in
+            let sliced_func = Slicing.slice_alternative_to_funcinst cfg cfg_instructions ~instrs:(Some instrs_to_keep) slicing_criterion in
             let sliced_labels = all_labels sliced_func.code.body in
             Printf.printf "success\t%s\t%ld\t%s\t%d/%d\t%d/%d\n"
               filename

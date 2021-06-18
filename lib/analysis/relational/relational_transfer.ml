@@ -250,11 +250,11 @@ let control_instr_transfer
     Relational_summary.apply summary state (List.map ~f:Var.to_string args) (Option.map ~f:Var.to_string ret)
   in
   match i.instr with
-  | Call (arity, f) ->
+  | Call (arity, _, f) ->
     (* We encounter a function call, retrieve its summary and apply it *)
     (* We assume all summaries are defined *)
     `Simple (apply_summary f arity state)
-  | CallIndirect (arity, typ) ->
+  | CallIndirect (arity, _, typ) ->
     (* v is the index in the table that points to the called functiion *)
     let v = pop i.annotation_before.vstack in
     (* Get table 0 *)

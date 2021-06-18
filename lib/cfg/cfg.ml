@@ -60,6 +60,13 @@ type 'a t = {
 }
 [@@deriving compare, equal]
 
+let local_type (cfg : 'a t) (l : int32) =
+  let nargs = List32.length cfg.arg_types in
+  if Int32.(l < nargs) then
+    List32.nth_exn cfg.arg_types l
+  else
+    List32.nth_exn cfg.local_types Int32.(l-nargs)
+
 let to_string (cfg : 'a t) : string = Printf.sprintf "CFG of function %s" (Int32.to_string cfg.idx)
 
 let to_dot
@@ -118,7 +125,7 @@ let callees (cfg : 'a t) : Int32Set.t =
   IntMap.fold cfg.basic_blocks
     ~init:Int32Set.empty
     ~f:(fun ~key:_ ~data:block callees -> match block.content with
-        | Control { instr = Call (_, n); _} -> Int32Set.union (Int32Set.singleton n) callees
+        | Control { instr = Call (_, _, n); _} -> Int32Set.union (Int32Set.singleton n) callees
         | _ -> callees)
 
 let callers (cfgs : 'a t Int32Map.t) (cfg : 'a t) : Int32Set.t =

@@ -145,8 +145,8 @@ module Make (* : Transfer.TRANSFER *) = struct
                                                                                                            [a; b])) ret
     in
     match i.instr with
-    | Call (arity, f) -> `Simple (apply_summary f arity state)
-    | CallIndirect (arity, typ) ->
+    | Call (arity, _, f) -> `Simple (apply_summary f arity state)
+    | CallIndirect (arity, _, typ) ->
       (* Simplest case: all functions with the proper type can be called.
          Refined case: all functions that are deemed reachable by previous analysis stages (i.e., relational analysis) can be called *)
       let table = List.nth_exn module_.table_insts 0 in

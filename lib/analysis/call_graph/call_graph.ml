@@ -26,11 +26,11 @@ let make (wasm_mod : Wasm_module.t) : t =
   let find_targets = indirect_call_targets in
   let nodes = Int32Set.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> Int32.of_int_exn i)) in
   let rec collect_calls (f : Int32.t) (instr : 'a Instr.t) (edges : Int32Set.t Int32Map.t) : Int32Set.t Int32Map.t = match instr with
-    | Control { instr = Call (_, f'); _ } ->
+    | Control { instr = Call (_, _, f'); _ } ->
       Int32Map.update edges f ~f:(function
           | None -> Int32Set.singleton f'
           | Some fs -> Int32Set.add fs f')
-    | Control { instr = CallIndirect (_, typ); _ } ->
+    | Control { instr = CallIndirect (_, _, typ); _ } ->
       List.fold_left (find_targets wasm_mod f (Instr.label instr) typ)
         ~init:edges
         ~f:(fun edges f' ->

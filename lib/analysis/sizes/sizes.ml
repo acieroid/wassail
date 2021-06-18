@@ -358,8 +358,8 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
           | BrIf x -> op 0x0d; var x
           | BrTable (xs, x) -> op 0x0e; vec var xs; var x
           | Return -> op 0x0f
-          | Call (_, x) -> op 0x10; var x
-          | CallIndirect (_, x) -> op 0x11; var x; u8 0x00
+          | Call (_, _, x) -> op 0x10; var x
+          | CallIndirect (_, _, x) -> op 0x11; var x; u8 0x00
           | Merge -> ()
         end
 
