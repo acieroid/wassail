@@ -339,9 +339,11 @@ let postdom =
               Out_channel.output_string ch (Tree.to_dot tree)))
 
 let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
+  Printf.printf "num: %d\n" (List.length instrs);
   List.fold_left instrs
     ~init:Instr.Label.Set.empty
     ~f:(fun acc instr ->
+        Printf.printf "instr: %s:%s\n" (Instr.Label.to_string (Instr.label instr)) (Instr.to_string instr);
         Instr.Label.Set.union acc (Instr.all_labels_no_merge instr))
 
 let slice =
@@ -358,7 +360,7 @@ let slice =
         Spec_inference.use_const := false;
         let module_ = Wasm_module.of_file filename in
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
-        let func = List32.nth_exn module_.funcs funidx in
+        let func = List32.nth_exn module_.funcs Int32.(funidx - module_.nfuncimports) in
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
         let funcinst = Slicing.slice_alternative_to_funcinst cfg slicing_criterion in
         let sliced_labels = all_labels funcinst.code.body in
@@ -487,6 +489,10 @@ let () =
        ; "taint-inter", taint_inter
        ; "reltaint-intra", reltaint_intra
        ; "relational-intra", relational_intra
+       ; "find-indirect-calls", find_indirect_calls
+
+       (* Slicing *)
        ; "slice", slice
        ; "random-slice", random_slice_report
-       ; "find-indirect-calls", find_indirect_calls])
+       ; "evaluate-slicing", Evaluate.evaluate
+       ])
