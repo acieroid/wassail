@@ -109,7 +109,11 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
               | None -> slice
             end
           | _ -> slice) in
-  let initial_worklist = InSlice.Set.singleton { label = criterion; reason = None } in
+  let global_set_instructions = InSlice.Set.of_list (List.map ~f:(fun label -> InSlice.{ label; reason = None })
+                                                       (Instr.Label.Map.keys (Instr.Label.Map.filter cfg_instructions ~f:(function
+                                                           | Data { instr = GlobalSet _; _ } -> true
+                                                           | _ -> false)))) in
+  let initial_worklist = InSlice.Set.union global_set_instructions (InSlice.Set.singleton { label = criterion; reason = None }) in
   let initial_slice = Instr.Label.Set.empty in
   agrawal (loop initial_worklist initial_slice InSlice.Set.empty)
 
@@ -654,6 +658,26 @@ module Test = struct
 )
 )" in
      check_slice original sliced 0l 6
+
+   (* Currently not supported
+   let%test "slice on a simple infinite loop example" =
+     let original = "(module
+  (type (;0;) (func))
+  (func (;0;) (type 0)
+    loop
+      i32.const 1 ;; slicing criterion
+      drop
+      br 0
+    end))" in
+     let sliced = "(module
+  (type (;0;) (func))
+  (func (;0;) (type 0)
+    loop
+      i32.const 1
+      drop
+      br 0
+    end))" in
+    check_slice original sliced 0l 2 *)
 
 
    let%test "slice on the example from Agrawal 1994 (Fig. 3) should be correct" =
@@ -1272,5 +1296,24 @@ module Test = struct
 ))" in
      check_slice word_count slice 1l 37
 
+    let%test "slicing with return" =
+      let original = "(module
+(type (;0;) (func))
+(type (;1;) (func (result i32)))
+(func (;0;) (type 1)
+  i32.const 0
+  i32.const 1
+  i32.const 2
+  i32.const 3
+  return))" in
+      let slice = "(module
+(type (;0;) (func (result i32)))
+(func (;0;) (type 0)
+  i32.const 0 ;; dummy instr
+  i32.const 0 ;; dummy instr
+  i32.const 0 ;; dummy instr
+  i32.const 3
+  return))" in
+      check_slice original slice 0l 4
 
  end

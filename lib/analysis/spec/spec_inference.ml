@@ -338,5 +338,7 @@ let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Ins
                 else
                   None)
         end
-      | Br _ | Return | Unreachable -> []
+      | Return ->
+        top_n (List.length cfg.return_types)
+      | Br _ | Unreachable -> []
     end
