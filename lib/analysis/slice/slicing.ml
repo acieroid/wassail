@@ -659,25 +659,26 @@ module Test = struct
 )" in
      check_slice original sliced 0l 6
 
-   (* Currently not supported
    let%test "slice on a simple infinite loop example" =
      let original = "(module
   (type (;0;) (func))
   (func (;0;) (type 0)
     loop
       i32.const 1 ;; slicing criterion
-      drop
-      br 0
+      if
+        br 0
+      end
     end))" in
      let sliced = "(module
   (type (;0;) (func))
   (func (;0;) (type 0)
     loop
       i32.const 1
-      drop
-      br 0
+      if
+        br 0
+      end
     end))" in
-    check_slice original sliced 0l 2 *)
+    check_slice original sliced 0l 2
 
 
    let%test "slice on the example from Agrawal 1994 (Fig. 3) should be correct" =

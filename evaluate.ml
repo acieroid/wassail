@@ -76,8 +76,11 @@ let random_slices (filename : string) : result list =
             with e -> CfgError (func.idx, slicing_criterion, Exn.to_string e))
   with e -> [LoadError (Exn.to_string e)]
 
+
+let prefix : string ref = ref "."
+
 let output (file : string) (fields : string list) =
-  Out_channel.with_file file ~append:true ~f:(fun ch ->
+  Out_channel.with_file (Printf.sprintf "%s/%s" !prefix file) ~append:true ~f:(fun ch ->
       Out_channel.output_string ch (Printf.sprintf "%s\n" (String.concat ~sep:"," fields)))
 
 let evaluate_files (files : string list) =
@@ -112,7 +115,12 @@ let evaluate =
   Command.basic
     ~summary:"Evalate the slicer on a set of benchmarks, listed in the file given as argument"
     Command.Let_syntax.(
-      let%map_open filelist = anon ("filelist" %: string) in
+      let%map_open filelist = anon ("filelist" %: string)
+      and prefix_opt = anon (maybe ("prefix" %: string)) in
       fun () ->
+        match prefix_opt with
+        | None -> ()
+        | Some p -> prefix := p
+          ;
         evaluate_files (In_channel.read_lines filelist))
 
