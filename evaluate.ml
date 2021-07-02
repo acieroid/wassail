@@ -66,6 +66,8 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
                         let t1 = Time.now () in
                         let slicing_time = Time.diff t1 t0 in
                         let sliced_labels = all_labels sliced_func.code.body in
+                        (* Printf.printf "fun %ld:%s -- initial: %s, before: %s, after: %d\n" func.idx (Instr.Label.to_string slicing_criterion) (Instr.Label.Set.to_string (all_labels func.code.body)) (Instr.Label.Set.to_string instrs_to_keep) (Instr.Label.Set.length sliced_labels); *)
+
                         Success {
                           function_sliced = func.idx;
                           slicing_criterion;
@@ -92,13 +94,15 @@ let evaluate_files (files : string list) (criterion_selection : [`All | `Random 
   List.iteri files ~f:(fun i filename ->
       Printf.printf "\r%d/%d %s%!" i total filename;
       List.iter (slices filename criterion_selection) ~f:(function
-      | Success r ->
-        output "data.txt" [filename; Int32.to_string r.function_sliced; Instr.Label.to_string r.slicing_criterion;
-                           string_of_int r.initial_number_of_instrs;
-                           string_of_int r.slice_size_before_adaptation;
-                           string_of_int r.slice_size_after_adaptation;
-                           string_of_float (Time.Span.to_ms r.preanalysis_time);
-                           string_of_float (Time.Span.to_ms r.slicing_time)]
+          | Success r ->
+            output "data.txt" [filename; (* 0 *)
+                               Int32.to_string r.function_sliced; (* 1 *)
+                               Instr.Label.to_string r.slicing_criterion; (* 2 *)
+                               string_of_int r.initial_number_of_instrs; (* 3 *)
+                               string_of_int r.slice_size_before_adaptation; (* 4 *)
+                               string_of_int r.slice_size_after_adaptation; (* 5 *)
+                               string_of_float (Time.Span.to_ms r.preanalysis_time); (* 6 *)
+                               string_of_float (Time.Span.to_ms r.slicing_time)] (* 7 *)
       | Ignored NoFunction ->
         output "nofunction.txt" [filename]
       | Ignored (NoInstruction f) ->
@@ -124,9 +128,9 @@ let evaluate =
       and all = flag "-a" no_arg ~doc:"slice on all functions, for all slicing criterion"
       and last = flag "-l" no_arg ~doc:"slice on all functions, for the last slicing criterion" in
       fun () ->
-        match prefix_opt with
+        begin match prefix_opt with
         | None -> ()
         | Some p -> prefix := p
-          ;
+        end;
         evaluate_files (In_channel.read_lines filelist) (if all then `All else if last then `Last else `Random))
 

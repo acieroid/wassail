@@ -115,7 +115,12 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
                                                            | _ -> false)))) in
   let initial_worklist = InSlice.Set.union global_set_instructions (InSlice.Set.singleton { label = criterion; reason = None }) in
   let initial_slice = Instr.Label.Set.empty in
-  agrawal (loop initial_worklist initial_slice InSlice.Set.empty)
+  Instr.Label.Set.filter (agrawal (loop initial_worklist initial_slice InSlice.Set.empty))
+    ~f:(fun lab -> match lab.section with
+        | MergeInFunction _ ->
+          (* Merge instructions do not need to be marked as part of the slice once slicing has been performed *)
+          false
+        | _ -> true)
 
 (** Construct a dummy list of instruction that has the given net effect on the stack size *)
 let dummy_instrs (net_effect : int) (next_label : unit -> int) : (Instr.data, unit) Instr.labelled list =
@@ -372,7 +377,8 @@ module Test = struct
     i32.add)        ;; Instr 9 -- slicing criterion
   )" in
     let actual = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 9) in
-    let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2; lab 3; merge 4; lab 8; lab 9] in
+    (* Merge blocks do not need to be in the slice *)
+    let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2; lab 3; lab 8; lab 9] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
   let%test_unit "slicing with merge blocks using slice" =
