@@ -18,9 +18,9 @@ type ignored_reason =
 type result =
   | Success of slicing_result
   | Ignored of ignored_reason
-  | SliceExtensionError of int32 * Instr.Label.t * string
-  | SliceError of int32 * Instr.Label.t * string
-  | CfgError of int32 * string
+  | SliceExtensionError of int32 * Instr.Label.t * int * string
+  | SliceError of int32 * Instr.Label.t * int * string
+  | CfgError of int32 * int * string
   | LoadError of string
 
 let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
@@ -77,9 +77,9 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
                           preanalysis_time;
                           slicing_time;
                         }
-                      with e -> SliceExtensionError (func.idx, slicing_criterion, Exn.to_string e)
-                    with e -> SliceError (func.idx, slicing_criterion, Exn.to_string e))
-            with e -> [CfgError (func.idx, Exn.to_string e)])
+                      with e -> SliceExtensionError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e)
+                    with e -> SliceError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e))
+            with e -> [CfgError (func.idx, Array.length labels, Exn.to_string_mach e)])
   with e -> [LoadError (Exn.to_string e)]
 
 
@@ -107,15 +107,27 @@ let evaluate_files (files : string list) (criterion_selection : [`All | `Random 
         output "nofunction.txt" [filename]
       | Ignored (NoInstruction f) ->
         output "noinstruction.txt" [filename; Int32.to_string f]
-      | SliceExtensionError (f, criterion, reason) ->
-        output "error.txt" [filename; Int32.to_string f; Instr.Label.to_string criterion;
-                            "slice-extension"; reason]
-      | SliceError (f, criterion, reason) ->
-        output "error.txt" [filename; Int32.to_string f; Instr.Label.to_string criterion;
-                            "slice"; reason]
-      | CfgError (f, reason) ->
-        output "error.txt" [filename; Int32.to_string f; "-1";
-                            "cfg"; reason]
+      | SliceExtensionError (f, criterion, size, reason) ->
+        output "error.txt" [filename; (* 0 *)
+                            Int32.to_string f; (* 1 *)
+                            Instr.Label.to_string criterion; (* 2 *)
+                            string_of_int size; (* 3 *)
+                            "slice-extension"; (* 4 *)
+                            reason] (* 5 *)
+      | SliceError (f, criterion, size, reason) ->
+        output "error.txt" [filename; (* 0 *)
+                            Int32.to_string f; (* 1 *)
+                            Instr.Label.to_string criterion; (* 2 *)
+                            string_of_int size; (* 3 *)
+                            "slice"; (* 4 *)
+                            reason] (* 5 *)
+      | CfgError (f, size, reason) ->
+        output "error.txt" [filename; (* 0 *)
+                            Int32.to_string f; (* 1 *)
+                            "-1"; (* 2 *)
+                            string_of_int size; (* 3 *)
+                            "cfg"; (* 4 *)
+                            reason] (* 5 *)
       | LoadError _ ->
         output "loaderror.txt" [filename]))
 
