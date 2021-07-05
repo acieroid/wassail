@@ -10,6 +10,7 @@ module Import = Import
 module Export = Export
 module Var = Var
 module Type = Type
+module Prim_value = Prim_value
 
 module Basic_block = Basic_block
 module Tree = Tree

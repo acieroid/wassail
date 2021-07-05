@@ -360,12 +360,10 @@ let slice =
         Spec_inference.use_const := false;
         let module_ = Wasm_module.of_file filename in
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
-        let func = List32.nth_exn module_.funcs Int32.(funidx - module_.nfuncimports) in
+        (* let func = List32.nth_exn module_.funcs Int32.(funidx - module_.nfuncimports) in *)
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
         let funcinst = Slicing.slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) slicing_criterion in
-        let sliced_labels = all_labels funcinst.code.body in
-        Printf.printf "all: %s\n" (Instr.Label.Set.to_string (all_labels func.code.body));
-        Printf.printf "sliced: %s\n" (Instr.Label.Set.to_string sliced_labels);
+        (* let sliced_labels = all_labels funcinst.code.body in *)
         let module_ = Wasm_module.replace_func module_ funidx funcinst in
         Out_channel.with_file outfile
           ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_)))
@@ -496,4 +494,5 @@ let () =
        ; "slice", slice
        ; "random-slice", random_slice_report
        ; "evaluate-slicing", Evaluate.evaluate
+       ; "gen-slice-specific", Evaluate.gen_slice_specific
        ])

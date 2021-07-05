@@ -186,9 +186,13 @@ let type_of_control
   | BrIf _ -> ([T Type.I32], [])
   | BrTable (_, _) -> ([T Type.I32], [])
   | Return ->
-    let annot_before = Instr.annotation_before (Cfg.find_instr_exn instructions_map i.label) in
-    let vstack = annot_before.vstack in
-    (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i)), (List.map cfg.return_types ~f:(fun t -> T t)))
+    begin match Cfg.find_instr instructions_map i.label with
+    | Some i ->
+      let annot_before = Instr.annotation_before i in
+      let vstack = annot_before.vstack in
+      (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i)), (List.map cfg.return_types ~f:(fun t -> T t)))
+    | None -> failwith "Unsupported in slicing: return instruction is part of unreachable code"
+    end
   | Unreachable -> ([], [])
   | Merge -> ([], [])
 

@@ -133,7 +133,7 @@ let evaluate_files (files : string list) (criterion_selection : [`All | `Random 
 
 let evaluate =
   Command.basic
-    ~summary:"Evalate the slicer on a set of benchmarks, listed in the file given as argument"
+    ~summary:"Evaluate the slicer on a set of benchmarks, listed in the file given as argument"
     Command.Let_syntax.(
       let%map_open filelist = anon ("filelist" %: string)
       and prefix_opt = flag "-p" (optional string) ~doc:"prefix for where to save the results file (default: current directory)"
@@ -146,3 +146,65 @@ let evaluate =
         end;
         evaluate_files (In_channel.read_lines filelist) (if all then `All else if last then `Last else `Random))
 
+
+(* Generate a slice for printf function calls with a specific string *)
+let generate_slice (filename : string) (output_file : string) =
+  let pattern = "\norbs:" in
+  Spec_inference.propagate_globals := false;
+  Spec_inference.propagate_locals := false;
+  Spec_inference.use_const := false;
+  let wasm_mod = Wasm_module.of_file filename in
+  (* Find the specific string in the data section *)
+  let str_pos = match List.find_map wasm_mod.data ~f:(fun segment ->
+      match String.substr_index segment.init ~pattern with
+      | Some idx -> begin match segment.offset with
+        | (Instr.Data {instr = Instr.Const (Prim_value.I32 n); _}) :: [] -> Some (Int32.(n + (of_int_exn idx)))
+        | _ -> failwith "unsupported segment offset"
+        end
+      | None -> None) with
+  | Some idx -> idx
+  | None -> failwith "cannot find pattern in any data segment" in
+  Printf.printf "data segment: %ld\n" str_pos;
+  (* Find the index of the printf function (it should be exported, otherwise it is unnamed) *)
+  let printf_export_idx = match List.find_map wasm_mod.exported_funcs ~f:(fun (idx, name, _type) ->
+      if String.equal name "printf" then
+        Some idx
+      else
+        None) with
+  | Some idx -> idx
+  | None -> failwith "cannot find printf in exported functions" in
+  Spec_inference.propagate_globals := false;
+  Spec_inference.propagate_locals := false;
+  Printf.printf "printf id: %ld\n" printf_export_idx;
+  (* Find the function and slicing criterion: it should call printf with the string's position in the data segment as argument *)
+  let (function_idx, slicing_criterion) = match List.find_map wasm_mod.funcs ~f:(fun func ->
+      Spec_inference.use_const := true;
+      let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
+      List.find_map (Cfg.all_instructions_list cfg) ~f:(function
+          | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
+            begin match annotation_before.vstack with
+              | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 str_pos)) -> Some (func.idx, label)
+              | _ -> None
+            end
+          | _ -> None)) with
+  | Some r -> r
+  | None -> failwith "cannot find function to slice" in
+  Printf.printf "function: %ld, slicing criterion: %s\n" function_idx (Instr.Label.to_string slicing_criterion);
+  (* Perform the actual slicing *)
+  Spec_inference.use_const := false;
+  let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod function_idx) in
+  let funcinst = Slicing.slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) slicing_criterion in
+  let module_ = Wasm_module.replace_func wasm_mod function_idx funcinst in
+  Out_channel.with_file output_file
+    ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_))
+
+let gen_slice_specific =
+  Command.basic
+    ~summary:"Generate a slice for a specific slicing criterion"
+    Command.Let_syntax.(
+      let%map_open file = anon ("file" %: string)
+      and output = anon ("output" %: string) in
+      fun () ->
+        generate_slice file output)
+          
+    
