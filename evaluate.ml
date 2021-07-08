@@ -40,18 +40,23 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
     Spec_inference.propagate_globals := false;
     Spec_inference.propagate_locals := false;
     Spec_inference.use_const := false;
+    Printf.printf "loading...\n%!";
     let wasm_mod = Wasm_module.of_file filename in
     let funcs = wasm_mod.funcs in
     if List.is_empty funcs then
       [Ignored NoFunction]
     else
+      let first_idx = (List.hd_exn funcs).idx in
+      let nfuncs = List.length funcs in
       List.concat_map funcs ~f:(fun func ->
           let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
           if Array.length labels = 0 then
             [Ignored (NoInstruction func.idx)]
           else
             try
+              Printf.printf "[%s fun %ld/%ld] building CFG...\n%!" filename func.idx Int32.(first_idx + (of_int_exn nfuncs));
               let (cfg, preanalysis_time) = time (fun () -> Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx)) in
+              Printf.printf "getting instructions...\n%!";
               let cfg_instructions = Cfg.all_instructions cfg in
               List.map (match criterion_selection with
                   | `Random -> [Array.get labels (Random.int (Array.length labels))]
@@ -60,8 +65,10 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
                 ~f:(fun slicing_criterion ->
                     let t0 = Time.now () in
                     try
+                      Printf.printf "slicing...\n%!";
                       let instrs_to_keep = Slicing.instructions_to_keep cfg cfg_instructions slicing_criterion in
                       try
+                        Printf.printf "reconstructing...\n%!";
                         let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) cfg_instructions slicing_criterion in
                         let t1 = Time.now () in
                         let slicing_time = Time.diff t1 t0 in
@@ -92,7 +99,7 @@ let output (file : string) (fields : string list) =
 let evaluate_files (files : string list) (criterion_selection : [`All | `Random | `Last]) : unit =
   let total = List.length files in
   List.iteri files ~f:(fun i filename ->
-      Printf.printf "\r%d/%d %s%!" i total filename;
+      Printf.printf "\r%d/%d %s\n" i total filename;
       List.iter (slices filename criterion_selection) ~f:(function
           | Success r ->
             output "data.txt" [filename; (* 0 *)
