@@ -55,7 +55,7 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
           else
             try
               Printf.printf "[%s fun %ld/%ld] building CFG...\n%!" filename func.idx Int32.(first_idx + (of_int_exn nfuncs));
-              let (cfg, preanalysis_time) = time (fun () -> Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx)) in
+              let (cfg, preanalysis_time1) = time (fun () -> Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx)) in
               Printf.printf "getting instructions...\n%!";
               let cfg_instructions = Cfg.all_instructions cfg in
               List.map (match criterion_selection with
@@ -63,15 +63,15 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
                   | `All -> Array.to_list labels
                   | `Last -> [Array.last labels])
                 ~f:(fun slicing_criterion ->
-                    let t0 = Time.now () in
                     try
                       Printf.printf "slicing...\n%!";
-                      let instrs_to_keep = Slicing.instructions_to_keep cfg cfg_instructions slicing_criterion in
+                      let instrs_to_keep, preanalysis_time2, slicing_time1 = Slicing.instructions_to_keep cfg cfg_instructions slicing_criterion in
                       try
                         Printf.printf "reconstructing...\n%!";
+                        let t0 = Time.now () in
                         let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) cfg_instructions slicing_criterion in
                         let t1 = Time.now () in
-                        let slicing_time = Time.diff t1 t0 in
+                        let slicing_time2 = Time.diff t1 t0 in
                         let sliced_labels = all_labels sliced_func.code.body in
                         (* Printf.printf "fun %ld:%s -- initial: %s, before: %s, after: %d\n" func.idx (Instr.Label.to_string slicing_criterion) (Instr.Label.Set.to_string (all_labels func.code.body)) (Instr.Label.Set.to_string instrs_to_keep) (Instr.Label.Set.length sliced_labels); *)
 
@@ -81,8 +81,8 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
                           initial_number_of_instrs = Array.length labels;
                           slice_size_before_adaptation = Instr.Label.Set.length instrs_to_keep;
                           slice_size_after_adaptation = Instr.Label.Set.length sliced_labels;
-                          preanalysis_time;
-                          slicing_time;
+                          preanalysis_time = Time.Span.(+) preanalysis_time1 preanalysis_time2;
+                          slicing_time = Time.Span.(+) slicing_time1 slicing_time2;
                         }
                       with e -> SliceExtensionError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e)
                     with e -> SliceError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e))
@@ -156,7 +156,7 @@ let evaluate =
 
 (* Generate a slice for printf function calls with a specific string *)
 let generate_slice (filename : string) (output_file : string) =
-  let pattern = "\norbs:" in
+  let pattern = "\nORBS:" in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
   Spec_inference.use_const := false;

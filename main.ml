@@ -354,57 +354,30 @@ let slice =
       and funidx = anon ("fun" %: int32)
       and instr = anon ("instr" %: int)
       and outfile = anon ("output" %: string) in
+      Log.enable_info ();
       fun () ->
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
         Spec_inference.use_const := false;
+        Log.info "Loading module";
         let module_ = Wasm_module.of_file filename in
+        Log.info "Constructing CFG";
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
-        (* let func = List32.nth_exn module_.funcs Int32.(funidx - module_.nfuncimports) in *)
-        let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
+        let func = List32.nth_exn module_.funcs Int32.(funidx - module_.nfuncimports) in
+        let slicing_criterion = if instr = 0 then
+            (* No instruction selected, pick the last one *)
+            let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
+            Log.info (Printf.sprintf "There are %d instructions" (Array.length labels));
+            Array.last labels
+          else
+            Instr.Label.{ section = Function funidx; id = instr } in
+        Log.info "Slicing";
         let funcinst = Slicing.slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) slicing_criterion in
+        Log.info "done";
         (* let sliced_labels = all_labels funcinst.code.body in *)
         let module_ = Wasm_module.replace_func module_ funidx funcinst in
         Out_channel.with_file outfile
           ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_)))
-
-let random_slice_report =
-  Command.basic
-    ~summary:"Computes a slice of a random function with a random slicing criterion from the given file, outputs the size of the slice as a percentage of the size of the original function, in terms of number of instructions"
-    Command.Let_syntax.(
-      let%map_open filename = anon ("file" %: string) in
-      fun () ->
-        try
-          Spec_inference.propagate_globals := false;
-          Spec_inference.propagate_locals := false;
-          Spec_inference.use_const := false;
-          let wasm_mod = Wasm_module.of_file filename in
-          let funcs = Array.of_list wasm_mod.funcs in
-          if Array.length funcs = 0 then
-            begin Printf.printf "ignored\t%s\tno function\n" filename; exit 1 end;
-          let func = Array.get funcs (Random.int (Array.length funcs)) in
-          let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
-          if Array.length labels = 0 then
-            begin Printf.printf "ignored\t%s\t%ld\tno instruction\n" filename func.idx; exit 1 end;
-          let slicing_criterion = Array.get labels (Random.int (Array.length labels)) in
-          try
-            let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
-            let cfg_instructions = Cfg.all_instructions cfg in
-            let instrs_to_keep = Slicing.instructions_to_keep cfg cfg_instructions slicing_criterion in
-            let sliced_func = Slicing.slice_alternative_to_funcinst cfg cfg_instructions ~instrs:(Some instrs_to_keep) slicing_criterion in
-            let sliced_labels = all_labels sliced_func.code.body in
-            Printf.printf "success\t%s\t%ld\t%s\t%d/%d\t%d/%d\n"
-              filename
-              func.idx
-              (Instr.Label.to_string slicing_criterion)
-              (Instr.Label.Set.length instrs_to_keep)
-              (Array.length labels)
-              (Instr.Label.Set.length sliced_labels)
-              (Array.length labels)
-          with e -> begin Printf.printf "error\t%s\t%ld\t%s\t%s\n" filename func.idx (Instr.Label.to_string slicing_criterion) (Exn.to_string e); exit 1 end
-        with
-        | Failure s -> begin Printf.printf "error\t%s\t-\t-\t%s\n" filename s; exit 1 end
-        | e -> begin Printf.printf "error\t%s\t-\t-\t%s\n" filename (Exn.to_string e); exit 1 end)
 
 let find_indirect_calls =
   Command.basic
@@ -492,7 +465,6 @@ let () =
 
        (* Slicing *)
        ; "slice", slice
-       ; "random-slice", random_slice_report
        ; "evaluate-slicing", Evaluate.evaluate
        ; "gen-slice-specific", Evaluate.gen_slice_specific
        ])
