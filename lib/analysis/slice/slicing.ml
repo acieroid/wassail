@@ -126,16 +126,14 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
   let t2 = Time.now () in
   (slice, Time.diff t1 t0, Time.diff t2 t1)
 
-(** Construct a dummy list of instruction that has the given net effect on the stack size *)
-let dummy_instrs (net_effect : int) (next_label : unit -> int) : (Instr.data, unit) Instr.labelled list =
-  let dummy_label () : Instr.Label.t = { section = Instr.Label.Dummy; id = next_label () } in
-  if net_effect = 0 then []
-  else if net_effect < 0 then List.init (- net_effect) ~f:(fun _ -> { Instr.instr = Instr.Drop; label = dummy_label (); annotation_before = (); annotation_after = (); })
-  else List.init net_effect ~f:(fun _ -> { Instr.instr = Instr.Const (Prim_value.I32 0l); label = dummy_label (); annotation_before = (); annotation_after = () })
-
 type instr_type_element =
   | T of Type.t
   | Any of string
+[@@deriving equal]
+
+let instr_type_element_to_string t = match t with
+  | T t -> Type.to_string t
+  | Any _ -> "any"
 
 let type_of_data
     (i : (Instr.data, 'a) Instr.labelled)
@@ -200,19 +198,49 @@ let type_of_control
   | Unreachable -> ([], [])
   | Merge -> ([], [])
 
-(** The net effect of an instruction on the stack: positive if it expects value on the stack, negative otherwise *)
-(* TODO: we should actually rely on the type information to add well-typed instructions *)
-let type_of (i : 'a Instr.t) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : int =
-  match i with
-  | Data d ->
-    let (input, output) = type_of_data d cfg in
-    (List.length output) - (List.length input)
-  | Control c ->
-    let (input, output) = type_of_control c cfg instructions_map in
-    (List.length output) - (List.length input)
+(** Construct a dummy list of instruction that has the given type *)
+let dummy_instrs (t : instr_type_element list * instr_type_element list) (next_label : unit -> int) : (Instr.data, unit) Instr.labelled list =
+  let dummy_label () : Instr.Label.t = { section = Instr.Label.Dummy; id = next_label () } in
+  (* before anything, we remove parts of types that won't be needed, e.g., [i32] -> [i32] can be replaced by [] -> [] *)
+  let rec loop (l1 : instr_type_element list) (l2 : instr_type_element list) (n : int) : int = match (l1, l2) with
+    | (Any _) :: t1, _ :: t2
+    | _ :: t1, (Any _) :: t2 -> loop t1 t2 (n+1)
+    | T h1 :: t1, T h2 :: t2 when Type.equal h1 h2 -> loop t1 t2 (n+1)
+    | _ -> n in
+  let prefix = loop (fst t) (snd t) 0 in
+  let input = List.drop (fst t) prefix in
+  let output = List.drop (snd t) prefix in
+  (* we pop everything off the stack, then we push *)
+  let input = List.map input ~f:(fun _ -> { Instr.instr = Instr.Drop; label = dummy_label (); annotation_before = (); annotation_after = (); }) in
+  let push (v : Prim_value.t) = { Instr.instr = Instr.Const v; label = dummy_label (); annotation_before = (); annotation_after = () } in
+  let output = List.map output ~f:(function
+      | Any _ -> push (Prim_value.I32 0l)
+      | T Type.I32 -> push (Prim_value.I32 0l)
+      | T Type.I64 -> push (Prim_value.I64 0L)
+      | T Type.F32 -> push (Prim_value.F32 (Wasm.F32.of_float 0.))
+      | T Type.F64 -> push (Prim_value.F64 (Wasm.F64.of_float 0.))) in
+  input @ output
 
-let instrs_net_effect (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : int =
-  List.fold_left instrs ~init:0 ~f:(fun acc instr -> acc + (type_of instr cfg instructions_map))
+(** The type of an instruction on the stack: positive if it expects value on the stack, negative otherwise *)
+let type_of (i : 'a Instr.t) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : (instr_type_element list * instr_type_element list) =
+  match i with
+  | Data d -> type_of_data d cfg
+  | Control c -> type_of_control c cfg instructions_map
+
+let instrs_type (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : (instr_type_element list * instr_type_element list) =
+  let input, output = List.fold_left instrs ~init:([], []) ~f:(fun (initial_stack, current_stack) instr ->
+      let (i, o) = type_of instr cfg instructions_map in
+      let (initial_stack, current_stack) =
+        List.fold_left i ~init:(initial_stack, current_stack) ~f:(fun (initial_stack, current_stack) t ->
+          match current_stack with
+          | _ :: rest ->
+            (* We don't check that the types match, as we assume they will *)
+            (initial_stack, rest)
+          | [] ->
+            (t :: initial_stack, current_stack)) in
+      (initial_stack, (List.rev o) @ current_stack)) in
+  List.rev input, output
+
 
 let counter : int ref = ref 0
 let reset_counter () : unit = counter := 0
@@ -223,8 +251,8 @@ let next_label : unit -> int =
       v
 
 let replace_with_equivalent_instructions (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : unit Instr.t list =
-  let net_effect = instrs_net_effect instrs cfg instructions_map in
-  List.map (dummy_instrs net_effect next_label) ~f:(fun i -> Instr.Data i)
+  let t = instrs_type instrs cfg instructions_map in
+  List.map (dummy_instrs t next_label) ~f:(fun i -> Instr.Data i)
 
 let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (original_instructions : unit Instr.t list) (instructions_to_keep : Instr.Label.Set.t): unit Instr.t list =
   let rec loop (instrs : unit Instr.t list) (to_remove_rev : unit Instr.t list) : unit Instr.t list =
@@ -510,9 +538,6 @@ module Test = struct
            Printf.printf "instruction not equal: %s != %s\n" (Instr.to_string x) (Instr.to_string y);
            false
          end) expected actual
-
-
-
 
    let%test "slicing intra-block should only include the relevant instructions" =
      let original = "(module
