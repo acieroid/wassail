@@ -467,4 +467,5 @@ let () =
        ; "slice", slice
        ; "evaluate-slicing", Evaluate.evaluate
        ; "gen-slice-specific", Evaluate.gen_slice_specific
+       ; "count-in-slice", Evaluate.count_in_slice
        ])

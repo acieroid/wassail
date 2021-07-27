@@ -48,45 +48,46 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
     else
       let first_idx = (List.hd_exn funcs).idx in
       let nfuncs = List.length funcs in
-      List.concat_map funcs ~f:(fun func ->
+      List.concat_mapi funcs ~f:(fun i func ->
           let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
-          if Array.length labels = 0 then
-            [Ignored (NoInstruction func.idx)]
-          else
-            try
-              Printf.printf "[%s fun %ld/%ld] building CFG...\n%!" filename func.idx Int32.(first_idx + (of_int_exn nfuncs));
-              let (cfg, preanalysis_time1) = time (fun () -> Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx)) in
-              Printf.printf "getting instructions...\n%!";
-              let cfg_instructions = Cfg.all_instructions cfg in
-              List.map (match criterion_selection with
-                  | `Random -> [Array.get labels (Random.int (Array.length labels))]
-                  | `All -> Array.to_list labels
-                  | `Last -> [Array.last labels])
-                ~f:(fun slicing_criterion ->
-                    try
-                      Printf.printf "slicing...\n%!";
-                      let instrs_to_keep, preanalysis_time2, slicing_time1 = Slicing.instructions_to_keep cfg cfg_instructions slicing_criterion in
+          (* Slice every 10 functions *)
+          if i mod 10 <> 0 then [] else
+            if Array.length labels = 0 then
+              [Ignored (NoInstruction func.idx)]
+            else
+              try
+                Printf.printf "[%s fun %ld/%ld] building CFG...\n%!" filename func.idx Int32.(first_idx + (of_int_exn nfuncs));
+                let (cfg, preanalysis_time1) = time (fun () -> Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx)) in
+                Printf.printf "getting instructions...\n%!";
+                let cfg_instructions = Cfg.all_instructions cfg in
+                List.map (match criterion_selection with
+                    | `Random -> [Array.get labels (Random.int (Array.length labels))]
+                    | `All -> Array.to_list labels
+                    | `Last -> [Array.last labels])
+                  ~f:(fun slicing_criterion ->
                       try
-                        Printf.printf "reconstructing...\n%!";
-                        let t0 = Time.now () in
-                        let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) cfg_instructions slicing_criterion in
-                        let t1 = Time.now () in
-                        let slicing_time2 = Time.diff t1 t0 in
-                        let sliced_labels = all_labels sliced_func.code.body in
-                        (* Printf.printf "fun %ld:%s -- initial: %s, before: %s, after: %d\n" func.idx (Instr.Label.to_string slicing_criterion) (Instr.Label.Set.to_string (all_labels func.code.body)) (Instr.Label.Set.to_string instrs_to_keep) (Instr.Label.Set.length sliced_labels); *)
-
-                        Success {
-                          function_sliced = func.idx;
-                          slicing_criterion;
-                          initial_number_of_instrs = Array.length labels;
-                          slice_size_before_adaptation = Instr.Label.Set.length instrs_to_keep;
-                          slice_size_after_adaptation = Instr.Label.Set.length sliced_labels;
-                          preanalysis_time = Time.Span.(+) preanalysis_time1 preanalysis_time2;
-                          slicing_time = Time.Span.(+) slicing_time1 slicing_time2;
-                        }
-                      with e -> SliceExtensionError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e)
-                    with e -> SliceError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e))
-            with e -> [CfgError (func.idx, Array.length labels, Exn.to_string_mach e)])
+                        Printf.printf "slicing...\n%!";
+                        let instrs_to_keep, preanalysis_time2, slicing_time1 = Slicing.instructions_to_keep cfg cfg_instructions slicing_criterion in
+                        try
+                          Printf.printf "reconstructing...\n%!";
+                          let t0 = Time.now () in
+                          let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) cfg_instructions slicing_criterion in
+                          let t1 = Time.now () in
+                          let slicing_time2 = Time.diff t1 t0 in
+                          let sliced_labels = all_labels sliced_func.code.body in
+                          (* Printf.printf "fun %ld:%s -- initial: %s, before: %s, after: %d\n" func.idx (Instr.Label.to_string slicing_criterion) (Instr.Label.Set.to_string (all_labels func.code.body)) (Instr.Label.Set.to_string instrs_to_keep) (Instr.Label.Set.length sliced_labels); *)
+                          Success {
+                            function_sliced = func.idx;
+                            slicing_criterion;
+                            initial_number_of_instrs = Array.length labels;
+                            slice_size_before_adaptation = Instr.Label.Set.length instrs_to_keep;
+                            slice_size_after_adaptation = Instr.Label.Set.length sliced_labels;
+                            preanalysis_time = Time.Span.(+) preanalysis_time1 preanalysis_time2;
+                            slicing_time = Time.Span.(+) slicing_time1 slicing_time2;
+                          }
+                        with e -> SliceExtensionError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e)
+                      with e -> SliceError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e))
+              with e -> [CfgError (func.idx, Array.length labels, Exn.to_string_mach e)])
   with e -> [LoadError (Exn.to_string e)]
 
 
@@ -213,5 +214,55 @@ let gen_slice_specific =
       and output = anon ("output" %: string) in
       fun () ->
         generate_slice file output)
-          
-    
+
+let count_instructions_in_slice (filename : string) =
+  let pattern = "\nORBS:" in
+  Spec_inference.propagate_globals := false;
+  Spec_inference.propagate_locals := false;
+  Spec_inference.use_const := false;
+  let wasm_mod = Wasm_module.of_file filename in
+  (* Find the specific string in the data section *)
+  let str_pos = match List.find_map wasm_mod.data ~f:(fun segment ->
+      match String.substr_index segment.init ~pattern with
+      | Some idx -> begin match segment.offset with
+        | (Instr.Data {instr = Instr.Const (Prim_value.I32 n); _}) :: [] -> Some (Int32.(n + (of_int_exn idx)))
+        | _ -> failwith "unsupported segment offset"
+        end
+      | None -> None) with
+  | Some idx -> idx
+  | None -> failwith "cannot find pattern in any data segment" in
+  (* Find the index of the printf function (it should be exported, otherwise it is unnamed) *)
+  let printf_export_idx = match List.find_map wasm_mod.exported_funcs ~f:(fun (idx, name, _type) ->
+      if String.equal name "printf" then
+        Some idx
+      else
+        None) with
+  | Some idx -> idx
+  | None -> failwith "cannot find printf in exported functions" in
+    Spec_inference.propagate_globals := false;
+  Spec_inference.propagate_locals := false;
+  (* Find the function and slicing criterion: it should call printf with the string's position in the data segment as argument *)
+  let (function_idx, _slicing_criterion) = match List.find_map wasm_mod.funcs ~f:(fun func ->
+      Spec_inference.use_const := true;
+      let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
+      List.find_map (Cfg.all_instructions_list cfg) ~f:(function
+          | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
+            begin match annotation_before.vstack with
+              | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 str_pos)) -> Some (func.idx, label)
+              | _ -> None
+            end
+          | _ -> None)) with
+  | Some r -> r
+  | None -> failwith "cannot find function to slice" in
+  let f = List32.nth_exn wasm_mod.funcs Int32.(function_idx - wasm_mod.nfuncimports) in
+  let all_labels = List.fold_left f.code.body ~init:Instr.Label.Set.empty ~f:(fun acc i ->
+      Instr.Label.Set.union acc (Instr.all_labels_no_merge i)) in
+  Printf.printf "%d\n" (Instr.Label.Set.length all_labels)
+
+let count_in_slice =
+  Command.basic
+    ~summary:"Count the number of instructions in a slice for a specific slicing criterion"
+    Command.Let_syntax.(
+      let%map_open file = anon ("file" %: string) in
+      fun () ->
+        count_instructions_in_slice file)
