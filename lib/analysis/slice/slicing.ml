@@ -241,7 +241,6 @@ let instrs_type (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map 
       (initial_stack, (List.rev o) @ current_stack)) in
   List.rev input, output
 
-
 let counter : int ref = ref 0
 let reset_counter () : unit = counter := 0
 let next_label : unit -> int =
@@ -265,25 +264,25 @@ let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t In
         (* Block body is empty, drop the block entirely *)
         loop rest (entire_instr :: to_remove_rev)
       else
-        (replace_with_equivalent_instructions to_remove_rev cfg cfg_instructions) @ [Instr.Control { instr with instr = Block (bt, arity, sliced_body) }] @ loop rest []
+        (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @ [Instr.Control { instr with instr = Block (bt, arity, sliced_body) }] @ loop rest []
     | (Control ({ instr = Loop (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
       let sliced_body = slice_alternative cfg cfg_instructions body instructions_to_keep in
       if List.is_empty sliced_body then
         loop rest (entire_instr :: to_remove_rev)
       else
-        (replace_with_equivalent_instructions to_remove_rev cfg cfg_instructions) @ [Instr.Control { instr with instr = Loop (bt, arity, sliced_body) }] @ loop rest []
+        (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @ [Instr.Control { instr with instr = Loop (bt, arity, sliced_body) }] @ loop rest []
     | (Control ({ instr = If (bt, arity, then_, else_); _ } as instr)) as entire_instr :: rest ->
       let sliced_then = slice_alternative cfg cfg_instructions then_ instructions_to_keep in
       let sliced_else = slice_alternative cfg cfg_instructions else_ instructions_to_keep in
       if List.is_empty sliced_then && List.is_empty sliced_else then
         loop rest (entire_instr :: to_remove_rev)
       else
-        (replace_with_equivalent_instructions to_remove_rev cfg cfg_instructions) @
+        (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @
         [Instr.Control { instr with instr = If (bt, arity,
                                                 sliced_then,
                                                 sliced_else) }] @ loop rest []
     | instr :: rest when Instr.Label.Set.mem instructions_to_keep (Instr.label instr) ->
-    (replace_with_equivalent_instructions to_remove_rev cfg cfg_instructions) @ [instr] @ loop rest []
+    (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @ [instr] @ loop rest []
     | instr :: rest ->
       loop rest (instr :: to_remove_rev) in
   loop original_instructions []
@@ -564,6 +563,55 @@ module Test = struct
    (table (;0;) 1 1 funcref)
    (memory (;0;) 2)
    (global (;0;) (mut i32) (i32.const 66560)))" in
+     check_slice original sliced 0l 2
+
+   let%test "slicing should replace type-varying instructions correctly" =
+     let original = "(module
+   (type (;0;) (func (param i32) (result i32)))
+   (type (;1;) (func (param i32 i32) (result i32)))
+   (func (;test;) (type 0) (param i32) (result i32)
+    i32.const 1024  ;; instr 0
+    local.get 0     ;; instr 1
+    call 1          ;; instr 2, slicing criterion
+    drop            ;; instr 3
+    i32.const 4992  ;; instr 4
+    i64.const 0     ;; instr 5
+    i64.store       ;; instr 6
+    i32.const 1024  ;; instr 7
+    i32.const 0     ;; instr 8
+    call 1          ;; instr 9
+    drop            ;; instr 10
+    i32.const 4992  ;; instr 11
+    i64.const 0     ;; instr 12
+    i64.store       ;; instr 13
+    local.get 0     ;; instr 14
+    i32.const 16    ;; instr 15
+    i32.add         ;; instr 16
+    global.set 0    ;; instr 17
+   )
+   (func (;1;) (type 1) (param i32 i32) (result i32)
+     local.get 0)
+   (table (;0;) 1 1 funcref)
+   (memory (;0;) 2)
+   (global (;0;) (mut i32) (i32.const 66560)))" in
+     let sliced = "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (type (;1;) (func (param i32 i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    i32.const 1024
+    local.get 0
+    call 1
+    drop
+    local.get 0
+    i32.const 16
+    i32.add
+    global.set 0)
+  (func (;1;) (type 1) (param i32 i32) (result i32)
+    local.get 0)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560))
+)" in
      check_slice original sliced 0l 2
 
    let%test "slicing with memory does not fail" =
