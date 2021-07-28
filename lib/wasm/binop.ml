@@ -67,6 +67,6 @@ let to_mnemonic (b : t) : string =
      | Rotr -> "rotr"
      | Min -> "min"
      | Max -> "max"
-     | CopySign -> "copy_sign")
+     | CopySign -> "copysign")
 
 let to_string (b : t) : string = to_mnemonic b
