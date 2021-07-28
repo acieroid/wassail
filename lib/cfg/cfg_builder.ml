@@ -142,8 +142,10 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
             breaks,
             returns,
             block.idx, exit')
-        | ((Block (_bt, _arity, instrs')) as b)
-        | ((Loop (_bt, _arity, instrs')) as b) ->
+        | ((Block (_bt, (arity_in, arity_out), instrs')) as b)
+        | ((Loop (_bt, (arity_in, arity_out), instrs')) as b) ->
+          if arity_in > 0 || arity_out > 0 then
+            failwith "Unsupported: block with arity higher than 0";
           (* Create a new block with all instructions collected, without the current instruction *)
           let block = mk_data_block instrs in
           (* Is the current instruction a loop? *)
