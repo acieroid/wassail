@@ -258,6 +258,7 @@ let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t In
     match instrs with
     | [] -> replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions
     | (Control ({ instr = Block (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
+      if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: block with arity greater than 0";
       let sliced_body = slice_alternative cfg cfg_instructions body instructions_to_keep in
       (* TODO: we could also drop the block if it is not empty but only contains instructions that are not part of the slice (basically, only dummy instructions) *)
       if List.is_empty sliced_body then
@@ -266,12 +267,14 @@ let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t In
       else
         (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @ [Instr.Control { instr with instr = Block (bt, arity, sliced_body) }] @ loop rest []
     | (Control ({ instr = Loop (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
+      if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: loop with arity greater than 0";
       let sliced_body = slice_alternative cfg cfg_instructions body instructions_to_keep in
       if List.is_empty sliced_body then
         loop rest (entire_instr :: to_remove_rev)
       else
         (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @ [Instr.Control { instr with instr = Loop (bt, arity, sliced_body) }] @ loop rest []
     | (Control ({ instr = If (bt, arity, then_, else_); _ } as instr)) as entire_instr :: rest ->
+      if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: if with arity greater than 0";
       let sliced_then = slice_alternative cfg cfg_instructions then_ instructions_to_keep in
       let sliced_else = slice_alternative cfg cfg_instructions else_ instructions_to_keep in
       if List.is_empty sliced_then && List.is_empty sliced_else then

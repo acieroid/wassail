@@ -176,7 +176,8 @@ let data_to_string (instr : data) : string =
 
 let block_type_to_string (bt : block_type) : string = match bt with
   | None -> ""
-  | Some t -> Printf.sprintf " (result %s)" (Type.to_string t)
+  | Some t ->
+    Printf.sprintf " (result %s)" (Type.to_string t)
 
 (** Converts a control instruction to its string representation *)
 let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot_to_string : 'a -> string = fun _ -> "") (instr : 'a control)  : string =
