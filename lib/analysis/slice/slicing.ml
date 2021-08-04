@@ -36,16 +36,23 @@ end
     slicing criterion `criterion`, encoded as an instruction index. Returns the
     set of instructions that are part of the slice, as a set of instruction
     labels. *)
-let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (criterion : Instr.Label.t) : (Instr.Label.Set.t * Time.Span.t * Time.Span.t) =
+let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (criterion : Instr.Label.t) : (Instr.Label.Set.t * (Time.Span.t * Time.Span.t * Time.Span.t * Time.Span.t * Time.Span.t)) =
   let t0 = Time.now () in
   let control_dependencies = Control_deps.control_deps_exact_instrs cfg in
+  let t1 = Time.now () in
   let (_, _, data_dependencies) = Use_def.make cfg in
+  let t2 = Time.now () in
   let mem_dependencies = Memory_deps.make cfg in
+  let t3 = Time.now () in
   let global_set_instructions = InSlice.Set.of_list (List.map ~f:(fun label -> InSlice.{ label; reason = None })
                                                        (Instr.Label.Map.keys (Instr.Label.Map.filter cfg_instructions ~f:(function
                                                            | Data { instr = GlobalSet _; _ } -> true
                                                            | _ -> false)))) in
-  let t1 = Time.now () in
+  let t4 = Time.now () in
+  let control_time = Time.diff t1 t0 in
+  let data_time = Time.diff t2 t1 in
+  let mem_time = Time.diff t3 t2 in
+  let global_time = Time.diff t4 t3 in
   let rec loop (worklist : InSlice.Set.t) (slice : Instr.Label.Set.t) (visited : InSlice.Set.t) : Instr.Label.Set.t =
     (* Perform backward slicing as follows:
        Given an instruction as the slicing criterion (we can derive variable uses from instructions),
@@ -123,8 +130,8 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
           (* Merge instructions do not need to be marked as part of the slice once slicing has been performed *)
           false
         | _ -> true) in
-  let t2 = Time.now () in
-  (slice, Time.diff t1 t0, Time.diff t2 t1)
+  let t5 = Time.now () in
+  (slice, (control_time, data_time, mem_time, global_time, Time.diff t5 t4))
 
 type instr_type_element =
   | T of Type.t
@@ -295,7 +302,7 @@ let slice_alternative_to_funcinst (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.
     | Some instrs -> instrs
     | None ->
       Log.info "Computing instructions part of the slice";
-      let instrs, _, _ = instructions_to_keep cfg cfg_instructions slicing_criterion in
+      let instrs, _ = instructions_to_keep cfg cfg_instructions slicing_criterion in
       instrs in
   Log.info "Clearing annotations";
   let unit_cfg = Cfg.clear_annotations cfg in
@@ -335,7 +342,7 @@ module Test = struct
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6
   )" in
-    let actual, _, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 2) in
+    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 2) in
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -354,7 +361,7 @@ module Test = struct
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6 -- slicing criterion
   )" in
-    let actual, _, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 6) in
+    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 6) in
     let expected = Instr.Label.Set.of_list [lab 4; lab 5; lab 6] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -373,7 +380,7 @@ module Test = struct
     end
     local.get 0)  ;; Instr 5
   )" in
-    let actual, _, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 3) in
+    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 3) in
     let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -392,7 +399,7 @@ module Test = struct
     end
     local.get 0)  ;; Instr 5
   )" in
-    let actual, _, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 4) in
+    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 4) in
     let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3; lab 4] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -419,7 +426,7 @@ module Test = struct
     memory.size     ;; Instr 8
     i32.add)        ;; Instr 9 -- slicing criterion
   )" in
-    let actual, _, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 9) in
+    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 9) in
     (* Merge blocks do not need to be in the slice *)
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2; lab 3; lab 8; lab 9] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected

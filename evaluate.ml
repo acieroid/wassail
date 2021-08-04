@@ -7,8 +7,14 @@ type slicing_result = {
   initial_number_of_instrs : int;
   slice_size_before_adaptation : int;
   slice_size_after_adaptation : int;
-  preanalysis_time : Time.Span.t;
-  slicing_time : Time.Span.t;
+  cfg_time : Time.Span.t;
+  spec_time : Time.Span.t;
+  control_time : Time.Span.t;
+  data_time : Time.Span.t;
+  mem_time : Time.Span.t;
+  global_time : Time.Span.t;
+  slicing_time1 : Time.Span.t;
+  slicing_time2 : Time.Span.t;
 }
 
 type ignored_reason =
@@ -57,7 +63,12 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
             else
               try
                 Printf.printf "[%s fun %ld/%ld] building CFG...\n%!" filename func.idx Int32.(first_idx + (of_int_exn nfuncs));
-                let (cfg, preanalysis_time1) = time (fun () -> Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx)) in
+                let t0 = Time.now () in
+                let cfg_raw = Cfg_builder.build wasm_mod func.idx in
+                let cfg_time = Time.diff (Time.now ()) t0 in
+                let t0 = Time.now () in
+                let cfg = Spec_inference.Intra.analyze wasm_mod cfg_raw in
+                let spec_time = Time.diff (Time.now ()) t0 in
                 Printf.printf "getting instructions...\n%!";
                 let cfg_instructions = Cfg.all_instructions cfg in
                 List.map (match criterion_selection with
@@ -67,7 +78,7 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
                   ~f:(fun slicing_criterion ->
                       try
                         Printf.printf "slicing...\n%!";
-                        let instrs_to_keep, preanalysis_time2, slicing_time1 = Slicing.instructions_to_keep cfg cfg_instructions slicing_criterion in
+                        let instrs_to_keep, (control_time, data_time, mem_time, global_time, slicing_time1) = Slicing.instructions_to_keep cfg cfg_instructions slicing_criterion in
                         try
                           Printf.printf "reconstructing...\n%!";
                           let t0 = Time.now () in
@@ -82,8 +93,7 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
                             initial_number_of_instrs = Array.length labels;
                             slice_size_before_adaptation = Instr.Label.Set.length instrs_to_keep;
                             slice_size_after_adaptation = Instr.Label.Set.length sliced_labels;
-                            preanalysis_time = Time.Span.(+) preanalysis_time1 preanalysis_time2;
-                            slicing_time = Time.Span.(+) slicing_time1 slicing_time2;
+                            cfg_time; spec_time; slicing_time1; slicing_time2; control_time; data_time; mem_time; global_time
                           }
                         with e -> SliceExtensionError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e)
                       with e -> SliceError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e))
@@ -109,8 +119,15 @@ let evaluate_files (files : string list) (criterion_selection : [`All | `Random 
                                string_of_int r.initial_number_of_instrs; (* 3 *)
                                string_of_int r.slice_size_before_adaptation; (* 4 *)
                                string_of_int r.slice_size_after_adaptation; (* 5 *)
-                               string_of_float (Time.Span.to_ms r.preanalysis_time); (* 6 *)
-                               string_of_float (Time.Span.to_ms r.slicing_time)] (* 7 *)
+                               string_of_float (Time.Span.to_ms r.cfg_time); (* 6 *)
+                               string_of_float (Time.Span.to_ms r.spec_time); (* 7 *)
+                               string_of_float (Time.Span.to_ms r.control_time); (* 8 *)
+                               string_of_float (Time.Span.to_ms r.data_time); (* 9 *)
+                               string_of_float (Time.Span.to_ms r.mem_time); (* 10 *)
+                               string_of_float (Time.Span.to_ms r.global_time); (* 11 *)
+                               string_of_float (Time.Span.to_ms r.slicing_time1); (* 12 *)
+                               string_of_float (Time.Span.to_ms r.slicing_time2)] (* 13 *)
+
       | Ignored NoFunction ->
         output "nofunction.txt" [filename]
       | Ignored (NoInstruction f) ->
@@ -215,7 +232,7 @@ let gen_slice_specific =
       fun () ->
         generate_slice file output)
 
-let count_instructions_in_slice (filename : string) =
+let count_instructions_in_slice (filename : string) (output_file : string) =
   let pattern = "\nORBS:" in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
@@ -240,29 +257,32 @@ let count_instructions_in_slice (filename : string) =
   | Some idx -> idx
   | None -> failwith "cannot find printf in exported functions" in
     Spec_inference.propagate_globals := false;
-  Spec_inference.propagate_locals := false;
-  (* Find the function and slicing criterion: it should call printf with the string's position in the data segment as argument *)
-  let (function_idx, _slicing_criterion) = match List.find_map wasm_mod.funcs ~f:(fun func ->
-      Spec_inference.use_const := true;
-      let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
-      List.find_map (Cfg.all_instructions_list cfg) ~f:(function
-          | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
-            begin match annotation_before.vstack with
-              | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 str_pos)) -> Some (func.idx, label)
-              | _ -> None
-            end
-          | _ -> None)) with
-  | Some r -> r
-  | None -> failwith "cannot find function to slice" in
-  let f = List32.nth_exn wasm_mod.funcs Int32.(function_idx - wasm_mod.nfuncimports) in
-  let all_labels = List.fold_left f.code.body ~init:Instr.Label.Set.empty ~f:(fun acc i ->
-      Instr.Label.Set.union acc (Instr.all_labels_no_merge i)) in
-  Printf.printf "%d\n" (Instr.Label.Set.length all_labels)
+    Spec_inference.propagate_locals := false;
+    (* Find the function and slicing criterion: it should call printf with the string's position in the data segment as argument *)
+    let (function_idx, _slicing_criterion) = match List.find_map wasm_mod.funcs ~f:(fun func ->
+        Spec_inference.use_const := true;
+        Out_channel.with_file output_file
+          ~f:(fun ch -> Out_channel.output_string ch (Instr.list_to_string func.code.body ?indent:(Some 0) ?sep:(Some "\n") (fun () -> "")));
+       let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
+       List.find_map (Cfg.all_instructions_list cfg) ~f:(function
+           | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
+             begin match annotation_before.vstack with
+               | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 str_pos)) -> Some (func.idx, label)
+               | _ -> None
+             end
+           | _ -> None)) with
+    | Some r -> r
+    | None -> failwith "cannot find function to slice" in
+    let f = List32.nth_exn wasm_mod.funcs Int32.(function_idx - wasm_mod.nfuncimports) in
+    let all_labels = List.fold_left f.code.body ~init:Instr.Label.Set.empty ~f:(fun acc i ->
+        Instr.Label.Set.union acc (Instr.all_labels_no_merge i)) in
+    Printf.printf "%d\n" (Instr.Label.Set.length all_labels)
 
 let count_in_slice =
   Command.basic
     ~summary:"Count the number of instructions in a slice for a specific slicing criterion"
     Command.Let_syntax.(
-      let%map_open file = anon ("file" %: string) in
+      let%map_open file = anon ("file" %: string)
+          and out = anon ("out" %: string) in
       fun () ->
-        count_instructions_in_slice file)
+        count_instructions_in_slice file out)
