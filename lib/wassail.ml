@@ -11,6 +11,7 @@ module Export = Export
 module Var = Var
 module Type = Type
 module Prim_value = Prim_value
+module Func_inst = Func_inst
 
 module Basic_block = Basic_block
 module Tree = Tree

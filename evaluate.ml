@@ -233,6 +233,22 @@ let gen_slice_specific =
         generate_slice file output)
 
 let count_instructions_in_slice (filename : string) (output_file : string) =
+  let output_func (i : Int32.t) (f : Func_inst.t) (put : string -> unit) =
+    put (Printf.sprintf "(func (;%ld;) (type %ld)" i f.type_idx);
+    if not (List.is_empty (fst f.typ)) then begin
+      put (Printf.sprintf " (param %s)"
+             (String.concat ~sep:" " (List.map (fst f.typ) ~f:Type.to_string)))
+    end;
+    if not (List.is_empty (snd f.typ)) then begin
+      put (Printf.sprintf " (result %s)"
+             (String.concat ~sep:" " (List.map (snd f.typ) ~f:Type.to_string)))
+    end;
+    put "\n";
+    if not (List.is_empty f.code.locals) then begin
+      put (Printf.sprintf "  (local %s)\n" (String.concat ~sep:" " (List.map f.code.locals ~f:Type.to_string)))
+    end;
+    put (Instr.list_to_string f.code.body ?indent:(Some 2) ?sep:(Some "\n") (fun () -> ""));
+    put ")\n" in
   let pattern = "\nORBS:" in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
@@ -262,7 +278,7 @@ let count_instructions_in_slice (filename : string) (output_file : string) =
     let (function_idx, _slicing_criterion) = match List.find_map wasm_mod.funcs ~f:(fun func ->
         Spec_inference.use_const := true;
         Out_channel.with_file output_file
-          ~f:(fun ch -> Out_channel.output_string ch (Instr.list_to_string func.code.body ?indent:(Some 0) ?sep:(Some "\n") (fun () -> "")));
+          ~f:(fun ch -> output_func func.idx func (Out_channel.output_string ch));
        let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
        List.find_map (Cfg.all_instructions_list cfg) ~f:(function
            | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
