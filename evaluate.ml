@@ -204,6 +204,7 @@ let generate_slice (filename : string) (output_file : string) =
   (* Find the function and slicing criterion: it should call printf with the string's position in the data segment as argument *)
   let (function_idx, slicing_criterion) = match List.find_map wasm_mod.funcs ~f:(fun func ->
       Spec_inference.use_const := true;
+      Spec_inference.propagate_locals := true;
       let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
       List.find_map (Cfg.all_instructions_list cfg) ~f:(function
           | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
@@ -277,6 +278,7 @@ let count_instructions_in_slice (filename : string) (output_file : string) =
     (* Find the function and slicing criterion: it should call printf with the string's position in the data segment as argument *)
     let (function_idx, _slicing_criterion) = match List.find_map wasm_mod.funcs ~f:(fun func ->
         Spec_inference.use_const := true;
+        Spec_inference.propagate_locals := true;
         Out_channel.with_file output_file
           ~f:(fun ch -> output_func func.idx func (Out_channel.output_string ch));
        let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
