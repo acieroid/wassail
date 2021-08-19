@@ -185,7 +185,7 @@ let to_string (m : t) : string =
     | FuncImport tidx ->
       put (Printf.sprintf "(func (;%d;) (type %ld))"
              i tidx)
-    | TableImport _ -> failwith "Unsupported: table import" (* should be easy to add, just need an example *)
+    | TableImport _ -> ()  (* failwith "Unsupported: table import" (* should be easy to add, just need an example *) *)
     | MemoryImport l ->
       put (Printf.sprintf "(memory (;%d;) " (next_memory_import ()));
       limits l;
