@@ -218,6 +218,8 @@ let generate_slice (filename : string) (output_file : string) =
   Printf.printf "function: %ld, slicing criterion: %s\n" function_idx (Instr.Label.to_string slicing_criterion);
   (* Perform the actual slicing *)
   Spec_inference.use_const := false;
+  Spec_inference.propagate_globals := false;
+  Spec_inference.propagate_locals := false;
   let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod function_idx) in
   let funcinst = Slicing.slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) slicing_criterion in
   let module_ = Wasm_module.replace_func wasm_mod function_idx funcinst in
