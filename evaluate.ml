@@ -41,126 +41,117 @@ let time (f : unit -> 'a) : 'a * Time.Span.t =
   let t1 = Time.now () in
   (res, Time.diff t1 t0)
 
-let slices (filename : string) (criterion_selection : [`Random | `All | `Last ]) : result list =
-  try
-    Spec_inference.propagate_globals := false;
-    Spec_inference.propagate_locals := false;
-    Spec_inference.use_const := false;
-    Printf.printf "loading...\n%!";
-    let wasm_mod = Wasm_module.of_file filename in
-    let funcs = wasm_mod.funcs in
-    if List.is_empty funcs then
-      [Ignored NoFunction]
-    else
-      let first_idx = (List.hd_exn funcs).idx in
-      let nfuncs = List.length funcs in
-      List.concat_mapi funcs ~f:(fun i func ->
-          let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
-          (* Slice every 10 functions *)
-          if i mod 10 <> 0 then [] else
-            if Array.length labels = 0 then
-              [Ignored (NoInstruction func.idx)]
-            else
-              try
-                Printf.printf "[%s fun %ld/%ld] building CFG...\n%!" filename func.idx Int32.(first_idx + (of_int_exn nfuncs));
-                let t0 = Time.now () in
-                let cfg_raw = Cfg_builder.build wasm_mod func.idx in
-                let cfg_time = Time.diff (Time.now ()) t0 in
-                let t0 = Time.now () in
-                let cfg = Spec_inference.Intra.analyze wasm_mod cfg_raw in
-                let spec_time = Time.diff (Time.now ()) t0 in
-                Printf.printf "getting instructions...\n%!";
-                let cfg_instructions = Cfg.all_instructions cfg in
-                List.map (match criterion_selection with
-                    | `Random -> [Array.get labels (Random.int (Array.length labels))]
-                    | `All -> Array.to_list labels
-                    | `Last -> [Array.last labels])
-                  ~f:(fun slicing_criterion ->
-                      try
-                        Printf.printf "slicing...\n%!";
-                        let instrs_to_keep, (control_time, data_time, mem_time, global_time, slicing_time1) = Slicing.instructions_to_keep cfg cfg_instructions slicing_criterion in
-                        try
-                          Printf.printf "reconstructing...\n%!";
-                          let t0 = Time.now () in
-                          let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) cfg_instructions slicing_criterion in
-                          let t1 = Time.now () in
-                          let slicing_time2 = Time.diff t1 t0 in
-                          let sliced_labels = all_labels sliced_func.code.body in
-                          (* Printf.printf "fun %ld:%s -- initial: %s, before: %s, after: %d\n" func.idx (Instr.Label.to_string slicing_criterion) (Instr.Label.Set.to_string (all_labels func.code.body)) (Instr.Label.Set.to_string instrs_to_keep) (Instr.Label.Set.length sliced_labels); *)
-                          Success {
-                            function_sliced = func.idx;
-                            slicing_criterion;
-                            initial_number_of_instrs = Array.length labels;
-                            slice_size_before_adaptation = Instr.Label.Set.length instrs_to_keep;
-                            slice_size_after_adaptation = Instr.Label.Set.length sliced_labels;
-                            cfg_time; spec_time; slicing_time1; slicing_time2; control_time; data_time; mem_time; global_time
-                          }
-                        with e -> SliceExtensionError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e)
-                      with e -> SliceError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e))
-              with e -> [CfgError (func.idx, Array.length labels, Exn.to_string_mach e)])
-  with e -> [LoadError (Exn.to_string e)]
-
-
 let prefix : string ref = ref "."
 
 let output (file : string) (fields : string list) =
   Out_channel.with_file (Printf.sprintf "%s/%s" !prefix file) ~append:true ~f:(fun ch ->
       Out_channel.output_string ch (Printf.sprintf "%s\n" (String.concat ~sep:"," fields)))
 
-let evaluate_files (files : string list) (criterion_selection : [`All | `Random | `Last]) : unit =
-  let total = List.length files in
-  List.iteri files ~f:(fun i filename ->
-      Printf.printf "\r%d/%d %s\n" i total filename;
-      List.iter (slices filename criterion_selection) ~f:(function
-          | Success r ->
-            output "data.txt" [filename; (* 0 *)
-                               Int32.to_string r.function_sliced; (* 1 *)
-                               Instr.Label.to_string r.slicing_criterion; (* 2 *)
-                               string_of_int r.initial_number_of_instrs; (* 3 *)
-                               string_of_int r.slice_size_before_adaptation; (* 4 *)
-                               string_of_int r.slice_size_after_adaptation; (* 5 *)
-                               string_of_float (Time.Span.to_ms r.cfg_time); (* 6 *)
-                               string_of_float (Time.Span.to_ms r.spec_time); (* 7 *)
-                               string_of_float (Time.Span.to_ms r.control_time); (* 8 *)
-                               string_of_float (Time.Span.to_ms r.data_time); (* 9 *)
-                               string_of_float (Time.Span.to_ms r.mem_time); (* 10 *)
-                               string_of_float (Time.Span.to_ms r.global_time); (* 11 *)
-                               string_of_float (Time.Span.to_ms r.slicing_time1); (* 12 *)
-                               string_of_float (Time.Span.to_ms r.slicing_time2)] (* 13 *)
+let output_slicing_result filename = function
+  | Success r ->
+    output "data.txt" [filename; (* 0 *)
+                       Int32.to_string r.function_sliced; (* 1 *)
+                       Instr.Label.to_string r.slicing_criterion; (* 2 *)
+                       string_of_int r.initial_number_of_instrs; (* 3 *)
+                       string_of_int r.slice_size_before_adaptation; (* 4 *)
+                       string_of_int r.slice_size_after_adaptation; (* 5 *)
+                       string_of_float (Time.Span.to_ms r.cfg_time); (* 6 *)
+                       string_of_float (Time.Span.to_ms r.spec_time); (* 7 *)
+                       string_of_float (Time.Span.to_ms r.control_time); (* 8 *)
+                       string_of_float (Time.Span.to_ms r.data_time); (* 9 *)
+                       string_of_float (Time.Span.to_ms r.mem_time); (* 10 *)
+                       string_of_float (Time.Span.to_ms r.global_time); (* 11 *)
+                       string_of_float (Time.Span.to_ms r.slicing_time1); (* 12 *)
+                       string_of_float (Time.Span.to_ms r.slicing_time2)] (* 13 *)
+  | Ignored NoFunction ->
+    output "nofunction.txt" [filename]
+  | Ignored (NoInstruction f) ->
+    output "noinstruction.txt" [filename; Int32.to_string f]
+  | SliceExtensionError (f, criterion, size, reason) ->
+    output "error.txt" [filename; (* 0 *)
+                        Int32.to_string f; (* 1 *)
+                        Instr.Label.to_string criterion; (* 2 *)
+                        string_of_int size; (* 3 *)
+                        "slice-extension"; (* 4 *)
+                        reason] (* 5 *)
+  | SliceError (f, criterion, size, reason) ->
+    output "error.txt" [filename; (* 0 *)
+                        Int32.to_string f; (* 1 *)
+                        Instr.Label.to_string criterion; (* 2 *)
+                        string_of_int size; (* 3 *)
+                        "slice"; (* 4 *)
+                        reason] (* 5 *)
+  | CfgError (f, size, reason) ->
+    output "error.txt" [filename; (* 0 *)
+                        Int32.to_string f; (* 1 *)
+                        "-1"; (* 2 *)
+                        string_of_int size; (* 3 *)
+                        "cfg"; (* 4 *)
+                        reason] (* 5 *)
+  | LoadError _ ->
+    output "loaderror.txt" [filename]
 
-      | Ignored NoFunction ->
-        output "nofunction.txt" [filename]
-      | Ignored (NoInstruction f) ->
-        output "noinstruction.txt" [filename; Int32.to_string f]
-      | SliceExtensionError (f, criterion, size, reason) ->
-        output "error.txt" [filename; (* 0 *)
-                            Int32.to_string f; (* 1 *)
-                            Instr.Label.to_string criterion; (* 2 *)
-                            string_of_int size; (* 3 *)
-                            "slice-extension"; (* 4 *)
-                            reason] (* 5 *)
-      | SliceError (f, criterion, size, reason) ->
-        output "error.txt" [filename; (* 0 *)
-                            Int32.to_string f; (* 1 *)
-                            Instr.Label.to_string criterion; (* 2 *)
-                            string_of_int size; (* 3 *)
-                            "slice"; (* 4 *)
-                            reason] (* 5 *)
-      | CfgError (f, size, reason) ->
-        output "error.txt" [filename; (* 0 *)
-                            Int32.to_string f; (* 1 *)
-                            "-1"; (* 2 *)
-                            string_of_int size; (* 3 *)
-                            "cfg"; (* 4 *)
-                            reason] (* 5 *)
-      | LoadError _ ->
-        output "loaderror.txt" [filename]))
+let slices (filename : string) (criterion_selection : [`Random | `All | `Last ]) : unit =
+  try
+    Spec_inference.propagate_globals := false;
+    Spec_inference.propagate_locals := false;
+    Spec_inference.use_const := false;
+    let wasm_mod = Wasm_module.of_file filename in
+    let funcs = wasm_mod.funcs in
+    if List.is_empty funcs then
+      output_slicing_result filename (Ignored NoFunction)
+    else
+      List.iteri funcs ~f:(fun _i func ->
+          let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
+          if Array.length labels = 0 then
+            output_slicing_result filename (Ignored (NoInstruction func.idx))
+          else
+            try
+              let t0 = Time.now () in
+              let cfg_raw = Cfg_builder.build wasm_mod func.idx in
+              let cfg_time = Time.diff (Time.now ()) t0 in
+              let t0 = Time.now () in
+              let cfg = Spec_inference.Intra.analyze wasm_mod cfg_raw in
+              let spec_time = Time.diff (Time.now ()) t0 in
+              let cfg_instructions = Cfg.all_instructions cfg in
+              List.iter (match criterion_selection with
+                  | `Random -> [Array.get labels (Random.int (Array.length labels))]
+                  | `All -> Array.to_list labels
+                  | `Last -> [Array.last labels])
+                ~f:(fun slicing_criterion ->
+                    try
+                      let instrs_to_keep, (control_time, data_time, mem_time, global_time, slicing_time1) = Slicing.instructions_to_keep cfg cfg_instructions slicing_criterion in
+                      try
+                        let t0 = Time.now () in
+                        let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) cfg_instructions slicing_criterion in
+                        let t1 = Time.now () in
+                        let slicing_time2 = Time.diff t1 t0 in
+                        let sliced_labels = all_labels sliced_func.code.body in
+                        (* Printf.printf "fun %ld:%s -- initial: %s, before: %s, after: %d\n" func.idx (Instr.Label.to_string slicing_criterion) (Instr.Label.Set.to_string (all_labels func.code.body)) (Instr.Label.Set.to_string instrs_to_keep) (Instr.Label.Set.length sliced_labels); *)
+                        output_slicing_result filename (Success {
+                            function_sliced = func.idx;
+                            slicing_criterion;
+                            initial_number_of_instrs = Array.length labels;
+                            slice_size_before_adaptation = Instr.Label.Set.length instrs_to_keep;
+                            slice_size_after_adaptation = Instr.Label.Set.length sliced_labels;
+                            cfg_time; spec_time; slicing_time1; slicing_time2; control_time; data_time; mem_time; global_time
+                          })
+                      with e ->
+                        output_slicing_result filename (SliceExtensionError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e))
+                    with e ->
+                      output_slicing_result filename (SliceError (func.idx, slicing_criterion, Array.length labels, Exn.to_string_mach e)))
+            with e -> output_slicing_result filename (CfgError (func.idx, Array.length labels, Exn.to_string_mach e)))
+  with e -> output_slicing_result filename (LoadError (Exn.to_string e))
+
+
+let evaluate_file (filename : string) (criterion_selection : [`All | `Random | `Last]) : unit =
+  slices filename criterion_selection
 
 let evaluate =
   Command.basic
-    ~summary:"Evaluate the slicer on a set of benchmarks, listed in the file given as argument"
+    ~summary:"Evaluate the slicer on a a benchmark"
     Command.Let_syntax.(
-      let%map_open filelist = anon ("filelist" %: string)
+      let%map_open filename = anon ("file" %: string)
       and prefix_opt = flag "-p" (optional string) ~doc:"prefix for where to save the results file (default: current directory)"
       and all = flag "-a" no_arg ~doc:"slice on all functions, for all slicing criterion"
       and last = flag "-l" no_arg ~doc:"slice on all functions, for the last slicing criterion" in
@@ -169,7 +160,7 @@ let evaluate =
         | None -> ()
         | Some p -> prefix := p
         end;
-        evaluate_files (In_channel.read_lines filelist) (if all then `All else if last then `Last else `Random))
+        evaluate_file filename (if all then `All else if last then `Last else `Random))
 
 
 (* Generate a slice for printf function calls with a specific string *)
