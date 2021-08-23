@@ -711,6 +711,23 @@ module Test = struct
   )" in
      check_slice original sliced 0l 6
 
+  let%test "slice with global.set and i32.add" =
+    let original = "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    global.get 0 ;; Instr 0
+    i32.const 16 ;; Instr 1
+    i32.sub      ;; Instr 2
+    local.tee 0  ;; Instr 3
+    global.set 0 ;; Instr 4
+    i32.const 0  ;; Instr 5
+    local.get 0  ;; Instr 6
+    i32.const 16 ;; Instr 7
+    i32.add      ;; Instr 8
+    global.set 0) ;; Instr 9
+)" in
+    check_slice original original 0l 5
+
    let%test "slice with an empty if" =
      let original = "(module
 (type (;0;) (func (param i32) (result i32)))

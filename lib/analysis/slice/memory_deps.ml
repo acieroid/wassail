@@ -4,7 +4,7 @@ type t = Instr.Label.Set.t Instr.Label.Map.t (* Map from instruction to its memo
 
 let make (cfg : 'a Cfg.t) : t =
   let instrs = Cfg.all_instructions cfg in
-  (* Instructions that are load or call depend on all stores that may have been executed before, hence on all stores contained in a predecessor of the current node in the CFG *)
+  (* Instructions that are load or call depend on all stores/calls that may have been executed before, hence on all stores contained in a predecessor of the current node in the CFG *)
   let loads_and_calls = Instr.Label.Map.keys
       (Instr.Label.Map.filter instrs ~f:(fun i -> match i with
            | Control { instr = Call _ ; _ } -> true
@@ -17,6 +17,8 @@ let make (cfg : 'a Cfg.t) : t =
       (label, List.fold_left predecessors ~init:Instr.Label.Set.empty ~f:(fun acc block ->
            Instr.Label.Set.union acc
              (match block.content with
+             | Control { instr = Call _; label; _ } -> Instr.Label.Set.singleton label
+             | Control { instr = CallIndirect _; label; _ } -> Instr.Label.Set.singleton label
              | Control _ -> Instr.Label.Set.empty
              | Data instrs ->
                Instr.Label.Set.of_list (List.filter_map instrs ~f:(function
@@ -30,7 +32,7 @@ let deps_for (deps : t) (instr : Instr.Label.t) : Instr.Label.Set.t =
   | None -> Instr.Label.Set.empty
 
 module Test = struct
-  let%test "mem-dep with memory2" =
+  let%test "mem-dep with memory" =
     let open Instr.Label.Test in
     let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
@@ -46,4 +48,23 @@ module Test = struct
     let actual = deps_for deps (lab 4) in
     let expected = Instr.Label.Set.singleton (lab 2) in
     Instr.Label.Set.check_equality ~actual ~expected
+  let%test "mem-dep with call" =
+    let open Instr.Label.Test in
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (type (;1;) (func))
+  (func (;test;) (type 0) (param i32) (result i32)
+    memory.size     ;; Instr 0
+    memory.size     ;; Instr 1
+    call 1       ;; Instr 2
+    memory.size     ;; Instr 3
+    i32.load)       ;; Instr 4
+  (func (;1;) (type 1))
+  )" in
+    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    let deps = make cfg in
+    let actual = deps_for deps (lab 4) in
+    let expected = Instr.Label.Set.singleton (lab 2) in
+    Instr.Label.Set.check_equality ~actual ~expected
+
 end
