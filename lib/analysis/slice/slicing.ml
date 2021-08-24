@@ -36,7 +36,7 @@ end
     slicing criterion `criterion`, encoded as an instruction index. Returns the
     set of instructions that are part of the slice, as a set of instruction
     labels. *)
-let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (criterion : Instr.Label.t) : (Instr.Label.Set.t * (Time.Span.t * Time.Span.t * Time.Span.t * Time.Span.t * Time.Span.t)) =
+let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (criteria : Instr.Label.Set.t) : (Instr.Label.Set.t * (Time.Span.t * Time.Span.t * Time.Span.t * Time.Span.t * Time.Span.t)) =
   let t0 = Time.now () in
   let control_dependencies = Control_deps.control_deps_exact_instrs cfg in
   let t1 = Time.now () in
@@ -122,7 +122,7 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
               | None -> slice
             end
           | _ -> slice) in
-  let initial_worklist = InSlice.Set.union global_set_instructions (InSlice.Set.singleton { label = criterion; reason = None }) in
+  let initial_worklist = InSlice.Set.union global_set_instructions (InSlice.Set.of_list (List.map (Instr.Label.Set.to_list criteria) ~f:(fun criterion -> InSlice.{ label = criterion; reason = None }))) in
   let initial_slice = Instr.Label.Set.empty in
   let slice = Instr.Label.Set.filter (agrawal (loop initial_worklist initial_slice InSlice.Set.empty))
     ~f:(fun lab -> match lab.section with
@@ -297,12 +297,12 @@ let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t In
       loop rest (instr :: to_remove_rev) in
   loop original_instructions []
 
-let slice_alternative_to_funcinst (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) (slicing_criterion : Instr.Label.t) : Func_inst.t =
+let slice_alternative_to_funcinst (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) (slicing_criteria : Instr.Label.Set.t) : Func_inst.t =
   let instructions_in_slice = match instructions_in_slice with
     | Some instrs -> instrs
     | None ->
       Log.info "Computing instructions part of the slice";
-      let instrs, _ = instructions_to_keep cfg cfg_instructions slicing_criterion in
+      let instrs, _ = instructions_to_keep cfg cfg_instructions slicing_criteria in
       instrs in
   Log.info "Clearing annotations";
   let unit_cfg = Cfg.clear_annotations cfg in
@@ -342,7 +342,7 @@ module Test = struct
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6
   )" in
-    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 2) in
+    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 2)) in
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -361,7 +361,7 @@ module Test = struct
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6 -- slicing criterion
   )" in
-    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 6) in
+    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 6)) in
     let expected = Instr.Label.Set.of_list [lab 4; lab 5; lab 6] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -380,7 +380,7 @@ module Test = struct
     end
     local.get 0)  ;; Instr 5
   )" in
-    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 3) in
+    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 3)) in
     let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -399,7 +399,7 @@ module Test = struct
     end
     local.get 0)  ;; Instr 5
   )" in
-    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 4) in
+    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 4)) in
     let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3; lab 4] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -426,7 +426,7 @@ module Test = struct
     memory.size     ;; Instr 8
     i32.add)        ;; Instr 9 -- slicing criterion
   )" in
-    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (lab 9) in
+    let actual, _ = instructions_to_keep cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
     (* Merge blocks do not need to be in the slice *)
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2; lab 3; lab 8; lab 9] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
@@ -456,7 +456,7 @@ module Test = struct
    (table (;0;) 1 1 funcref)
    (memory (;0;) 2)
    (global (;0;) (mut i32) (i32.const 66560)))" in
-    let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (lab 9) in
+    let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
     (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
     ()
 
@@ -481,7 +481,7 @@ module Test = struct
       i32.add       ;; Instr 8 ;; [i7]
     end)
    )" in
-     let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (lab 8) in
+     let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 8)) in
      ()
 
    let%test_unit "slicing intra-block block containing a single drop - variant" =
@@ -505,7 +505,7 @@ module Test = struct
       i32.add       ;; Instr 9
     end)
    )" in
-     let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (lab 9) in
+     let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
      ()
 
    let%test_unit "slicing with a block containing a single drop - variant" =
@@ -529,7 +529,7 @@ module Test = struct
       i32.add       ;; Instr 9
     end)
    )" in
-     let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (lab 9) in
+     let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
      ()
 
    let check_slice original sliced fidx criterion =
@@ -537,7 +537,7 @@ module Test = struct
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
      let _, cfg = build_cfg ~fidx original in
-     let expected = (slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (lab ~fidx criterion)).code.body in
+     let expected = (slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab ~fidx criterion))).code.body in
      let _, expected_cfg = build_cfg ~fidx sliced in
      let actual = Cfg.body expected_cfg in
      List.equal (fun x y ->
@@ -1006,7 +1006,7 @@ module Test = struct
         Spec_inference.propagate_locals := false;
         Spec_inference.propagate_globals := false;
         Spec_inference.use_const := false;
-        let funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) instr_idx in
+        let funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) in
         let module_ = Wasm_module.replace_func module_ 14l funcinst in
         (* We should be able to re-annotate the graph *)
         Spec_inference.propagate_locals := true;
@@ -1026,7 +1026,7 @@ module Test = struct
          Spec_inference.propagate_locals := false;
          Spec_inference.propagate_globals := false;
          Spec_inference.use_const := false;
-         let funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) instr_idx in
+         let funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) in
          let module_ = Wasm_module.replace_func module_ 22l funcinst in
          (* We should be able to re-annotate the graph *)
          Spec_inference.propagate_locals := true;

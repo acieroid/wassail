@@ -120,10 +120,10 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
                   | `Last -> [Array.last labels])
                 ~f:(fun slicing_criterion ->
                     try
-                      let instrs_to_keep, (control_time, data_time, mem_time, global_time, slicing_time1) = Slicing.instructions_to_keep cfg cfg_instructions slicing_criterion in
+                      let instrs_to_keep, (control_time, data_time, mem_time, global_time, slicing_time1) = Slicing.instructions_to_keep cfg cfg_instructions (Instr.Label.Set.singleton slicing_criterion) in
                       try
                         let t0 = Time.now () in
-                        let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) cfg_instructions slicing_criterion in
+                        let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) cfg_instructions (Instr.Label.Set.singleton slicing_criterion) in
                         let t1 = Time.now () in
                         let slicing_time2 = Time.diff t1 t0 in
                         let sliced_labels = all_labels sliced_func.code.body in
@@ -193,26 +193,27 @@ let generate_slice (filename : string) (output_file : string) =
   Spec_inference.propagate_locals := false;
   Printf.printf "printf id: %ld\n" printf_export_idx;
   (* Find the function and slicing criterion: it should call printf with the string's position in the data segment as argument *)
-  let (function_idx, slicing_criterion) = match List.find_map wasm_mod.funcs ~f:(fun func ->
+  let (function_idx, slicing_criteria) = match List.find_map wasm_mod.funcs ~f:(fun func ->
       Spec_inference.use_const := true;
       Spec_inference.propagate_locals := true;
       let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
-      List.find_map (Cfg.all_instructions_list cfg) ~f:(function
+      match List.filter_map (Cfg.all_instructions_list cfg) ~f:(function
           | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
             begin match annotation_before.vstack with
-              | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 str_pos)) -> Some (func.idx, label)
+              | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 str_pos)) -> Some label
               | _ -> None
             end
-          | _ -> None)) with
+          | _ -> None) with
+      | [] -> None
+      | l -> Some (func.idx, l)) with
   | Some r -> r
   | None -> failwith "cannot find function to slice" in
-  Printf.printf "function: %ld, slicing criterion: %s\n" function_idx (Instr.Label.to_string slicing_criterion);
   (* Perform the actual slicing *)
   Spec_inference.use_const := false;
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
   let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod function_idx) in
-  let funcinst = Slicing.slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) slicing_criterion in
+  let funcinst = Slicing.slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.of_list slicing_criteria) in
   let module_ = Wasm_module.replace_func wasm_mod function_idx funcinst in
   Out_channel.with_file output_file
     ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_))

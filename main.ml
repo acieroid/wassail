@@ -372,7 +372,7 @@ let slice =
           else
             Instr.Label.{ section = Function funidx; id = instr } in
         Log.info "Slicing";
-        let funcinst = Slicing.slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) slicing_criterion in
+        let funcinst = Slicing.slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) in
         Log.info "done";
         (* let sliced_labels = all_labels funcinst.code.body in *)
         let module_ = Wasm_module.replace_func module_ funidx funcinst in
