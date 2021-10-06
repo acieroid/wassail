@@ -332,8 +332,6 @@ let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t In
       (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: if with arity greater than 0"; *)
       let sliced_then = slice_alternative cfg cfg_instructions then_ instructions_to_keep in
       let sliced_else = slice_alternative cfg cfg_instructions else_ instructions_to_keep in
-      Printf.printf "sliced body: %s\n"
-        (String.concat ~sep:"," (List.map sliced_then ~f:(fun instr -> Instr.Label.to_string (Instr.label instr))));
       if body_can_be_removed sliced_then && body_can_be_removed sliced_else then
         loop rest (entire_instr :: to_remove_rev)
       else
@@ -751,7 +749,8 @@ module Test = struct
     i32.const 16 ;; Instr 7
     i32.add      ;; Instr 8
     global.set 0) ;; Instr 9
-)" in
+  (global (;0;) (mut i32) (i32.const 69232)))
+" in
     check_slice original original 0l 5
 
    let%test "slice with an empty if" =
