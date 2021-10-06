@@ -303,6 +303,10 @@ let replace_with_equivalent_instructions (instrs : unit Instr.t list) (cfg : 'a 
     replaced
 
 
+(* Check if the body is empty or only consist only of dummy instructions *)
+let body_can_be_removed (body : unit Instr.t list) : bool =
+  List.for_all body ~f:(fun instr -> Instr.Label.equal_section (Instr.label instr).section Instr.Label.Dummy)
+
 let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (original_instructions : unit Instr.t list) (instructions_to_keep : Instr.Label.Set.t): unit Instr.t list =
   let rec loop (instrs : unit Instr.t list) (to_remove_rev : unit Instr.t list) : unit Instr.t list =
     match instrs with
@@ -311,7 +315,7 @@ let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t In
       (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: block with arity greater than 0"; *)
       let sliced_body = slice_alternative cfg cfg_instructions body instructions_to_keep in
       (* TODO: we could also drop the block if it is not empty but only contains instructions that are not part of the slice (basically, only dummy instructions) *)
-      if List.is_empty sliced_body then
+      if body_can_be_removed sliced_body then
         (* Block body is empty, drop the block entirely *)
         loop rest (entire_instr :: to_remove_rev)
       else
@@ -319,7 +323,7 @@ let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t In
     | (Control ({ instr = Loop (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
       (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: loop with arity greater than 0"; *)
       let sliced_body = slice_alternative cfg cfg_instructions body instructions_to_keep in
-      if List.is_empty sliced_body then
+      if body_can_be_removed sliced_body then
         loop rest (entire_instr :: to_remove_rev)
       else
         (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @ [Instr.Control { instr with instr = Loop (bt, arity, sliced_body) }] @ loop rest []
@@ -327,7 +331,9 @@ let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t In
       (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: if with arity greater than 0"; *)
       let sliced_then = slice_alternative cfg cfg_instructions then_ instructions_to_keep in
       let sliced_else = slice_alternative cfg cfg_instructions else_ instructions_to_keep in
-      if List.is_empty sliced_then && List.is_empty sliced_else then
+      Printf.printf "sliced body: %s\n"
+        (String.concat ~sep:"," (List.map sliced_then ~f:(fun instr -> Instr.Label.to_string (Instr.label instr))));
+      if body_can_be_removed sliced_then && body_can_be_removed sliced_else then
         loop rest (entire_instr :: to_remove_rev)
       else
         (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @
@@ -1481,8 +1487,6 @@ module Test = struct
   loop
     block (result i32)
       local.get 0
-      drop
-      i32.const 0
     end
   end))" in
        check_slice original slice 0l 3
