@@ -350,12 +350,10 @@ let slice =
   Command.basic
     ~summary:"Produce an executable program after slicing the given function at the given slicing criterion"
     Command.Let_syntax.(
-      Log.enable_info ();
       let%map_open filename = anon ("file" %: string)
       and funidx = anon ("fun" %: int32)
       and instr = anon ("instr" %: int)
       and outfile = anon ("output" %: string) in
-      Log.enable_info ();
       fun () ->
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
