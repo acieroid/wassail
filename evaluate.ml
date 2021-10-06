@@ -114,13 +114,14 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
               let cfg = Spec_inference.Intra.analyze wasm_mod cfg_raw in
               let spec_time = Time.diff (Time.now ()) t0 in
               let cfg_instructions = Cfg.all_instructions cfg in
+              let preanalysis = Slicing.preanalysis cfg cfg_instructions in
               List.iter (match criterion_selection with
                   | `Random -> [Array.get labels (Random.int (Array.length labels))]
                   | `All -> Array.to_list labels
                   | `Last -> [Array.last labels])
                 ~f:(fun slicing_criterion ->
                     try
-                      let instrs_to_keep, (control_time, data_time, mem_time, global_time, slicing_time1) = Slicing.instructions_to_keep cfg cfg_instructions (Instr.Label.Set.singleton slicing_criterion) in
+                      let instrs_to_keep, (control_time, data_time, mem_time, global_time, slicing_time1) = Slicing.instructions_to_keep cfg cfg_instructions preanalysis (Instr.Label.Set.singleton slicing_criterion) in
                       try
                         let t0 = Time.now () in
                         let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) cfg_instructions (Instr.Label.Set.singleton slicing_criterion) in
