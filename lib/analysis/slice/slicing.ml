@@ -132,6 +132,7 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
                 (Instr.Label.Set.to_list (Memory_deps.deps_for preanalysis.mem_dependencies slicepart.label)))) in
       loop (InSlice.Set.remove worklist''' slicepart) slice' visited' in
   let agrawal (slice : Instr.Label.Set.t) : Instr.Label.Set.t =
+    (* For each br instruction of the function, we add them to the slice if they are control-dependent on an instruction in the slice *)
     (* For each instruction in the slice, we add all br instructions that are control-dependent on it *)
     Instr.Label.Set.fold (Instr.Label.Set.of_list (Instr.Label.Map.keys cfg_instructions))
       ~init:slice
@@ -141,8 +142,8 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
           | Control { instr = Br _; _ } -> begin match Instr.Label.Map.find preanalysis.control_dependencies label with
               | Some instrs -> begin match Instr.Label.Set.find_map instrs
                                              ~f:(fun i -> if Instr.Label.Set.mem slice i then Some i else None) with
-                  | Some _ ->
-                    Log.info (Printf.sprintf "Agrawal tells us to add %s to the slice\n" (Instr.Label.to_string label));
+                | Some label' ->
+                    Log.info (Printf.sprintf "Agrawal tells us to add %s to the slice because there is a dependency to %s\n" (Instr.Label.to_string label) (Instr.Label.to_string label'));
                     Instr.Label.Set.add slice label
                   | None -> slice
                 end
@@ -302,9 +303,9 @@ let replace_with_equivalent_instructions (instrs : unit Instr.t list) (cfg : 'a 
                 (String.concat ~sep:"," (List.map ~f:Instr.to_string replaced)));
     replaced
 
-
 (* Check if the body is empty or only consist only of dummy instructions *)
 let body_can_be_removed (body : unit Instr.t list) : bool =
+  (* A safer alternative is simply: List.is_empty body *)
   List.for_all body ~f:(fun instr -> Instr.Label.equal_section (Instr.label instr).section Instr.Label.Dummy)
 
 let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (original_instructions : unit Instr.t list) (instructions_to_keep : Instr.Label.Set.t): unit Instr.t list =
@@ -788,15 +789,11 @@ module Test = struct
     local.get 0
   end
 ))" in
-     (* This is not the ideal slice, but this is good enough *)
      let sliced = "(module
 (type (;0;) (func (param i32) (result i32)))
 (func (;0;) (type 0)
   block
     i32.const 0
-    block
-      drop
-    end
     local.get 0
   end
 )
@@ -1465,30 +1462,33 @@ module Test = struct
       let original = "(module
 (type (;0;) (func))
 (type (;1;) (func (param i32) (result i32)))
-(func (;0;) (type 1)
-  local.get 0
+(func (;0;) (type 1) (param i32) (result i32)
   loop (result i32)
     block (result i32)
       local.get 0 ;; This is the slicing criterion
+      drop
+      i32.const 1
       if
-        i32.const 0
-        ;; The difficulty lies in removing this instruction, which is not considered part of the slice.
+        i32.const 1
+        ;; The difficulty lies in removing this instruction, which is not considered part of the slice.
         ;; However, its effect on the stack (-1) depends on the current block arity (0) and the target block arity (1)
         br 1
       end
-      i32.const 0
-    end
-  end
-  drop))" in
-     let slice = "(module
-(type (;0;) (func))
-(type (;1;) (func (result i32)))
-(func (;0;) (type 1)
-  loop
-    block (result i32)
-      local.get 0
+      i32.const 2
     end
   end))" in
+     let slice = "(module
+(type (;0;) (func))
+(type (;1;) (func (param i32) (result i32)))
+(func (;0;) (type 1) (param i32) (result i32)
+  loop (result i32)
+    block (result i32)
+      local.get 0
+      drop
+      i32.const 0
+    end
+  end)
+)" in
        check_slice original slice 0l 3
 
         (*
