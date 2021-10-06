@@ -16,11 +16,6 @@ module InSlice = struct
       | Some var -> Printf.sprintf "%s(%s)" (Instr.Label.to_string t.label) (Var.to_string var)
 
     let make (label : Instr.Label.t) (var : Var.t option) (instructions : 'a Instr.t Instr.Label.Map.t) =
-      Log.info (Printf.sprintf "instr %s is part of the slice due to %s\n"
-        (Instr.Label.to_string label)
-        (match var with
-         | Some v -> Var.to_string v
-         | None -> "no var"));
       { label ;
         reason = match Cfg.find_instr instructions label with
           | Some (Instr.Control { instr = Merge; _ }) -> var
@@ -109,6 +104,9 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
               (* For def in usedef(use): if def contains an instruction, add def.instr to W *)
               let data_deps : InSlice.Set.t = match def with
                 | Use_def.Def.Instruction (instr', var) ->
+                  Log.info
+                    (Printf.sprintf "Instruction %s is part of the slice due to its data dependence on %s"
+                       (Instr.Label.to_string instr') (Var.to_string var));
                   InSlice.Set.singleton (InSlice.make instr' (Some var) cfg_instructions)
                 | Use_def.Def.Entry _ -> InSlice.Set.empty
                 | Use_def.Def.Constant _ -> InSlice.Set.empty in
@@ -117,12 +115,20 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
       let control_deps : InSlice.Set.t = match Instr.Label.Map.find preanalysis.control_dependencies slicepart.label with
         | None -> InSlice.Set.empty
         | Some deps -> InSlice.Set.of_list (List.map (Instr.Label.Set.to_list deps)
-                                              ~f:(fun label -> InSlice.make label None cfg_instructions)) in
+                                              ~f:(fun label ->
+                                                  Log.info
+                                                    (Printf.sprintf "Instruction %s is part of the slice due to control dependences"
+                                                       (Instr.Label.to_string label));
+                                                  InSlice.make label None cfg_instructions)) in
       let worklist'' = InSlice.Set.union worklist' control_deps in
       (* For instr' in mem_deps(instr): add instr to W *)
       let worklist''' = InSlice.Set.union worklist''
           (InSlice.Set.of_list
-             (List.map ~f:(fun label -> InSlice.make label None cfg_instructions)
+             (List.map ~f:(fun label ->
+                  Log.info
+                    (Printf.sprintf "Instruction %s is part of the slice due to memory dependences"
+                       (Instr.Label.to_string label));
+                  InSlice.make label None cfg_instructions)
                 (Instr.Label.Set.to_list (Memory_deps.deps_for preanalysis.mem_dependencies slicepart.label)))) in
       loop (InSlice.Set.remove worklist''' slicepart) slice' visited' in
   let agrawal (slice : Instr.Label.Set.t) : Instr.Label.Set.t =
@@ -198,6 +204,12 @@ let type_of_control
     (cfg : unit Cfg.t)
     (instructions_map : Spec.t Instr.t Instr.Label.Map.t)
   : instr_type_element list * instr_type_element list =
+  let vstack_before () = match Cfg.find_instr instructions_map i.label with
+      | Some i ->
+        let annot_before = Instr.annotation_before i in
+        annot_before.vstack
+      | None -> failwith "Unsupported in slicing: return instruction is part of unreachable code"
+  in
   match i.instr with
   | Call (_, (in_type, out_type), _) -> (List.map in_type ~f:(fun t -> T t), List.map out_type ~f:(fun t -> T t))
   | CallIndirect (_, (in_type, out_type), _) ->
@@ -212,17 +224,19 @@ let type_of_control
     ([], match bt with
       | Some t -> [T t]
       | None -> [])
-  | Br _ -> ([], [])
-  | BrIf _ -> ([T Type.I32], [])
-  | BrTable (_, _) -> ([T Type.I32], [])
+  | Br _ ->
+    (* The code after a br is not reachable, so we can assume that br drops everything from the stack *)
+    let vstack = vstack_before () in
+    (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i)), [])
+  | BrIf _ ->
+    let vstack = List.drop (vstack_before ()) 1 in
+    ([T Type.I32] @ (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i))), [])
+  | BrTable (_, _) ->
+    let vstack = List.drop (vstack_before ()) 1 in
+    ([T Type.I32] @ (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i))), [])
   | Return ->
-    begin match Cfg.find_instr instructions_map i.label with
-    | Some i ->
-      let annot_before = Instr.annotation_before i in
-      let vstack = annot_before.vstack in
-      (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i)), (List.map cfg.return_types ~f:(fun t -> T t)))
-    | None -> failwith "Unsupported in slicing: return instruction is part of unreachable code"
-    end
+    let vstack = vstack_before () in
+    (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i)), (List.map cfg.return_types ~f:(fun t -> T t)))
   | Unreachable -> ([], [])
   | Merge -> ([], [])
 
@@ -278,15 +292,23 @@ let next_label : unit -> int =
       v
 
 let replace_with_equivalent_instructions (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : unit Instr.t list =
-  let t = instrs_type instrs cfg instructions_map in
-  List.map (dummy_instrs t next_label) ~f:(fun i -> Instr.Data i)
+  if List.is_empty instrs then instrs else
+    let t = instrs_type instrs cfg instructions_map in
+    let replaced = List.map (dummy_instrs t next_label) ~f:(fun i -> Instr.Data i) in
+    Log.info (Printf.sprintf "Replacing instructions %s of type %s -> %s with %s"
+                (String.concat ~sep:"," (List.map ~f:Instr.to_string instrs))
+                (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (fst t)))
+                (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (snd t)))
+                (String.concat ~sep:"," (List.map ~f:Instr.to_string replaced)));
+    replaced
+
 
 let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (original_instructions : unit Instr.t list) (instructions_to_keep : Instr.Label.Set.t): unit Instr.t list =
   let rec loop (instrs : unit Instr.t list) (to_remove_rev : unit Instr.t list) : unit Instr.t list =
     match instrs with
     | [] -> replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions
     | (Control ({ instr = Block (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
-      if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: block with arity greater than 0";
+      (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: block with arity greater than 0"; *)
       let sliced_body = slice_alternative cfg cfg_instructions body instructions_to_keep in
       (* TODO: we could also drop the block if it is not empty but only contains instructions that are not part of the slice (basically, only dummy instructions) *)
       if List.is_empty sliced_body then
@@ -295,14 +317,14 @@ let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t In
       else
         (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @ [Instr.Control { instr with instr = Block (bt, arity, sliced_body) }] @ loop rest []
     | (Control ({ instr = Loop (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
-      if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: loop with arity greater than 0";
+      (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: loop with arity greater than 0"; *)
       let sliced_body = slice_alternative cfg cfg_instructions body instructions_to_keep in
       if List.is_empty sliced_body then
         loop rest (entire_instr :: to_remove_rev)
       else
         (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @ [Instr.Control { instr with instr = Loop (bt, arity, sliced_body) }] @ loop rest []
     | (Control ({ instr = If (bt, arity, then_, else_); _ } as instr)) as entire_instr :: rest ->
-      if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: if with arity greater than 0";
+      (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: if with arity greater than 0"; *)
       let sliced_then = slice_alternative cfg cfg_instructions then_ instructions_to_keep in
       let sliced_else = slice_alternative cfg cfg_instructions else_ instructions_to_keep in
       if List.is_empty sliced_then && List.is_empty sliced_else then
@@ -456,35 +478,6 @@ module Test = struct
     (* Merge blocks do not need to be in the slice *)
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2; lab 3; lab 8; lab 9] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
-
-  let%test_unit "slicing with merge blocks using slice" =
-     Spec_inference.propagate_globals := false;
-     Spec_inference.propagate_locals := false;
-     Spec_inference.use_const := false;
-    let _, cfg = build_cfg "(module
-   (type (;0;) (func (param i32) (result i32)))
-   (func (;test;) (type 0) (param i32) (result i32)
-    memory.size     ;; Instr 0
-    if (result i32) ;; Instr 1
-      memory.size   ;; Instr 2
-    else
-      memory.size   ;; Instr 3
-    end
-    ;; Merge block 4 here
-    ;; ----
-    memory.size     ;; Instr 4
-    memory.size     ;; Instr 5
-    i32.add         ;; Instr 6
-    drop            ;; Instr 7
-    ;; ---- this previous part should not be part of the slice
-    memory.size     ;; Instr 8
-    i32.add)        ;; Instr 9
-   (table (;0;) 1 1 funcref)
-   (memory (;0;) 2)
-   (global (;0;) (mut i32) (i32.const 66560)))" in
-    let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
-    (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
-    ()
 
    let%test_unit "slicing with a block containing a single drop should produce a valid slice" =
      Spec_inference.propagate_globals := false;
@@ -1462,25 +1455,26 @@ module Test = struct
   return))" in
       check_slice original slice 0l 4
 
-    (* not supported
     let%test "slicing blocks with results" =
-     let original = "(module
+      let original = "(module
 (type (;0;) (func))
 (type (;1;) (func (param i32) (result i32)))
 (func (;0;) (type 1)
   local.get 0
-  loop
+  loop (result i32)
     block (result i32)
-      local.get 0
+      local.get 0 ;; This is the slicing criterion
       if
         i32.const 0
+        ;; The difficulty lies in removing this instruction, which is not considered part of the slice.
+        ;; However, its effect on the stack (-1) depends on the current block arity (0) and the target block arity (1)
         br 1
       end
       i32.const 0
     end
   end
   drop))" in
-     let sliced = "(module
+     let slice = "(module
 (type (;0;) (func))
 (type (;1;) (func (result i32)))
 (func (;0;) (type 1)
@@ -1490,7 +1484,37 @@ module Test = struct
       drop
       i32.const 0
     end
-  end))"
+  end))" in
        check_slice original slice 0l 3
-    *)
- end
+
+        (*
+  let%test_unit "slicing with merge blocks using slice" =
+     Spec_inference.propagate_globals := false;
+     Spec_inference.propagate_locals := false;
+     Spec_inference.use_const := false;
+    let _, cfg = build_cfg "(module
+   (type (;0;) (func (param i32) (result i32)))
+   (func (;test;) (type 0) (param i32) (result i32)
+    memory.size     ;; Instr 0
+    if (result i32) ;; Instr 1
+      memory.size   ;; Instr 2
+    else
+      memory.size   ;; Instr 3
+    end
+    ;; Merge block 4 here
+    ;; ----
+    memory.size     ;; Instr 4
+    memory.size     ;; Instr 5
+    i32.add         ;; Instr 6
+    drop            ;; Instr 7
+    ;; ---- this previous part should not be part of the slice
+    memory.size     ;; Instr 8
+    i32.add)        ;; Instr 9
+   (table (;0;) 1 1 funcref)
+   (memory (;0;) 2)
+   (global (;0;) (mut i32) (i32.const 66560)))" in
+    let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
+    (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
+    ()*)
+
+  end

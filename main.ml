@@ -350,6 +350,7 @@ let slice =
   Command.basic
     ~summary:"Produce an executable program after slicing the given function at the given slicing criterion"
     Command.Let_syntax.(
+      Log.enable_info ();
       let%map_open filename = anon ("file" %: string)
       and funidx = anon ("fun" %: int32)
       and instr = anon ("instr" %: int)
