@@ -889,39 +889,62 @@ module Test = struct
      let sliced = "(module
   (type (;0;) (func))
   (type (;1;) (func (result i32)))
-  (type (;1;) (func (param i32) (result i32)))
-  (func (;eof;) (type 1) (result i32)
+  (type (;2;) (func (param i32) (result i32)))
+  (func (;0;) (type 1) (result i32)
     i32.const 0)
-  (func (;read;) (type 1) (result i32)
+  (func (;1;) (type 1) (result i32)
     i32.const 0)
-  (func (;f;) (type 2) (param i32) (result i32)
+  (func (;2;) (type 2) (param i32) (result i32)
     local.get 0)
-  (func (;test;) (type 0)
+  (func (;3;) (type 0)
     (local i32 i32 i32)
+    ;; If a line is annotated with Agrawal, it means it is part of Agrawal's original solution
+    ;; If a line is annotated with superfluous, it means it is part of our slice because we don't assume functions to be pure, while Agrawal does. Hence, our solution is an over-approximation of Agrawal's, but it is still correct.
     block
       loop
-        call 0
-        br_if 1
+        call 0 ;; eof(), Agrawal
+        br_if 1 ;; Agrawal
         block
           block
-            call 1
-            br_if 0
-            br 1
-          end ;; end of block 2 (L8)
-          block
-            local.get 1
-            i32.const 1
-            i32.add
-            local.set 1
+            call 1 ;; read(), Agrawal
+            local.tee 2 ;; x = read(), Agrawal
+            br_if 0 ;; Agrawal
+            local.get 2 ;; superfluous due to call
+            call 2 ;; superfluous due to missing purity assumption
+            local.get 0 ;; superflous
+            i32.add ;; superfluous
+            local.set 0 ;; superfluous
+            br 1 ;; Agrawal
           end
+          block
+            local.get 1 ;; Agrawal
+            i32.const 1 ;; Agrawal
+            i32.add ;; Agrawal
+            local.set 1 ;; Agrawal
+            local.get 2 ;; superfluous
+            br_if 0 ;; superfluous
+            local.get 2 ;; superfluous
+            call 2 ;; superflous due to missing purity assumption
+            local.get 0 ;; superfluous
+            i32.add ;; superfluous
+            local.set 0 ;; superfluous due to call 2 at the end
+            br 1 ;; superfluous
+          end
+          local.get 2 ;; superfluous
+          call 2 ;; superfluous
+          local.get 0 ;; superfluous
+          i32.add ;; superfluous
+          local.set 0 ;; superfluous due to call 2 at the end
         end
-        br 0
+        br 0 ;; Agrawal
       end
     end
-    local.get 1
-    call 2
+    local.get 0 ;; superfluous due to call
+    call 2 ;; superfluous due to missing purity assumption
     drop
-    ))" in
+    local.get 1 ;; Agrawal
+    call 2 ;; Agrawal
+    drop))" in
      check_slice original sliced 3l 38
 
    let%test "slice on the example from Agrawal 1994 (Fig. 5) should be correct" =
@@ -988,34 +1011,59 @@ module Test = struct
      let sliced = "(module
   (type (;0;) (func))
   (type (;1;) (func (result i32)))
-  (type (;1;) (func (param i32) (result i32)))
-  (func (;eof;) (type 1) (result i32)
+  (type (;2;) (func (param i32) (result i32)))
+  (func (;0;) (type 1) (result i32)
     i32.const 0)
-  (func (;read;) (type 1) (result i32)
+  (func (;1;) (type 1) (result i32)
     i32.const 0)
-  (func (;f;) (type 2) (param i32) (result i32)
+  (func (;2;) (type 2) (param i32) (result i32)
     local.get 0)
-  (func (;test;) (type 0)
+  (func (;3;) (type 0)
     (local i32 i32 i32)
-  block
-    loop
-      call 0
-      i32.const 0
-      i32.ne
-      br_if 1
-      call 1
-      if
-        br 1
+    block
+      loop
+        call 0 ;; Agrawal
+        i32.const 0 ;; Agrawal
+        i32.ne ;; Agrawal
+        br_if 1 ;; Agrawal
+        call 1 ;; Agrawal
+        local.tee 2 ;; superfluous due to call
+        if ;; Agrawal
+          local.get 2 ;; superfluous due to call
+          call 2 ;; superfluous due to missing purity assumption
+          local.get 0 ;; superfluous due to local 0
+          i32.add ;; superfluous due to local 0
+          local.set 0 ;; superfluous due to call
+          br 1 ;; Agrawal
+        end
+        local.get 1 ;; Agrawal
+        i32.const 1 ;; Agrawal
+        i32.add ;; Agrawal
+        local.set 1 ;; Agrawal
+        local.get 2 ;; superfluous
+        if ;; superfluous
+          local.get 2 ;; superfluous due to call 0
+          call 2 ;; superfluous due to missing purity assumption
+          local.get 0 ;; superfluous due to local 0
+          i32.add ;; superfluous due to local 0
+          local.set 0 ;; superfluous due to call
+          br 1 ;; superfluous
+        end
+        local.get 2 ;; superfluous due to call
+        call 2 ;; superfluous due to missing purity assumption
+        local.get 0 ;; superfluous due to call 0
+        i32.add ;; superfluous due to local 0
+        local.set 0 ;; superfluous due to call
+        br 0 ;; superfluous due to local 0
       end
-      local.get 1
-      i32.const 1
-      i32.add
-      local.set 1
     end
-  end
-  local.get 1
-  call 2
-  drop))" in
+    local.get 0 ;; superfluous due to call
+    call 2 ;; superfluous due to missing purity assumption
+    drop ;; superfluous due to call
+    local.get 1 ;; Agrawal
+    call 2 ;; Agrawal
+    drop)
+)" in
      check_slice original sliced 3l 37
 
    let%test_unit "slicing function 14 of trmm" =
