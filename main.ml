@@ -362,15 +362,9 @@ let slice =
         let module_ = Wasm_module.of_file filename in
         Log.info "Constructing CFG";
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
-        let func = List32.nth_exn module_.funcs Int32.(funidx - module_.nfuncimports) in
-        let slicing_criterion = if instr = 0 then
-            (* No instruction selected, pick the last one *)
-            let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
-            Log.info (Printf.sprintf "There are %d instructions" (Array.length labels));
-            Array.last labels
-          else
-            Instr.Label.{ section = Function funidx; id = instr } in
+        let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
         Log.info "Slicing";
+        Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
         let funcinst = Slicing.slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) in
         Log.info "done";
         (* let sliced_labels = all_labels funcinst.code.body in *)

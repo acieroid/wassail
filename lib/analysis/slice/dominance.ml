@@ -88,23 +88,46 @@ module Graph = struct
       and Kennedy (2001), based on the description made here:
       . *)
   let dominator_tree (graph : 'a t) : Tree.t =
-    let rec loop (tree : Tree.t) : Tree.t =
-      let (tree, changed) =
-        List.fold_left graph.nodes ~init:(tree, false) ~f:(fun (tree, changed) node1 ->
-          List.fold_left (graph.preds node1) ~init:(tree, changed) ~f:(fun (tree, changed) node2 ->
-              let parent_n1 = match Tree.parent tree node1 with
-                | Some p -> p
-                | None -> failwith "Unsupported: infinite loops" in
-              let nca = match Tree.nca tree node2 parent_n1 with
-                | Some n -> n
-                | None -> failwith "dominator_tree accessing nodes without common ancestor" in
-              if parent_n1 <> node2 && nca <> parent_n1 then
-                (Tree.set_parent tree node1 nca, true)
-              else
-                (tree, changed))) in
-      if changed then loop tree else tree
+    let rec loop (tree : Tree.t) : [ `Result of Tree.t | `Unreachable of int ] =
+      let (tree, changed, unreachable) =
+        List.fold_left graph.nodes ~init:(tree, false, []) ~f:(fun (tree, changed, unreachable) node1 ->
+            List.fold_left (graph.preds node1) ~init:(tree, changed, unreachable) ~f:(fun (tree, changed, unreachable) node2 ->
+                match Tree.parent tree node1 with
+                | Some parent_n1 ->
+                  begin try
+                    let nca = match Tree.nca tree node2 parent_n1 with
+                      | Some n -> n
+                      | None -> failwith "dominator_tree accessing nodes without common ancestor" in
+                    if parent_n1 <> node2 && nca <> parent_n1 then
+                      (Tree.set_parent tree node1 nca, true, unreachable)
+                    else
+                      (tree, changed, unreachable)
+                  with _ ->
+                    (tree, changed, node2 :: unreachable)
+                end
+                | None ->
+                  (* This is an unreachable node, part of an infinite loop.
+                     Don't visit it and mark it as unreachable *)
+                  (tree, changed, node1 :: unreachable))) in
+      if List.is_empty unreachable then
+        begin if changed then loop tree else `Result tree end
+      else
+        `Unreachable (List.hd_exn unreachable)
     in
-    loop (spanning_tree graph)
+    let rec outer_loop (graph : 'a t) : Tree.t =
+      match loop (spanning_tree graph) with
+      | `Result res -> res
+      | `Unreachable node ->
+        (* There has been unreachable nodes.
+           We will therefore compute one of the dominator trees, according to Chris Dodd's answer here:
+           https://stackoverflow.com/questions/35399281/how-can-i-build-the-post-dominator-tree-of-a-function-with-an-endless-loop
+           To do so, we add an edge from the entry of the graph to the one of the unreachable node and try again *)
+        outer_loop {
+          graph with
+          succs = (fun n -> if n = graph.entry then node :: (graph.succs n) else graph.succs n);
+          preds = (fun n -> if n = node then graph.entry :: (graph.preds n) else graph.preds n);
+        } in
+    outer_loop graph
 end
 
 let graph_of_cfg (cfg : 'a Cfg.t) : int Graph.t =
@@ -240,4 +263,17 @@ module Test = struct
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let _actual = cfg_post_dominator cfg in
     ()
+
+  let%test_unit "post-dominator tree is computed on a CFG that contains an infinite loop" =
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (result i32)))
+  (func (;0;) (type 0) (result i32)
+    loop
+      br 0
+    end
+    unreachable))" in
+    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    let _actual = cfg_post_dominator cfg in
+    ()
 end
+

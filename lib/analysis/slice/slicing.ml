@@ -68,6 +68,7 @@ let preanalysis (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.La
     set of instructions that are part of the slice, as a set of instruction
     labels. *)
 let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (preanalysis : preanalysis_results) (criteria : Instr.Label.Set.t) : (Instr.Label.Set.t * (Time.Span.t * Time.Span.t * Time.Span.t * Time.Span.t * Time.Span.t)) =
+  Log.info (Printf.sprintf "Slicing with criteria %s" (Instr.Label.Set.to_string criteria));
   let t0 = Time.now () in
   let rec loop (worklist : InSlice.Set.t) (slice : Instr.Label.Set.t) (visited : InSlice.Set.t) : Instr.Label.Set.t =
     (* Perform backward slicing as follows:
@@ -89,6 +90,7 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
       (* Already seen this slice part, no need to process it again *)
       loop (InSlice.Set.remove worklist slicepart) slice visited
     | Some slicepart ->
+      Log.info (Printf.sprintf "Looking at instruction %s" (InSlice.to_string slicepart));
       (* Add instr to the current slice *)
       let slice' = Instr.Label.Set.add slice slicepart.label in
       let visited' = InSlice.Set.add visited slicepart in
@@ -1457,7 +1459,7 @@ module Test = struct
   return))" in
       check_slice original slice 0l 4
 
-    let%test "slicing blocks with results" =
+    let%test "slicing blocks with results and br" =
       let original = "(module
 (type (;0;) (func))
 (type (;1;) (func (param i32) (result i32)))
@@ -1490,34 +1492,37 @@ module Test = struct
 )" in
        check_slice original slice 0l 3
 
-        (*
-  let%test_unit "slicing with merge blocks using slice" =
-     Spec_inference.propagate_globals := false;
-     Spec_inference.propagate_locals := false;
-     Spec_inference.use_const := false;
-    let _, cfg = build_cfg "(module
+  let%test "slicing blocks with result" =
+    let original = "(module
    (type (;0;) (func (param i32) (result i32)))
-   (func (;test;) (type 0) (param i32) (result i32)
-    memory.size     ;; Instr 0
+   (func (;0;) (type 0) (param i32) (result i32)
+    i32.const 0     ;; Instr 0
     if (result i32) ;; Instr 1
-      memory.size   ;; Instr 2
+      i32.const 1   ;; Instr 2
     else
-      memory.size   ;; Instr 3
+      i32.const 2   ;; Instr 3
     end
-    ;; Merge block 4 here
-    ;; ----
-    memory.size     ;; Instr 4
-    memory.size     ;; Instr 5
+    ;; ---- This part should not be part of the slice (until ----)
+    i32.const 3     ;; Instr 4
+    i32.const 4     ;; Instr 5
     i32.add         ;; Instr 6
     drop            ;; Instr 7
-    ;; ---- this previous part should not be part of the slice
-    memory.size     ;; Instr 8
+    ;; ----
+    i32.const 5     ;; Instr 8
     i32.add)        ;; Instr 9
-   (table (;0;) 1 1 funcref)
-   (memory (;0;) 2)
-   (global (;0;) (mut i32) (i32.const 66560)))" in
-    let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
-    (* Nothing is really tested here, besides the fact that we don't want any exceptions to be thrown *)
-    ()*)
+   )" in
+    let slice = "(module
+   (type (;0;) (func (param i32) (result i32)))
+   (func (;test;) (type 0) (param i32) (result i32)
+    i32.const 0     ;; Instr 0
+    if (result i32) ;; Instr 1
+      i32.const 1   ;; Instr 2
+    else
+      i32.const 2   ;; Instr 3
+    end
+    i32.const 5     ;; Instr 8
+    i32.add)        ;; Instr 9
+   )" in
+    check_slice original slice 0l 9
 
   end
