@@ -1573,4 +1573,26 @@ module Test = struct
    )" in
     check_slice original slice 0l 9
 
+  let%test "slicing with unreachable code" =
+    let original = "(module
+(type (;0;) (func (param i32) (result i32)))
+(func (;0;) (type 0) (param i32) (result i32)
+    block
+      local.get 0
+      br_if 0
+      unreachable
+    end
+    local.get 0
+))" in
+    let slice = "(module
+(type (;0;) (func (param i32) (result i32)))
+(func (;0;) (type 0) (param i32) (result i32)
+    block
+      local.get 0
+      drop
+    end
+    i32.const 0
+))" in
+    check_slice original slice 0l 1
+
   end

@@ -68,8 +68,17 @@ module Test = struct
       i32.add
       drop
     end
-    local.get 0)
-  (table (;0;) 1 1 funcref)
-  (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))"
+    local.get 0))"
+
+  let%test_unit "spec analysis succeeds even in the presence of unreachable code" =
+    does_not_fail "(module
+(type (;0;) (func (param i32) (result i32)))
+(func (;0;) (type 0) (param i32) (result i32)
+    block
+      local.get 0
+      br_if 0
+      unreachable ;; stack length here is 0, and it is connected to the exit of the function
+    end
+    local.get 0 ;; stack length here is 1, hence there is a length mismatch
+))"
 end

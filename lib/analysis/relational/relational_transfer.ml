@@ -240,7 +240,7 @@ let control_instr_transfer
     (cfg : annot_expected Cfg.t) (* The CFG analyzed *)
     (i : annot_expected Instr.labelled_control) (* The instruction *)
     (state : Domain.t) (* The pre state *)
-  : [`Simple of state | `Branch of state * state] =
+  : [`Simple of state | `Branch of state * state | `AnyState ] =
   (* This restricts the variables to only those used in the current instruction and those defined at the entry/exit of the CFG. This can be safely disabled. *)
   let state = if !remove_vars then Domain.change_vars state (Var.Set.union_list [reachable_vars (Control i); entry_vars cfg; exit_vars cfg]) else state in
   let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
@@ -298,7 +298,7 @@ let control_instr_transfer
     `Simple state
   | Unreachable ->
     (* Unreachable, so what we return does not really matter *)
-    `Simple state
+    `AnyState
   | Merge -> (* Not handled here, but in merge_flows *) `Simple state
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr))
 

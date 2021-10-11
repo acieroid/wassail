@@ -134,7 +134,7 @@ module Make (* : Transfer.TRANSFER *) = struct
       (_cfg : annot_expected Cfg.t) (* The CFG analyzed *)
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : state) (* The pre state *)
-    : [`Simple of state | `Branch of state * state] =
+    : [`Simple of state | `Branch of state * state | `AnyState ] =
     let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
       let summary = SummaryManager.get f in
       let args = List.take (fst i.annotation_before).vstack (fst arity) in
@@ -175,7 +175,7 @@ module Make (* : Transfer.TRANSFER *) = struct
     | Br _ -> `Simple state
     | BrIf _ | If _ -> `Branch (state, state)
     | Return -> `Simple state
-    | Unreachable -> `Simple state
+    | Unreachable -> `AnyState
     | _ -> `Simple state
 
   let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * state) list) : state =

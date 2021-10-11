@@ -103,7 +103,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
       { state with vstack = drop 2 state.vstack;
                    memory = Var.OffsetMap.update state.memory (addr, offset) ~f:(fun _ -> value) }
 
-  let control_instr_transfer (_module_ : Wasm_module.t) (cfg : 'a Cfg.t) (i : ('a Instr.control, 'a) Instr.labelled) (state : state) : [`Simple of state | `Branch of state * state] =
+  let control_instr_transfer (_module_ : Wasm_module.t) (cfg : 'a Cfg.t) (i : ('a Instr.control, 'a) Instr.labelled) (state : state) : [`Simple of state | `Branch of state * state | `AnyState ] =
     let ret = Var.Var i.label in
     match i.instr with
     | Call ((arity_in, arity_out), _, _) ->
@@ -122,7 +122,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                            { state with vstack = [] })
     | Unreachable ->
       (* failwith (Printf.sprintf "unsupported: unreachable") (*  in function %ld cfg.idx *) *)
-      `Simple state
+      `AnyState
     | Merge -> `Simple state
     | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr))
 
@@ -235,7 +235,11 @@ let new_merge_variables (cfg : t Cfg.t) (merge_block : t Basic_block.t) : (Var.t
   let state_after = Cfg.state_after_block cfg merge_block.idx (init_state cfg) in
   List.fold_left preds ~init:[] ~f:(fun acc pred_idx ->
       let state_before = Cfg.state_after_block cfg pred_idx (init_state cfg) in
-      (extract_different_vars state_before state_after) @ acc)
+      if Spec_inference.equal state_before Spec_inference.bottom then
+        (* Ignore bottom state *)
+        acc
+      else
+        (extract_different_vars state_before state_after) @ acc)
 
 (** Return the list of variables defined by an instruction *)
 let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
