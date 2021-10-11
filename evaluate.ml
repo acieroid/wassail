@@ -33,7 +33,7 @@ let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
   List.fold_left instrs
     ~init:Instr.Label.Set.empty
     ~f:(fun acc instr ->
-        Instr.Label.Set.union acc (Instr.all_labels_no_merge instr))
+        Instr.Label.Set.union acc (Instr.all_labels_no_blocks_no_merge instr))
 
 let time (f : unit -> 'a) : 'a * Time.Span.t =
   let t0 = Time.now () in

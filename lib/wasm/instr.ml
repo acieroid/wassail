@@ -455,6 +455,20 @@ let rec all_labels_no_merge (i : 'a t) : Label.Set.t =
     end
 
 
+let rec all_labels_no_blocks_no_merge (i : 'a t) : Label.Set.t =
+  match i with
+  | Data d -> Label.Set.singleton d.label
+  | Control c -> begin match c.instr with
+      | Block (_, _, instrs)
+      | Loop (_, _, instrs) -> List.fold_left instrs ~init:Label.Set.empty ~f:(fun acc i ->
+          Label.Set.union acc (all_labels_no_blocks_no_merge i))
+      | If (_, _, instrs1, instrs2) ->
+        List.fold_left (instrs1 @ instrs2) ~init:Label.Set.empty ~f:(fun acc i ->
+          Label.Set.union acc (all_labels_no_blocks_no_merge i))
+      | Merge -> Label.Set.empty
+      | _ -> Label.Set.singleton c.label
+    end
+
 let rec all_labels (i : 'a t) : Label.Set.t =
   match i with
   | Data d -> Label.Set.singleton d.label

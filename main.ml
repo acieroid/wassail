@@ -86,7 +86,7 @@ let function_instructions =
             (List.find_exn wasm_mod.funcs ~f:(fun f -> Int32.(f.idx = fidx))).code.body
             ~init:Instr.Label.Set.empty
             ~f:(fun acc instr ->
-                Instr.Label.Set.union acc (Instr.all_labels instr)) in
+                Instr.Label.Set.union acc (Instr.all_labels_no_blocks_no_merge instr)) in
         Instr.Label.Set.iter labels ~f:(fun label ->
             Printf.printf "%s\n" (Instr.Label.to_string label)))
 
