@@ -5,20 +5,20 @@ synopsis:
   "Wassail (WebAssembly static analyzer and inspection library) is a toolkit to perform both lightweight and heavyweight static analysis of WebAssembly modules"
 maintainer: "Quentin Stiévenart <quentin.stievenart@gmail.com>"
 authors: "Quentin Stiévenart <quentin.stievenart@gmail.com>"
-license: "MIT"
+license: "GPL-3.0-or-later"
 homepage: "https://github.com/acieroid/wassail"
 bug-reports: "https://github.com/acieroid/wassail"
 depends: [
-  "apron"
-  "core"
-  "core_kernel"
-  "dune" {>= "2.7.0"}
-  "ppx_compare"
-  "ppx_inline_test"
-  "ppx_jane"
-  "sexplib"
-  "wasm"
-  "bisect_ppx" {dev & >= "2.5.0"}
+  "apron" # LGPL
+  "core" # MIT
+  "core_kernel" # MIT
+  "dune" {>= "2.7.0"} # MIT
+  "ppx_compare" # MIT
+  "ppx_inline_test" # MIT
+  "ppx_jane" # MIT
+  "sexplib" # MIT
+  "wasm" # Apache 2.0
+  "bisect_ppx" {dev & >= "2.5.0"} # MIT
 ]
 build: [
   ["dune" "subst"] {pinned}
