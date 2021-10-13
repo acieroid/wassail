@@ -28,7 +28,6 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
     | Uninitialized (** Meaning it has not been computed yet *)
     | Simple of state (** A single successor *)
     | Branch of state * state (** Upon a `brif`, there are two successor states: one where the condition holds, and where where it does not hold. This is used to model that. *)
-    | AnyState (** Meaning that it can be anything, this is useful for the unreachable construct that needs to be stack-polymorphic *)
   [@@deriving compare]
 
   (** The results of an intra analysis are a mapping from instruction labels to their in and out values *)
@@ -36,13 +35,12 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
 
   (** Converts a result to a state. May require joining output states in case of branching *)
   let result_to_state (cfg : annot_expected Cfg.t) (r : result) : state = match r with
-    | Uninitialized | AnyState -> bottom_state cfg
+    | Uninitialized -> bottom_state cfg
     | Simple s -> s
     | Branch (s1, s2) -> join_state s1 s2
 
   let result_to_string (r : result) : string = match r with
     | Uninitialized -> "uninit"
-    | AnyState -> "any"
     | Simple s -> Printf.sprintf "simple: %s" (state_to_string s)
     | Branch (s1, s2) -> Printf.sprintf "branch: %s\nand: %s" (state_to_string s1) (state_to_string s2)
 
@@ -72,7 +70,6 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
         let poststate = match Transfer.control_instr_transfer module_ cfg instr state with
           | `Simple s -> Simple s
           | `Branch (s1, s2) -> Branch (s1, s2)
-          | `AnyState -> AnyState
         in
         instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple state, poststate);
         poststate in
@@ -90,7 +87,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
           | Branch (t, _), Some true -> (idx, t)
           | Branch (_, f), Some false -> (idx, f)
           | Branch _, None -> failwith (Printf.sprintf "invalid branch state at block %d, from block %d" block_idx idx)
-          | Uninitialized, _ | AnyState, _ -> (idx, Transfer.bottom_state cfg))) in
+          | Uninitialized, _ -> (idx, Transfer.bottom_state cfg))) in
       let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
       let result = transfer block in_state in

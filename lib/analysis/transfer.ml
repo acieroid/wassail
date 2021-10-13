@@ -35,7 +35,7 @@ module type TRANSFER = sig
     -> annot_expected Cfg.t (* the CFG of the function to analyze *)
     -> annot_expected Instr.labelled_control (* the control instruction to analyze *)
     -> state (* the state before this instruction *)
-    -> [`Simple of state | `Branch of state * state | `AnyState ] (* the resulting state after applying the transfer function *)
+    -> [`Simple of state | `Branch of state * state ] (* the resulting state after applying the transfer function *)
 
   (** Transfer function for data instructions *)
   val data_instr_transfer

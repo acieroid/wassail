@@ -224,10 +224,10 @@ let count_vars =
                 Var.Set.filter ~f:(function
                     | Merge _ -> false
                     | _ -> true)
-                  (Var.Set.union (Var.Set.of_list st.vstack)
-                     (Var.Set.union (Var.Set.of_list st.locals)
-                        (Var.Set.union (Var.Set.of_list st.globals)
-                           (Var.Set.of_list (List.concat_map (Var.OffsetMap.to_alist st.memory) ~f:(fun ((a, _), b) -> [a; b]))))))
+                  (Var.Set.union (Var.Set.of_list (Spec.get_or_fail st).vstack)
+                     (Var.Set.union (Var.Set.of_list (Spec.get_or_fail st).locals)
+                        (Var.Set.union (Var.Set.of_list (Spec.get_or_fail st).globals)
+                           (Var.Set.of_list (List.concat_map (Var.OffsetMap.to_alist (Spec.get_or_fail st).memory) ~f:(fun ((a, _), b) -> [a; b]))))))
               let transfer before after (vars, n) =
                 ((Var.Set.union vars
                     (Var.Set.union (extract_vars before) (extract_vars after))),

@@ -208,9 +208,8 @@ let type_of_control
     (instructions_map : Spec.t Instr.t Instr.Label.Map.t)
   : instr_type_element list * instr_type_element list =
   let vstack_before () = match Cfg.find_instr instructions_map i.label with
-      | Some i ->
-        let annot_before = Instr.annotation_before i in
-        annot_before.vstack
+    | Some i ->
+      (Spec.get_or_fail (Instr.annotation_before i)).vstack
       | None -> failwith "Unsupported in slicing: return instruction is part of unreachable code"
   in
   match i.instr with

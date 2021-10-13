@@ -200,7 +200,7 @@ let generate_slice (filename : string) (output_file : string) =
       let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
       match List.filter_map (Cfg.all_instructions_list cfg) ~f:(function
           | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
-            begin match annotation_before.vstack with
+            begin match (Spec.get_or_fail annotation_before).vstack with
               | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 str_pos)) -> Some label
               | _ -> None
             end
@@ -279,7 +279,7 @@ let count_instructions_in_slice (filename : string) (output_file : string) =
        let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
        List.find_map (Cfg.all_instructions_list cfg) ~f:(function
            | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
-             begin match annotation_before.vstack with
+             begin match (Spec.get_or_fail annotation_before).vstack with
                | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 str_pos)) -> Some (func.idx, label)
                | _ -> None
              end

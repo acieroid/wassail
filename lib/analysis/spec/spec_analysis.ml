@@ -81,4 +81,41 @@ module Test = struct
     end
     local.get 0 ;; stack length here is 1, hence there is a length mismatch
 ))"
+
+  let%test_unit "spec analysis succeeds even in the presence of unreachable code" =
+    does_not_fail "(module
+(type (;0;) (func (param i32) (result i32)))
+(func (;0;) (type 0) (param i32) (result i32)
+    (local i32 i32)
+    block
+      i32.const 3
+      local.get 0
+      local.set 1
+      br 0
+      i32.const 1 ;; unreachable
+      local.set 0 ;; also unreachable
+    end
+    local.get 1))"
+
+  let%test_unit "spec analysis suceeds even in the presence of stack-polymorphic instructions" =
+    (* The solution here is that stack polymorphic instructions only leave what is necessary on the stack:
+       - br and br_if leave the number of "results" of the target block
+       - unreachable returns bottom
+       - return leaves the number of results of the function *)
+    does_not_fail  "(module
+(type (;0;) (func (param i32) (result i32)))
+(func (;0;) (type 0) (param i32) (result i32)
+    (local i32 i32)
+    block (result i32)
+      i32.const 0
+      if
+        i32.const 1
+        i32.const 2
+        i32.const 3
+        br 0
+      else
+      end
+      i32.const 4
+    end))"
+
 end

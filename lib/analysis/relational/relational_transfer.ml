@@ -16,12 +16,12 @@ type summary = Relational_summary.t
 
 let init_summaries s = SummaryManager.init s
 
+let extract_from_bottom (annot : Spec.t) : Spec.SpecWithoutBottom.t = match annot with
+  | Bottom -> failwith "can't extract annot from bottom"
+  | NotBottom s -> s
+
 let annot_vars (annot : annot_expected) : Var.Set.t =
-  Var.Set.of_list
-             (List.concat [annot.vstack;
-                           annot.locals;
-                           annot.globals;
-                           List.concat_map (Var.OffsetMap.to_alist annot.memory) ~f:(fun ((x, _), y) -> [x; y])])
+  Spec.vars_of annot
 
 let vars (cfg : annot_expected Cfg.t) : Var.Set.t =
   List.fold_left (Cfg.all_annots cfg)
@@ -85,7 +85,7 @@ let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block :
       @return the resulting state (poststate).
 *)
 let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_data) (state : state) : state =
-  let ret (i : annot_expected Instr.labelled_data) : Var.t = match List.hd i.annotation_after.vstack with
+  let ret (i : annot_expected Instr.labelled_data) : Var.t = match List.hd (extract_from_bottom i.annotation_after).vstack with
     | Some r -> r
     | None -> failwith "Relational data_instr_transfer: no return value" in
   let state = if !remove_vars then Domain.change_vars state (Var.Set.union_list [reachable_vars (Data i); entry_vars cfg; exit_vars cfg]) else state in
@@ -106,7 +106,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
   | Drop -> state
   | Select ->
     let ret = ret i in
-    let vstack = i.annotation_before.vstack in
+    let vstack = (extract_from_bottom i.annotation_before).vstack in
     let (c, v2, v1) = pop3 vstack in
     begin
       match Domain.is_zero state c with
@@ -123,23 +123,23 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
     end
   | LocalGet l ->
     (* add ret = ln where ln is the local accessed *)
-    Domain.add_equality_constraint state (ret i) (get_nth i.annotation_before.locals l)
+    Domain.add_equality_constraint state (ret i) (get_nth (extract_from_bottom i.annotation_before).locals l)
   | LocalSet l ->
-    let local = get_nth i.annotation_after.locals l in
+    let local = get_nth (extract_from_bottom i.annotation_after).locals l in
     (* add ln' = v where ln' is the variable for the local set and v is the top of the vstack *)
-    let v = pop i.annotation_before.vstack in
+    let v = pop (extract_from_bottom i.annotation_before).vstack in
     Domain.add_equality_constraint state local v
   | LocalTee l ->
-    let local = get_nth i.annotation_after.locals l in
+    let local = get_nth (extract_from_bottom i.annotation_after).locals l in
     (* same as local.set x followed by local.get x *)
-    let v = pop i.annotation_before.vstack in
+    let v = pop (extract_from_bottom i.annotation_before).vstack in
     Domain.add_equality_constraints state [(ret i, v); (local, v)]
   | GlobalGet g ->
     (* add v = gn where gn is the local accessed *)
-    Domain.add_equality_constraint state (ret i) (get_nth i.annotation_before.globals g)
+    Domain.add_equality_constraint state (ret i) (get_nth (extract_from_bottom i.annotation_before).globals g)
   | GlobalSet g ->
-    let global = get_nth i.annotation_before.globals g in
-    let v = pop i.annotation_before.vstack in
+    let global = get_nth (extract_from_bottom i.annotation_before).globals g in
+    let v = pop (extract_from_bottom i.annotation_before).vstack in
     Domain.add_equality_constraint state global v
   | Const n ->
     (* add ret = n *)
@@ -150,10 +150,10 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
     Domain.add_interval_constraint state (ret i) (0, 1)
   | Binary { op = Binop.Add; _ } ->
     (* TODO: this is not sound, as + in the constraints is not a binary + *)
-    let v2, v1 = pop2 i.annotation_before.vstack in
+    let v2, v1 = pop2 (extract_from_bottom i.annotation_before).vstack in
     Domain.add_constraint state (ret i) (Domain.add v1 v2)
   | Binary { op = Binop.Sub; _ } ->
-    let v2, v1 = pop2 i.annotation_before.vstack in
+    let v2, v1 = pop2 (extract_from_bottom i.annotation_before).vstack in
     Domain.add_constraint state (ret i) (Domain.sub v1 v2)
   | Binary _ ->
     (* TODO: reflect "bin v1 v2" the operation in the constraints, when possible *)
@@ -172,7 +172,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
   | Load {offset; _ } ->
     if !Relational_options.ignore_memory then state else
       let ret = ret i in
-      let vaddr = pop i.annotation_before.vstack in
+      let vaddr = pop (extract_from_bottom i.annotation_before).vstack in
       (* We are loading from address vaddr (also mk_i.label_0).
          The resulting value is ret (also mv_i.label_0).
          a. If there are addresses that are equal to vaddr, we join all the values they map to and assign ret to it. In case they differ, ret will be top.
@@ -182,7 +182,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
            b. the resulting value is top, hence it is soundly over-approximative *)
       (* We assume load/stores are symmetric, i.e., when a load/store operation is made on an address for a specific type and size, all other operations on the same address are made with the same type and size *)
       (* First, find all addresses that are equal to vaddr *)
-      let mem = i.annotation_before.memory in
+      let mem = (extract_from_bottom i.annotation_before).memory in
       let addrs = List.filter (Var.OffsetMap.keys mem)
           ~f:(fun a -> match Domain.are_equal_with_offset state a (vaddr, offset) with
               | (true, false) -> true (* definitely equal *)
@@ -205,9 +205,9 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
         List.reduce_exn states ~f:Domain.meet
   | Store { offset; _ } ->
     let res = if !Relational_options.ignore_memory then state else
-      let vval, vaddr = pop2 i.annotation_before.vstack in
+      let vval, vaddr = pop2 (extract_from_bottom i.annotation_before).vstack in
       (* Find all memory keys that are definitely equal to the address *)
-      let mem = i.annotation_after.memory in
+      let mem = (extract_from_bottom i.annotation_after).memory in
       let equal_addrs = List.filter (Var.OffsetMap.keys mem)
           ~f:(fun a -> match Domain.are_equal_with_offset state a (vaddr, offset) with
               | (true, false) -> true (* definitely equal *)
@@ -240,13 +240,13 @@ let control_instr_transfer
     (cfg : annot_expected Cfg.t) (* The CFG analyzed *)
     (i : annot_expected Instr.labelled_control) (* The instruction *)
     (state : Domain.t) (* The pre state *)
-  : [`Simple of state | `Branch of state * state | `AnyState ] =
+  : [`Simple of state | `Branch of state * state ] =
   (* This restricts the variables to only those used in the current instruction and those defined at the entry/exit of the CFG. This can be safely disabled. *)
   let state = if !remove_vars then Domain.change_vars state (Var.Set.union_list [reachable_vars (Control i); entry_vars cfg; exit_vars cfg]) else state in
   let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
     let summary = SummaryManager.get f in
-    let args = List.take i.annotation_before.vstack (fst arity) in
-    let ret = if snd arity = 1 then List.hd i.annotation_after.vstack else None in
+    let args = List.take (extract_from_bottom i.annotation_before).vstack (fst arity) in
+    let ret = if snd arity = 1 then List.hd (extract_from_bottom i.annotation_after).vstack else None in
     Relational_summary.apply summary state (List.map ~f:Var.to_string args) (Option.map ~f:Var.to_string ret)
   in
   match i.instr with
@@ -256,7 +256,7 @@ let control_instr_transfer
     `Simple (apply_summary f arity state)
   | CallIndirect (arity, _, typ) ->
     (* v is the index in the table that points to the called functiion *)
-    let v = pop i.annotation_before.vstack in
+    let v = pop (extract_from_bottom i.annotation_before).vstack in
     (* Get table 0 *)
     let table = List.nth_exn module_.table_insts 0 in
     (* Get all indices that v could be equal to *)
@@ -289,7 +289,7 @@ let control_instr_transfer
     `Simple state
   | BrIf _
   | If _ ->
-    let cond = Var.to_string (pop i.annotation_before.vstack) in
+    let cond = Var.to_string (pop (extract_from_bottom i.annotation_before).vstack) in
     (* restrict cond = 1 to the constraints of the true branch, cond = 0 to the constrainst of the false branch *)
     `Branch (state (* true branch, cond is non-zero. Can't refine it (would have to meet with ]-inf,-1] union [1, +inf[, which is ]-inf,+inf[ in the current domains *),
              Domain.meet_interval state cond (0, 0) (* false branch, cond is zero *))
@@ -297,22 +297,22 @@ let control_instr_transfer
     (* return does not change anything *)
     `Simple state
   | Unreachable ->
-    (* Unreachable, so what we return does not really matter *)
-    `AnyState
+    (* Unreachable, so bottom is returned *)
+    `Simple (bottom_state cfg)
   | Merge -> (* Not handled here, but in merge_flows *) `Simple state
   | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr))
 
 let memvars (annot : annot_expected) : Var.t list =
-  List.concat_map (Var.OffsetMap.to_alist annot.memory) ~f:(fun ((x, _), y) -> [x; y])
+  Spec.memvars annot
 
 let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
   let spec_entry = Cfg.state_before_block cfg cfg.entry_block (Spec_inference.init_state cfg) in
   let spec_exit = Cfg.state_after_block cfg cfg.exit_block (Spec_inference.init_state cfg) in
   Relational_summary.make cfg out_state
-    (if List.length cfg.return_types = 1 then (List.hd spec_exit.vstack) else None)
+    (if List.length cfg.return_types = 1 then (List.hd (extract_from_bottom spec_exit).vstack) else None)
     (memvars spec_entry)
     (memvars spec_exit)
-    spec_exit.globals
+    (extract_from_bottom spec_exit).globals
 
 let dummy_annotate (cfg : 'a Cfg.t) : ('a * state) Cfg.t =
   let bot = Relational_domain.bottom Var.Set.empty in

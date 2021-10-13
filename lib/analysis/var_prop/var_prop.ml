@@ -45,19 +45,19 @@ let eqs_data_instr (instr : (Instr.data, Spec.t) Instr.labelled) : VarEq.Set.t =
   | Nop | Drop | Select | MemorySize | MemoryGrow
   | Unary _ | Binary _ | Compare _ | Test _ | Convert _ -> VarEq.Set.empty
   | Const n ->
-    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top instr.annotation_after.vstack) (Var.Const n))
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top (Spec.get_or_fail instr.annotation_after).vstack) (Var.Const n))
   | LocalGet l ->
-    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top instr.annotation_after.vstack) (Spec_inference.get l instr.annotation_before.locals))
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top (Spec.get_or_fail instr.annotation_after).vstack) (Spec_inference.get l (Spec.get_or_fail instr.annotation_before).locals))
   | LocalSet l ->
-    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get l instr.annotation_after.locals) (Spec_inference.top instr.annotation_before.vstack))
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get l (Spec.get_or_fail instr.annotation_after).locals) (Spec_inference.top (Spec.get_or_fail instr.annotation_before).vstack))
   | LocalTee l ->
     VarEq.Set.of_list
-                    [VarEq.of_vars (Spec_inference.get l instr.annotation_after.locals) (Spec_inference.top instr.annotation_before.vstack);
-                     VarEq.of_vars (Spec_inference.top instr.annotation_after.vstack) (Spec_inference.get l instr.annotation_before.locals)]
+                    [VarEq.of_vars (Spec_inference.get l (Spec.get_or_fail instr.annotation_after).locals) (Spec_inference.top (Spec.get_or_fail instr.annotation_before).vstack);
+                     VarEq.of_vars (Spec_inference.top (Spec.get_or_fail instr.annotation_after).vstack) (Spec_inference.get l (Spec.get_or_fail instr.annotation_before).locals)]
   | GlobalGet g ->
-    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top instr.annotation_after.vstack) (Spec_inference.get g instr.annotation_before.globals))
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top (Spec.get_or_fail instr.annotation_after).vstack) (Spec_inference.get g (Spec.get_or_fail instr.annotation_before).globals))
   | GlobalSet g ->
-    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get g instr.annotation_after.globals) (Spec_inference.top instr.annotation_before.vstack))
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get g (Spec.get_or_fail instr.annotation_after).globals) (Spec_inference.top (Spec.get_or_fail instr.annotation_before).vstack))
   | Load _ -> VarEq.Set.empty (* TODO (it is sound to ignore them, but shouldn't be too complicated to deal with this) *)
   | Store _ -> VarEq.Set.empty (* TODO: same *)
 
@@ -78,7 +78,8 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
             List.fold_left (Cfg.predecessors cfg block.idx)
               ~init:eqs
               ~f:(fun eqs pred ->
-                  let pred_spec = Cfg.state_after_block cfg pred init_spec in
+                  let pred_spec = Spec.get_or_fail (Cfg.state_after_block cfg pred init_spec) in
+                  let spec = Spec.get_or_fail spec in
                   assert (List.length pred_spec.vstack = List.length spec.vstack);
                   assert (List.length pred_spec.locals = List.length spec.locals);
                   assert (List.length pred_spec.globals = List.length spec.globals);

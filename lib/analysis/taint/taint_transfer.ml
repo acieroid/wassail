@@ -36,41 +36,41 @@ module Make (* : Transfer.TRANSFER *) = struct
       (i : annot_expected Instr.labelled_data)
       (state : state)
     : state =
-    let ret (i : annot_expected Instr.labelled_data) : Var.t = match List.hd (fst i.annotation_after).vstack with
+    let ret (i : annot_expected Instr.labelled_data) : Var.t = match List.hd (Spec.get_or_fail (fst i.annotation_after)).vstack with
       | Some r -> r
       | None -> failwith "Taint: no return value" in
     match i.instr with
     | Nop | MemorySize | Drop | MemoryGrow -> state
     | Select ->
       let ret = ret i in
-      let (_c, v2, v1) = pop3 (fst i.annotation_before).vstack in
+      let (_c, v2, v1) = pop3 (Spec.get_or_fail (fst i.annotation_before)).vstack in
       (* TODO: could improve precision by checking the constraints on c: if it is precisely zero/not-zero, we can only include v1 or v2 *)
       Taint_domain.add_taint_v (Taint_domain.add_taint_v state ret v1) ret v2
     | LocalGet l ->
-      Taint_domain.add_taint_v state (ret i) (get_nth (fst i.annotation_before).locals l)
+      Taint_domain.add_taint_v state (ret i) (get_nth (Spec.get_or_fail (fst i.annotation_before)).locals l)
     | LocalSet l ->
-      Taint_domain.add_taint_v state (get_nth (fst i.annotation_before).locals l) (pop (fst i.annotation_before).vstack)
+      Taint_domain.add_taint_v state (get_nth (Spec.get_or_fail (fst i.annotation_before)).locals l) (pop (Spec.get_or_fail (fst i.annotation_before)).vstack)
     | LocalTee l ->
       Taint_domain.add_taint_v
-        (Taint_domain.add_taint_v state (get_nth (fst i.annotation_before).locals l) (pop (fst i.annotation_before).vstack))
-        (ret i) (get_nth (fst i.annotation_before).locals l)
+        (Taint_domain.add_taint_v state (get_nth (Spec.get_or_fail (fst i.annotation_before)).locals l) (pop (Spec.get_or_fail (fst i.annotation_before)).vstack))
+        (ret i) (get_nth (Spec.get_or_fail (fst i.annotation_before)).locals l)
     | GlobalGet g ->
-      Taint_domain.add_taint_v state (ret i) (get_nth (fst i.annotation_before).globals g)
+      Taint_domain.add_taint_v state (ret i) (get_nth (Spec.get_or_fail (fst i.annotation_before)).globals g)
     | GlobalSet g ->
-      Taint_domain.add_taint_v state (get_nth (fst i.annotation_before).globals g) (pop (fst i.annotation_before).vstack)
+      Taint_domain.add_taint_v state (get_nth (Spec.get_or_fail (fst i.annotation_before)).globals g) (pop (Spec.get_or_fail (fst i.annotation_before)).vstack)
     | Const _ -> state
     | Binary _ | Compare _ ->
-      let v1, v2 = pop2 (fst i.annotation_before).vstack in
+      let v1, v2 = pop2 (Spec.get_or_fail (fst i.annotation_before)).vstack in
       Taint_domain.add_taint_v
         (Taint_domain.add_taint_v state (ret i) v1)
         (ret i) v2
     | Unary _ | Test _ | Convert _ ->
-      Taint_domain.add_taint_v state (ret i) (pop (fst i.annotation_before).vstack)
+      Taint_domain.add_taint_v state (ret i) (pop (Spec.get_or_fail (fst i.annotation_before)).vstack)
     | Load { offset; _ } ->
       (* Simplest case: get the taint of the entire memory.
          Refined case: get the taint of the memory cells that can pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-      let addr = pop (fst i.annotation_before).vstack in
-      let mem = (fst i.annotation_before).memory in
+      let addr = pop (Spec.get_or_fail (fst i.annotation_before)).vstack in
+      let mem = (Spec.get_or_fail (fst i.annotation_before)).memory in
       let all_locs = Var.OffsetMap.keys mem in
       (* Filter the memory location using results from the relational analysis if possible *)
       let locs = if !Taint_options.use_relational then
@@ -105,8 +105,8 @@ module Make (* : Transfer.TRANSFER *) = struct
     | Store { offset; _ } ->
       (* Simplest case: set the taint for the entire memory
          Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-      let vval, vaddr = pop2 (fst i.annotation_before).vstack in
-      let mem = (fst i.annotation_after).memory in
+      let vval, vaddr = pop2 (Spec.get_or_fail (fst i.annotation_before)).vstack in
+      let mem = (Spec.get_or_fail (fst i.annotation_after)).memory in
       let all_locs = Var.OffsetMap.keys mem in
       (* Refine memory locations using relational innformation, if available *)
       let locs = if !Taint_options.use_relational then
@@ -134,12 +134,12 @@ module Make (* : Transfer.TRANSFER *) = struct
       (_cfg : annot_expected Cfg.t) (* The CFG analyzed *)
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : state) (* The pre state *)
-    : [`Simple of state | `Branch of state * state | `AnyState ] =
+    : [`Simple of state | `Branch of state * state ] =
     let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
       let summary = SummaryManager.get f in
-      let args = List.take (fst i.annotation_before).vstack (fst arity) in
-      let ret = if snd arity = 1 then List.hd (fst i.annotation_after).vstack else None in
-      Taint_summary.apply summary state args (fst i.annotation_before).globals (fst i.annotation_after).globals (List.concat_map (Var.OffsetMap.to_alist (fst i.annotation_after).memory)
+      let args = List.take (Spec.get_or_fail (fst i.annotation_before)).vstack (fst arity) in
+      let ret = if snd arity = 1 then List.hd (Spec.get_or_fail (fst i.annotation_after)).vstack else None in
+      Taint_summary.apply summary state args (Spec.get_or_fail (fst i.annotation_before)).globals (Spec.get_or_fail (fst i.annotation_after)).globals (List.concat_map (Var.OffsetMap.to_alist (Spec.get_or_fail (fst i.annotation_after)).memory)
                                                                                                        ~f:(fun ((a, _offset), b) ->
                                                                                                            Log.warn (Printf.sprintf "TODO: ignoring offset\n");
                                                                                                            [a; b])) ret
@@ -159,7 +159,7 @@ module Make (* : Transfer.TRANSFER *) = struct
             if Stdlib.(ftype = (Wasm_module.get_func_type module_ fa)) then Some (fa, idx) else None
           | _ -> None) in
       let funs_to_apply = if !Taint_options.use_relational then
-          let v = pop (fst i.annotation_before).vstack in
+          let v = pop (Spec.get_or_fail (fst i.annotation_before)).vstack in
           List.filter funs_with_matching_type ~f:(fun (_, idx) ->
               (* Only keep the functions for which the index may match *)
               (* TODO: instead of fst, we could take the ones that are (true, false) first, and if there's none, take the ones that are (true, true) *)
@@ -175,7 +175,7 @@ module Make (* : Transfer.TRANSFER *) = struct
     | Br _ -> `Simple state
     | BrIf _ | If _ -> `Branch (state, state)
     | Return -> `Simple state
-    | Unreachable -> `AnyState
+    | Unreachable -> `Simple Taint_domain.bottom
     | _ -> `Simple state
 
   let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * state) list) : state =
@@ -209,7 +209,7 @@ module Make (* : Transfer.TRANSFER *) = struct
 
   let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
     let init_spec = (Spec_inference.init_state cfg, Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i)))) in
-    let exit_spec = fst (Cfg.state_after_block cfg cfg.exit_block init_spec) in
+    let exit_spec = Spec.get_or_fail (fst (Cfg.state_after_block cfg cfg.exit_block init_spec)) in
     Taint_summary.make cfg out_state
       (if List.length cfg.return_types = 1 then List.hd exit_spec.vstack else None)
       exit_spec.globals
