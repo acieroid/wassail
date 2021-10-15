@@ -32,6 +32,12 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
     | Some v -> v
     | None -> failwith "Spec_inference.top: var list is empty"
 
+  let take (l : Var.t list) (n : int) =
+    if List.length l < n then
+      failwith "Spec_inference.take: not enough element in var list"
+    else
+      List.take l n
+
   let get (n : Int32.t) (l : Var.t list) =
     match List.nth l (Int32.to_int_exn n) with
     | Some v -> v
@@ -123,7 +129,16 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
               | Some size -> size
               | None -> failwith "Spec inference: no stack size computed at entry of block"
             end in
-        stack_size_at_entry + (snd (Cfg.block_arity cfg (Cfg.find_nth_parent_block_exn cfg i.label n))) in
+        let out_arity = match Cfg.find_nth_parent_block cfg i.label n with
+          | Some block_label ->
+            let arity = Cfg.block_arity cfg block_label in
+            if Cfg.is_loop_exn cfg block_label then
+              (* If we break out of a loop, we're actually looping back, so we need to look at the param and not the result here *)
+              fst arity
+            else
+              snd arity
+          | None -> List.length cfg.return_types in
+        stack_size_at_entry + out_arity in
       match i.instr with
       | Call ((arity_in, arity_out), _, _) ->
         `Simple (NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) })
@@ -131,9 +146,9 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
         (* Like call, but reads the function index from the vstack *)
         `Simple (NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) })
       | Br n ->
-        `Simple (NotBottom ({ state with vstack = List.take state.vstack (get_block_return_stack_size n) }))
+        `Simple (NotBottom ({ state with vstack = take state.vstack (get_block_return_stack_size n) }))
       | BrIf n ->
-        let state' = NotBottom ({ state with vstack = List.take (drop 1 state.vstack) (get_block_return_stack_size n) }) in
+        let state' = NotBottom ({ state with vstack = take (drop 1 state.vstack) (get_block_return_stack_size n) }) in
         `Branch (state', state')
       | If _ ->
         let state' = NotBottom ({ state with vstack = drop 1 state.vstack }) in
@@ -143,11 +158,8 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
          (* LIMITATION: we assume all block arities are equal. Not sure this is always the case, but this is a limitation we have *)
         assert (IntSet.length (IntSet.of_list arities) = 1);
         let arity = List.hd_exn arities in
-        `Simple (NotBottom { state with vstack = List.take (drop 1 state.vstack) arity })
-      | Return -> `Simple (if List.length cfg.return_types = 1 then
-                             NotBottom ({ state with vstack = [top state.vstack] })
-                           else
-                             NotBottom ({ state with vstack = [] }))
+        `Simple (NotBottom { state with vstack = take (drop 1 state.vstack) arity })
+      | Return -> `Simple (NotBottom ({ state with vstack = take state.vstack (List.length cfg.return_types) }))
       | Unreachable ->
         (* failwith (Printf.sprintf "unsupported: unreachable") (*  in function %ld cfg.idx *) *)
         `Simple bottom
@@ -286,7 +298,7 @@ let instr_def (cfg : t Cfg.t) (instr : t Instr.t) : Var.t list =
       let state_after = match i.annotation_after with
         | Bottom -> failwith "bottom annotation"
         | NotBottom s -> s in
-      let top_n n = List.take state_after.vstack n in
+      let top_n n = take state_after.vstack n in
       begin match i.instr with
         | Nop | Drop -> []
         | Select | MemorySize
@@ -319,7 +331,7 @@ let instr_def (cfg : t Cfg.t) (instr : t Instr.t) : Var.t list =
     | Instr.Control i ->
       let top_n n = match i.annotation_after with
         | Bottom -> failwith "bottom annotation"
-        | NotBottom s -> List.take s.vstack n in
+        | NotBottom s -> take s.vstack n in
         begin match i.instr with
         | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
         | If _ -> [] (* We could say that if defines its "resulting" value, but that will be handled by the merge node *)
@@ -349,7 +361,7 @@ let instr_use (cfg : t Cfg.t) ?var:(var : Var.t option) (instr : t Instr.t) : Va
   | Instr.Data i ->
     let top_n n = match i.annotation_before with
       | Bottom -> failwith "bottom annotation"
-      | NotBottom s -> List.take s.vstack n in
+      | NotBottom s -> take s.vstack n in
     begin match i.instr with
       | Nop -> []
       | Drop -> top_n 1
@@ -377,7 +389,7 @@ let instr_use (cfg : t Cfg.t) ?var:(var : Var.t option) (instr : t Instr.t) : Va
   | Instr.Control i ->
     let top_n n = match i.annotation_before with
         | Bottom -> failwith "bottom annotation"
-        | NotBottom s -> List.take s.vstack n in
+        | NotBottom s -> take s.vstack n in
     begin match i.instr with
       | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
       | If _ -> top_n 1 (* relies on top value to decide the branch taken *)

@@ -109,14 +109,18 @@ let find_enclosing_block_exn (cfg : 'a t) (label : Instr.Label.t) : 'a Basic_blo
   | Some (_, b) -> b
   | None -> failwith "find_enclosing_block did not find a block"
 
-let rec find_nth_parent_block_exn (cfg : 'a t) (instruction : Instr.Label.t) (n : int32) : Instr.Label.t =
+let rec find_nth_parent_block (cfg : 'a t) (instruction : Instr.Label.t) (n : int32) : Instr.Label.t option =
   match find_enclosing_block cfg instruction with
-  | None -> failwith "Cfg.find_nth_parent_block_exn: cannot find parent of an instruction"
+  | None ->
+    if Int32.(n = 0l) then
+      None (* break out of the function *)
+    else
+      failwith "Cfg.find_nth_parent_block_exn: break level is too high"
   | Some parent ->
     if Int32.(n = 0l) then
-      parent
+      Some parent
     else
-      find_nth_parent_block_exn cfg parent Int32.(n-1l)
+      find_nth_parent_block cfg parent Int32.(n-1l)
 
 let block_arity (cfg : 'a t) (block_label : Instr.Label.t) : int * int =
   match Instr.Label.Map.find cfg.block_arities block_label with
@@ -352,3 +356,12 @@ let all_predecessors (cfg : 'a t) (block : 'a Basic_block.t) : 'a Basic_block.t 
   in
   loop (IntSet.singleton block.idx) IntSet.empty []
 
+let is_loop_exn (cfg : 'a t) (label : Instr.Label.t) : bool =
+  match Instr.Label.Map.find cfg.label_to_instr label with
+  | None -> failwith "Cfg.is_loop_exn: did not find the instruction"
+  | Some (Data _)  -> failwith "Cfg.is_loop_exn: this is not a control instruction"
+  | Some (Control i) -> begin match i.instr with
+      | Loop _ -> true
+      | Block _ | If _ -> false
+      | _ -> failwith "Cfg.is_loop_exn: this is not a block"
+    end

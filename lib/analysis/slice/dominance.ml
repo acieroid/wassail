@@ -252,7 +252,7 @@ module Test = struct
     block (result i32)  ;; label = @1
       i32.const 42
       i32.const 1
-      br_if 1 (;@0;)
+      br_if 1 (;@0;) ;; This is equivalent to a return
       drop
       i32.const 11
     end
