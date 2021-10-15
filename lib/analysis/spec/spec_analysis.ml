@@ -98,10 +98,6 @@ module Test = struct
     local.get 1))"
 
   let%test_unit "spec analysis suceeds even in the presence of stack-polymorphic instructions" =
-    (* The solution here is that stack polymorphic instructions only leave what is necessary on the stack:
-       - br and br_if leave the number of "results" of the target block
-       - unreachable returns bottom
-       - return leaves the number of results of the function *)
     does_not_fail  "(module
 (type (;0;) (func (param i32) (result i32)))
 (func (;0;) (type 0) (param i32) (result i32)

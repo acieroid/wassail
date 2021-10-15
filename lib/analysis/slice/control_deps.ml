@@ -199,6 +199,7 @@ let annotate_exact (cfg : Spec.t Cfg.t) : string =
                  (Printf.sprintf "block%d -> block%d [color=green]" a b) :: acc)))
 
 let%test "control dependencies computation" =
+  (* TODO: this one fails because br_if clears the stack as the block has no result, but there was one value on the stack before *)
   let open Instr.Label.Test in
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))

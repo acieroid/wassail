@@ -57,6 +57,8 @@ type 'a t = {
   loop_heads: IntSet.t;
   instructions: Instr.Label.t list;
   label_to_instr: unit Instr.t Instr.Label.Map.t;
+  block_arities: (int * int) Instr.Label.Map.t;
+  label_to_enclosing_block: Instr.Label.t Instr.Label.Map.t;
 }
 [@@deriving compare, equal]
 
@@ -95,6 +97,31 @@ let find_block_exn (cfg : 'a t) (idx : int) : 'a Basic_block.t =
   match find_block cfg idx with
   | Some b -> b
   | None -> failwith (Printf.sprintf "Cfg.find_block_exn did not find block %d" idx)
+
+let find_enclosing_block (cfg : 'a t) (label : Instr.Label.t) : Instr.Label.t option =
+  Instr.Label.Map.find cfg.label_to_enclosing_block label
+
+let find_enclosing_block_exn (cfg : 'a t) (label : Instr.Label.t) : 'a Basic_block.t  =
+  (* TODO: return a label instead? *)
+  match List.find (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, block) ->
+      let labels = Basic_block.all_direct_instruction_labels block in
+      Instr.Label.Set.mem labels label) with
+  | Some (_, b) -> b
+  | None -> failwith "find_enclosing_block did not find a block"
+
+let rec find_nth_parent_block_exn (cfg : 'a t) (instruction : Instr.Label.t) (n : int32) : Instr.Label.t =
+  match find_enclosing_block cfg instruction with
+  | None -> failwith "Cfg.find_nth_parent_block_exn: cannot find parent of an instruction"
+  | Some parent ->
+    if Int32.(n = 0l) then
+      parent
+    else
+      find_nth_parent_block_exn cfg parent Int32.(n-1l)
+
+let block_arity (cfg : 'a t) (block_label : Instr.Label.t) : int * int =
+  match Instr.Label.Map.find cfg.block_arities block_label with
+  | Some arity -> arity
+  | None -> failwith "Cfg.block_arity: cannot find block"
 
 let outgoing_edges (cfg : 'a t) (idx : int) : Edge.t list =
   Edges.from cfg.edges idx
@@ -136,13 +163,6 @@ let callers (cfgs : 'a t Int32Map.t) (cfg : 'a t) : Int32Set.t =
         Int32Set.add callers caller
       else
         callers)
-
-let find_enclosing_block_exn (cfg : 'a t) (label : Instr.Label.t) : 'a Basic_block.t =
-  match List.find (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, block) ->
-      let labels = Basic_block.all_direct_instruction_labels block in
-      Instr.Label.Set.mem labels label) with
-  | Some (_, b) -> b
-  | None -> failwith "find_enclosing_block did not find a block"
 
 let all_instructions (cfg : 'a t) : 'a Instr.t Instr.Label.Map.t =
   IntMap.fold cfg.basic_blocks ~init:Instr.Label.Map.empty ~f:(fun ~key:_ ~data:block acc ->

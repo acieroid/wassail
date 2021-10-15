@@ -54,6 +54,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
         List.mapi (cfg.arg_types @ cfg.local_types) ~f:(fun i _ -> Var.Local i);
     globals = List.mapi cfg.global_types ~f:(fun i _ -> Var.Global i);
     memory = Var.OffsetMap.empty;
+    stack_size_at_entry = Instr.Label.Map.empty;
   }
 
   let bottom : state = Spec.Bottom
@@ -66,14 +67,29 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
   (* No widening *)
   let widen_state _ s2 = s2
 
+  let compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : SpecWithoutBottom.t) : SpecWithoutBottom.t =
+    match Cfg.find_enclosing_block cfg label with
+    | None -> (* no enclosing block, the stack is initally empty at the beginning of the function, we ignore that *)
+      state
+    | Some block_label ->
+      begin match Instr.Label.Map.find state.stack_size_at_entry block_label with
+        | None ->
+          (* We are at the first instruction, the current stack size is the stack size at entry *)
+          { state with
+            stack_size_at_entry = Instr.Label.Map.set state.stack_size_at_entry ~key:block_label ~data:(List.length state.vstack) }
+        | Some _ ->
+          (* we already computed it *)
+          state
+      end
   (*---- Transfer functions ----*)
 
   let data_instr_transfer
       (_module_ : Wasm_module.t)
-      (_cfg : annot_expected Cfg.t)
+      (cfg : annot_expected Cfg.t)
       (i : annot_expected Instr.labelled_data)
     : state -> state = Spec.lift (function state ->
       let ret = Var.Var i.label in
+      let state = compute_stack_size_at_entry cfg i.label state in
       match i.instr with
       | Nop -> state
       | MemorySize -> { state with vstack = ret :: state.vstack }
@@ -99,17 +115,35 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
 
   let control_instr_transfer (_module_ : Wasm_module.t) (cfg : 'a Cfg.t) (i : ('a Instr.control, 'a) Instr.labelled) : state -> [`Simple of state | `Branch of state * state ] = Spec.wrap ~default:(`Simple bottom) (function state ->
       let ret = Var.Var i.label in
+      let state = compute_stack_size_at_entry cfg i.label state in
+      let get_block_return_stack_size n =
+        let stack_size_at_entry = match Cfg.find_enclosing_block cfg i.label with
+          | None -> 0 (* the stack is initially empty *)
+          | Some block_label -> begin match Instr.Label.Map.find state.stack_size_at_entry block_label with
+              | Some size -> size
+              | None -> failwith "Spec inference: no stack size computed at entry of block"
+            end in
+        stack_size_at_entry + (snd (Cfg.block_arity cfg (Cfg.find_nth_parent_block_exn cfg i.label n))) in
       match i.instr with
       | Call ((arity_in, arity_out), _, _) ->
         `Simple (NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) })
       | CallIndirect ((arity_in, arity_out), _, _) ->
         (* Like call, but reads the function index from the vstack *)
         `Simple (NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) })
-      | Br _ -> `Simple (NotBottom state)
-      | BrIf _ | If _ ->
-        `Branch (NotBottom ({ state with vstack = drop 1 state.vstack }),
-                 NotBottom ({ state with vstack = drop 1 state.vstack }))
-      | BrTable _ -> `Simple (NotBottom { state with vstack = drop 1 state.vstack })
+      | Br n ->
+        `Simple (NotBottom ({ state with vstack = List.take state.vstack (get_block_return_stack_size n) }))
+      | BrIf n ->
+        let state' = NotBottom ({ state with vstack = List.take (drop 1 state.vstack) (get_block_return_stack_size n) }) in
+        `Branch (state', state')
+      | If _ ->
+        let state' = NotBottom ({ state with vstack = drop 1 state.vstack }) in
+        `Branch (state', state')
+      | BrTable (ns, n) ->
+        let arities = List.map (n :: ns) ~f:get_block_return_stack_size in
+         (* LIMITATION: we assume all block arities are equal. Not sure this is always the case, but this is a limitation we have *)
+        assert (IntSet.length (IntSet.of_list arities) = 1);
+        let arity = List.hd_exn arities in
+        `Simple (NotBottom { state with vstack = List.take (drop 1 state.vstack) arity })
       | Return -> `Simple (if List.length cfg.return_types = 1 then
                              NotBottom ({ state with vstack = [top state.vstack] })
                            else
@@ -186,7 +220,11 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                                               then after the join point of these branches, only [] is a valid memory
                                               (otherwise we could derive information assuming that m is bound to v,
                                               which is not always the case)*)
-                                           None); })) in
+                                           None);
+                                     stack_size_at_entry = Instr.Label.Map.merge acc.stack_size_at_entry s.stack_size_at_entry ~f:(fun ~key:_ presence -> match presence with
+                                         | `Both (a, b) -> if a <> b then failwith "Cannot merge due to different stack sizes" else Some a
+                                         | `Left a | `Right a -> Some a)
+                                   })) in
               (* Then, add merge variables *)
               let plug_holes = (function
                   | Var.Hole -> (* add a merge variable *) new_var ()
@@ -194,7 +232,9 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
               lift (fun s -> { vstack = List.map s.vstack ~f:plug_holes;
                                locals = List.map s.locals ~f:plug_holes;
                                globals = List.map s.globals ~f:plug_holes;
-                               memory = Var.OffsetMap.map s.memory ~f:plug_holes }) with_holes
+                               memory = Var.OffsetMap.map s.memory ~f:plug_holes;
+                               stack_size_at_entry = s.stack_size_at_entry;
+                             }) with_holes
           end
       end)
     | _ ->

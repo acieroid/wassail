@@ -8,6 +8,8 @@ module SpecWithoutBottom = struct
     locals : Var.t list;
     globals : Var.t list;
     memory : Var.t Var.OffsetMap.t;
+    (** A mapping from block labels to the stack sizes when entering these blocks *)
+    stack_size_at_entry : int Instr.Label.Map.t;
   }
   [@@deriving compare, equal]
 
@@ -30,7 +32,8 @@ module SpecWithoutBottom = struct
     { vstack = List.map s.vstack ~f:f;
       locals = List.map s.locals ~f:f;
       globals = List.map s.globals ~f:f;
-      memory = Var.OffsetMap.map_vars s.memory ~f:f }
+      memory = Var.OffsetMap.map_vars s.memory ~f:f;
+      stack_size_at_entry = s.stack_size_at_entry }
 
   (** Returns all variables contained in the memory of a state *)
   let memvars (s : t) : Var.t list =

@@ -1,6 +1,44 @@
 open Core_kernel
 open Helpers
 
+let compute_block_arities (instrs : unit Instr.t list) : (int * int) Instr.Label.Map.t =
+  let rec loop (instrs : unit Instr.t list) (acc : (int * int) Instr.Label.Map.t) =
+    match instrs with
+    | [] -> acc
+    | (Data _) :: rest -> loop rest acc
+    | (Control i) :: rest -> loop rest (match i.instr with
+        | Block (_, arity, body) ->
+          loop body (Instr.Label.Map.set acc ~key:i.label ~data:arity)
+        | Loop (_, arity, body) ->
+          loop body (Instr.Label.Map.set acc ~key:i.label ~data:arity)
+        | If (_, arity, then_, else_) ->
+          loop else_ (loop then_ (Instr.Label.Map.set acc ~key:i.label ~data:arity))
+        | _ -> acc)
+  in
+  loop instrs Instr.Label.Map.empty
+
+let compute_enclosing_blocks (instrs : unit Instr.t list) : Instr.Label.t Instr.Label.Map.t =
+  let add (instr : Instr.Label.t) (current_block : Instr.Label.t option) (mapping : Instr.Label.t Instr.Label.Map.t) =
+    match current_block with
+    | Some l -> Instr.Label.Map.set mapping ~key:instr ~data:l
+    | None -> mapping in
+  let rec loop (instrs : unit Instr.t list) (current_block : Instr.Label.t option) (acc : Instr.Label.t Instr.Label.Map.t) =
+    match instrs with
+    | [] -> acc
+    | (Data i) :: rest -> loop rest current_block (add i.label current_block acc)
+    | (Control i) :: rest ->
+      let acc = add i.label current_block acc in
+      loop rest current_block (match i.instr with
+        | Block (_, _, body) ->
+          loop body (Some i.label) acc
+        | Loop (_, _, body) ->
+          loop body (Some i.label) acc
+        | If (_, _, then_, else_) ->
+          loop else_ (Some i.label) (loop then_ (Some i.label) acc)
+        | _ -> acc)
+  in
+  loop instrs None Instr.Label.Map.empty
+
 (** Constructs a CFG for function `fid` in a module. *)
 let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
   (* TODO: this implementation is really not ideal and should be cleaned *)
@@ -314,6 +352,10 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     instructions = (List.map funcinst.code.body ~f:Instr.label);
     (* A mapping from instruction labels to instructions *)
     label_to_instr;
+    (* Arity of each block *)
+    block_arities = compute_block_arities funcinst.code.body;
+    (* Mapping from label to enclosing block *)
+    label_to_enclosing_block = compute_enclosing_blocks funcinst.code.body;
   }
 
 let build_all (mod_ : Wasm_module.t) : unit Cfg.t Int32Map.t =
