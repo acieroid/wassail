@@ -71,19 +71,19 @@ let get_nth (l : 'a list) (n : Int32.t) : Var.t =
 let pop (vstack : 'a list) : 'a =
   match vstack with
   | hd :: _ -> hd
-  | _ -> failwith "Invalid vstack"
+  | _ -> failwith "Invalid vstack when popping 1 value"
 
 (** Pop two elements from a list *)
 let pop2 (vstack : 'a list) : ('a * 'a) =
   match vstack with
   | x :: y :: _ -> (x, y)
-  | _ -> failwith "Invalid vstack"
+  | _ -> failwith "Invalid vstack when popping 2 values"
 
 (** Pop 3 elements from a list *)
 let pop3 (vstack : 'a list) : ('a * 'a * 'a) =
     match vstack with
     | x :: y :: z :: _ -> (x, y, z)
-    | _ -> failwith "Invalid vstack"
+    | _ -> failwith "Invalid vstack when popping 3 values"
 
 
 let error at category msg =

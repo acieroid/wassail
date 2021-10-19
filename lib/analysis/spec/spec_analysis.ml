@@ -97,7 +97,7 @@ module Test = struct
     end
     local.get 1))"
 
-  let%test_unit "spec analysis suceeds even in the presence of stack-polymorphic instructions" =
+  let%test_unit "spec analysis succeeds even in the presence of stack-polymorphic instructions" =
     does_not_fail  "(module
 (type (;0;) (func (param i32) (result i32)))
 (func (;0;) (type 0) (param i32) (result i32)
@@ -113,5 +113,55 @@ module Test = struct
       end
       i32.const 4
     end))"
+
+  let%test_unit "spec analysis succeeds on example from the wild" =
+    does_not_fail "(module
+(type (;0;) (func (param i32 i32) (result i32)))
+(func (;0;) (type 0) (param i32 i32) (result i32)
+    (local i32)
+    local.get 0 ;; [_]
+    if (result i32) ;; [] INSTR 1
+      block (result i32) ;; INSTR 2
+        i32.const 8 ;; [_]
+        local.tee 2 ;; [_]
+        drop ;; []
+        local.get 2 ;; [_]
+        local.tee 1  ;; [_]
+      end
+      if (result i32) ;; [] ;; INSTR 8
+        local.get 0 ;; [_]
+        local.get 1 ;; [_, _]
+        i32.store ;; []
+        i32.const 0 ;; [_]
+      else
+        i32.const -16 ;; [_]
+      end
+    else
+      i32.const -10420289 ;; [_]
+    end)
+)"
+
+  let%test_unit "spec analysis suceeds on example from the wild (2)" =
+    does_not_fail "(module
+(type (;0;) (func (param i32)))
+(func (;0;) (type 0) (param i32)
+    (local i32)
+    block
+      local.get 0
+      i32.load8_u offset=4
+      br_if 0
+      local.get 0
+      i32.load
+      i32.const 0
+      i32.eqz
+      br_if 0
+      i32.const 1
+      i32.store8 offset=28
+    end
+    local.get 0
+    i32.load
+    i32.load
+    drop))"
+
 
 end

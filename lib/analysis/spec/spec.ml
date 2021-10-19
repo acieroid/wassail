@@ -14,11 +14,12 @@ module SpecWithoutBottom = struct
   [@@deriving compare, equal]
 
   let to_string (s : t) : string =
-    Printf.sprintf "{\nvstack: [%s]\nlocals: [%s]\nglobals: [%s]\nmemory: [%s]\n}"
+    Printf.sprintf "{\nvstack: [%s]\nlocals: [%s]\nglobals: [%s]\nmemory: [%s]\nsize_entry: %s}"
       (String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
       (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))
       (String.concat ~sep:", " (List.map s.globals ~f:Var.to_string))
       (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v))))
+      (String.concat ~sep:", " (List.map ~f:(fun (k, v) -> Printf.sprintf "%s: %d" (Instr.Label.to_string k) v) (Instr.Label.Map.to_alist s.stack_size_at_entry)))
 
   let to_dot_string (s : t) : string =
     (String.concat ~sep:"|" (List.map s.vstack ~f:(fun v ->

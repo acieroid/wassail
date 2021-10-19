@@ -356,6 +356,16 @@ let all_predecessors (cfg : 'a t) (block : 'a Basic_block.t) : 'a Basic_block.t 
   in
   loop (IntSet.singleton block.idx) IntSet.empty []
 
+let is_if_exn (cfg : 'a t) (label : Instr.Label.t) : bool =
+  match Instr.Label.Map.find cfg.label_to_instr label with
+  | None -> failwith "Cfg.is_if_exn: did not find the instruction"
+  | Some (Data _)  -> failwith "Cfg.is_if_exn: this is not a control instruction"
+  | Some (Control i) -> begin match i.instr with
+      | If _ -> true
+      | Block _ | Loop _ -> false
+      | _ -> failwith "Cfg.is_if_exn: this is not a block"
+    end
+
 let is_loop_exn (cfg : 'a t) (label : Instr.Label.t) : bool =
   match Instr.Label.Map.find cfg.label_to_instr label with
   | None -> failwith "Cfg.is_loop_exn: did not find the instruction"
@@ -364,4 +374,14 @@ let is_loop_exn (cfg : 'a t) (label : Instr.Label.t) : bool =
       | Loop _ -> true
       | Block _ | If _ -> false
       | _ -> failwith "Cfg.is_loop_exn: this is not a block"
+    end
+
+let is_block_exn (cfg : 'a t) (label : Instr.Label.t) : bool =
+  match Instr.Label.Map.find cfg.label_to_instr label with
+  | None -> failwith "Cfg.is_block_exn: did not find the instruction"
+  | Some (Data _)  -> failwith "Cfg.is_block_exn: this is not a control instruction"
+  | Some (Control i) -> begin match i.instr with
+      | Block _ -> true
+      | Loop _ | If _ -> false
+      | _ -> failwith "Cfg.is_block_exn: this is not a block"
     end

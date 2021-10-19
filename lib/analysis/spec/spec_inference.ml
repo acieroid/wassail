@@ -73,7 +73,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
   (* No widening *)
   let widen_state _ s2 = s2
 
-  let compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : SpecWithoutBottom.t) : SpecWithoutBottom.t =
+  let rec compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : SpecWithoutBottom.t) : SpecWithoutBottom.t =
     match Cfg.find_enclosing_block cfg label with
     | None -> (* no enclosing block, the stack is initally empty at the beginning of the function, we ignore that *)
       state
@@ -81,8 +81,11 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
       begin match Instr.Label.Map.find state.stack_size_at_entry block_label with
         | None ->
           (* We are at the first instruction, the current stack size is the stack size at entry *)
+          let size = List.length state.vstack in
+          (* It could be that this is e.g., a block contained in an if. The block and loop instructions are not reified in the CFG, and we therefore have to manually map them to their parent for stack size computation. This is done by a recursive call: if block 1 is an if, containing block 2, a block, containing an instruction with `label`, we compute the stack size at etnry of both block 1 and 2 from the current state. *)
+          let state = compute_stack_size_at_entry cfg block_label state in
           { state with
-            stack_size_at_entry = Instr.Label.Map.set state.stack_size_at_entry ~key:block_label ~data:(List.length state.vstack) }
+            stack_size_at_entry = Instr.Label.Map.set state.stack_size_at_entry ~key:block_label ~data:size }
         | Some _ ->
           (* we already computed it *)
           state
@@ -217,7 +220,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                           | _ -> Var.Hole (* this is a hole *)
                         in
                         if (List.length acc.vstack <> List.length s.vstack) then
-                          failwith "unsupported in spec_inference: incompatible stack lengths (probably due to unreachable code)";
+                          failwith "unsupported in spec_inference: incompatible stack lengths (probably due to mismatches in br_table branches)";
                         assert (List.length acc.locals = List.length s.locals);
                         assert (List.length acc.globals = List.length s.globals);
                         NotBottom ({ vstack = List.map2_exn acc.vstack s.vstack ~f:f;
@@ -234,7 +237,8 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
                                               which is not always the case)*)
                                            None);
                                      stack_size_at_entry = Instr.Label.Map.merge acc.stack_size_at_entry s.stack_size_at_entry ~f:(fun ~key:_ presence -> match presence with
-                                         | `Both (a, b) -> if a <> b then failwith "Cannot merge due to different stack sizes" else Some a
+                                         | `Both (a, b) ->
+                                           if a <> b then failwith "Cannot merge due to different stack sizes" else Some a
                                          | `Left a | `Right a -> Some a)
                                    })) in
               (* Then, add merge variables *)
@@ -296,7 +300,7 @@ let instr_def (cfg : t Cfg.t) (instr : t Instr.t) : Var.t list =
   let defs = match instr with
     | Instr.Data i ->
       let state_after = match i.annotation_after with
-        | Bottom -> failwith "bottom annotation"
+        | Bottom -> failwith "bottom annotation, this an unreachable instruction"
         | NotBottom s -> s in
       let top_n n = take state_after.vstack n in
       begin match i.instr with
