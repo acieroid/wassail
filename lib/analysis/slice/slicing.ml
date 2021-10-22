@@ -213,7 +213,13 @@ let type_of_control
     (cfg : unit Cfg.t)
     (instructions_map : Spec.t Instr.t Instr.Label.Map.t)
   : instr_type_element list * instr_type_element list =
-  match (i.instr, Cfg.find_instr instructions_map i.label) with
+  let vstack_before = match Cfg.find_instr instructions_map i.label with
+    | None -> None
+    | Some reachable_instruction ->
+      match Instr.annotation_before reachable_instruction with
+      | Bottom -> None (* unreachable because it hasn't been spec-analyzed! *)
+      | NotBottom s -> Some s.vstack in
+  match i.instr, vstack_before with
   | (Block (bt, _, _), _)
   | (Loop (bt, _, _), _) ->
     (* Blocks and loops are not reified in the CFG, so we don't want to check their reachability *)
@@ -224,8 +230,7 @@ let type_of_control
     Log.warn (Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
     (* instruction is unreachable, treating it as having no effect *)
     ([], [])
-  | (_, Some reachable_instruction) ->
-    let vstack_before = (Spec.get_or_fail (Instr.annotation_before reachable_instruction)).vstack in
+  | (_, Some vstack_before) ->
     (* instruction is reachable *)
     match i.instr with
     | Call (_, (in_type, out_type), _) -> (List.map in_type ~f:(fun t -> T t), List.map out_type ~f:(fun t -> T t))
@@ -1618,4 +1623,24 @@ module Test = struct
     local.get 0 ;; [_]
 ))" in
     check_slice original slice 0l 0
+
+    let%test "slicing with extra breaks" =
+      let original = "(module
+(type (;0;) (func))
+(func (;0;) (type 0)
+    block
+      br 0
+      br 0
+    end))
+" in
+      let slice = "(module
+(type (;0;) (func))
+(func (;0;) (type 0)
+    block
+      br 0
+    end))
+" in
+      check_slice original slice 0l 1
+
+
 end
