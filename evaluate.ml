@@ -124,7 +124,7 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
                       let instrs_to_keep, (control_time, data_time, mem_time, global_time, slicing_time1) = Slicing.instructions_to_keep cfg cfg_instructions preanalysis (Instr.Label.Set.singleton slicing_criterion) in
                       try
                         let t0 = Time.now () in
-                        let sliced_func = Slicing.slice_alternative_to_funcinst cfg ~instrs:(Some instrs_to_keep) cfg_instructions (Instr.Label.Set.singleton slicing_criterion) in
+                        let sliced_func = Slicing.slice_to_funcinst cfg ~instrs:(Some instrs_to_keep) cfg_instructions (Instr.Label.Set.singleton slicing_criterion) in
                         let t1 = Time.now () in
                         let slicing_time2 = Time.diff t1 t0 in
                         let sliced_labels = all_labels sliced_func.code.body in
@@ -214,7 +214,7 @@ let generate_slice (filename : string) (output_file : string) =
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
   let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod function_idx) in
-  let funcinst = Slicing.slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.of_list slicing_criteria) in
+  let funcinst = Slicing.slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.of_list slicing_criteria) in
   let module_ = Wasm_module.replace_func wasm_mod function_idx funcinst in
   Out_channel.with_file output_file
     ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_))

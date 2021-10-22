@@ -365,7 +365,7 @@ let slice =
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
         Log.info "Slicing";
         Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
-        let funcinst = Slicing.slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) in
+        let funcinst = Slicing.slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) in
         Log.info "done";
         (* let sliced_labels = all_labels funcinst.code.body in *)
         let module_ = Wasm_module.replace_func module_ funidx funcinst in
@@ -417,6 +417,7 @@ let generate_all =
               Out_channel.output_string ch (Wasm_module.to_string module_)))
 
 let () =
+  Log.enable_info ();
   Command.run ~version:"0.0"
     (Command.group ~summary:"Static analysis of WebAssembly"
        [

@@ -175,72 +175,82 @@ let instr_type_element_to_string t = match t with
 let type_of_data
     (i : (Instr.data, 'a) Instr.labelled)
     (cfg : 'a Cfg.t)
+    (instructions_map : Spec.t Instr.t Instr.Label.Map.t)
   : instr_type_element list * instr_type_element list =
-  match i.instr with
-  | Nop -> ([], [])
-  | Drop -> ([Any "any"], [])
-  | Select -> ([Any "a"; Any "a"; T Type.I32], [Any "a"])
-  | MemorySize -> ([], [T Type.I32])
-  | MemoryGrow -> ([T Type.I32], [T Type.I32])
-  | Const (I32 _) -> ([], [T Type.I32])
-  | Const (I64 _) -> ([], [T Type.I64])
-  | Const (F32 _) -> ([], [T Type.F32])
-  | Const (F64 _) -> ([], [T Type.F32])
-  | Unary op -> ([T op.typ], [T op.typ])
-  | Binary op -> ([T op.typ; T op.typ], [T op.typ])
-  | Compare op -> ([T op.typ; T op.typ], [T Type.I32])
-  | Test I32Eqz -> ([T Type.I32], [T Type.I32])
-  | Test I64Eqz -> ([T Type.I64], [T Type.I32])
-  | Convert op -> ([Any "a"], [T op.typ]) (* TODO: it should really be a specific type rather than any *)
-  | LocalGet l -> ([], [T (Cfg.local_type cfg l)])
-  | LocalSet l -> ([T (Cfg.local_type cfg l)], [])
-  | LocalTee l ->
-    let t = Cfg.local_type cfg l in
-    ([T t], [T t])
-  | GlobalGet g -> ([], [T (List32.nth_exn cfg.global_types g)])
-  | GlobalSet g -> ([T (List32.nth_exn cfg.global_types g)], [])
-  | Load op -> ([T Type.I32], [T op.typ])
-  | Store op -> ([T Type.I32; T op.typ], [])
+  match Cfg.find_instr instructions_map i.label with
+  | None ->
+    Log.warn (Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
+    ([], [])
+  | Some _ ->
+    match i.instr with
+    | Nop -> ([], [])
+    | Drop -> ([Any "any"], [])
+    | Select -> ([Any "a"; Any "a"; T Type.I32], [Any "a"])
+    | MemorySize -> ([], [T Type.I32])
+    | MemoryGrow -> ([T Type.I32], [T Type.I32])
+    | Const (I32 _) -> ([], [T Type.I32])
+    | Const (I64 _) -> ([], [T Type.I64])
+    | Const (F32 _) -> ([], [T Type.F32])
+    | Const (F64 _) -> ([], [T Type.F32])
+    | Unary op -> ([T op.typ], [T op.typ])
+    | Binary op -> ([T op.typ; T op.typ], [T op.typ])
+    | Compare op -> ([T op.typ; T op.typ], [T Type.I32])
+    | Test I32Eqz -> ([T Type.I32], [T Type.I32])
+    | Test I64Eqz -> ([T Type.I64], [T Type.I32])
+    | Convert op -> ([Any "a"], [T op.typ]) (* TODO: it should really be a specific type rather than any *)
+    | LocalGet l -> ([], [T (Cfg.local_type cfg l)])
+    | LocalSet l -> ([T (Cfg.local_type cfg l)], [])
+    | LocalTee l ->
+      let t = Cfg.local_type cfg l in
+      ([T t], [T t])
+    | GlobalGet g -> ([], [T (List32.nth_exn cfg.global_types g)])
+    | GlobalSet g -> ([T (List32.nth_exn cfg.global_types g)], [])
+    | Load op -> ([T Type.I32], [T op.typ])
+    | Store op -> ([T Type.I32; T op.typ], [])
 
 let type_of_control
     (i : ('a Instr.control, 'a) Instr.labelled)
     (cfg : unit Cfg.t)
     (instructions_map : Spec.t Instr.t Instr.Label.Map.t)
   : instr_type_element list * instr_type_element list =
-  let vstack_before () = match Cfg.find_instr instructions_map i.label with
-    | Some i ->
-      (Spec.get_or_fail (Instr.annotation_before i)).vstack
-      | None -> failwith "Unsupported in slicing: return instruction is part of unreachable code"
-  in
-  match i.instr with
-  | Call (_, (in_type, out_type), _) -> (List.map in_type ~f:(fun t -> T t), List.map out_type ~f:(fun t -> T t))
-  | CallIndirect (_, (in_type, out_type), _) ->
-    ((List.map in_type ~f:(fun t -> T t)) @ [T Type.I32], (List.map out_type ~f:(fun t -> T t)))
-  | If (bt, _, _, _) ->
-    (* the net effect of the head, which drops the first element of the stack *)
-    ([T Type.I32], match bt with
-      | Some t -> [T t]
-      | None -> [])
-  | Block (bt, _, _)
-  | Loop (bt, _, _) ->
+  match (i.instr, Cfg.find_instr instructions_map i.label) with
+  | (Block (bt, _, _), _)
+  | (Loop (bt, _, _), _) ->
+    (* Blocks and loops are not reified in the CFG, so we don't want to check their reachability *)
     ([], match bt with
       | Some t -> [T t]
       | None -> [])
-  | Br _ ->
-    (* The code after a br is not reachable, so we can assume that br drops everything from the stack *)
-    let vstack = vstack_before () in
-    (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i)), [])
-  | BrIf _ ->
-    let vstack = List.drop (vstack_before ()) 1 in
-    ([T Type.I32] @ (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i))), [])
-  | BrTable (_, _) ->
-    let vstack = List.drop (vstack_before ()) 1 in
-    ([T Type.I32] @ (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i))), [])
-  | Return ->
-    let vstack = vstack_before () in
-    (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i)), (List.map cfg.return_types ~f:(fun t -> T t)))
-  | Unreachable -> ([], [])
-  | Merge -> ([], [])
+  | (_, None) ->
+    Log.warn (Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
+    (* instruction is unreachable, treating it as having no effect *)
+    ([], [])
+  | (_, Some reachable_instruction) ->
+    let vstack_before = (Spec.get_or_fail (Instr.annotation_before reachable_instruction)).vstack in
+    (* instruction is reachable *)
+    match i.instr with
+    | Call (_, (in_type, out_type), _) -> (List.map in_type ~f:(fun t -> T t), List.map out_type ~f:(fun t -> T t))
+    | CallIndirect (_, (in_type, out_type), _) ->
+      ((List.map in_type ~f:(fun t -> T t)) @ [T Type.I32], (List.map out_type ~f:(fun t -> T t)))
+    | If (bt, _, _, _) ->
+      (* the net effect of the head, which drops the first element of the stack *)
+      ([T Type.I32], match bt with
+        | Some t -> [T t]
+        | None -> [])
+    | Br _ ->
+      (* The code after a br is not reachable, so we can assume that br drops everything from the stack *)
+      let vstack = vstack_before in
+      (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i)), [])
+    | BrIf _ ->
+      let vstack = List.drop vstack_before 1 in
+      ([T Type.I32] @ (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i))), [])
+    | BrTable (_, _) ->
+      let vstack = List.drop vstack_before 1 in
+      ([T Type.I32] @ (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i))), [])
+    | Return ->
+      (List.mapi vstack_before ~f:(fun i _ -> Any (string_of_int i)), (List.map cfg.return_types ~f:(fun t -> T t)))
+    | Unreachable -> ([], [])
+    | Merge -> ([], [])
+    | Block _ | Loop _ -> failwith "should not happen" (* because we have the block/loop instructions handled in the first match *)
 
 (** Construct a dummy list of instruction that has the given type *)
 let dummy_instrs (t : instr_type_element list * instr_type_element list) (next_label : unit -> int) : (Instr.data, unit) Instr.labelled list =
@@ -268,7 +278,7 @@ let dummy_instrs (t : instr_type_element list * instr_type_element list) (next_l
 (** The type of an instruction on the stack: positive if it expects value on the stack, negative otherwise *)
 let type_of (i : 'a Instr.t) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : (instr_type_element list * instr_type_element list) =
   match i with
-  | Data d -> type_of_data d cfg
+  | Data d -> type_of_data d cfg instructions_map
   | Control c -> type_of_control c cfg instructions_map
 
 let instrs_type (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : (instr_type_element list * instr_type_element list) =
@@ -309,13 +319,13 @@ let body_can_be_removed (body : unit Instr.t list) : bool =
   (* A safer alternative is simply: List.is_empty body *)
   List.for_all body ~f:(fun instr -> Instr.Label.equal_section (Instr.label instr).section Instr.Label.Dummy)
 
-let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (original_instructions : unit Instr.t list) (instructions_to_keep : Instr.Label.Set.t): unit Instr.t list =
+let rec slice (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (original_instructions : unit Instr.t list) (instructions_to_keep : Instr.Label.Set.t): unit Instr.t list =
   let rec loop (instrs : unit Instr.t list) (to_remove_rev : unit Instr.t list) : unit Instr.t list =
     match instrs with
     | [] -> replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions
     | (Control ({ instr = Block (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
       (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: block with arity greater than 0"; *)
-      let sliced_body = slice_alternative cfg cfg_instructions body instructions_to_keep in
+      let sliced_body = slice cfg cfg_instructions body instructions_to_keep in
       (* TODO: we could also drop the block if it is not empty but only contains instructions that are not part of the slice (basically, only dummy instructions) *)
       if body_can_be_removed sliced_body then
         (* Block body is empty, drop the block entirely *)
@@ -324,15 +334,15 @@ let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t In
         (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @ [Instr.Control { instr with instr = Block (bt, arity, sliced_body) }] @ loop rest []
     | (Control ({ instr = Loop (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
       (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: loop with arity greater than 0"; *)
-      let sliced_body = slice_alternative cfg cfg_instructions body instructions_to_keep in
+      let sliced_body = slice cfg cfg_instructions body instructions_to_keep in
       if body_can_be_removed sliced_body then
         loop rest (entire_instr :: to_remove_rev)
       else
         (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @ [Instr.Control { instr with instr = Loop (bt, arity, sliced_body) }] @ loop rest []
     | (Control ({ instr = If (bt, arity, then_, else_); _ } as instr)) as entire_instr :: rest ->
       (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: if with arity greater than 0"; *)
-      let sliced_then = slice_alternative cfg cfg_instructions then_ instructions_to_keep in
-      let sliced_else = slice_alternative cfg cfg_instructions else_ instructions_to_keep in
+      let sliced_then = slice cfg cfg_instructions then_ instructions_to_keep in
+      let sliced_else = slice cfg cfg_instructions else_ instructions_to_keep in
       if body_can_be_removed sliced_then && body_can_be_removed sliced_else then
         loop rest (entire_instr :: to_remove_rev)
       else
@@ -346,7 +356,7 @@ let rec slice_alternative (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t In
       loop rest (instr :: to_remove_rev) in
   loop original_instructions []
 
-let slice_alternative_to_funcinst (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) (slicing_criteria : Instr.Label.Set.t) : Func_inst.t =
+let slice_to_funcinst (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) (slicing_criteria : Instr.Label.Set.t) : Func_inst.t =
   let instructions_in_slice = match instructions_in_slice with
     | Some instrs -> instrs
     | None ->
@@ -356,7 +366,7 @@ let slice_alternative_to_funcinst (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.
   Log.info "Clearing annotations";
   let unit_cfg = Cfg.clear_annotations cfg in
   Log.info "Constructing a valid slice";
-  let instructions = slice_alternative unit_cfg cfg_instructions (Cfg.body unit_cfg) instructions_in_slice  in
+  let instructions = slice unit_cfg cfg_instructions (Cfg.body unit_cfg) instructions_in_slice  in
   { idx = cfg.idx;
     name = Some cfg.name;
     type_idx = cfg.type_idx;
@@ -506,7 +516,7 @@ module Test = struct
       i32.add       ;; Instr 8 ;; [i7]
     end)
    )" in
-     let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 8)) in
+     let _funcinst = slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 8)) in
      ()
 
    let%test_unit "slicing intra-block block containing a single drop - variant" =
@@ -530,7 +540,7 @@ module Test = struct
       i32.add       ;; Instr 9
     end)
    )" in
-     let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
+     let _funcinst = slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
      ()
 
    let%test_unit "slicing with a block containing a single drop - variant" =
@@ -554,7 +564,7 @@ module Test = struct
       i32.add       ;; Instr 9
     end)
    )" in
-     let _funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
+     let _funcinst = slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
      ()
 
    let check_slice original sliced fidx criterion =
@@ -562,7 +572,7 @@ module Test = struct
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
      let _, cfg = build_cfg ~fidx original in
-     let expected = (slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab ~fidx criterion))).code.body in
+     let expected = (slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab ~fidx criterion))).code.body in
      let _, expected_cfg = build_cfg ~fidx sliced in
      let actual = Cfg.body expected_cfg in
      List.equal (fun x y ->
@@ -1076,12 +1086,9 @@ module Test = struct
         Spec_inference.propagate_locals := false;
         Spec_inference.propagate_globals := false;
         Spec_inference.use_const := false;
-        let funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) in
+        let funcinst = slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) in
         let module_ = Wasm_module.replace_func module_ 14l funcinst in
         (* We should be able to re-annotate the graph *)
-        Spec_inference.propagate_locals := true;
-        Spec_inference.propagate_globals := true;
-        Spec_inference.use_const := true;
         let _new_cfg = Spec_analysis.analyze_intra1 module_ 14l in
         ())
 
@@ -1096,7 +1103,7 @@ module Test = struct
          Spec_inference.propagate_locals := false;
          Spec_inference.propagate_globals := false;
          Spec_inference.use_const := false;
-         let funcinst = slice_alternative_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) in
+         let funcinst = slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) in
          let module_ = Wasm_module.replace_func module_ 22l funcinst in
          (* We should be able to re-annotate the graph *)
          Spec_inference.propagate_locals := true;
@@ -1594,4 +1601,21 @@ module Test = struct
 ))" in
     check_slice original slice 0l 1
 
-  end
+  let%test "slicing with unreachable return" =
+    let original = "(module
+(type (;0;) (func (result i32)))
+(func (;0;) (type 0) (result i32)
+    (local i32 i32)
+    local.get 0 ;; [_]
+    return ;; []
+    i32.const -1 ;; [_] not reachable
+    return) ;; [] not reachable
+)" in
+    let slice = "(module
+(type (;0;) (func (result i32)))
+(func (;0;) (type 0) (result i32)
+    (local i32 i32)
+    local.get 0 ;; [_]
+))" in
+    check_slice original slice 0l 0
+end

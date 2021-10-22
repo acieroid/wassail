@@ -141,27 +141,5 @@ module Test = struct
     end)
 )"
 
-  let%test_unit "spec analysis suceeds on example from the wild (2)" =
-    does_not_fail "(module
-(type (;0;) (func (param i32)))
-(func (;0;) (type 0) (param i32)
-    (local i32)
-    block
-      local.get 0
-      i32.load8_u offset=4
-      br_if 0
-      local.get 0
-      i32.load
-      i32.const 0
-      i32.eqz
-      br_if 0
-      i32.const 1
-      i32.store8 offset=28
-    end
-    local.get 0
-    i32.load
-    i32.load
-    drop))"
-
 
 end
