@@ -141,6 +141,15 @@ let to_string (s : t) : string =
                                     (Var.to_string k)
                                     (Taint.to_string t))))
 
+
+(** Converts a taint map to its string representation, using only the non-identity taints (e.g., if l0 is tainted by exactly l0, it is not printed *)
+let only_non_id_to_string (s : t) : string =
+  let restricted = Var.Map.filteri s ~f:(fun ~key:k ~data:d ->
+      match d with
+      | Taints taints -> not (Var.Set.equal taints (Var.Set.singleton k))
+      | _ -> true) in
+  to_string restricted
+
 (** Join two taint maps together *)
 let join (s1 : t) (s2 : t) : t =
   Var.Map.merge s1 s2 ~f:(fun ~key:_ v -> match v with

@@ -77,10 +77,11 @@ let taint_cfg =
       file_out = anon ("out" %: string) and
       funs = anon (sequence ("funs" %: int32)) in
       fun () ->
+        Spec_inference.use_const := false;
         let results = Taint.analyze_intra (Wasm_module.of_file file_in) funs in
         (* We only output the latest analyzed CFG *)
         let annotated_cfg = Option.value_exn (snd (Int32Map.find_exn results (List.last_exn funs))) in
-        output_to_file file_out (Cfg.to_dot annotated_cfg ~annot_str:Taint.Domain.to_string))
+        output_to_file file_out (Cfg.to_dot annotated_cfg ~annot_str:Taint.Domain.only_non_id_to_string))
 
 
 let relational_intra =
