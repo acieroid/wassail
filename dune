@@ -2,7 +2,7 @@
  (package wassail)
  (name main)
  (public_name wassail)
- (modules Main Evaluate)
+ (modules Main Slicing Slicing_evaluation Utils Cfg Callgraph Generation Analysis)
  (libraries wassail core wasm)
  ;; (link_flags :standard -cclib -static) ;; uncomment to enable static executable
  (preprocess (pps ppx_jane ppx_compare)))
