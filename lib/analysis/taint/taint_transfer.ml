@@ -25,10 +25,7 @@ module Make (* : Transfer.TRANSFER *) = struct
 
   let widen_state (_s1 : state) (s2 : state) : state = s2 (* no widening *)
 
-  module SummaryManager = Summary.MakeManager(Taint_summary)
   type summary = Taint_summary.t
-
-  let init_summaries s = SummaryManager.init s
 
   let data_instr_transfer
       (_module_ : Wasm_module.t)
@@ -131,12 +128,13 @@ module Make (* : Transfer.TRANSFER *) = struct
 
   let control_instr_transfer
       (module_ : Wasm_module.t) (* The wasm module (read-only) *)
+      (summaries : summary Int32Map.t) (* The summaries *)
       (_cfg : annot_expected Cfg.t) (* The CFG analyzed *)
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : state) (* The pre state *)
     : [`Simple of state | `Branch of state * state ] =
     let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
-      let summary = SummaryManager.get f in
+      let summary = Int32Map.find_exn summaries f in
       let args = List.take (Spec.get_or_fail (fst i.annotation_before)).vstack (fst arity) in
       let ret = if snd arity = 1 then List.hd (Spec.get_or_fail (fst i.annotation_after)).vstack else None in
       Taint_summary.apply summary state args (Spec.get_or_fail (fst i.annotation_before)).globals (Spec.get_or_fail (fst i.annotation_after)).globals (List.concat_map (Var.OffsetMap.to_alist (Spec.get_or_fail (fst i.annotation_after)).memory)
@@ -218,4 +216,8 @@ module Make (* : Transfer.TRANSFER *) = struct
              Log.warn
                (Printf.sprintf "ignoring offset");
              [a; b]))
+
+  let extract_summary (cfg : annot_expected Cfg.t) (analyzed_cfg : state Cfg.t) : summary =
+    let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block (init_state cfg) in
+    summary cfg out_state
 end

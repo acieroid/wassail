@@ -10,11 +10,8 @@ type state = Relational_domain.t
 [@@deriving compare, equal]
 
 module Domain = Relational_domain
-module SummaryManager = Summary.MakeManager(Relational_summary)
 
 type summary = Relational_summary.t
-
-let init_summaries s = SummaryManager.init s
 
 let extract_from_bottom (annot : Spec.t) : Spec.SpecWithoutBottom.t = match annot with
   | Bottom -> failwith "can't extract annot from bottom"
@@ -237,6 +234,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
 
 let control_instr_transfer
     (module_ : Wasm_module.t) (* The wasm module (read-only) *)
+    (summaries : summary Int32Map.t) (* The summaries of other functions *)
     (cfg : annot_expected Cfg.t) (* The CFG analyzed *)
     (i : annot_expected Instr.labelled_control) (* The instruction *)
     (state : Domain.t) (* The pre state *)
@@ -244,7 +242,7 @@ let control_instr_transfer
   (* This restricts the variables to only those used in the current instruction and those defined at the entry/exit of the CFG. This can be safely disabled. *)
   let state = if !remove_vars then Domain.change_vars state (Var.Set.union_list [reachable_vars (Control i); entry_vars cfg; exit_vars cfg]) else state in
   let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
-    let summary = SummaryManager.get f in
+    let summary = Int32Map.find_exn summaries f in
     let args = List.take (extract_from_bottom i.annotation_before).vstack (fst arity) in
     let ret = if snd arity = 1 then List.hd (extract_from_bottom i.annotation_after).vstack else None in
     Relational_summary.apply summary state (List.map ~f:Var.to_string args) (Option.map ~f:Var.to_string ret)
@@ -305,7 +303,8 @@ let control_instr_transfer
 let memvars (annot : annot_expected) : Var.t list =
   Spec.memvars annot
 
-let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
+let extract_summary (cfg : annot_expected Cfg.t) (analyzed_cfg : state Cfg.t) : summary =
+  let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block (init_state cfg) in
   let spec_entry = Cfg.state_before_block cfg cfg.entry_block (Spec_inference.init_state cfg) in
   let spec_exit = Cfg.state_after_block cfg cfg.exit_block (Spec_inference.init_state cfg) in
   Relational_summary.make cfg out_state

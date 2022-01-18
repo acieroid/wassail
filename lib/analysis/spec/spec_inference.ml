@@ -1,7 +1,7 @@
 open Core_kernel
 open Helpers
 
-module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
+module Spec_inference = struct
   include Spec
 
   (** Allows the use of variables encoding constants *)
@@ -17,8 +17,8 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
 
   (** No summaries for this analysis *)
   type summary = unit
-  let summary _ _ = ()
-  let init_summaries _ = ()
+
+  let extract_summary _ _ = ()
 
   (*---- Helper functions ----*)
   (** Like List.drop, but raises an exception if the list does not contain enough element *)
@@ -122,7 +122,7 @@ module Spec_inference (* : Transfer.TRANSFER TODO *) = struct
         { state with vstack = drop 2 state.vstack;
                      memory = Var.OffsetMap.update state.memory (addr, offset) ~f:(fun _ -> value) })
 
-  let control_instr_transfer (_module_ : Wasm_module.t) (cfg : 'a Cfg.t) (i : ('a Instr.control, 'a) Instr.labelled) : state -> [`Simple of state | `Branch of state * state ] = Spec.wrap ~default:(`Simple bottom) (function state ->
+  let control_instr_transfer (_module_ : Wasm_module.t) _summaries (cfg : 'a Cfg.t) (i : ('a Instr.control, 'a) Instr.labelled) : state -> [`Simple of state | `Branch of state * state ] = Spec.wrap ~default:(`Simple bottom) (function state ->
       let ret = Var.Var i.label in
       let state = compute_stack_size_at_entry cfg i.label state in
       let get_block_return_stack_size n =
@@ -417,3 +417,5 @@ let instr_use (cfg : t Cfg.t) ?var:(var : Var.t option) (instr : t Instr.t) : Va
         top_n (List.length cfg.return_types)
       | Br _ | Unreachable -> []
     end
+
+module Spec_inference_opaque : Transfer.TRANSFER = Spec_inference

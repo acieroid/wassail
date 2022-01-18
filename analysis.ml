@@ -22,48 +22,6 @@ let spec_inference =
          ~f:(fun ch ->
              Out_channel.output_string ch (Cfg.to_dot annotated_cfg ~annot_str:Spec.to_dot_string)))
 
-let count_vars =
-  mk_intra "Count the number of program variables generated for a function"
-    (Analysis_helpers.mk_intra (fun _ _ -> Int32Map.empty)
-       (fun _ wasm_mod annotated_cfg ->
-          let module CountVarsIntra = Intra.Make(struct
-              type annot_expected = Spec_inference.state
-              type state = (Var.Set.t * int)
-              [@@deriving equal, compare, sexp]
-              type summary = state
-              let init_summaries _ = ()
-              let init_state _ = (Var.Set.empty, 0)
-              let bottom_state _ = (Var.Set.empty, 0)
-              let state_to_string _ = ""
-              let join_state (s1, n1) (s2, n2) = (Var.Set.union s1 s2, max n1 n2)
-              let widen_state = join_state
-              let extract_vars (st : Spec.t) : Var.Set.t =
-                Var.Set.filter ~f:(function
-                    | Merge _ -> false
-                    | _ -> true)
-                  (Var.Set.union (Var.Set.of_list (Spec.get_or_fail st).vstack)
-                     (Var.Set.union (Var.Set.of_list (Spec.get_or_fail st).locals)
-                        (Var.Set.union (Var.Set.of_list (Spec.get_or_fail st).globals)
-                           (Var.Set.of_list (List.concat_map (Var.OffsetMap.to_alist (Spec.get_or_fail st).memory) ~f:(fun ((a, _), b) -> [a; b]))))))
-              let transfer before after (vars, n) =
-                ((Var.Set.union vars
-                    (Var.Set.union (extract_vars before) (extract_vars after))),
-                 (max n (Var.Set.length (extract_vars after))))
-              let control_instr_transfer (_mod : Wasm_module.t) (_cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_control) (vars, n) =
-                `Simple (transfer i.annotation_before i.annotation_after (vars, n))
-              let data_instr_transfer (_mod : Wasm_module.t) (_cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_data) (vars, n) =
-                transfer i.annotation_before i.annotation_after (vars, n)
-              let merge_flows _mod cfg _block (states : (int * state) list) =
-                List.fold_left (List.map states ~f:snd) ~init:(bottom_state cfg) ~f:join_state
-              let summary _cfg st = st
-            end) in
-          let result = CountVarsIntra.analyze wasm_mod annotated_cfg in
-          let (vars, n) = CountVarsIntra.final_state annotated_cfg result in
-          Printf.printf "Vars: %d, max: %d\n" (Var.Set.length vars) n;
-          (vars, n)))
-    (fun fid summary ->
-       Printf.printf "Vars %ld: %d, max: %d\n" fid (Var.Set.length (fst summary)) (snd summary))
-
 let taint_intra =
   mk_intra "Just like `intra`, but only performs the taint analysis" Taint.analyze_intra
     (fun fid data ->

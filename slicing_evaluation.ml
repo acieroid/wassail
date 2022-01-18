@@ -111,7 +111,7 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
               let cfg_raw = Cfg_builder.build wasm_mod func.idx in
               let cfg_time = Time.diff (Time.now ()) t0 in
               let t0 = Time.now () in
-              let cfg = Spec_inference.Intra.analyze wasm_mod cfg_raw in
+              let cfg, () = Spec_inference.Intra.analyze wasm_mod cfg_raw Int32Map.empty in
               let spec_time = Time.diff (Time.now ()) t0 in
               let cfg_instructions = Cfg.all_instructions cfg in
               let preanalysis = Slicing.preanalysis cfg cfg_instructions in

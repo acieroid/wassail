@@ -8,6 +8,9 @@ module type TRANSFER = sig
   (** The state of the analysis *)
   type state
 
+  (** The type of summaries used by the analysis (can be unit) *)
+  type summary
+
   (** Checks equality between two states *)
   val equal_state : state -> state -> bool
 
@@ -32,6 +35,7 @@ module type TRANSFER = sig
   (** Transfer function for control instructions *)
   val control_instr_transfer
     : Wasm_module.t (* the wasm module *)
+    -> summary Int32Map.t (* the summaries of other functions *)
     -> annot_expected Cfg.t (* the CFG of the function to analyze *)
     -> annot_expected Instr.labelled_control (* the control instruction to analyze *)
     -> state (* the state before this instruction *)
@@ -53,13 +57,7 @@ module type TRANSFER = sig
     -> (int * state) list (* the predecessor flows, as pairs of block indices and state *)
     -> state (* the state resulting from the merge *)
 
-  (** The summaries of the analysis *)
-  type summary
-
-  (** Builds the summary after the analysis, from the final state *)
-  val summary : annot_expected Cfg.t -> state -> summary
-
-  (** Stores the summaries produced by other intra analyses, to be used upon function calls *)
-  val init_summaries : summary Int32Map.t -> unit
+  (** Extract a fully-analyzed CFG into a summary *)
+  val extract_summary : annot_expected Cfg.t -> state Cfg.t -> summary
 end
 

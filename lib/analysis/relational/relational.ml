@@ -10,13 +10,10 @@ module Intra = Intra.Make(Transfer)
 
 let analyze_intra : Wasm_module.t -> Int32.t list -> Summary.t Int32Map.t =
   Analysis_helpers.mk_intra
-    (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Top)
+    (fun _cfgs _wasm_mod : Summary.t Int32Map.t -> Int32Map.empty)
     (fun summaries wasm_mod cfg ->
-       Intra.init_summaries summaries;
        Options.ignore_memory := false;
-       let result_cfg = Intra.analyze wasm_mod cfg in
-       let out_state = Intra.final_state cfg result_cfg in
-       Intra.summary cfg out_state)
+       snd (Intra.analyze wasm_mod cfg summaries))
 
 let check (expected : Summary.t) (actual : Summary.t) : bool =
   if Summary.equal expected actual then begin

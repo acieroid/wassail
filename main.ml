@@ -37,7 +37,6 @@ let () =
 
        (* Other *)
        ; "spec-inference", Analysis.spec_inference
-       ; "count-vars", Analysis.count_vars
        ; "taint-cfg", Analysis.taint_cfg
        ; "taint-intra", Analysis.taint_intra
        ; "taint-inter", Analysis.taint_inter

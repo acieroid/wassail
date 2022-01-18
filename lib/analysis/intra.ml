@@ -6,6 +6,9 @@ module type INTRA = sig
   (** The state of the analysis *)
   type state
 
+  (** The type of summaries used by the analysis (can be unit) *)
+  type summary
+
   (** States should be comparable *)
   val equal_state : state -> state -> bool
 
@@ -13,10 +16,10 @@ module type INTRA = sig
   type annot_expected
 
   (** Analyze a method (represented by its CFG) from the module *)
-  val analyze : Wasm_module.t -> annot_expected Cfg.t -> state Cfg.t
+  val analyze : Wasm_module.t -> annot_expected Cfg.t -> summary Int32Map.t -> state Cfg.t * summary
 
   (** Similar to analyze, but keep previous annotations *)
-  val analyze_keep : Wasm_module.t -> annot_expected Cfg.t -> (annot_expected * state) Cfg.t
+  val analyze_keep : Wasm_module.t -> annot_expected Cfg.t -> summary Int32Map.t -> (annot_expected * state) Cfg.t * summary
 end
 
 module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
@@ -47,7 +50,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
   (** Analyzes a CFG. Returns the final state after computing the transfer of the entire function. That final state is a pair where the first element are the results per block, and the second element are the results per instructions.
       @param module_ is the overall WebAssembly module, needed to access type information, tables, etc.
       @param cfg is the CFG to analyze *)
-  let analyze_ (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : intra_results =
+  let analyze_ (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (summaries : summary Int32Map.t) : intra_results =
     let bottom = Uninitialized in
     (* Data of the analysis, per block *)
     let block_data : (result * result) IntMap.t ref =
@@ -67,7 +70,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
             instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple prestate, Simple poststate);
             poststate))
       | Control instr ->
-        let poststate = match Transfer.control_instr_transfer module_ cfg instr state with
+        let poststate = match Transfer.control_instr_transfer module_ summaries cfg instr state with
           | `Simple s -> Simple s
           | `Branch (s1, s2) -> Branch (s1, s2)
         in
@@ -155,20 +158,28 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
     (* _narrow (IntMap.keys cfg.basic_blocks); *)
     !instr_data
 
-  let analyze (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : state Cfg.t =
+  let analyze (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (summaries : summary Int32Map.t): state Cfg.t * summary =
     let to_state (results_pair : result * result) : (state * state) =
       (result_to_state cfg (fst results_pair), result_to_state cfg (snd results_pair)) in
-    let instr_data = analyze_ module_ cfg in
-    Cfg.map_annotations cfg
-      ~f:(fun i -> to_state (Instr.Label.Map.find_exn instr_data (Instr.label i)))
+    let instr_data = analyze_ module_ cfg summaries in
+    let analyzed_cfg = Cfg.map_annotations cfg
+        ~f:(fun i -> to_state (Instr.Label.Map.find_exn instr_data (Instr.label i))) in
+    let summary = Transfer.extract_summary cfg analyzed_cfg in
+    analyzed_cfg, summary
 
-  let analyze_keep (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : (annot_expected * state) Cfg.t =
+  let analyze_keep (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (summaries : summary Int32Map.t) : (annot_expected * state) Cfg.t * summary =
     let to_state_keep (previous : annot_expected * annot_expected) (results_pair : result * result) : ((annot_expected * state) * (annot_expected * state)) =
       ((fst previous, result_to_state cfg (fst results_pair)),
        (snd previous, result_to_state cfg (snd results_pair))) in
-    let instr_data = analyze_ module_ cfg in
-    Cfg.map_annotations cfg
-      ~f:(fun i -> to_state_keep (Instr.annotation_before i, Instr.annotation_after i) (Instr.Label.Map.find_exn instr_data (Instr.label i)))
+    let to_state (results_pair : result * result) : (state * state) =
+      (result_to_state cfg (fst results_pair), result_to_state cfg (snd results_pair)) in
+    let instr_data = analyze_ module_ cfg summaries in
+    let analyzed_cfg = Cfg.map_annotations cfg
+        ~f:(fun i -> to_state (Instr.Label.Map.find_exn instr_data (Instr.label i))) in
+    let analyzed_keep_cfg = Cfg.map_annotations cfg
+        ~f:(fun i -> to_state_keep (Instr.annotation_before i, Instr.annotation_after i) (Instr.Label.Map.find_exn instr_data (Instr.label i))) in
+    let summary = Transfer.extract_summary cfg analyzed_cfg in
+    analyzed_keep_cfg, summary
 
   (** Extract the out state from intra-procedural results *)
   let final_state (cfg_before : annot_expected Cfg.t) (cfg : state Cfg.t) : state =
