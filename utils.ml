@@ -122,11 +122,10 @@ let function_instructions =
 
 let functions =
   Command.basic
-    ~summary:"Returns the indices of functions of a WebAssembly modules"
+    ~summary:"Returns the indices of functions of a WebAssembly modules, along with their name if they have one"
     Command.Let_syntax.(
       let%map_open file_in = anon ("in" %: string) in
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         List.iter wasm_mod.funcs
-          ~f:(fun f -> Printf.printf "%ld\n" f.idx))
-
+          ~f:(fun f -> Printf.printf "%ld\t%s\n" f.idx (Option.value (Wasm_module.get_funcname wasm_mod f.idx) ~default:"<no-name>")))

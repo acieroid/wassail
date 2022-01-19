@@ -137,6 +137,7 @@ module Make (* : Transfer.TRANSFER *) = struct
       let summary = Int32Map.find_exn summaries f in
       let args = List.take (Spec.get_or_fail (fst i.annotation_before)).vstack (fst arity) in
       let ret = if snd arity = 1 then List.hd (Spec.get_or_fail (fst i.annotation_after)).vstack else None in
+      Printf.printf "Calling function %ld with args: %s\n" f (Var.list_to_string args);
       Taint_summary.apply summary state args (Spec.get_or_fail (fst i.annotation_before)).globals (Spec.get_or_fail (fst i.annotation_after)).globals (List.concat_map (Var.OffsetMap.to_alist (Spec.get_or_fail (fst i.annotation_after)).memory)
                                                                                                        ~f:(fun ((a, _offset), b) ->
                                                                                                            Log.warn (Printf.sprintf "TODO: ignoring offset\n");

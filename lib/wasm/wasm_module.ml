@@ -34,6 +34,16 @@ let get_funcinst (m : t) (fidx : Int32.t) : Func_inst.t =
   | Some v -> v
   | None -> failwith "get_funcinst nth exception"
 
+(** Get the name of a function, if it has one *)
+let get_funcname (m : t) (fidx : Int32.t) : string option =
+  let funcinst = get_funcinst m fidx in
+  funcinst.name
+
+(** Checks if a function is exported or not. An exported function has a name. *)
+let is_exported (m : t) (fidx : Int32.t) : bool =
+  let funcinst = get_funcinst m fidx in
+  Option.is_some funcinst.name
+
 (** Get the memory instance for the memory with index idx *)
 let get_meminst (m : t) (idx : int) : Memory_inst.t =
   match List.nth m.memory_insts idx with
