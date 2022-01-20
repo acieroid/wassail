@@ -62,28 +62,27 @@ let detect_unsafe_calls_to_sinks (module_ : Wasm_module.t) (sinks : Int32Set.t) 
   let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
   let results = analyze_inter module_ schedule in
   Log.warn "Analyzing unsafe flows in indirect calls is not yet implemented";
-  (* TODO: have a way of extracting sinks set from their names *)
-  (* TODO: restrict this to exported function arguments only! *)
-  (* TODO: but also treat as sink anything that calls a sink with one of its argument? *)
+  (* TODO: treat as sink anything that calls a sink with one of its argument! *)
   Int32Map.iteri results ~f:(fun ~key:fidx ~data:(spec_cfg, taint_cfg, _summary) ->
-      let call_blocks = Cfg.all_direct_calls_blocks spec_cfg in
-      List.iter call_blocks ~f:(fun block ->
-          let spec_state_before_call = Cfg.state_before_block spec_cfg block.idx (Spec_inference.init_state spec_cfg) in
-          let (arity, target) = match block.content with
-            | Control { instr = Instr.Call (arity, _, target); _ } -> (arity, target)
-            | _ -> failwith "unexpected" in
-          if Int32Set.mem sinks target then
-            let args = List.take (Spec.get_or_fail spec_state_before_call).vstack (fst arity) in
-            let taint_before_call = Cfg.state_before_block taint_cfg block.idx Taint_domain.bottom in
-            List.iter args ~f:(fun arg ->
-                let taint = Taint_domain.get_taint taint_before_call arg in
-                let unsafe = match taint with
-                  | TopTaint -> true
-                  | Taints taints -> Option.is_some (Var.Set.find taints ~f:(function
-                      | Local _ -> true
-                      | _ -> false)) in
-                if unsafe then
-                  Log.info (Printf.sprintf "Function %ld is calling sink %ld with arg %s and the following taint: %s" fidx target (Var.to_string arg) (Taint_domain.Taint.to_string taint)))))
+      if Wasm_module.is_exported module_ fidx then
+        let call_blocks = Cfg.all_direct_calls_blocks spec_cfg in
+        List.iter call_blocks ~f:(fun block ->
+            let spec_state_before_call = Cfg.state_before_block spec_cfg block.idx (Spec_inference.init_state spec_cfg) in
+            let (arity, target) = match block.content with
+              | Control { instr = Instr.Call (arity, _, target); _ } -> (arity, target)
+              | _ -> failwith "unexpected" in
+            if Int32Set.mem sinks target then
+              let args = List.take (Spec.get_or_fail spec_state_before_call).vstack (fst arity) in
+              let taint_before_call = Cfg.state_before_block taint_cfg block.idx Taint_domain.bottom in
+              List.iter args ~f:(fun arg ->
+                  let taint = Taint_domain.get_taint taint_before_call arg in
+                  let unsafe = match taint with
+                    | TopTaint -> true
+                    | Taints taints -> Option.is_some (Var.Set.find taints ~f:(function
+                        | Local _ -> true
+                        | _ -> false)) in
+                  if unsafe then
+                    Log.info (Printf.sprintf "Function %ld is calling sink %ld with arg %s and the following taint: %s" fidx target (Var.to_string arg) (Taint_domain.Taint.to_string taint)))))
 
 (** Extracts the index of functions that are considered sinks, based on their names *)
 let find_sinks_from_names (module_ : Wasm_module.t) (names : String.Set.t) : Int32Set.t =
