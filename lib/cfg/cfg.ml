@@ -190,6 +190,9 @@ let find_instr_exn (instructions : 'a Instr.t Instr.Label.Map.t) (label : Instr.
 let all_blocks (cfg : 'a t) : 'a Basic_block.t list =
   IntMap.data cfg.basic_blocks
 
+let all_direct_calls_blocks (cfg : 'a t) : 'a Basic_block.t list =
+  List.filter (all_blocks cfg) ~f:Basic_block.is_direct_call
+
 let all_edges (cfg : 'a t) : (int * int) list =
   List.concat_map (IntMap.to_alist cfg.edges) ~f:(fun (src, edges) ->
       List.map (Edge.Set.to_list edges) ~f:(fun (dst, _) -> (src, dst)))

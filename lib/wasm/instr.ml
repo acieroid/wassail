@@ -499,4 +499,3 @@ let instructions_contained_in (i : 'a t) : 'a t list = match i with
     | Loop (_, _, instrs) -> instrs
     | If (_, _, instrs1, instrs2) -> instrs1 @ instrs2
     | _ -> []
-  

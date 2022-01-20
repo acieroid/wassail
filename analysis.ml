@@ -65,7 +65,16 @@ let mk_inter (desc : string) (analysis : Wasm_module.t -> Int32.t list list -> '
 let taint_inter =
   mk_inter "Performs inter analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target."
     Taint.analyze_inter
-    (fun fid summary -> Printf.printf "function %ld: %s\n" fid (Taint.Summary.to_string summary))
+    (fun fid (_, _, summary) -> Printf.printf "function %ld: %s\n" fid (Taint.Summary.to_string summary))
+
+let taint_to_sinks =
+  Command.basic
+    ~summary:"Detects unsafe flows from exported function arguments to list of defined sinks"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and sinks = anon (sequence ("funs" %: int32)) in
+      fun () ->
+        Taint.detect_unsafe_calls_to_sinks (Wasm_module.of_file filename) (Int32Set.of_list sinks))
 
 let find_indirect_calls =
   Command.basic

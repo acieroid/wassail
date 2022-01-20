@@ -100,6 +100,19 @@ let is_merge (b : 'a t) : bool =
   | Control { instr = Merge; _ } -> true
   | _ -> false
 
+(** Check if the block is a call or call_indirect block *)
+let is_call (b : 'a t) : bool =
+  match b.content with
+  | Control { instr = Instr.Call (_, _, _); _ } -> true
+  | Control { instr = Instr.CallIndirect (_, _, _); _ } -> true
+  | _ -> false
+
+(** Check if the block is a direct call *)
+let is_direct_call (b : 'a t) : bool =
+  match b.content with
+  | Control { instr = Instr.Call (_, _, _); _ } -> true
+  | _ -> false
+
 (** Check if the block is a data block *)
 let is_data (b : 'a t) : bool =
   match b.content with

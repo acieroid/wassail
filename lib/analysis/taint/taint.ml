@@ -39,19 +39,51 @@ let check (expected : Summary.t) (actual : Summary.t) : bool =
     false
   end
 
-let analyze_inter : Wasm_module.t -> Int32.t list list -> Summary.t Int32Map.t =
+let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Taint_domain.t Cfg.t * Summary.t) Int32Map.t =
   Analysis_helpers.mk_inter
-    (fun cfgs wasm_mod -> Summary.initial_summaries cfgs wasm_mod `Bottom)
-    (fun wasm_mod scc summaries ->
+    (fun _cfgs _wasm_mod -> Int32Map.empty)
+    (fun wasm_mod scc cfgs_and_summaries ->
        Log.info
          (Printf.sprintf "---------- Taint analysis of SCC {%s} ----------"
             (String.concat ~sep:"," (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
        (* Run the taint analysis *)
        Options.use_relational := false;
        let annotated_scc = Int32Map.map scc ~f:Relational.Transfer.dummy_annotate in
+       let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_spec_cfg, _taint_cfg, summary) -> summary) in
        let results = Inter.analyze wasm_mod annotated_scc summaries in
-       Int32Map.mapi results ~f:(fun ~key:_idx ~data:(_cfg, summary) ->
-           summary))
+       Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
+           let spec_cfg = Int32Map.find_exn scc idx in
+           (spec_cfg, taint_cfg, summary)))
+
+(** Detects calls to sinks with data coming from the exported functions' arguments.
+    Sinks are declared as a set of function indices. *)
+let detect_unsafe_calls_to_sinks (module_ : Wasm_module.t) (sinks : Int32Set.t) : unit =
+  let cg = Call_graph.make module_ in
+  let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
+  let results = analyze_inter module_ schedule in
+  Log.warn "Analyzing unsafe flows in indirect calls is not yet implemented";
+  (* TODO: have a way of extracting sinks set from their names *)
+  (* TODO: restrict this to exported function arguments only! *)
+  (* TODO: but also treat as sink anything that calls a sink with one of its argument? *)
+  Int32Map.iteri results ~f:(fun ~key:fidx ~data:(spec_cfg, taint_cfg, _summary) ->
+      let call_blocks = Cfg.all_direct_calls_blocks spec_cfg in
+      List.iter call_blocks ~f:(fun block ->
+          let spec_state_before_call = Cfg.state_before_block spec_cfg block.idx (Spec_inference.init_state spec_cfg) in
+          let (arity, target) = match block.content with
+            | Control { instr = Instr.Call (arity, _, target); _ } -> (arity, target)
+            | _ -> failwith "unexpected" in
+          if Int32Set.mem sinks target then
+            let args = List.take (Spec.get_or_fail spec_state_before_call).vstack (fst arity) in
+            let taint_before_call = Cfg.state_before_block taint_cfg block.idx Taint_domain.bottom in
+            List.iter args ~f:(fun arg ->
+                let taint = Taint_domain.get_taint taint_before_call arg in
+                let unsafe = match taint with
+                  | TopTaint -> true
+                  | Taints taints -> Option.is_some (Var.Set.find taints ~f:(function
+                      | Local _ -> true
+                      | _ -> false)) in
+                if unsafe then
+                  Log.info (Printf.sprintf "Function %ld is calling sink %ld with arg %s and the following taint: %s" fidx target (Var.to_string arg) (Taint_domain.Taint.to_string taint)))))
 
 module Test = struct
   let%test "simple function has no taint" =
