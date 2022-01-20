@@ -72,9 +72,11 @@ let taint_to_sinks =
     ~summary:"Detects unsafe flows from exported function arguments to list of defined sinks"
     Command.Let_syntax.(
       let%map_open filename = anon ("file" %: string)
-      and sinks = anon (sequence ("funs" %: int32)) in
+      and sink_names = anon (sequence ("funs" %: string)) in
       fun () ->
-        Taint.detect_unsafe_calls_to_sinks (Wasm_module.of_file filename) (Int32Set.of_list sinks))
+        let module_ = Wasm_module.of_file filename in
+        let sink_indices = Taint.find_sinks_from_names module_ (String.Set.of_list sink_names) in
+        Taint.detect_unsafe_calls_to_sinks module_ sink_indices)
 
 let find_indirect_calls =
   Command.basic

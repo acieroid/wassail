@@ -85,6 +85,14 @@ let detect_unsafe_calls_to_sinks (module_ : Wasm_module.t) (sinks : Int32Set.t) 
                 if unsafe then
                   Log.info (Printf.sprintf "Function %ld is calling sink %ld with arg %s and the following taint: %s" fidx target (Var.to_string arg) (Taint_domain.Taint.to_string taint)))))
 
+(** Extracts the index of functions that are considered sinks, based on their names *)
+let find_sinks_from_names (module_ : Wasm_module.t) (names : String.Set.t) : Int32Set.t =
+  let funs = List.filter_map module_.funcs ~f:(fun f ->
+      match Wasm_module.get_funcname module_ f.idx with
+      | Some name when String.Set.mem names name -> Some f.idx
+      | _ -> None) in
+  Int32Set.of_list funs
+
 module Test = struct
   let%test "simple function has no taint" =
     let module_ = Wasm_module.of_string "(module
