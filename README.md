@@ -61,7 +61,7 @@ Output graph:
 You can either generate a single CFG, for example to generate the CFG of function 1 from file `foo.wat` into `foo.dot`:
 
 ```sh
-$ wassail cfg foo.wat 1 foo.dot
+$ wassail cfg foo.wasm 1 foo.dot
 ```
 
 Or you can generate all CFGs in a given directory:
@@ -74,15 +74,8 @@ Example output:
 
 ![DOT CFG](doc/cfg.png)
 
-## Performing Taint Analysis
-WIP, more to come.
-## Performing Relational Analysis
-WIP, more to come.
-## Slicing
-WIP, more to come.
-
 # Contributing
-Contributions are welcome!
+Contributions are welcome! Wassail is licensed under the conditions of the GPLv3.0 license with a non-commercial usage clause.
 
 ## Running the tests
 
@@ -94,3 +87,5 @@ $ make test
 
 Wassail has been described in the following publication:
   - [Compositional Information Flow Analysis for WebAssembly Programs](http://soft.vub.ac.be/~qstieven/scam2020wasm/), SCAM 2020. ([pdf](http://soft.vub.ac.be/Publications/2020/vub-tr-soft-20-11.pdf), [video](https://www.youtube.com/watch?v=IX8swyZ4TPI))
+  - [Wassail: A WebAssembly Static Analysis Library](https://soft.vub.ac.be/Publications/2021/vub-tr-soft-21-04.pdf), ProWeb 2021.
+  - [Static Stack-Preserving Intra-Procedural Slicing of WebAssembly Binaries](https://soft.vub.ac.be/Publications/2022/vub-tr-soft-22-04.pdf), ICSE 2022.
