@@ -31,6 +31,7 @@ module Spec = Spec
 
 module Relational = Relational
 module Taint = Taint
+module Taintcall = Taintcall
 module Reltaint = Reltaint
 
 module Slicing = Slicing

@@ -67,11 +67,14 @@ let detect_unsafe_calls_to_sinks (module_ : Wasm_module.t) (sinks : Int32Set.t) 
       if Wasm_module.is_exported module_ fidx then
         let call_blocks = Cfg.all_direct_calls_blocks spec_cfg in
         List.iter call_blocks ~f:(fun block ->
+            Printf.printf "checking call block of fun %ld, blockidx: %d\n" fidx block.idx;
             let spec_state_before_call = Cfg.state_before_block spec_cfg block.idx (Spec_inference.init_state spec_cfg) in
             let (arity, target) = match block.content with
               | Control { instr = Instr.Call (arity, _, target); _ } -> (arity, target)
               | _ -> failwith "unexpected" in
-            if Int32Set.mem sinks target then
+            Printf.printf "target is: %ld\n" target;
+            if Int32Set.mem sinks target then begin
+              Printf.printf "target is a sink\n";
               let args = List.take (Spec.get_or_fail spec_state_before_call).vstack (fst arity) in
               let taint_before_call = Cfg.state_before_block taint_cfg block.idx Taint_domain.bottom in
               List.iter args ~f:(fun arg ->
@@ -81,8 +84,10 @@ let detect_unsafe_calls_to_sinks (module_ : Wasm_module.t) (sinks : Int32Set.t) 
                     | Taints taints -> Option.is_some (Var.Set.find taints ~f:(function
                         | Local _ -> true
                         | _ -> false)) in
+                  Printf.printf "checking safety\n";
                   if unsafe then
-                    Log.info (Printf.sprintf "Function %ld is calling sink %ld with arg %s and the following taint: %s" fidx target (Var.to_string arg) (Taint_domain.Taint.to_string taint)))))
+                    Log.info (Printf.sprintf "Function %ld is calling sink %ld with arg %s and the following taint: %s" fidx target (Var.to_string arg) (Taint_domain.Taint.to_string taint)))
+            end))
 
 (** Extracts the index of functions that are considered sinks, based on their names *)
 let find_sinks_from_names (module_ : Wasm_module.t) (names : String.Set.t) : Int32Set.t =

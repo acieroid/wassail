@@ -91,8 +91,8 @@ module Make (* : Transfer.TRANSFER *) = struct
          In practice, both the memory location and the value have the same taint
       *)
       let taints = List.map locs ~f:(fun (k, offset) ->
-          Log.warn
-            (Printf.sprintf "TODO: currently ignoring offsets in taints!!!\n--------------------\n--------------\n"); (* maybe only the values should be tainted, not the keys *)
+          (* Log.warn
+            (Printf.sprintf "TODO: currently ignoring offsets in taints!!!\n--------------------\n--------------\n"); (* maybe only the values should be tainted, not the keys *) *)
           Taint_domain.Taint.join (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Var.OffsetMap.find_exn mem (k, offset)))) in
       Taint_domain.add_taint
         state
@@ -122,7 +122,7 @@ module Make (* : Transfer.TRANSFER *) = struct
           all_locs in
       (* Set the taint of memory locations and the value to the taint of vval *)
       List.fold_left locs ~init:state ~f:(fun s (k, offset) ->
-          Log.warn (Printf.sprintf "TODO: ignoring offsets!");
+          (* Log.warn (Printf.sprintf "TODO: ignoring offsets!"); *)
           Taint_domain.add_taint_v (Taint_domain.add_taint_v s k vval)
             (Var.OffsetMap.find_exn mem (k, offset)) vval)
 
@@ -137,11 +137,16 @@ module Make (* : Transfer.TRANSFER *) = struct
       let summary = Int32Map.find_exn summaries f in
       let args = List.take (Spec.get_or_fail (fst i.annotation_before)).vstack (fst arity) in
       let ret = if snd arity = 1 then List.hd (Spec.get_or_fail (fst i.annotation_after)).vstack else None in
-      Printf.printf "Calling function %ld with args: %s\n" f (Var.list_to_string args);
-      Taint_summary.apply summary state args (Spec.get_or_fail (fst i.annotation_before)).globals (Spec.get_or_fail (fst i.annotation_after)).globals (List.concat_map (Var.OffsetMap.to_alist (Spec.get_or_fail (fst i.annotation_after)).memory)
-                                                                                                       ~f:(fun ((a, _offset), b) ->
-                                                                                                           Log.warn (Printf.sprintf "TODO: ignoring offset\n");
-                                                                                                           [a; b])) ret
+      Taint_summary.apply
+        summary
+        state
+        args
+        (Spec.get_or_fail (fst i.annotation_before)).globals
+        (Spec.get_or_fail (fst i.annotation_after)).globals
+        (List.concat_map (Var.OffsetMap.to_alist (Spec.get_or_fail (fst i.annotation_after)).memory)
+           ~f:(fun ((a, _offset), b) ->
+               Log.warn (Printf.sprintf "TODO: ignoring offset\n");
+               [a; b])) ret
     in
     match i.instr with
     | Call (arity, _, f) -> `Simple (apply_summary f arity state)

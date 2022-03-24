@@ -140,3 +140,29 @@ let apply_to_string (string : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
   let lexbuf = Lexing.from_string string in
   parse_from_lexbuf_textual "no-file" lexbuf f
 
+module type Abstract_domain = sig
+  type t
+  val compare : t -> t -> int
+  val equal : t -> t -> bool
+  val t_of_sexp : Sexp.t -> t
+  val sexp_of_t : t -> Sexp.t
+
+  val bottom : t
+  val to_string : t -> string
+  val join : t -> t -> t
+end
+
+module Product_domain = struct
+  module Make (Domain1 : Abstract_domain) (Domain2 : Abstract_domain) = struct
+    type t = Domain1.t * Domain2.t
+    [@@deriving sexp, compare, equal]
+    let bottom : t = (Domain1.bottom, Domain2.bottom)
+    let to_string (t : t) =
+      Printf.sprintf "(%s, %s)"
+        (Domain1.to_string (fst t))
+        (Domain2.to_string (snd t))
+    let join (t1 : t) (t2 : t) : t =
+      (Domain1.join (fst t1) (fst t2),
+       Domain2.join (snd t1) (snd t2))
+  end
+end

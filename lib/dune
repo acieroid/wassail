@@ -15,6 +15,7 @@
    Spec Spec_inference Spec_analysis
    Var_prop
    Taint Taint_options Taint_domain Taint_transfer Taint_summary
+   Taintcall_domain Taintcall_transfer Taintcall
    Relational Relational_domain Relational_transfer Relational_summary Relational_spec Relational_options
    Reltaint
    Use_def Dominance Control_deps Memory_deps Slicing
