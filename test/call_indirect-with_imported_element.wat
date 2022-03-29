@@ -10,5 +10,5 @@
   (elem (i32.const 0) $bar1 $f1 $callBar1)
   (func $callBar1 (export "callBar1")
     i32.const 0
-    call_indirect (type 0))
+    call_indirect )
 )
