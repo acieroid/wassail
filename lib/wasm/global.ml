@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 type mutability = Mutable | Immutable
 [@@deriving sexp, compare, equal]

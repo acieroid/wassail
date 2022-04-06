@@ -37,7 +37,7 @@ let buf_size (s : stream) : int =
   Bytes.length (buf_to_bytes s)
 
 let buf_to_file (s : stream) (filename : string) =
-  let open Core_kernel in
+  let open Core in
   Out_channel.with_file filename
     ~f:(fun ch ->
         Out_channel.output_bytes ch (buf_to_bytes s))

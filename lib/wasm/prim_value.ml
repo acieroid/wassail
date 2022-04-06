@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 
 (** Primitive values, which are either i32 or i64 *)

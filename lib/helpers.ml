@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 (** Integers *)
 module I = struct

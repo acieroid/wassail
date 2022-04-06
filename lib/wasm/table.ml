@@ -1,4 +1,3 @@
-open Core_kernel
 open Wasm
 
 (** Limits to the size of the table (min, max) *)

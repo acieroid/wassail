@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 open Helpers
 
 module Domain = Relational_domain

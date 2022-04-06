@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 open Helpers
 
 let analyze_intra : Wasm_module.t -> Int32.t list -> (Relational.Summary.t * Taint.Summary.t) Int32Map.t =

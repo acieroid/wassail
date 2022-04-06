@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 (** Binary operations *)
 module T = struct

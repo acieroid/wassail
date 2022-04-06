@@ -1,5 +1,5 @@
 (* Implementation of dominance algorithms, based on  Cooper, Keith D.; Harvey, Timothy J; Kennedy, Ken (2001). "A Simple, Fast Dominance Algorithm". *)
-open Core_kernel
+open Core
 open Helpers
 
 module Graph = struct

@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 open Wasm
 
 (** Returns the (optional) type of a block *)

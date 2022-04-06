@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 type t = Int32.t * (Int32.t option)
 [@@deriving sexp, compare, equal]

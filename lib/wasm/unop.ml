@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 module T = struct
   type pack_size = Pack8 | Pack16 | Pack32 (* TODO: duplicate with memoryop *)

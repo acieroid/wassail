@@ -1,5 +1,3 @@
-open Core_kernel
-
 type memory_type = Limits.t
 [@@deriving sexp, compare, equal]
 

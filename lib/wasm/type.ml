@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 open Wasm
 
 (** These are types of values during the execution of wasm *)

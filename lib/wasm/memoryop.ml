@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 open Wasm
 
 (** Description of memory operations (load and store) *)

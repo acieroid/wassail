@@ -20,7 +20,7 @@ let cfgs =
       and out_dir = anon ("out_dir" %: string) in
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
-        Core.Unix.mkdir_p out_dir;
+        Core_unix.mkdir_p out_dir;
         List.iteri wasm_mod.funcs
           ~f:(fun i _ ->
               let faddr = Int32.(wasm_mod.nfuncimports + (Int32.of_int_exn i)) in

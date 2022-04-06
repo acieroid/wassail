@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 module T = struct
   (** A basic block can either be a control block, a data block, or a merge block *)

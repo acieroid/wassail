@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 open Helpers
 
 let compute_block_arities (instrs : unit Instr.t list) : (int * int) Instr.Label.Map.t =

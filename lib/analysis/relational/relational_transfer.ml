@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 open Helpers
 
 (** Remove vars in certain cases, but this is probably wrong so it is disabled *)

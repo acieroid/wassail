@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 open Helpers
 
 (** A predicate is represented as the variable used in the predicate as well as the label of the control instruction using it *)

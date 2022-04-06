@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 type t = {
   index : Int32.t; (** The table index (should always be 0 currently, wasm does

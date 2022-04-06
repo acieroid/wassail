@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 module T = struct
   type funcelem = Int32.t option

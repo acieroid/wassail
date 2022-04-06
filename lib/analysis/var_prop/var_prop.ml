@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 (** Check if a variable is considered as being defined at the entry point *)
 let entry_var (v : Var.t) : bool = match v with

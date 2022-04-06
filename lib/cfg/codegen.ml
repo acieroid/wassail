@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 let codegen (cfg : unit Cfg.t) : unit Instr.t list =
   List.map cfg.instructions ~f:(fun label -> match Instr.Label.Map.find cfg.label_to_instr label with

@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 (** The apron domain used.
     We use octagon here, but simpler domains could be good enough.

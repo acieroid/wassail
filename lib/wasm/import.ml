@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 type desc =
   | FuncImport of Int32.t

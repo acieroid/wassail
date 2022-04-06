@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 type desc =
   | FuncExport of Int32.t

@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 type t = Instr.Label.Set.t Instr.Label.Map.t (* Map from instruction to its memory dependencies *)
 

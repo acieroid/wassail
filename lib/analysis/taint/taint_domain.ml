@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 module Taint = struct
   (** A taint value is a set of variables *)

@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 open Helpers
 
 (** A lexical successor tree is a tree where a node a is the parent of a node

@@ -1,11 +1,12 @@
 open Core
+open Core_unix
 
 let report_time (msg : string) (t0 : Time.t) (t1 : Time.t) : unit =
   Printf.printf "Time for '%s': %s\n%!" msg (Time.Span.to_string (Time.diff t1 t0))
 
 let () =
   Wassail.Log.enable_info ();
-  Command.run ~version:"0.0"
+  Command_unix.run ~version:"0.0"
     (Command.group ~summary:"Static analysis of WebAssembly"
        [
 

@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 module Label = struct
   (** The section in which an instruction is contained *)
