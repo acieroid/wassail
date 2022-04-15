@@ -45,11 +45,12 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Domain
 
 (** Detects calls to sinks with data coming from the exported functions' arguments.
     Sinks are declared as a set of function indices. *)
-let detect_unsafe_calls_to_sinks (module_ : Wasm_module.t) (sinks : Int32Set.t) : unit =
+let detect_unsafe_calls_from_exported_to_sinks (module_ : Wasm_module.t) (sinks : Int32Set.t) : (int32 * int32 * Taint_domain.Taint.t) list =
   let cg = Call_graph.make module_ in
   let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
   let results = analyze_inter module_ schedule in
   Log.warn "Analyzing unsafe flows in indirect calls is not yet implemented";
+  let found = ref [] in
   Int32Map.iteri results ~f:(fun ~key:fidx ~data:(_spec_cfg, _taint_cfg, summary) ->
       if Wasm_module.is_exported module_ fidx then
         let taintcall_summary = fst summary in
@@ -61,8 +62,55 @@ let detect_unsafe_calls_to_sinks (module_ : Wasm_module.t) (sinks : Int32Set.t) 
                     | Taints taints -> Option.is_some (Var.Set.find taints ~f:(function
                         | Local _ -> true
                         | _ -> false)) in
-                  Printf.printf "checking safety\n";
-                  if unsafe then
-                    Log.info (Printf.sprintf "Function %ld is eventually calling sink %ld with the following taint: %s" fidx target (Taint_domain.Taint.to_string t)))
-            end))
+                  if unsafe then begin
+                    Log.info (Printf.sprintf "Function %ld is eventually calling sink %ld with the following taint: %s" fidx target (Taint_domain.Taint.to_string t));
+                      found := (fidx, target, t) :: !found
+                  end)
+            end));
+  !found
 
+
+module Test = struct
+  let%test "call from exported to sink" =
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32 i32) (result i32)))
+  (type (;1;) (func (param i32) (result i32)))
+  (func (;0;) (type 1) (param i32) (result i32)
+    local.get 0
+    ;; Calls 1 with l0
+    ;; 2 calls 4 (strcpy) with its own l0
+    call 1)
+  (func (;1;) (type 1) (param i32) (result i32)
+    (local i32)
+    global.get 0 ;; [g0]
+    i32.const 48 ;; [48, g0]
+    i32.sub ;; [g0-48]
+    local.tee 1 ;; l1 = g0-48
+    global.set 0 ;; g0' = g0-48 --> allocated 48 bytes of stack memory
+    local.get 1 ;; [g0-48]
+    local.get 0 ;; [l0, g0-48]
+    call 2 ;; call strcpy with argument (tainted) and g0-48 (stack memory)
+    drop
+    local.get 1
+    i32.const 48
+    i32.add
+    global.set 0
+    i32.const 0)
+  (func (;2;) (type 0) (param i32 i32) (result i32)
+    ;; This is strcpy (but we remove its implementation for simplicity)
+    local.get 0)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560))
+  (export \"memory\" (memory 0))
+  (export \"submit\" (func 1))
+  (export \"strcpy\" (func 2)))" in
+    let actual = detect_unsafe_calls_from_exported_to_sinks module_ (Int32Set.singleton 2l) in
+    let expected = [(1l, 2l, Taint_domain.Taint.Taints (Var.Set.singleton (Var.Local 0)))] in
+    List.equal (fun (caller, callee, taint) (expected_caller, expected_callee, expected_taint) ->
+        Int32.equal caller expected_caller &&
+        Int32.equal callee expected_callee &&
+        Taint_domain.Taint.equal taint expected_taint)
+      actual expected
+
+end

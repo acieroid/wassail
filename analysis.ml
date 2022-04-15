@@ -76,7 +76,8 @@ let taint_to_sinks =
       fun () ->
         let module_ = Wasm_module.of_file filename in
         let sink_indices = Taint.find_sinks_from_names module_ (String.Set.of_list sink_names) in
-        Taintcall.detect_unsafe_calls_to_sinks module_ sink_indices)
+        let _ = Taintcall.detect_unsafe_calls_from_exported_to_sinks module_ sink_indices in
+        ())
 
 let find_indirect_calls =
   Command.basic
