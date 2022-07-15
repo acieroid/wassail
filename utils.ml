@@ -28,6 +28,17 @@ let load =
           Printf.printf "Successfully loaded %s\n" file_in
         with e -> Printf.printf "Error when loading %s: %s\n" file_in (Exn.to_string e); exit 1)
 
+let count =
+  Command.basic
+    ~summary:"Count instructions in a file"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string) in
+      fun () ->
+        let _module : Wasm_module.t = Wasm_module.of_file file_in in
+        let counts = Instruction_counter.count _module in
+        List.iter (StringMap.to_alist counts)
+          ~f:(fun (instr, count) -> Printf.printf "%s: %d\n" instr count))
+
 let imports =
   Command.basic
     ~summary:"List functions imported by a WebAssembly module"

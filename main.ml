@@ -19,6 +19,7 @@ let () =
        ; "mem-exports", Utils.mem_exports
        ; "function-instructions", Utils.function_instructions
        ; "functions", Utils.functions
+       ; "count", Utils.count
 
        (* Utilities that require building the CFGs *)
        ; "cfg", Cfg.cfg
