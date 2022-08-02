@@ -71,6 +71,13 @@ let detect_unsafe_calls_from_exported_to_sinks (module_ : Wasm_module.t) (sinks 
 
 
 module Test = struct
+
+  let check_equal =
+    List.equal (fun (caller, callee, taint) (expected_caller, expected_callee, expected_taint) ->
+        Int32.equal caller expected_caller &&
+        Int32.equal callee expected_callee &&
+        Taint_domain.Taint.equal taint expected_taint)
+
   let%test "call from exported to sink" =
     let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32 i32) (result i32)))
@@ -105,12 +112,49 @@ module Test = struct
   (export \"memory\" (memory 0))
   (export \"submit\" (func 1))
   (export \"strcpy\" (func 2)))" in
+    (* Function 0 is not exported so it should not be detected. Function 1 is,
+       and calls strcpy, so it should be detected. *)
     let actual = detect_unsafe_calls_from_exported_to_sinks module_ (Int32Set.singleton 2l) in
     let expected = [(1l, 2l, Taint_domain.Taint.Taints (Var.Set.singleton (Var.Local 0)))] in
-    List.equal (fun (caller, callee, taint) (expected_caller, expected_callee, expected_taint) ->
-        Int32.equal caller expected_caller &&
-        Int32.equal callee expected_callee &&
-        Taint_domain.Taint.equal taint expected_taint)
-      actual expected
+    check_equal actual expected
+
+  let%test "call from exported to sink through another function" =
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32 i32) (result i32)))
+  (type (;1;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32 i32) (result i32)
+    local.get 1
+    ;; Calls 1 with l1
+    ;; 2 calls 4 (strcpy) with its own l0
+    call 1)
+  (func (;1;) (type 1) (param i32) (result i32)
+    (local i32)
+    global.get 0 ;; [g0]
+    i32.const 48 ;; [48, g0]
+    i32.sub ;; [g0-48]
+    local.tee 1 ;; l1 = g0-48
+    global.set 0 ;; g0' = g0-48 --> allocated 48 bytes of stack memory
+    local.get 1 ;; [g0-48]
+    local.get 0 ;; [l0, g0-48]
+    call 2 ;; call strcpy with argument (tainted) and g0-48 (stack memory)
+    drop
+    local.get 1
+    i32.const 48
+    i32.add
+    global.set 0
+    i32.const 0)
+  (func (;2;) (type 0) (param i32 i32) (result i32)
+    ;; This is strcpy (but we remove its implementation for simplicity)
+    local.get 0)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560))
+  (export \"memory\" (memory 0))
+  (export \"strcpy\" (func 2))
+  (export \"foo\" (func 0)))" in
+    (* Function 0 is exported, calls 1, which calls a sink. It should be detected then. And it should be detected with l1. *)
+    let actual = detect_unsafe_calls_from_exported_to_sinks module_ (Int32Set.singleton 2l) in
+    let expected = [(0l, 2l, Taint_domain.Taint.Taints (Var.Set.singleton (Var.Local 1)))] in
+    check_equal actual expected
 
 end
