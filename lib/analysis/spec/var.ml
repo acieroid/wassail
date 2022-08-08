@@ -9,6 +9,7 @@ module T = struct
     | Return (* return variable *)
     | Hole (* only temporary holes meant to be replaced by merge variables *)
     | Const of Prim_value.t
+    | Other of string (* sometimes it is useful to add new variables, depending on the client analysis *)
   [@@deriving sexp, compare, equal]
   type with_offset = t * int
   [@@deriving sexp, compare, equal]
@@ -21,6 +22,7 @@ module T = struct
   | Return -> "ret"
   | Hole -> "_"
   | Const n ->  Prim_value.to_string n
+  | Other s -> s
 
   let list_to_string (vs : t list) : string = String.concat ~sep: ", " (List.map vs ~f:to_string)
 end

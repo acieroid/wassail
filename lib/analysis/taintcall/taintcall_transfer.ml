@@ -55,11 +55,33 @@ let control_instr_transfer
   in
   match TaintTransfer.control_instr_transfer module_
           (Int32Map.map ~f:snd summaries) cfg i (snd state) with
-  | `Simple sndstate' -> begin match i.instr with
-      | Call (arity, _, f) ->
-        let args = List.take (Spec.get_or_fail (fst i.annotation_before)).vstack (fst arity) in
-        `Simple (add_call (apply_summary f (List.map args ~f:(Taint_domain.get_taint (snd state)))) f arity, sndstate')
-      | CallIndirect _ -> failwith "not yet supported (TODO: see how it is done in taint_transfer.ml)"
+  | `Simple sndstate' ->
+    let apply_fun f arity =
+      let args = List.take (Spec.get_or_fail (fst i.annotation_before)).vstack (fst arity) in
+      add_call (apply_summary f (List.map args ~f:(Taint_domain.get_taint (snd state)))) f arity, sndstate'
+    in
+    begin match i.instr with
+      | Call (arity, _, f) -> `Simple (apply_fun f arity)
+      | CallIndirect (arity, _, typ) ->
+        let table = List.nth_exn module_.table_insts 0 in
+        (* TODO: this may be unsound, as the table values can be modified by the host environment *)
+        let funs = List.map (Table_inst.indices table) ~f:(fun idx -> (Table_inst.get table idx, idx)) in
+        let ftype = Wasm_module.get_type module_ typ in
+        assert (snd arity <= 1);
+        (* These are all the functions with a valid type *)
+        let funs_with_matching_type = List.filter_map funs ~f:(function
+            | (Some fa, idx) ->
+              if Stdlib.(ftype = (Wasm_module.get_func_type module_ fa)) then Some (fa, idx) else None
+            | _ -> None) in
+        let funs_to_apply =
+          (* All functions with a matching types are applicable *)
+          funs_with_matching_type in
+        `Simple (List.fold_left funs_to_apply
+                   ~init:state
+                   ~f:(fun acc (fa, _) ->
+                       let (call, taint) = apply_fun fa arity in
+                       (Taintcall_domain.Call.join call (fst acc),
+                        Taint_domain.join taint (snd acc))))
       | Unreachable -> `Simple bottom
       | _ -> `Simple (fst state, sndstate')
     end

@@ -7,6 +7,9 @@ let int32_comma_separated_list =
   Command.Arg_type.create (fun ids ->
       List.map (String.split ids ~on:',') ~f:Int32.of_string)
 
+let string_comma_separated_list =
+  Command.Arg_type.create (fun strs -> (String.split strs ~on:','))
+
 let on_cfg (file_in : string) (fid : Int32.t) (f : unit Wassail.Cfg.t -> unit) : unit =
   let wasm_mod = Wasm_module.of_file file_in in
   if Int32.(fid < wasm_mod.nfuncimports) then

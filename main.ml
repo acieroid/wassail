@@ -42,6 +42,8 @@ let () =
        ; "taint-intra", Analysis.taint_intra
        ; "taint-inter", Analysis.taint_inter
        ; "taint-to-sinks", Analysis.taint_to_sinks
+       ; "taint-from-sources-to-sinks", Analysis.taint_from_sources_to_sinks
+       ; "taintcall-cfg", Analysis.taintcall_cfg
        ; "reltaint-intra", Analysis.reltaint_intra
        ; "relational-intra", Analysis.relational_intra
        ; "find-indirect-calls", Analysis.find_indirect_calls

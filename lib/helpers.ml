@@ -35,12 +35,12 @@ end
 (** Maps of integers *)
 module IntMap = struct
   include Map.Make(I)
-  let to_string (m : 'a t) (f : 'a -> string) : string = String.concat ~sep:", " (List.map (to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%d -> %s" k (f v)))
+  let to_string (m : 'a t) (f : 'a -> string) : string = String.concat ~sep:", " (List.map (to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%d → %s" k (f v)))
 end
 
 module Int32Map = struct
   include Map.Make(Int32)
-  let to_string (m : 'a t) (f : 'a -> string) : string = String.concat ~sep:", " (List.map (to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s -> %s" (Int32.to_string k) (f v)))
+  let to_string (m : 'a t) (f : 'a -> string) : string = String.concat ~sep:", " (List.map (to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s → %s" (Int32.to_string k) (f v)))
 end
 
 (** Sets of strings *)

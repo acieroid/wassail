@@ -132,8 +132,8 @@ let subsumes (t1 : t) (t2 : t) : bool =
       else
         false)
 
-(** Convert a taint map to its string representation *)
-let to_string (s : t) : string =
+(** Convert a taint map to its string representation with all details *)
+let full_to_string (s : t) : string =
   Printf.sprintf "[%s]" (String.concat ~sep:", "
                            (List.map (Var.Map.to_alist s)
                               ~f:(fun (k, t) ->
@@ -148,7 +148,9 @@ let only_non_id_to_string (s : t) : string =
       match d with
       | Taints taints -> not (Var.Set.equal taints (Var.Set.singleton k))
       | _ -> true) in
-  to_string restricted
+  full_to_string restricted
+
+let to_string = full_to_string
 
 (** Join two taint maps together *)
 let join (s1 : t) (s2 : t) : t =

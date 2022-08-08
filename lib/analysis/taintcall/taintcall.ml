@@ -69,6 +69,29 @@ let detect_unsafe_calls_from_exported_to_sinks (module_ : Wasm_module.t) (sinks 
             end));
   !found
 
+let detect_unsafe_calls_from_sources_to_sinks (module_ : Wasm_module.t) (_sources : String.Set.t) (sinks : Int32Set.t) : (int32 * int32 * Taint_domain.Taint.t) list =
+  let cg = Call_graph.make module_ in
+  let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
+  let results = analyze_inter module_ schedule in
+  Log.warn "Analyzing unsafe flows in indirect calls is not yet implemented";
+  let found = ref [] in
+  (* TODO: fill taint_specifications with sources and their index *)
+  Int32Map.iteri results ~f:(fun ~key:fidx ~data:(_spec_cfg, _taint_cfg, summary) ->
+      let taintcall_summary = fst summary in
+      Int32Map.iteri taintcall_summary ~f:(fun ~key:target ~data:taint ->
+          if Int32Set.mem sinks target then begin
+            List.iter taint ~f:(fun t ->
+                let unsafe = match t with
+                  | TopTaint -> true
+                  | Taints taints -> Option.is_some (Var.Set.find taints ~f:(function
+                      | Other _ -> true
+                      | _ -> false)) in
+                if unsafe then begin
+                  Log.info (Printf.sprintf "Function %ld is eventually calling sink %ld with the following taint: %s" fidx target (Taint_domain.Taint.to_string t));
+                  found := (fidx, target, t) :: !found
+                end)
+          end));
+  !found
 
 module Test = struct
 

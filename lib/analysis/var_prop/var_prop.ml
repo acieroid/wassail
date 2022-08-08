@@ -2,8 +2,9 @@ open Core
 
 (** Check if a variable is considered as being defined at the entry point *)
 let entry_var (v : Var.t) : bool = match v with
-  | Var _ | Merge (_, _) | Hole -> false
   | Local _ | Global _ | Return | Const _ -> true
+  | Var _ | Merge (_, _) | Hole | Other _ -> false
+
 
 (* Pairs of vars, only used to deal with variable equality so these are unordered pairs *)
 module VarEq = struct

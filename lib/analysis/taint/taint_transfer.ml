@@ -9,6 +9,10 @@ module Make (* : Transfer.TRANSFER *) = struct
   type state = Taint_domain.t
   [@@deriving sexp, compare, equal]
 
+  let return_taint_specifications : Var.t Int32Map.t ref = ref (Int32Map.of_alist_exn [
+      (7l, Var.Other "fgets") (* TODO: empty, and fill it from client analysis *)
+    ])
+
   (** In the initial state, we only set the taint for for parameters and the globals. *)
   let init_state (cfg : 'a Cfg.t) : state =
     Var.Map.of_alist_exn
@@ -137,7 +141,7 @@ module Make (* : Transfer.TRANSFER *) = struct
       let summary = Int32Map.find_exn summaries f in
       let args = List.take (Spec.get_or_fail (fst i.annotation_before)).vstack (fst arity) in
       let ret = if snd arity = 1 then List.hd (Spec.get_or_fail (fst i.annotation_after)).vstack else None in
-      Taint_summary.apply
+      let taint_after_call = Taint_summary.apply
         summary
         state
         args
@@ -146,7 +150,12 @@ module Make (* : Transfer.TRANSFER *) = struct
         (List.concat_map (Var.OffsetMap.to_alist (Spec.get_or_fail (fst i.annotation_after)).memory)
            ~f:(fun ((a, _offset), b) ->
                Log.warn (Printf.sprintf "TODO: ignoring offset\n");
-               [a; b])) ret
+               [a; b])) ret in
+      match ret, Int32Map.find !return_taint_specifications f with
+      | Some ret_var, Some t ->
+        (* This function returns a specific taint that we have to add to ret *)
+        Taint_domain.add_taint taint_after_call ret_var (Taints (Var.Set.singleton t))
+      | _ -> taint_after_call
     in
     match i.instr with
     | Call (arity, _, f) -> `Simple (apply_summary f arity state)
@@ -154,6 +163,7 @@ module Make (* : Transfer.TRANSFER *) = struct
       (* Simplest case: all functions with the proper type can be called.
          Refined case: all functions that are deemed reachable by previous analysis stages (i.e., relational analysis) can be called *)
       let table = List.nth_exn module_.table_insts 0 in
+      (* TODO: this may be unsound, as the table values can be modified by the host environment *)
       let funs = List.map (Table_inst.indices table) ~f:(fun idx -> (Table_inst.get table idx, idx)) in
       let ftype = Wasm_module.get_type module_ typ in
       assert (snd arity <= 1);
@@ -175,7 +185,8 @@ module Make (* : Transfer.TRANSFER *) = struct
       `Simple (List.fold_left funs_to_apply
         ~init:state
         ~f:(fun acc (fa, _) ->
-            Taint_domain.join (apply_summary fa arity state) acc))
+            Taint_domain.join (apply_summary fa arity state)
+              acc))
     | Br _ -> `Simple state
     | BrIf _ | If _ -> `Branch (state, state)
     | Return -> `Simple state

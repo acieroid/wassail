@@ -79,6 +79,37 @@ let taint_to_sinks =
         let _ = Taintcall.detect_unsafe_calls_from_exported_to_sinks module_ sink_indices in
         ())
 
+let taint_from_sources_to_sinks =
+  Command.basic
+    ~summary:"Detects unsafe flows from a list of sources to a list of defined sinks"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and source_names = anon ("sources" %: string_comma_separated_list)
+      and sink_names = anon ("sinks" %: string_comma_separated_list) in
+      fun () ->
+        let module_ = Wasm_module.of_file filename in
+        let sink_indices = Taint.find_sinks_from_names module_ (String.Set.of_list sink_names) in
+        let _ = Taintcall.detect_unsafe_calls_from_sources_to_sinks module_ (String.Set.of_list source_names) sink_indices in
+        ())
+
+let taintcall_cfg =
+  Command.basic
+    ~summary:"Performs a inter-procedural taintcall analysis and displays the results for the given CFGs"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and cfgs = anon ("cfgs" %: int32_comma_separated_list) in
+      fun () ->
+        let module_ = Wasm_module.of_file filename in
+        let cg = Call_graph.make module_ in
+        let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
+        let results = Taintcall.analyze_inter module_ schedule in
+        List.iter cfgs ~f:(fun idx ->
+            let (_, cfg, _) = Int32Map.find_exn results idx in
+            let file_out = Printf.sprintf "%ld.dot" idx in
+            Out_channel.with_file file_out
+              ~f:(fun ch ->
+                  Out_channel.output_string ch (Cfg.to_dot cfg ~annot_str:Taintcall.Domain.to_string))))
+
 let find_indirect_calls =
   Command.basic
     ~summary:"Find call_indirect instructions and shows the function in which they appear as well as their label"
