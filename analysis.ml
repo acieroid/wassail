@@ -67,19 +67,17 @@ let taint_inter =
     Taint.analyze_inter
     (fun fid (_, _, summary) -> Printf.printf "function %ld: %s\n" fid (Taint.Summary.to_string summary))
 
-let taint_to_sinks =
+let taint_flow_from_exported_to_imported =
   Command.basic
-    ~summary:"Detects unsafe flows from exported function arguments to list of defined sinks"
+    ~summary:"Detects unsafe flows from exported functions to imported functions"
     Command.Let_syntax.(
-      let%map_open filename = anon ("file" %: string)
-      and sink_names = anon (sequence ("funs" %: string)) in
+      let%map_open filename = anon ("file" %: string) in
       fun () ->
         let module_ = Wasm_module.of_file filename in
-        let sink_indices = Taint.find_sinks_from_names module_ (String.Set.of_list sink_names) in
-        let _ = Taintcall.detect_unsafe_calls_from_exported_to_sinks module_ sink_indices in
+        let _ = Taintcall.detect_flows_from_exported_to_imported module_ in
         ())
 
-let taint_from_sources_to_sinks =
+let taint_flow_from_sources_to_sinks =
   Command.basic
     ~summary:"Detects unsafe flows from a list of sources to a list of defined sinks"
     Command.Let_syntax.(
@@ -88,8 +86,7 @@ let taint_from_sources_to_sinks =
       and sink_names = anon ("sinks" %: string_comma_separated_list) in
       fun () ->
         let module_ = Wasm_module.of_file filename in
-        let sink_indices = Taint.find_sinks_from_names module_ (String.Set.of_list sink_names) in
-        let _ = Taintcall.detect_unsafe_calls_from_sources_to_sinks module_ (String.Set.of_list source_names) sink_indices in
+        let _ = Taintcall.detect_flows_from_sources_to_sinks module_ (StringSet.of_list source_names) (StringSet.of_list sink_names) in
         ())
 
 let taintcall_cfg =

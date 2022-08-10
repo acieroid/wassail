@@ -69,29 +69,58 @@ let detect_unsafe_calls_from_exported_to_sinks (module_ : Wasm_module.t) (sinks 
             end));
   !found
 
-let detect_unsafe_calls_from_sources_to_sinks (module_ : Wasm_module.t) (_sources : String.Set.t) (sinks : Int32Set.t) : (int32 * int32 * Taint_domain.Taint.t) list =
+module TaintFlow = struct
+  type t = int32 * int32 * Taint_domain.Taint.t
+  [@@deriving sexp, compare, equal]
+end
+
+module TaintFlowSet = Set.Make(TaintFlow)
+
+let detect_flows_from_sources_to_sinks (module_ : Wasm_module.t) (sources : StringSet.t) (sinks : StringSet.t) : TaintFlowSet.t =
   let cg = Call_graph.make module_ in
   let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
+  let funcnames = Wasm_module.get_funcnames module_ in
+  let sources_specifications = Int32Map.of_alist_exn (List.filter_map (StringSet.to_list sources) ~f:(fun source_name ->
+      match StringMap.find funcnames source_name with
+      | Some source_idx -> Some (source_idx, Var.Other source_name)
+      | None ->
+        Log.warn (Printf.sprintf "source does not exist in binary (this could be perfectly fine): %s" source_name);
+        None (* This source does not exist in the binary, so we ignore it *)
+    )) in
+  let sink_indices_to_names = Int32Map.of_alist_exn (List.filter_map (StringSet.to_list sinks) ~f:(fun sink_name ->
+      match StringMap.find funcnames sink_name with
+      | Some sink_idx -> Some (sink_idx, sink_name)
+      | None ->
+        Log.warn (Printf.sprintf "sink does not exist in binary (this could be perfectly fine): %s" sink_name);
+        None (* This sink does not exist in the binary, so we ignore it *)
+    )) in
+  Taintcall_transfer.TaintTransfer.return_taint_specifications := sources_specifications;
   let results = analyze_inter module_ schedule in
-  Log.warn "Analyzing unsafe flows in indirect calls is not yet implemented";
-  let found = ref [] in
-  (* TODO: fill taint_specifications with sources and their index *)
+  let found = ref TaintFlowSet.empty in
   Int32Map.iteri results ~f:(fun ~key:fidx ~data:(_spec_cfg, _taint_cfg, summary) ->
       let taintcall_summary = fst summary in
       Int32Map.iteri taintcall_summary ~f:(fun ~key:target ~data:taint ->
-          if Int32Set.mem sinks target then begin
+          if Int32Map.mem sink_indices_to_names target then begin
             List.iter taint ~f:(fun t ->
                 let unsafe = match t with
                   | TopTaint -> true
                   | Taints taints -> Option.is_some (Var.Set.find taints ~f:(function
                       | Other _ -> true
                       | _ -> false)) in
-                if unsafe then begin
-                  Log.info (Printf.sprintf "Function %ld is eventually calling sink %ld with the following taint: %s" fidx target (Taint_domain.Taint.to_string t));
-                  found := (fidx, target, t) :: !found
-                end)
+                if unsafe then found := TaintFlowSet.add !found (fidx, target, t))
           end));
+  List.iter (TaintFlowSet.to_list !found) ~f:(fun (fidx, target, taint) ->
+      Log.info (Printf.sprintf "Function %ld is eventually calling sink %s with the following taint: %s" fidx (Int32Map.find_exn sink_indices_to_names target) (Taint_domain.Taint.to_string taint)));
   !found
+
+let detect_flows_from_exported_to_imported (module_ : Wasm_module.t) : TaintFlowSet.t =
+  let imports = StringSet.of_list (List.filter_map module_.imports ~f:(function
+      | { item_name; idesc = FuncImport _; _ } -> Some item_name
+      | _ -> None)) in
+  let exports = StringSet.of_list (List.filter_map module_.exports ~f:(function
+      | { name; edesc = Export.FuncExport _ } -> Some name
+      | _ -> None)) in
+  detect_flows_from_sources_to_sinks module_ exports imports
 
 module Test = struct
 

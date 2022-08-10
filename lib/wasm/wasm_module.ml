@@ -39,6 +39,17 @@ let get_funcname (m : t) (fidx : Int32.t) : string option =
   let funcinst = get_funcinst m fidx in
   funcinst.name
 
+(** Get the index and name of all functions that have names, as a map from function name to its index *)
+let get_funcnames (m : t) : int32 StringMap.t =
+  let alist = List.filter_map m.funcs ~f:(fun funcinst ->
+      Option.map funcinst.name ~f:(fun name -> (name, funcinst.idx))) in
+  let imported = List.mapi
+      (List.filter m.imports ~f:(function
+           | { idesc = Import.FuncImport _; _ } -> true
+           | _ -> false))
+      ~f:(fun idx f -> (f.item_name, (Int32.of_int_exn idx))) in
+  StringMap.of_alist_exn (alist @ imported)
+
 (** Checks if a function is exported or not. An exported function has a name. *)
 let is_exported (m : t) (fidx : Int32.t) : bool =
   let funcinst = get_funcinst m fidx in

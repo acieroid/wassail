@@ -40,11 +40,18 @@ let control_instr_transfer
     (state : state) (* The pre state *)
   : [`Simple of state | `Branch of state * state ] =
   let apply_summary (f : Int32.t) (argsv : Taint_domain.Taint.t list) : Taintcall_domain.Call.t =
-    let summary = Int32Map.find_exn summaries f in
-    let substituted_summary =
-      Int32Map.map (fst summary) ~f:(fun args ->
-          (List.map args ~f:(fun arg -> Taint_domain.Taint.substitute arg (List.mapi argsv ~f:(fun i argv -> (Var.Local i, argv)))))) in
-    Taintcall_domain.Call.join substituted_summary (fst state)
+    match Int32Map.find summaries f with
+    | None ->
+      if Int32.(f < module_.nfuncimports) then begin
+        Log.warn (Printf.sprintf "No summary found for function %ld (imported function): assuming taint is preserved" f);
+        fst state
+      end else
+        failwith "Unexpected: analyzing a function that has no summary"
+    | Some summary ->
+      let substituted_summary =
+        Int32Map.map (fst summary) ~f:(fun args ->
+            (List.map args ~f:(fun arg -> Taint_domain.Taint.substitute arg (List.mapi argsv ~f:(fun i argv -> (Var.Local i, argv)))))) in
+      Taintcall_domain.Call.join substituted_summary (fst state)
   in
   let add_call (to_state : Taintcall_domain.Call.t) (f : Int32.t) (arity : int * int) : Taintcall_domain.Call.t =
     let args = List.take (Spec.get_or_fail (fst i.annotation_before)).vstack (fst arity) in
@@ -63,23 +70,14 @@ let control_instr_transfer
     begin match i.instr with
       | Call (arity, _, f) -> `Simple (apply_fun f arity)
       | CallIndirect (arity, _, typ) ->
-        let table = List.nth_exn module_.table_insts 0 in
-        (* TODO: this may be unsound, as the table values can be modified by the host environment *)
-        let funs = List.map (Table_inst.indices table) ~f:(fun idx -> (Table_inst.get table idx, idx)) in
+        let funs = List.map module_.imported_funcs ~f:(fun (idx, _, _) -> idx) @ (List.map module_.funcs ~f:(fun f -> f.idx)) in
         let ftype = Wasm_module.get_type module_ typ in
         assert (snd arity <= 1);
-        (* These are all the functions with a valid type *)
-        let funs_with_matching_type = List.filter_map funs ~f:(function
-            | (Some fa, idx) ->
-              if Stdlib.(ftype = (Wasm_module.get_func_type module_ fa)) then Some (fa, idx) else None
-            | _ -> None) in
-        let funs_to_apply =
-          (* All functions with a matching types are applicable *)
-          funs_with_matching_type in
-        `Simple (List.fold_left funs_to_apply
+        let funs_with_matching_type = List.filter funs ~f:(fun idx -> Stdlib.(ftype = (Wasm_module.get_func_type module_ idx))) in
+        `Simple (List.fold_left funs_with_matching_type
                    ~init:state
-                   ~f:(fun acc (fa, _) ->
-                       let (call, taint) = apply_fun fa arity in
+                   ~f:(fun acc idx ->
+                       let (call, taint) = apply_fun idx arity in
                        (Taintcall_domain.Call.join call (fst acc),
                         Taint_domain.join taint (snd acc))))
       | Unreachable -> `Simple bottom
