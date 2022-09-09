@@ -72,8 +72,8 @@ let make (instrs : unit Instr.t list) : t =
 
 module Test = struct
   let lab id = Instr.Label.{ section = Instr.Label.Dummy; id }
-  let data id i = Instr.Data { instr = i; label = lab id; annotation_before = (); annotation_after = () }
-  let control id i = Instr.Control { instr = i; label = lab id; annotation_before = (); annotation_after = () }
+  let data id i = Instr.Data { instr = i; label = lab id; line_number = id; annotation_before = (); annotation_after = () }
+  let control id i = Instr.Control { instr = i; label = lab id; line_number = id; annotation_before = (); annotation_after = () }
   let%test "lexical successor tree for a single instruction" =
     let t = make [data 1 (Instr.Const (Prim_value.of_int 0))] in
     Tree.check_equality ~actual:t.successors ~expected:(Tree.of_node 1)

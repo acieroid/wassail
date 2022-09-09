@@ -270,8 +270,8 @@ let dummy_instrs (t : instr_type_element list * instr_type_element list) (next_l
   let input = List.drop (fst t) prefix in
   let output = List.drop (snd t) prefix in
   (* we pop everything off the stack, then we push *)
-  let input = List.map input ~f:(fun _ -> { Instr.instr = Instr.Drop; label = dummy_label (); annotation_before = (); annotation_after = (); }) in
-  let push (v : Prim_value.t) = { Instr.instr = Instr.Const v; label = dummy_label (); annotation_before = (); annotation_after = () } in
+  let input = List.map input ~f:(fun _ -> { Instr.instr = Instr.Drop; label = dummy_label (); line_number = -1; annotation_before = (); annotation_after = (); }) in
+  let push (v : Prim_value.t) = { Instr.instr = Instr.Const v; label = dummy_label (); line_number = -1; annotation_before = (); annotation_after = () } in
   let output = List.map output ~f:(function
       | Any _ -> push (Prim_value.I32 0l)
       | T Type.I32 -> push (Prim_value.I32 0l)

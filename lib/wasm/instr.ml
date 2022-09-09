@@ -64,6 +64,7 @@ module T = struct
   (** A container for an instruction with a label *)
   type ('a, 'b) labelled = {
     label : Label.t; (** The label of the instruction *)
+    line_number: int; (** The line number of the instruction *)
     instr : 'a; (** The instruction itself *)
     annotation_before: 'b; (** The annotation before the instruction *)
     annotation_after: 'b; (** The annotation after the instruction *)
@@ -270,18 +271,19 @@ let to_mnemonic (instr : 'a t) : string = match instr with
 
 (** Create an instruction from a WebAssembly instruction *)
 let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.Ast.instr) : unit t =
+  let line_number = i.at.left.line in
   (* Construct a labelled data instruction *)
   let data_labelled ?label:(lab : Label.t option) (instr : data) : unit t =
     let label = match lab with
       | Some l -> l
       | None -> new_label () in
-    Data { instr; label; annotation_before = (); annotation_after = (); } in
+    Data { instr; label; line_number; annotation_before = (); annotation_after = (); } in
   (* Construct a labelled control instruction *)
   let control_labelled ?label:(lab : Label.t option) (instr : 'a control) : 'a t =
     let label = match lab with
       | Some l -> l
       | None -> new_label () in
-    Control { instr; label; annotation_before = (); annotation_after = (); } in
+    Control { instr; label; line_number; annotation_before = (); annotation_after = (); } in
   match i.it with
   | Nop -> data_labelled Nop
   | Drop -> data_labelled Drop
@@ -499,3 +501,7 @@ let instructions_contained_in (i : 'a t) : 'a t list = match i with
     | Loop (_, _, instrs) -> instrs
     | If (_, _, instrs1, instrs2) -> instrs1 @ instrs2
     | _ -> []
+
+let line_number (i : 'a t) : int = match i with
+  | Data d -> d.line_number
+  | Control c -> c.line_number

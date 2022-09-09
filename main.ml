@@ -49,7 +49,7 @@ let () =
        ; "find-indirect-calls", Analysis.find_indirect_calls
 
        (* Slicing *)
-       ; "slice", Slicing.slice
+       ; "slice", Slicing.slice_line_number
        ; "evaluate-slicing", Slicing_evaluation.evaluate
        ; "gen-slice-specific", Slicing_evaluation.gen_slice_specific
        ; "count-in-slice", Slicing_evaluation.count_in_slice

@@ -61,6 +61,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     Basic_block.{ idx ; content = Control {
         instr = Merge;
         label = { section = MergeInFunction fid; id = idx };
+        line_number = -1;
         annotation_before = ();
         annotation_after = ();
       };

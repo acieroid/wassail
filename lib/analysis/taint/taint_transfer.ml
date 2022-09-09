@@ -144,7 +144,7 @@ module Make (* : Transfer.TRANSFER *) = struct
           Log.warn (Printf.sprintf "No summary found for function %ld (imported function): assuming taint is preserved" f);
           state
         end else
-          failwith "Unexpected: analyzing a function that has no summary"
+          failwith (Printf.sprintf "Unexpected: analyzing a function that has no summary: %ld" f)
       | Some summary ->
         let args = List.take (Spec.get_or_fail (fst i.annotation_before)).vstack (fst arity) in
         let ret = if snd arity = 1 then List.hd (Spec.get_or_fail (fst i.annotation_after)).vstack else None in
@@ -213,7 +213,6 @@ module Make (* : Transfer.TRANSFER *) = struct
         end
 
   let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
-    Printf.printf "making summary for %ld with state %s\n" cfg.idx (state_to_string out_state);
     let init_spec = (Spec_inference.init_state cfg, Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i)))) in
     match fst (Cfg.state_after_block cfg cfg.exit_block init_spec) with
     | Bottom ->
