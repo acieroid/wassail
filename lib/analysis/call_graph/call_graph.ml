@@ -8,18 +8,23 @@ type t = {
 }
 [@@deriving sexp, compare, equal]
 
-let indirect_call_targets (wasm_mod : Wasm_module.t) (_fidx : Int32.t) (_instr : Instr.Label.t) (typ : Int32.t) : Int32.t list =
+let indirect_call_targets (wasm_mod : Wasm_module.t) (typ : Int32.t) : Int32.t list =
   let ftype = Wasm_module.get_type wasm_mod typ in
   match List.hd wasm_mod.table_insts with
   | Some table ->
+    (* TODO: this may be unsound, as the table may be modified at runtime by the host environment.
+       If this is the case, we should only rely on the second case below *)
     let funs = List.map (Table_inst.indices table) ~f:(fun idx -> Table_inst.get table idx) in
     let funs_with_matching_type = List.filter_map funs ~f:(function
         | Some fa -> if Stdlib.(ftype = Wasm_module.get_func_type wasm_mod fa) then Some fa else None
         | None -> None) in
     funs_with_matching_type
   | None ->
-    (* No tables, so there can't be an indirect call target. (TODO: or it is a call to an imported table?) *)
-    []
+    (* All functions with the proper type can be called. *)
+    let funs = List.map wasm_mod.imported_funcs ~f:(fun (idx, _, _) -> idx) @ (List.map wasm_mod.funcs ~f:(fun f -> f.idx)) in
+    let ftype = Wasm_module.get_type wasm_mod typ in
+    (* These are all the functions with a valid type *)
+   List.filter funs ~f:(fun idx -> Stdlib.(ftype = (Wasm_module.get_func_type wasm_mod( idx))))
 
 (** Builds a call graph for a module *)
 let make (wasm_mod : Wasm_module.t) : t =
@@ -31,7 +36,7 @@ let make (wasm_mod : Wasm_module.t) : t =
           | None -> Int32Set.singleton f'
           | Some fs -> Int32Set.add fs f')
     | Control { instr = CallIndirect (_, _, typ); _ } ->
-      List.fold_left (find_targets wasm_mod f (Instr.label instr) typ)
+      List.fold_left (find_targets wasm_mod typ)
         ~init:edges
         ~f:(fun edges f' ->
             Int32Map.update edges f ~f:(function
