@@ -70,10 +70,7 @@ let control_instr_transfer
     begin match i.instr with
       | Call (arity, _, f) -> `Simple (apply_fun f arity)
       | CallIndirect (arity, _, typ) ->
-        let funs = List.map module_.imported_funcs ~f:(fun (idx, _, _) -> idx) @ (List.map module_.funcs ~f:(fun f -> f.idx)) in
-        let ftype = Wasm_module.get_type module_ typ in
-        assert (snd arity <= 1);
-        let funs_with_matching_type = List.filter funs ~f:(fun idx -> Stdlib.(ftype = (Wasm_module.get_func_type module_ idx))) in
+        let funs_with_matching_type = Call_graph.indirect_call_targets module_ typ in
         `Simple (List.fold_left funs_with_matching_type
                    ~init:state
                    ~f:(fun acc idx ->

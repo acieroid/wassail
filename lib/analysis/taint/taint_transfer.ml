@@ -156,7 +156,7 @@ module Make (* : Transfer.TRANSFER *) = struct
             (Spec.get_or_fail (fst i.annotation_after)).globals
             (List.concat_map (Var.OffsetMap.to_alist (Spec.get_or_fail (fst i.annotation_after)).memory)
                ~f:(fun ((a, _offset), b) ->
-                   Log.warn (Printf.sprintf "TODO: ignoring offset\n");
+                   (* Log.warn (Printf.sprintf "TODO: ignoring offset\n"); *)
                    [a; b])) ret in
         match ret, Int32Map.find !return_taint_specifications f with
         | Some ret_var, Some t ->
@@ -167,14 +167,9 @@ module Make (* : Transfer.TRANSFER *) = struct
     match i.instr with
     | Call (arity, _, f) -> `Simple (apply_summary f arity state)
     | CallIndirect (arity, _, typ) ->
-      (* All functions with the proper type can be called. *)
-      let funs = List.map module_.imported_funcs ~f:(fun (idx, _, _) -> idx) @ (List.map module_.funcs ~f:(fun f -> f.idx)) in
-      let ftype = Wasm_module.get_type module_ typ in
-      assert (snd arity <= 1);
-      (* These are all the functions with a valid type *)
-      let funs_with_matching_type = List.filter funs ~f:(fun idx -> Stdlib.(ftype = (Wasm_module.get_func_type module_ idx))) in
+      let targets = Call_graph.indirect_call_targets module_ typ in
       (* Apply the summaries *)
-      `Simple (List.fold_left funs_with_matching_type
+      `Simple (List.fold_left targets
         ~init:state
         ~f:(fun acc idx -> Taint_domain.join (apply_summary idx arity state) acc))
     | Br _ -> `Simple state
@@ -213,7 +208,6 @@ module Make (* : Transfer.TRANSFER *) = struct
         end
 
   let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
-    Printf.printf "making summary for %ld with state %s\n" cfg.idx (state_to_string out_state);
     let init_spec = (Spec_inference.init_state cfg, Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i)))) in
     match fst (Cfg.state_after_block cfg cfg.exit_block init_spec) with
     | Bottom ->
@@ -227,8 +221,7 @@ module Make (* : Transfer.TRANSFER *) = struct
         exit_spec.globals
         (List.concat_map (Var.OffsetMap.to_alist exit_spec.memory)
            ~f:(fun ((a, _), b) ->
-               Log.warn
-                 (Printf.sprintf "ignoring offset");
+               (* Log.warn (Printf.sprintf "ignoring offset"); *)
                [a; b]))
 
   let extract_summary (cfg : annot_expected Cfg.t) (analyzed_cfg : state Cfg.t) : summary =
