@@ -1,9 +1,7 @@
 open Core
 
 module T = struct
-  type pack_size = Pack8 | Pack16 | Pack32 (* TODO: duplicate with memoryop *)
-  [@@deriving sexp, compare, equal]
-  type op = Clz | Ctz | Popcnt | ExtendS of pack_size | Neg | Abs | Ceil | Floor | Trunc | Nearest | Sqrt
+  type op = Clz | Ctz | Popcnt | ExtendS of Memoryop.pack_size | Neg | Abs | Ceil | Floor | Trunc | Nearest | Sqrt
   [@@deriving sexp, compare, equal]
   type t = { op: op; typ: Type.t }
   [@@deriving sexp, compare, equal]
@@ -18,6 +16,7 @@ let of_wasm (u : Wasm.Ast.unop) : t =
     | ExtendS Pack8 -> ExtendS Pack8
     | ExtendS Pack16 -> ExtendS Pack16
     | ExtendS Pack32 -> ExtendS Pack32
+    | ExtendS Pack64 -> ExtendS Pack64
   in
   let of_op_f (op : Wasm.Ast.FloatOp.unop) : op = match op with
     | Neg -> Neg
@@ -34,11 +33,6 @@ let of_wasm (u : Wasm.Ast.unop) : t =
   | F32 op -> { typ = F32; op = of_op_f op }
   | F64 op -> { typ = F64; op = of_op_f op }
 
-let pack_size_to_int (p : pack_size) : int = match p with
-  | Pack8 -> 8
-  | Pack16 -> 16
-  | Pack32 -> 32
-
 let to_mnemonic (u : t) : string =
   Printf.sprintf "%s.%s"
     (Type.to_string u.typ)
@@ -46,7 +40,7 @@ let to_mnemonic (u : t) : string =
      | Clz -> "clz"
      | Ctz -> "ctz"
      | Popcnt -> "popcnt"
-     | ExtendS p -> Printf.sprintf "extend%d_s" (pack_size_to_int p)
+     | ExtendS p -> Printf.sprintf "extend%d_s" (Memoryop.pack_size_to_int p)
      | Abs -> "abs"
      | Neg -> "neg"
      | Sqrt -> "sqrt"

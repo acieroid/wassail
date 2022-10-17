@@ -1,4 +1,3 @@
-open Core
 open Wasm
 
 (** Test operations *)
@@ -14,7 +13,7 @@ let of_wasm (t : Ast.testop) : t =
   match t with
   | I32 Eqz -> I32Eqz
   | I64 Eqz -> I64Eqz
-  | _ -> failwith "unsupported type: float in testop"
+  | F32 _ | F64 _ -> .
 
 let to_mnemonic (t : t) : string =
   match t with

@@ -12,16 +12,22 @@ module T = struct
 end
 include T
 
-let init (t : Table.t) (elems : Elem.t list) : t =
+let init (t : Table.t) (elems : Elem_segment.t list) : t =
   let table = { max = Limits.max t.ttype;
                 elems = Wasm.Lib.Array32.make (Limits.min t.ttype) None } in
   List.iter elems ~f:(fun e ->
-      assert Int32.(e.index = 0l);
-      match e.offset with
-      | Data { instr = Const (I32 offset); _} :: [] ->
-        List.iteri e.init ~f:(fun idx addr ->
-            Wasm.Lib.Array32.set table.elems Int32.((of_int_exn idx) + offset) (Some addr))
-      | _ -> failwith "Unsupported elems for table initialization"
+      match e.emode with
+      | Active { offset; _ } ->
+        begin match offset with
+        | Data { instr = Const (I32 offset); _} :: [] ->
+           List.iteri e.einit ~f:(fun idx addrinstrs ->
+               match addrinstrs with
+               | Data { instr = Const (I32 addr); _} :: [] ->
+                  Wasm.Lib.Array32.set table.elems Int32.((of_int_exn idx) + offset) (Some addr)
+               | _ -> Unsupported.table_init ())
+        | _ -> Unsupported.table_init ()
+        end
+      | _ -> Unsupported.tables_2 ()
     );
   table
 

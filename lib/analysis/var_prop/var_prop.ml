@@ -43,7 +43,7 @@ end
 (** Return the equalities that arise between variable, from a data instruction *)
 let eqs_data_instr (instr : (Instr.data, Spec.t) Instr.labelled) : VarEq.Set.t =
   match instr.instr with
-  | Nop | Drop | Select | MemorySize | MemoryGrow
+  | Nop | Drop | Select _ | MemorySize | MemoryGrow
   | Unary _ | Binary _ | Compare _ | Test _ | Convert _ -> VarEq.Set.empty
   | Const n ->
     VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top (Spec.get_or_fail instr.annotation_after).vstack) (Var.Const n))

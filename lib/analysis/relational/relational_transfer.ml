@@ -101,7 +101,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
     (* not modeled precisely: returns the size of the memory before it has grown *)
     state
   | Drop -> state
-  | Select ->
+  | Select _ ->
     let ret = ret i in
     let vstack = (extract_from_bottom i.annotation_before).vstack in
     let (c, v2, v1) = pop3 vstack in
@@ -252,7 +252,7 @@ let control_instr_transfer
     (* We encounter a function call, retrieve its summary and apply it *)
     (* We assume all summaries are defined *)
     `Simple (apply_summary f arity state)
-  | CallIndirect (arity, _, typ) ->
+  | CallIndirect (_, arity, _, typ) ->
     (* v is the index in the table that points to the called functiion *)
     let v = pop (extract_from_bottom i.annotation_before).vstack in
     (* Get table 0 *)

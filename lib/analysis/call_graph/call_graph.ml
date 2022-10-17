@@ -35,7 +35,7 @@ let make (wasm_mod : Wasm_module.t) : t =
       Int32Map.update edges f ~f:(function
           | None -> Int32Set.singleton f'
           | Some fs -> Int32Set.add fs f')
-    | Control { instr = CallIndirect (_, _, typ); _ } ->
+    | Control { instr = CallIndirect (_, _, _, typ); _ } ->
       List.fold_left (find_targets wasm_mod typ)
         ~init:edges
         ~f:(fun edges f' ->

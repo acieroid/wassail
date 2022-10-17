@@ -12,12 +12,18 @@ module T = struct
 end
 include T
 
+let of_wasm_num (t : Types.num_type) : t =
+  match t with
+  | I32Type -> I32
+  | I64Type -> I64
+  | F32Type -> F32
+  | F64Type -> F64
+
 let of_wasm (vt : Types.value_type) : t =
   match vt with
-  | Types.I32Type -> I32
-  | Types.I64Type -> I64
-  | Types.F32Type -> F32
-  | Types.F64Type -> F64
+  | NumType t -> of_wasm_num t
+  | VecType _ -> Unsupported.vector_type ()
+  | RefType _ -> Unsupported.reference_type ()
 
 let to_string (t : t) : string =
   match t with

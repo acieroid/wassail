@@ -145,7 +145,8 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
       | Data i -> begin match i.instr with
           | Nop -> op 0x01
           | Drop -> op 0x1a
-          | Select -> op 0x1b
+          | Select None -> op 0x1b
+          | Select (Some ts) -> op 0x1c; vec value_type ts
 
           | LocalGet x -> op 0x20; var x
           | LocalSet x -> op 0x21; var x
@@ -153,34 +154,34 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
           | GlobalGet x -> op 0x23; var x
           | GlobalSet x -> op 0x24; var x
 
-          | Load ({typ = I32; sz = None; _} as mo) -> op 0x28; memop mo
-          | Load ({typ = I64; sz = None; _} as mo) -> op 0x29; memop mo
-          | Load ({typ = F32; sz = None; _} as mo) -> op 0x2a; memop mo
-          | Load ({typ = F64; sz = None; _} as mo) -> op 0x2b; memop mo
-          | Load ({typ = I32; sz = Some (Pack8, SX); _} as mo) -> op 0x2c; memop mo
-          | Load ({typ = I32; sz = Some (Pack8, ZX); _} as mo) -> op 0x2d; memop mo
-          | Load ({typ = I32; sz = Some (Pack16, SX); _} as mo) -> op 0x2e; memop mo
-          | Load ({typ = I32; sz = Some (Pack16, ZX); _} as mo) -> op 0x2f; memop mo
-          | Load ({typ = I32; sz = Some (Pack32, _); _}) -> assert false
-          | Load ({typ = I64; sz = Some (Pack8, SX); _} as mo) -> op 0x30; memop mo
-          | Load ({typ = I64; sz = Some (Pack8, ZX); _} as mo) -> op 0x31; memop mo
-          | Load ({typ = I64; sz = Some (Pack16, SX); _} as mo) -> op 0x32; memop mo
-          | Load ({typ = I64; sz = Some (Pack16, ZX); _} as mo) -> op 0x33; memop mo
-          | Load ({typ = I64; sz = Some (Pack32, SX); _} as mo) -> op 0x34; memop mo
-          | Load ({typ = I64; sz = Some (Pack32, ZX); _} as mo) -> op 0x35; memop mo
-          | Load ({typ = F32 | F64; sz = Some _; _}) -> assert false
+          | Load ({typ = I32; pack = None; _} as mo) -> op 0x28; memop mo
+          | Load ({typ = I64; pack = None; _} as mo) -> op 0x29; memop mo
+          | Load ({typ = F32; pack = None; _} as mo) -> op 0x2a; memop mo
+          | Load ({typ = F64; pack = None; _} as mo) -> op 0x2b; memop mo
+          | Load ({typ = I32; pack = Some (Pack8, SX); _} as mo) -> op 0x2c; memop mo
+          | Load ({typ = I32; pack = Some (Pack8, ZX); _} as mo) -> op 0x2d; memop mo
+          | Load ({typ = I32; pack = Some (Pack16, SX); _} as mo) -> op 0x2e; memop mo
+          | Load ({typ = I32; pack = Some (Pack16, ZX); _} as mo) -> op 0x2f; memop mo
+          | Load ({typ = I32; pack = Some (Pack32, _); _}) -> assert false
+          | Load ({typ = I64; pack = Some (Pack8, SX); _} as mo) -> op 0x30; memop mo
+          | Load ({typ = I64; pack = Some (Pack8, ZX); _} as mo) -> op 0x31; memop mo
+          | Load ({typ = I64; pack = Some (Pack16, SX); _} as mo) -> op 0x32; memop mo
+          | Load ({typ = I64; pack = Some (Pack16, ZX); _} as mo) -> op 0x33; memop mo
+          | Load ({typ = I64; pack = Some (Pack32, SX); _} as mo) -> op 0x34; memop mo
+          | Load ({typ = I64; pack = Some (Pack32, ZX); _} as mo) -> op 0x35; memop mo
+          | Load ({typ = F32 | F64; pack = Some _; _}) -> assert false
 
-          | Store ({typ = I32; sz = None; _} as mo) -> op 0x36; memop mo
-          | Store ({typ = I64; sz = None; _} as mo) -> op 0x37; memop mo
-          | Store ({typ = F32; sz = None; _} as mo) -> op 0x38; memop mo
-          | Store ({typ = F64; sz = None; _} as mo) -> op 0x39; memop mo
-          | Store ({typ = I32; sz = Some (Pack8, _); _} as mo) -> op 0x3a; memop mo
-          | Store ({typ = I32; sz = Some (Pack16, _); _} as mo) -> op 0x3b; memop mo
-          | Store ({typ = I32; sz = Some (Pack32, _); _}) -> assert false
-          | Store ({typ = I64; sz = Some (Pack8, _); _} as mo) -> op 0x3c; memop mo
-          | Store ({typ = I64; sz = Some (Pack16, _); _} as mo) -> op 0x3d; memop mo
-          | Store ({typ = I64; sz = Some (Pack32, _); _} as mo) -> op 0x3e; memop mo
-          | Store ({typ = F32 | F64; sz = Some _; _}) -> assert false
+          | Store ({typ = I32; pack = None; _} as mo) -> op 0x36; memop mo
+          | Store ({typ = I64; pack = None; _} as mo) -> op 0x37; memop mo
+          | Store ({typ = F32; pack = None; _} as mo) -> op 0x38; memop mo
+          | Store ({typ = F64; pack = None; _} as mo) -> op 0x39; memop mo
+          | Store ({typ = I32; pack = Some (Pack8, _); _} as mo) -> op 0x3a; memop mo
+          | Store ({typ = I32; pack = Some (Pack16, _); _} as mo) -> op 0x3b; memop mo
+          | Store ({typ = I32; pack = Some (Pack32, _); _}) -> assert false
+          | Store ({typ = I64; pack = Some (Pack8, _); _} as mo) -> op 0x3c; memop mo
+          | Store ({typ = I64; pack = Some (Pack16, _); _} as mo) -> op 0x3d; memop mo
+          | Store ({typ = I64; pack = Some (Pack32, _); _} as mo) -> op 0x3e; memop mo
+          | Store ({typ = F32 | F64; pack = Some _; _}) -> assert false
 
           | MemorySize -> op 0x3f; u8 0x00
           | MemoryGrow -> op 0x40; u8 0x00
@@ -359,7 +360,7 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
           | BrTable (xs, x) -> op 0x0e; vec var xs; var x
           | Return -> op 0x0f
           | Call (_, _, x) -> op 0x10; var x
-          | CallIndirect (_, _, x) -> op 0x11; var x; u8 0x00
+          | CallIndirect (y, _, _, x) -> op 0x11; var y; var x
           | Merge -> ()
         end
 
@@ -466,30 +467,26 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
       section 10 (vec code) fs (fs <> [])
 
     (* Element section *)
-    let segment_data dat (seg : Segment.DataSegment.t) =
-      let index = seg.index in
-      let offset = seg.offset in
-      let init = seg.init in
-      var index; const offset; dat init
-
-    let segment_elem dat (seg : Segment.ElemSegment.t) = (* TODO: extend to any segment *)
-      let index = seg.index in
-      let offset = seg.offset in
-      let init = seg.init in
-      var index; const offset; dat init
-
-    let table_segment seg =
-      segment_elem (vec var) seg
+    let elem (_ : Elem_segment.t) =
+      failwith "NYI"
 
     let elem_section elems =
-       section 9 (vec table_segment) elems (elems <> [])
+       section 9 (vec elem) elems (elems <> [])
 
     (* Data section *)
-    let memory_segment seg =
-      segment_data string seg
+    let data (seg : Data_segment.t) =
+      match seg.dmode with
+      | Segment_mode.Passive ->
+         u32 0x01l; string seg.dinit
+      | Segment_mode.Active {table_index; offset} when table_index = 0l ->
+         u32 0x00l; const offset; string seg.dinit
+      | Segment_mode.Active {table_index; offset} ->
+         u32 0x02l; var table_index; const offset; string seg.dinit
+      | Segment_mode.Declarative ->
+         failwith "illegal declarative data segment"
 
-    let data_section data =
-      section 11 (vec memory_segment) data (data <> [])
+    let data_section datas =
+      section 11 (vec data) datas (datas <> [])
 
     (* Module *)
 
@@ -512,7 +509,7 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
       let start_section = size (fun () -> start_section m.start) in
       let elem_section = size (fun () -> elem_section m.elems) in
       let code_section = size (fun () -> code_section m.funcs) in
-      let data_section = size (fun () -> data_section m.data) in
+      let data_section = size (fun () -> data_section m.datas) in
       { type_section; import_section; func_section; table_section; memory_section;
         global_section; export_section; start_section; elem_section; code_section; data_section }
   end in

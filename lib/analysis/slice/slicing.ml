@@ -185,7 +185,7 @@ let type_of_data
     match i.instr with
     | Nop -> ([], [])
     | Drop -> ([Any "any"], [])
-    | Select -> ([Any "a"; Any "a"; T Type.I32], [Any "a"])
+    | Select _ -> ([Any "a"; Any "a"; T Type.I32], [Any "a"])
     | MemorySize -> ([], [T Type.I32])
     | MemoryGrow -> ([T Type.I32], [T Type.I32])
     | Const (I32 _) -> ([], [T Type.I32])
@@ -234,7 +234,7 @@ let type_of_control
     (* instruction is reachable *)
     match i.instr with
     | Call (_, (in_type, out_type), _) -> (List.map in_type ~f:(fun t -> T t), List.map out_type ~f:(fun t -> T t))
-    | CallIndirect (_, (in_type, out_type), _) ->
+    | CallIndirect (_, _, (in_type, out_type), _) ->
       ((List.map in_type ~f:(fun t -> T t)) @ [T Type.I32], (List.map out_type ~f:(fun t -> T t)))
     | If (bt, _, _, _) ->
       (* the net effect of the head, which drops the first element of the stack *)

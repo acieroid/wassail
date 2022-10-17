@@ -49,16 +49,29 @@ end
 include T
 include Comparator.Make(T)
 
+(** Constructs a value from a numeric wasm value.
+    @param v the wasm numeric value *)
+let of_wasm_num (v : Wasm.Values.num) : t =
+  match v with
+  | I32 x -> I32 x
+  | I64 x -> I64 x
+  | F32 x -> F32 x
+  | F64 x -> F64 x
 
 (** Constructs a value from a wasm value.
     @param v the wasm value *)
 let of_wasm (v : Wasm.Values.value) : t =
   match v with
+  | Num x -> of_wasm_num x
+  | Vec _ -> Unsupported.vector_type ()
+  | Ref _ -> Unsupported.reference_type ()
+
+(*
   | I32 x -> I32 x
   | I64 x -> I64 x
   | F32 x ->  F32 x
   | F64 x -> F64 x
-
+*)
 let typ (v : t) : Type.t = match v with
   | I32 _ -> Type.I32
   | I64 _ -> Type.I64

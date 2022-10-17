@@ -69,7 +69,7 @@ let control_instr_transfer
     in
     begin match i.instr with
       | Call (arity, _, f) -> `Simple (apply_fun f arity)
-      | CallIndirect (arity, _, typ) ->
+      | CallIndirect (_, arity, _, typ) ->
         let funs_with_matching_type = Call_graph.indirect_call_targets module_ typ in
         `Simple (List.fold_left funs_with_matching_type
                    ~init:state

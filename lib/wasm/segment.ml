@@ -1,4 +1,4 @@
-open Core
+(* open Core
 
 module type SegmentType = sig
   type t
@@ -46,3 +46,4 @@ end
 module ElemSegment = struct
   include Make(Elem)
 end
+*)

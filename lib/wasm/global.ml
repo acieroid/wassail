@@ -25,7 +25,7 @@ type t = {
 
 let of_wasm (module_ : Wasm.Ast.module_) (idx : Int32.t) (g : Wasm.Ast.global) : t = {
   gtype = global_type_of_wasm g.it.gtype;
-  value = Instr.seq_of_wasm module_ (Instr.Label.maker (Instr.Label.Function idx)) g.it.value.it;
+  value = Instr.seq_of_wasm module_ (Instr.Label.maker (Instr.Label.Function idx)) g.it.ginit.it;
 }
 
 let of_wasm_import (t : Wasm.Types.global_type) : t = {

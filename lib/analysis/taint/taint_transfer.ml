@@ -42,7 +42,7 @@ module Make (* : Transfer.TRANSFER *) = struct
       | None -> failwith "Taint: no return value" in
     match i.instr with
     | Nop | MemorySize | Drop | MemoryGrow -> state
-    | Select ->
+    | Select _ ->
       let ret = ret i in
       let (_c, v2, v1) = pop3 (Spec.get_or_fail (fst i.annotation_before)).vstack in
       (* TODO: could improve precision by checking the constraints on c: if it is precisely zero/not-zero, we can only include v1 or v2 *)
@@ -166,7 +166,7 @@ module Make (* : Transfer.TRANSFER *) = struct
     in
     match i.instr with
     | Call (arity, _, f) -> `Simple (apply_summary f arity state)
-    | CallIndirect (arity, _, typ) ->
+    | CallIndirect (_, arity, _, typ) ->
       let targets = Call_graph.indirect_call_targets module_ typ in
       (* Apply the summaries *)
       `Simple (List.fold_left targets

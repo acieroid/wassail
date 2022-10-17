@@ -5,6 +5,7 @@ module Label = struct
   type section =
     | Function of Int32.t (** Instruction is part of the function with the given index *)
     | Elem of Int32.t (** Instruction is part of table elements with the given index *)
+    | Data of Int32.t (** Instruction is part of data element with the given index *)
     | MergeInFunction of Int32.t (** Instruction is a merge instruction in the given function *)
     | Dummy (** Dummy section, introduced by an extra processing phase (e.g., slicing) *)
   [@@deriving sexp, compare, equal]
@@ -12,6 +13,7 @@ module Label = struct
   let section_to_string (s : section) = match s with
     | Function n -> Printf.sprintf "%ld" n
     | Elem n -> Printf.sprintf "elem%ld" n
+    | Data n -> Printf.sprintf "data%ld" n
     | MergeInFunction n -> Printf.sprintf "m%ld" n
     | Dummy -> "d"
 
@@ -84,7 +86,7 @@ module T = struct
   type data =
     | Nop
     | Drop
-    | Select
+    | Select of Type.t list option
     | MemorySize | MemoryGrow
     | Const of Prim_value.t
     | Unary of Unop.t
@@ -106,7 +108,7 @@ module T = struct
     | Loop of block_type * arity * 'a t list
     | If of block_type * arity * 'a t list * 'a t list
     | Call of arity * (Type.t list * Type.t list) * Int32.t
-    | CallIndirect of arity * (Type.t list * Type.t list) * Int32.t
+    | CallIndirect of Int32.t * arity * (Type.t list * Type.t list) * Int32.t
     | Br of Int32.t
     | BrIf of Int32.t
     | BrTable of Int32.t list * Int32.t
@@ -146,7 +148,7 @@ let data_to_string (instr : data) : string =
   match instr with
      | Nop -> "nop"
      | Drop -> "drop"
-     | Select -> "select"
+     | Select _ -> "select"
      | MemorySize -> "memory.size"
      | MemoryGrow -> "memory.grow"
      | Const v -> Printf.sprintf "%s.const %s" (Type.to_string (Prim_value.typ v)) (Prim_value.to_string v)
@@ -184,7 +186,7 @@ let block_type_to_string (bt : block_type) : string = match bt with
 let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot_to_string : 'a -> string = fun _ -> "") (instr : 'a control)  : string =
   match instr with
   | Call (_, _, v) -> Printf.sprintf "call %s" (Int32.to_string v)
-  | CallIndirect (_, _, v) -> Printf.sprintf "call_indirect (type %ld)" v
+  | CallIndirect (_, _, _, v) -> Printf.sprintf "call_indirect (type %ld)" v
   | Br b -> Printf.sprintf "br %s" (Int32.to_string b)
   | BrIf b -> Printf.sprintf "br_if %s" (Int32.to_string b)
   | BrTable (t, b) -> Printf.sprintf "br_table %s %s" (String.concat ~sep:" " (List.map t ~f:Int32.to_string)) (Int32.to_string b)
@@ -238,7 +240,7 @@ let to_mnemonic (instr : 'a t) : string = match instr with
   | Data d -> begin match d.instr with
       | Nop -> "nop"
       | Drop -> "drop"
-      | Select -> "select"
+      | Select _ -> "select"
       | MemorySize -> "memory.size"
       | MemoryGrow -> "memory.grow"
       | Const v -> Printf.sprintf "%s.const" (Type.to_string (Prim_value.typ v))
@@ -260,7 +262,7 @@ let to_mnemonic (instr : 'a t) : string = match instr with
       | Loop (_, _, _) -> "loop"
       | If (_, _, _, _) -> "if"
       | Call (_, _, _) -> "call"
-      | CallIndirect (_, _, _) -> "call_indirect"
+      | CallIndirect (_, _, _, _) -> "call_indirect"
       | Br _ -> "br"
       | BrIf _ -> "br_if"
       | BrTable (_, _) -> "br_table"
@@ -296,7 +298,7 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
     let body = seq_of_wasm m new_label instrs in
     control_labelled ~label:label (Block (block_type, (arity_in, arity_out), body))
   | Const lit ->
-    data_labelled (Const (Prim_value.of_wasm lit.it))
+    data_labelled (Const (Prim_value.of_wasm_num lit.it))
   | Binary bin ->
     data_labelled (Binary (Binop.of_wasm bin))
   | Compare rel ->
@@ -322,8 +324,8 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
     control_labelled (Return)
   | Unreachable ->
     control_labelled (Unreachable)
-  | Select ->
-    data_labelled (Select)
+  | Select types ->
+    data_labelled (Select (Option.map ~f:(List.map ~f:Type.of_wasm) types))
   | Loop (st, instrs) ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_block m st in
     assert (arity_in = 0); (* what does it mean to have arity_in > 0 for a loop? *)
@@ -337,12 +339,12 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
     let body1 = seq_of_wasm m new_label instrs1 in
     let body2 = seq_of_wasm m new_label instrs2 in
     control_labelled ~label:label (If (Wasm_helpers.type_of_block m st, (arity_in, arity_out), body1, body2))
-  | CallIndirect f ->
+  | CallIndirect (table, f) ->
     let ((arity_in, arity_out), t) = Wasm_helpers.arity_and_type_of_fun_type m f in
     if arity_out > 1 then
       failwith "Unsupported: indirect function call with more than one return value"
     else
-    control_labelled (CallIndirect ((arity_in, arity_out), t, f.it))
+    control_labelled (CallIndirect (table.it, (arity_in, arity_out), t, f.it))
   | GlobalGet g ->
     data_labelled (GlobalGet g.it)
   | GlobalSet g ->
@@ -353,12 +355,20 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
     data_labelled (Store (Memoryop.of_wasm_store op))
   | MemorySize -> data_labelled (MemorySize)
   | MemoryGrow -> data_labelled MemoryGrow
+  | MemoryFill | MemoryCopy | MemoryInit _ -> Unsupported.memory_2_instructions ()
   | Test op ->
     data_labelled (Test (Testop.of_wasm op))
   | Convert op ->
     data_labelled (Convert (Convertop.of_wasm op))
   | Unary op ->
     data_labelled (Unary (Unop.of_wasm op))
+  | VecLoad _ | VecStore _ | VecLoadLane _ | VecStoreLane _
+    | VecConst _ | VecTest _ | VecCompare _ | VecUnary _ | VecBinary _ | VecConvert _
+    | VecShift _ | VecBitmask _ | VecTestBits _ | VecUnaryBits _ | VecBinaryBits _ | VecTernaryBits _
+    | VecSplat _ | VecExtract _ | VecReplace _ -> Unsupported.vector_type ()
+  | RefNull _ | RefFunc _ | RefIsNull -> Unsupported.reference_type ()
+  | TableGet _ | TableSet _ | TableGrow _ | TableFill _ | TableCopy _ | TableInit _ | TableSize _ -> Unsupported.table_instructions ()
+  | ElemDrop _ | DataDrop _ -> Unsupported.drop_2_instructions ()
 
 (** Creates a sequence of instructions from their Wasm representation *)
 and seq_of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (is : Wasm.Ast.instr list) : unit t list =
@@ -381,7 +391,7 @@ and map_annotation_control (i : ('a control, 'a) labelled) ~(f : 'a t ->  'b * '
                                                List.map then_ ~f:(map_annotation ~f:f),
                                                List.map else_ ~f:(map_annotation ~f:f))
              | Call (arity, t, f) -> Call (arity, t, f)
-             | CallIndirect (arity, t, f) -> CallIndirect (arity, t, f)
+             | CallIndirect (table, arity, t, f) -> CallIndirect (table, arity, t, f)
              | Br n -> Br n
              | BrIf n -> BrIf n
              | BrTable (l, n) -> BrTable (l, n)
@@ -404,7 +414,7 @@ and drop_labels_control (i : ('a control, 'a) labelled) : ('a control, 'a) label
                                                List.map then_ ~f:drop_labels,
                                                    List.map else_ ~f:drop_labels)
              | Call (arity, t, f) -> Call (arity, t, f)
-             | CallIndirect (arity, t, f) -> CallIndirect (arity, t, f)
+             | CallIndirect (table, arity, t, f) -> CallIndirect (table, arity, t, f)
              | Br n -> Br n
              | BrIf n -> BrIf n
              | BrTable (l, n) -> BrTable (l, n)

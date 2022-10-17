@@ -104,7 +104,7 @@ module Spec_inference = struct
       | MemorySize -> { state with vstack = ret :: state.vstack }
       | MemoryGrow -> { state with vstack = ret :: drop 1 state.vstack }
       | Drop -> { state with vstack = drop 1 state.vstack }
-      | Select -> { state with vstack = ret :: (drop 3 state.vstack) }
+      | Select _ -> { state with vstack = ret :: (drop 3 state.vstack) }
       | LocalGet l -> { state with vstack = (if !propagate_locals then get l state.locals else ret) :: state.vstack }
       | LocalSet l -> { state with vstack = drop 1 state.vstack; locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
       | LocalTee l -> { state with locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
@@ -145,7 +145,7 @@ module Spec_inference = struct
       match i.instr with
       | Call ((arity_in, arity_out), _, _) ->
         `Simple (NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) })
-      | CallIndirect ((arity_in, arity_out), _, _) ->
+      | CallIndirect (_, (arity_in, arity_out), _, _) ->
         (* Like call, but reads the function index from the vstack *)
         `Simple (NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) })
       | Br n ->
@@ -305,7 +305,7 @@ let instr_def (cfg : t Cfg.t) (instr : t Instr.t) : Var.t list =
       let top_n n = take state_after.vstack n in
       begin match i.instr with
         | Nop | Drop -> []
-        | Select | MemorySize
+        | Select _ | MemorySize
         | Unary _ | Binary _ | Compare _ | Test _ | Convert _
         | Const _ | MemoryGrow-> top_n 1
         | LocalGet _ ->
@@ -340,7 +340,7 @@ let instr_def (cfg : t Cfg.t) (instr : t Instr.t) : Var.t list =
         | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
         | If _ -> [] (* We could say that if defines its "resulting" value, but that will be handled by the merge node *)
         | Call ((_, arity_out), _, _) -> top_n arity_out
-        | CallIndirect ((_, arity_out), _, _) -> top_n arity_out
+        | CallIndirect (_, (_, arity_out), _, _) -> top_n arity_out
         | Merge ->
           (* Merge instruction defines new variabes *)
           let block = Cfg.find_enclosing_block_exn cfg (Instr.label instr) in
@@ -369,7 +369,7 @@ let instr_use (cfg : t Cfg.t) ?var:(var : Var.t option) (instr : t Instr.t) : Va
     begin match i.instr with
       | Nop -> []
       | Drop -> top_n 1
-      | Select -> top_n 3
+      | Select _ -> top_n 3
       | MemorySize -> []
       | MemoryGrow -> top_n 1
       | Const _ -> []
@@ -398,7 +398,7 @@ let instr_use (cfg : t Cfg.t) ?var:(var : Var.t option) (instr : t Instr.t) : Va
       | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
       | If _ -> top_n 1 (* relies on top value to decide the branch taken *)
       | Call ((arity_in, _), _, _) -> top_n arity_in (* uses the n arguments from the stack *)
-      | CallIndirect ((arity_in, _), _, _) -> top_n (arity_in + 1) (* + 1 because we need to pop the index that will refer to the called function, on top of the arguments *)
+      | CallIndirect (_, (arity_in, _), _, _) -> top_n (arity_in + 1) (* + 1 because we need to pop the index that will refer to the called function, on top of the arguments *)
       | BrIf _ | BrTable _ -> top_n 1
       | Merge ->
         (* Merge instruction uses the variables it redefines *)

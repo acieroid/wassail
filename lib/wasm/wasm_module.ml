@@ -21,8 +21,8 @@ module T = struct
     memory_insts : Memory_inst.t list; (** The memory instances *)
     tables : Table.t list; (** The table types *)
     table_insts : Table_inst.t list; (** The table instances *)
-    data : Segment.DataSegment.t list; (** The data segment containing initial data *)
-    elems : Segment.ElemSegment.t list; (** The elem segment *)
+    datas : Data_segment.t list; (** The data segments containing initial data *)
+    elems : Elem_segment.t list; (** The elem segments *)
   }
   [@@deriving sexp, compare, equal]
 end
@@ -132,21 +132,21 @@ let of_wasm (m : Wasm.Ast.module_) : t =
   let memory_insts = List.filter_map m.it.imports ~f:(fun import -> match import.it.idesc.it with
       | MemoryImport m -> Some (Memory_inst.of_wasm_type m)
       | _ -> None) @ (List.map m.it.memories ~f:Memory_inst.of_wasm) in
-  let data = List32.mapi m.it.data ~f:(Segment.DataSegment.of_wasm m) in
+  let datas = List32.mapi m.it.datas ~f:(Data_segment.of_wasm m) in
   let imports = List.map m.it.imports ~f:Import.of_wasm in
   let tables = List.map m.it.tables ~f:Table.of_wasm in
   let table_insts = List.map m.it.tables ~f:(fun t ->
         Table_inst.init
           (Table.of_wasm t)
-          (List32.mapi m.it.elems ~f:(Elem.of_wasm m))) in
-  let start = Option.map m.it.start ~f:(fun v -> v.it) in
-  let elems = List32.mapi m.it.elems ~f:(Segment.ElemSegment.of_wasm m) in
+          (List32.mapi m.it.elems ~f:(Elem_segment.of_wasm m))) in
+  let start = Option.map m.it.start ~f:(fun v -> v.it.sfunc.it) in
+  let elems = List32.mapi m.it.elems ~f:(Elem_segment.of_wasm m) in
   ({
     start;
     imports; nfuncimports; imported_funcs;
     exports; exported_funcs;
     funcs;
-    data; elems;
+    datas; elems;
     imported_globals; imported_global_types; global_types; nglobals; globals;
     memories; memory_insts;
     tables; table_insts;
@@ -259,19 +259,19 @@ let to_string (m : t) : string =
     end;
     put ")\n" in
   let exports () = List.iter m.exports ~f:export in
-  let elem (elem : Segment.ElemSegment.t) =
-    put (Printf.sprintf "(elem (;%ld;) " elem.index);
-    put (Printf.sprintf "(%s)" (Instr.list_to_string elem.offset (fun () -> "")));
-    (* TODO: this is not the general case, check that this is enough *)
-    put (Printf.sprintf " func %s)\n" (String.concat ~sep:" " (List.map elem.init ~f:Int32.to_string))) in
+  let elem (elem : Elem_segment.t) =
+    put (Printf.sprintf "(elem (;%ld;) " elem.idx);
+    put (Printf.sprintf "(%s)" (Instr.list_to_string (Segment_mode.offset elem.emode) (fun () -> "")));
+    (* TODO: this is not the general case, check that this is enough *)
+    put (Printf.sprintf " func %s)\n" (String.concat ~sep:" " (List.map ~f:(fun l -> Instr.list_to_string l (fun () -> "")) elem.einit))) in
   let elems () = List.iter m.elems ~f:elem in
-  let data (data : Segment.DataSegment.t) =
-    put (Printf.sprintf "  (data (;%ld;) " data.index);
-    put (Printf.sprintf "(offset %s)" (Instr.list_to_string data.offset (fun () -> "")));
+  let data (data : Data_segment.t) =
+    put (Printf.sprintf "  (data (;%ld;) " data.idx);
+    put (Printf.sprintf "(offset %s)" (Instr.list_to_string (Segment_mode.offset data.dmode) (fun () -> "")));
     put "\"";
-    put (string_to_wasm_string data.init); (* TODO: make sure to escape what is needed *)
+    put (string_to_wasm_string data.dinit); (* TODO: make sure to escape what is needed *)
     put "\")\n" in
-  let datas () = List.iter m.data ~f:data in
+  let datas () = List.iter m.datas ~f:data in
   let global (i : int) (g : Global.t) =
     put (Printf.sprintf "  (global (;%d;) %s" i
            (match g.gtype.mutability with

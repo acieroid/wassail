@@ -166,19 +166,21 @@ let evaluate =
 
 (* Generate a slice for printf function calls with a specific string *)
 let generate_slice (filename : string) (output_file : string) =
-  let pattern = "\nORBS:" in
+  let _pattern = "\nORBS:" in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
   Spec_inference.use_const := false;
   let wasm_mod = Wasm_module.of_file filename in
   (* Find the specific string in the data section *)
-  let str_pos = match List.find_map wasm_mod.data ~f:(fun segment ->
+  let str_pos = match List.find_map wasm_mod.datas ~f:(fun _segment ->
+                          failwith "TODO: find ORBS string" (*
+                                                              Prior to WebAssembly 2.0.0, it was done as follows:
       match String.substr_index segment.init ~pattern with
       | Some idx -> begin match segment.offset with
         | (Instr.Data {instr = Instr.Const (Prim_value.I32 n); _}) :: [] -> Some (Int32.(n + (of_int_exn idx)))
         | _ -> failwith "unsupported segment offset"
         end
-      | None -> None) with
+      | None -> None *)) with
   | Some idx -> idx
   | None -> failwith "cannot find pattern in any data segment" in
   Printf.printf "data segment: %ld\n" str_pos;
@@ -245,19 +247,21 @@ let count_instructions_in_slice (filename : string) (output_file : string) =
     end;
     put (Instr.list_to_string f.code.body ?indent:(Some 2) ?sep:(Some "\n") (fun () -> ""));
     put ")\n" in
-  let pattern = "\nORBS:" in
+  let _pattern = "\nORBS:" in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
   Spec_inference.use_const := false;
   let wasm_mod = Wasm_module.of_file filename in
   (* Find the specific string in the data section *)
-  let str_pos = match List.find_map wasm_mod.data ~f:(fun segment ->
+  let str_pos = match List.find_map wasm_mod.datas ~f:(fun _segment ->
+                          failwith "TODO: find slicing criterion for WebAssembly 2.0.0"
+                                                       (* Prior to 2.0.0, it was done as follows:
       match String.substr_index segment.init ~pattern with
       | Some idx -> begin match segment.offset with
         | (Instr.Data {instr = Instr.Const (Prim_value.I32 n); _}) :: [] -> Some (Int32.(n + (of_int_exn idx)))
         | _ -> failwith "unsupported segment offset"
         end
-      | None -> None) with
+      | None -> None *)) with
   | Some idx -> idx
   | None -> failwith "cannot find pattern in any data segment" in
   (* Find the index of the printf function (it should be exported, otherwise it is unnamed) *)
