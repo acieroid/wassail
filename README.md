@@ -8,10 +8,9 @@
 # Installation
 0. Install [opam](https://opam.ocaml.org/)
 
-2. Install version `1.1.1` of the `wasm` package: `opam install wasm.1.1.1`
+1. Run `opam install core_unix`
 
-1. Run `opam install .`
-   (It could be the case that you need to run `opam install core_unix` first, as some users have reported trouble with that)
+2. Run `opam install .`
 
 # Usage
 Wassail can perform a number of tasks on WebAssembly modules, both in their textual representation (`.wat` files) or in their binary representation (`.wasm`)
