@@ -1,4 +1,4 @@
-type t = | FuncRefType | ExternRefType
+type t = FuncRefType | ExternRefType
 [@@deriving sexp, compare, equal]
 
 let of_wasm (t : Wasm.Types.ref_type) : t =

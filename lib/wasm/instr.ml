@@ -419,9 +419,10 @@ let rec drop_labels (i : 'a t) : 'a t =
   | Data d -> Data (drop_labels_data d)
   | Control c -> Control (drop_labels_control c)
 and drop_labels_data (i : (data, 'a) labelled) : (data, 'a) labelled =
-  { i with label = Label.{ section = Dummy; id = 0 } }
+  { i with label = Label.{ section = Dummy; id = 0 }; line_number = 0; }
 and drop_labels_control (i : ('a control, 'a) labelled) : ('a control, 'a) labelled =
   { i with label = Label.{ section = Dummy; id = 0 };
+           line_number = 0;
            instr = match i.instr with
              | Block (bt, arity, instrs) -> Block (bt, arity, List.map instrs ~f:drop_labels)
              | Loop (bt, arity, instrs) -> Loop (bt, arity, List.map instrs ~f:drop_labels)
