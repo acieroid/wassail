@@ -61,6 +61,7 @@ let eqs_data_instr (instr : (Instr.data, Spec.t) Instr.labelled) : VarEq.Set.t =
     VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get g (Spec.get_or_fail instr.annotation_after).globals) (Spec_inference.top (Spec.get_or_fail instr.annotation_before).vstack))
   | Load _ -> VarEq.Set.empty (* TODO (it is sound to ignore them, but shouldn't be too complicated to deal with this) *)
   | Store _ -> VarEq.Set.empty (* TODO: same *)
+  | RefIsNull | RefNull _ | RefFunc _ -> VarEq.Set.empty
 
 (** Perform variable propagation *)
 let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =

@@ -101,6 +101,10 @@ module T = struct
     | GlobalSet of Int32.t
     | Load of Memoryop.t
     | Store of Memoryop.t
+    | RefNull of Ref_type.t
+    | RefFunc of Int32.t
+    | RefIsNull
+
 
   (** Control instructions *)
   and 'a control =
@@ -176,6 +180,9 @@ let data_to_string (instr : data) : string =
          (Memoryop.suffix_to_string op false)
          (if String.is_empty memop then "" else " ")
          memop
+     | RefNull t -> Printf.sprintf "ref.null %s" (Ref_type.to_string t)
+     | RefFunc f -> Printf.sprintf "ref.func %ld" f
+     | RefIsNull -> "ref.isnull"
 
 let block_type_to_string (bt : block_type) : string = match bt with
   | None -> ""
@@ -256,6 +263,9 @@ let to_mnemonic (instr : 'a t) : string = match instr with
       | GlobalSet _ -> "global.set"
       | Load _ -> "load"
       | Store _ -> "store"
+      | RefNull _ -> "ref.null"
+      | RefFunc _ -> "ref.func"
+      | RefIsNull -> "ref.isnull"
     end
   | Control c -> begin match c.instr with
       | Block (_, _, _) -> "block"
@@ -362,11 +372,16 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
     data_labelled (Convert (Convertop.of_wasm op))
   | Unary op ->
     data_labelled (Unary (Unop.of_wasm op))
+  | RefNull t ->
+     data_labelled (RefNull (Ref_type.of_wasm t))
+  | RefFunc f ->
+     data_labelled (RefFunc f.it)
+  | RefIsNull ->
+     data_labelled RefIsNull
   | VecLoad _ | VecStore _ | VecLoadLane _ | VecStoreLane _
     | VecConst _ | VecTest _ | VecCompare _ | VecUnary _ | VecBinary _ | VecConvert _
     | VecShift _ | VecBitmask _ | VecTestBits _ | VecUnaryBits _ | VecBinaryBits _ | VecTernaryBits _
     | VecSplat _ | VecExtract _ | VecReplace _ -> Unsupported.vector_type ()
-  | RefNull _ | RefFunc _ | RefIsNull -> Unsupported.reference_type ()
   | TableGet _ | TableSet _ | TableGrow _ | TableFill _ | TableCopy _ | TableInit _ | TableSize _ -> Unsupported.table_instructions ()
   | ElemDrop _ | DataDrop _ -> Unsupported.drop_2_instructions ()
 

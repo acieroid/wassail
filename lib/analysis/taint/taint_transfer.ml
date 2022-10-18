@@ -42,6 +42,7 @@ module Make (* : Transfer.TRANSFER *) = struct
       | None -> failwith "Taint: no return value" in
     match i.instr with
     | Nop | MemorySize | Drop | MemoryGrow -> state
+    | RefIsNull | RefNull _ | RefFunc _ -> state
     | Select _ ->
       let ret = ret i in
       let (_c, v2, v1) = pop3 (Spec.get_or_fail (fst i.annotation_before)).vstack in

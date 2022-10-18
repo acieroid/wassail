@@ -24,6 +24,8 @@ let init (t : Table.t) (elems : Elem_segment.t list) : t =
                match addrinstrs with
                | Data { instr = Const (I32 addr); _} :: [] ->
                   Wasm.Lib.Array32.set table.elems Int32.((of_int_exn idx) + offset) (Some addr)
+               | Data { instr = RefFunc addr; _} :: [] ->
+                  Wasm.Lib.Array32.set table.elems Int32.((of_int_exn idx) + offset) (Some addr)
                | _ -> Unsupported.table_init ())
         | _ -> Unsupported.table_init ()
         end

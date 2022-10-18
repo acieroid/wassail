@@ -207,6 +207,9 @@ let type_of_data
     | GlobalSet g -> ([T (List32.nth_exn cfg.global_types g)], [])
     | Load op -> ([T Type.I32], [T op.typ])
     | Store op -> ([T Type.I32; T op.typ], [])
+    | RefIsNull -> ([Any "any"], [])
+    | RefNull _ -> ([], [Any "any"])
+    | RefFunc _ -> ([], [Any "any"])
 
 let type_of_control
     (i : ('a Instr.control, 'a) Instr.labelled)

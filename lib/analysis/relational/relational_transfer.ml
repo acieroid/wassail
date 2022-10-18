@@ -231,6 +231,7 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
         List.reduce_exn states ~f:Domain.join
       end in
     res
+  | RefIsNull | RefNull _ | RefFunc _ -> Unsupported.reference_instructions ()
 
 let control_instr_transfer
     (module_ : Wasm_module.t) (* The wasm module (read-only) *)

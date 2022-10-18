@@ -120,7 +120,10 @@ module Spec_inference = struct
       | Store { offset; _} ->
         let (value, addr) = pop2 state.vstack in
         { state with vstack = drop 2 state.vstack;
-                     memory = Var.OffsetMap.update state.memory (addr, offset) ~f:(fun _ -> value) })
+                     memory = Var.OffsetMap.update state.memory (addr, offset) ~f:(fun _ -> value) }
+      | RefIsNull -> { state with vstack = ret :: (drop 1 state.vstack) }
+      | RefFunc _ -> { state with vstack = ret :: state.vstack }
+      | RefNull _ -> { state with vstack = ret :: state.vstack })
 
   let control_instr_transfer (_module_ : Wasm_module.t) _summaries (cfg : 'a Cfg.t) (i : ('a Instr.control, 'a) Instr.labelled) : state -> [`Simple of state | `Branch of state * state ] = Spec.wrap ~default:(`Simple bottom) (function state ->
       let ret = Var.Var i.label in
@@ -307,7 +310,8 @@ let instr_def (cfg : t Cfg.t) (instr : t Instr.t) : Var.t list =
         | Nop | Drop -> []
         | Select _ | MemorySize
         | Unary _ | Binary _ | Compare _ | Test _ | Convert _
-        | Const _ | MemoryGrow-> top_n 1
+        | Const _ | MemoryGrow
+        | RefIsNull | RefNull _ | RefFunc _ -> top_n 1
         | LocalGet _ ->
           if !propagate_locals then
             []
@@ -389,6 +393,8 @@ let instr_use (cfg : t Cfg.t) ?var:(var : Var.t option) (instr : t Instr.t) : Va
       | GlobalSet _ -> top_n 1
       | Load _ -> top_n 1 (* use memory address from the top of the stack *)
       | Store _ -> top_n 2 (* use address and valu from the top of the stack *)
+      | RefIsNull  -> top_n 1
+      | RefNull _ | RefFunc _ -> []
     end
   | Instr.Control i ->
     let top_n n = match i.annotation_before with
