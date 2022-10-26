@@ -166,21 +166,20 @@ let evaluate =
 
 (* Generate a slice for printf function calls with a specific string *)
 let generate_slice (filename : string) (output_file : string) =
-  let _pattern = "\nORBS:" in
+  let refined = true in (* Set to false if you want to slice the printf call, to true if you want to slice on the second printf argument *)
+  let pattern = "\nORBS:" in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
   Spec_inference.use_const := false;
   let wasm_mod = Wasm_module.of_file filename in
   (* Find the specific string in the data section *)
-  let str_pos = match List.find_map wasm_mod.datas ~f:(fun _segment ->
-                          failwith "TODO: find ORBS string" (*
-                                                              Prior to WebAssembly 2.0.0, it was done as follows:
-      match String.substr_index segment.init ~pattern with
-      | Some idx -> begin match segment.offset with
-        | (Instr.Data {instr = Instr.Const (Prim_value.I32 n); _}) :: [] -> Some (Int32.(n + (of_int_exn idx)))
-        | _ -> failwith "unsupported segment offset"
-        end
-      | None -> None *)) with
+  let str_pos = match List.find_map wasm_mod.datas ~f:(fun segment ->
+                          match String.substr_index segment.dinit ~pattern with
+                          | Some idx -> begin match (Segment_mode.offset segment.dmode) with
+                                        | (Instr.Data {instr = Instr.Const (Prim_value.I32 n); _}) :: [] -> Some (Int32.(n + (of_int_exn idx)))
+                                        | _ -> failwith "unsupported segment offset"
+                                        end
+                          | None -> None) with
   | Some idx -> idx
   | None -> failwith "cannot find pattern in any data segment" in
   Printf.printf "data segment: %ld\n" str_pos;
@@ -196,9 +195,9 @@ let generate_slice (filename : string) (output_file : string) =
   Spec_inference.propagate_locals := false;
   Printf.printf "printf id: %ld\n" printf_export_idx;
   (* Find the function and slicing criterion: it should call printf with the string's position in the data segment as argument *)
+  Spec_inference.use_const := true;
+  Spec_inference.propagate_locals := true;
   let (function_idx, slicing_criteria) = match List.find_map wasm_mod.funcs ~f:(fun func ->
-      Spec_inference.use_const := true;
-      Spec_inference.propagate_locals := true;
       let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
       match List.filter_map (Cfg.all_instructions_list cfg) ~f:(function
           | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
@@ -211,12 +210,42 @@ let generate_slice (filename : string) (output_file : string) =
       | l -> Some (func.idx, l)) with
   | Some r -> r
   | None -> failwith "cannot find function to slice" in
+  (* TODO: now we know the function to slide, and the label of the call to printf. What we want is actually the definition point of the slicing criterion, which is the second argument to printf *)
+  Spec_inference.use_const := false;
+  Spec_inference.propagate_globals := false;
+  Spec_inference.propagate_locals := false;
+  let actual_slicing_criteria =
+    match List.find_map wasm_mod.funcs ~f:(fun func ->
+              if Int32.(func.idx = function_idx) then begin
+                Printf.printf "We are slicing function %ld\n" func.idx;
+                let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
+                let (_, _, use_def) = Use_def.make cfg in
+                match List.filter_map (Cfg.all_instructions_list cfg) ~f:(function
+                          | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
+                             begin match (Spec.get_or_fail annotation_before).vstack with
+                             | second_arg :: _ when List.mem slicing_criteria label ~equal:Instr.Label.equal ->
+                                Printf.printf "second arg is: %s\n" (Var.to_string second_arg);
+                                begin match Use_def.UseDefChains.get use_def (Use_def.Use.make label second_arg) with
+                                | Use_def.Def.Instruction (arg_label, _) ->
+                                   Printf.printf "it is defined at: %s\n" (Instr.Label.to_string arg_label);
+                                   Some arg_label
+                                | _ -> None
+                                end
+                             | _ -> None
+                             end
+                          | _ -> None) with
+                | [] -> None
+                | l -> Some l
+              end else
+                None) with
+    | Some r -> r
+    | None -> failwith "cannot find second argument" in
   (* Perform the actual slicing *)
   Spec_inference.use_const := false;
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
   let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod function_idx) in
-  let funcinst = Slicing.slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.of_list slicing_criteria) in
+  let funcinst = Slicing.slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.of_list (if refined then actual_slicing_criteria else slicing_criteria) in
   let module_ = Wasm_module.replace_func wasm_mod function_idx funcinst in
   Out_channel.with_file output_file
     ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_))
@@ -247,21 +276,19 @@ let count_instructions_in_slice (filename : string) (output_file : string) =
     end;
     put (Instr.list_to_string f.code.body ?indent:(Some 2) ?sep:(Some "\n") (fun () -> ""));
     put ")\n" in
-  let _pattern = "\nORBS:" in
+  let pattern = "\nORBS:" in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
   Spec_inference.use_const := false;
   let wasm_mod = Wasm_module.of_file filename in
   (* Find the specific string in the data section *)
-  let str_pos = match List.find_map wasm_mod.datas ~f:(fun _segment ->
-                          failwith "TODO: find slicing criterion for WebAssembly 2.0.0"
-                                                       (* Prior to 2.0.0, it was done as follows:
-      match String.substr_index segment.init ~pattern with
-      | Some idx -> begin match segment.offset with
-        | (Instr.Data {instr = Instr.Const (Prim_value.I32 n); _}) :: [] -> Some (Int32.(n + (of_int_exn idx)))
-        | _ -> failwith "unsupported segment offset"
-        end
-      | None -> None *)) with
+  let str_pos = match List.find_map wasm_mod.datas ~f:(fun segment ->
+                          match String.substr_index segment.dinit ~pattern with
+                          | Some idx -> begin match (Segment_mode.offset segment.dmode) with
+                                        | (Instr.Data {instr = Instr.Const (Prim_value.I32 n); _}) :: [] -> Some (Int32.(n + (of_int_exn idx)))
+                                        | _ -> failwith "unsupported segment offset"
+                                        end
+                          | None -> None) with
   | Some idx -> idx
   | None -> failwith "cannot find pattern in any data segment" in
   (* Find the index of the printf function (it should be exported, otherwise it is unnamed) *)

@@ -335,6 +335,7 @@ module Test = struct
       "../../../benchmarks/polybench-clang/syrk.wat";
       "../../../benchmarks/polybench-clang/trisolv.wat";
       "../../../benchmarks/polybench-clang/trmm.wat";
+      "../../../test/element-section-func.wat";
     ] ~f:(fun program ->
         try
           let _ : t = of_file program in
@@ -345,5 +346,4 @@ module Test = struct
     let m: t = of_file "../../../test/call_indirect-with_imported_element.wat" in
     let (t1, t2) = get_func_type m 0l in
     List.is_empty t1 && (List.length t2) = 1 && Type.equal (List.hd_exn t2) Type.I32
-
 end

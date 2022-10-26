@@ -21,7 +21,7 @@ let generate =
           ~f:(fun ch ->
               Out_channel.output_string ch (Wasm_module.to_string module_)))
 
-let generate_all =
+let dump =
   Command.basic
     ~summary:"Outputs the entire WebAssembly file without modification"
     Command.Let_syntax.(

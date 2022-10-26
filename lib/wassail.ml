@@ -12,6 +12,7 @@ module Var = Var
 module Type = Type
 module Prim_value = Prim_value
 module Func_inst = Func_inst
+module Segment_mode = Segment_mode
 
 module Basic_block = Basic_block
 module Tree = Tree

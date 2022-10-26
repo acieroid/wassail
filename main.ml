@@ -9,7 +9,7 @@ let () =
     (Command.group ~summary:"Static analysis of WebAssembly"
        [
 
-       (* General utilities that only required to load the WebAssmbly files *)
+       (* General utilities that only required to load the WebAssembly files *)
          "load", Utils.load
        ; "imports", Utils.imports
        ; "exports", Utils.exports
@@ -34,7 +34,7 @@ let () =
        ; "schedule", Callgraph.schedule
 
        ; "generate", Generation.generate
-       ; "generate-all", Generation.generate_all
+       ; "dump", Generation.dump
 
        (* Other *)
        ; "spec-inference", Analysis.spec_inference
