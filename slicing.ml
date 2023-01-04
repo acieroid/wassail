@@ -13,11 +13,8 @@ let dependencies =
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
         Spec_inference.use_const := false;
-        Printf.printf "parsing module%!\n";
         let module_ = Wasm_module.of_file filename in
-        Printf.printf "spec analysis%!\n";
         let cfg = Spec_analysis.analyze_intra1 module_ funidx in
-        Printf.printf "outputting PDG to %s\n" dot_filename;
         let use_def_annot = (Use_def.annotate cfg) in
         let control_annot = (Control_deps.annotate_exact (Cfg.without_empty_nodes_with_no_predecessors cfg)) in
         Out_channel.with_file dot_filename
@@ -61,11 +58,9 @@ let postdom =
               Out_channel.output_string ch (Tree.to_dot tree)))
 
 let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
-  Printf.printf "num: %d\n" (List.length instrs);
   List.fold_left instrs
     ~init:Instr.Label.Set.empty
     ~f:(fun acc instr ->
-        Printf.printf "instr: %s:%s\n" (Instr.Label.to_string (Instr.label instr)) (Instr.to_string instr);
         Instr.Label.Set.union acc (Instr.all_labels_no_merge instr))
 
 let slice =

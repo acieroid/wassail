@@ -88,6 +88,7 @@ module T = struct
     | Drop
     | Select of Type.t list option
     | MemorySize | MemoryGrow
+    | MemoryFill | MemoryCopy | MemoryInit of Int32.t
     | Const of Prim_value.t
     | Unary of Unop.t
     | Binary of Binop.t
@@ -155,6 +156,9 @@ let data_to_string (instr : data) : string =
      | Select _ -> "select"
      | MemorySize -> "memory.size"
      | MemoryGrow -> "memory.grow"
+     | MemoryCopy -> "memory.copy"
+     | MemoryFill -> "memory.fill"
+     | MemoryInit m -> Printf.sprintf "memory.init %ld" m
      | Const v -> Printf.sprintf "%s.const %s" (Type.to_string (Prim_value.typ v)) (Prim_value.to_string v)
      | Binary b -> Printf.sprintf "%s" (Binop.to_string b)
      | Unary u -> Printf.sprintf "%s" (Unop.to_string u)
@@ -250,6 +254,9 @@ let to_mnemonic (instr : 'a t) : string = match instr with
       | Select _ -> "select"
       | MemorySize -> "memory.size"
       | MemoryGrow -> "memory.grow"
+      | MemoryCopy -> "memory.copy"
+      | MemoryFill -> "memory.fill"
+      | MemoryInit _ -> "memory.init"
       | Const v -> Printf.sprintf "%s.const" (Type.to_string (Prim_value.typ v))
       | Unary op -> Unop.to_mnemonic op
       | Binary op -> Binop.to_mnemonic op
@@ -363,9 +370,11 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
     data_labelled (Load (Memoryop.of_wasm_load op))
   | Store op ->
     data_labelled (Store (Memoryop.of_wasm_store op))
-  | MemorySize -> data_labelled (MemorySize)
+  | MemorySize -> data_labelled MemorySize
   | MemoryGrow -> data_labelled MemoryGrow
-  | MemoryFill | MemoryCopy | MemoryInit _ -> Unsupported.memory_2_instructions ()
+  | MemoryFill -> data_labelled MemoryFill
+  | MemoryCopy -> data_labelled MemoryCopy
+  | MemoryInit m -> data_labelled (MemoryInit m.it)
   | Test op ->
     data_labelled (Test (Testop.of_wasm op))
   | Convert op ->

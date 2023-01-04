@@ -69,6 +69,30 @@ let to_dot (cg : t) : string =
                                     List.map (Int32Set.to_list dsts) ~f:(fun dst ->
                                         Printf.sprintf "node%s -> node%s;\n" (Int32.to_string src) (Int32.to_string dst)))))
 
+(** Keeps only nodes reachable from the given root set *)
+let keep_reachable (cg : t) (from : Int32Set.t) : t =
+  let q = Queue.create () in
+  Int32Set.iter from ~f:(Queue.enqueue q);
+  let rec loop (new_cg : t) =
+     match Queue.dequeue q with
+    | None -> new_cg
+    | Some node ->
+      if Int32Set.mem new_cg.nodes node then
+        (* Skip this one, we already visited it *)
+        loop new_cg
+      else
+        (* Get all the directly reachable nodes *)
+      let directly_reachable_nodes = match Int32Map.find cg.edges node with
+        | None -> Int32Set.empty
+        | Some nodes -> nodes in
+      (* Enqueue all of them and recurse with the nodes added to the CG *)
+      Int32Set.iter directly_reachable_nodes ~f:(Queue.enqueue q);
+      loop {
+        nodes = Int32Set.add new_cg.nodes node;
+        edges = Int32Map.add_exn new_cg.edges ~key:node ~data:directly_reachable_nodes
+      } in
+  loop { nodes = Int32Set.empty; edges = Int32Map.empty }
+
 (** Remove nodes that are imported functions. Also removes all edges to these nodes *)
 let remove_imports (cg : t) (nimports : Int32.t) : t =
   let nodes = Int32Set.filter cg.nodes ~f:(fun n -> Int32.(n >= nimports)) in

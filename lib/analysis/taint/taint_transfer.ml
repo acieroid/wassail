@@ -9,9 +9,17 @@ module Make (* : Transfer.TRANSFER *) = struct
   type state = Taint_domain.t
   [@@deriving sexp, compare, equal]
 
-  let return_taint_specifications : Var.t Int32Map.t ref = ref (Int32Map.of_alist_exn [
-      (7l, Var.Other "fgets") (* TODO: empty, and fill it from client analysis *)
-    ])
+  (* This is a map from function index to:
+     - the taint of its return value
+     - the taint of its arguments
+     TODO: fill it from the names of the imports/exports
+   *)
+  let taint_specifications : (Taint_domain.Taint.t * (Taint_domain.Taint.t list)) StringMap.t ref =
+    let bottom = Taint_domain.Taint.Taints Var.Set.empty in
+    ref (StringMap.of_alist_exn [
+        ("fgets", (Taint_domain.Taint.Taints (Var.Set.singleton (Var.Other "fgets")),
+                   [Taint_domain.Taint.Taints (Var.Set.singleton (Var.Other "fgets")); bottom; bottom]))
+      ])
 
   (** In the initial state, we only set the taint for for parameters and the globals. *)
   let init_state (cfg : 'a Cfg.t) : state =
@@ -42,6 +50,7 @@ module Make (* : Transfer.TRANSFER *) = struct
       | None -> failwith "Taint: no return value" in
     match i.instr with
     | Nop | MemorySize | Drop | MemoryGrow -> state
+    | MemoryCopy | MemoryFill | MemoryInit _ -> state (* Not model entirely properly *)
     | RefIsNull | RefNull _ | RefFunc _ -> state
     | Select _ ->
       let ret = ret i in
@@ -139,13 +148,15 @@ module Make (* : Transfer.TRANSFER *) = struct
       (state : state) (* The pre state *)
     : [`Simple of state | `Branch of state * state ] =
     let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
+      Log.info (Printf.sprintf "applying summary of function %ld" f);
       match Int32Map.find summaries f with
       | None ->
         if Int32.(f < module_.nfuncimports) then begin
           Log.warn (Printf.sprintf "No summary found for function %ld (imported function): assuming taint is preserved" f);
           state
         end else
-          failwith (Printf.sprintf "Unexpected: analyzing a function that has no summary: %ld" f)
+          (* This function depend on another function that has not been analyzed yet, so it is part of some recursive loop. It will eventually stabilize *)
+          state
       | Some summary ->
         let args = List.take (Spec.get_or_fail (fst i.annotation_before)).vstack (fst arity) in
         let ret = if snd arity = 1 then List.hd (Spec.get_or_fail (fst i.annotation_after)).vstack else None in
@@ -159,11 +170,24 @@ module Make (* : Transfer.TRANSFER *) = struct
                ~f:(fun ((a, _offset), b) ->
                    (* Log.warn (Printf.sprintf "TODO: ignoring offset\n"); *)
                    [a; b])) ret in
-        match ret, Int32Map.find !return_taint_specifications f with
-        | Some ret_var, Some t ->
-          (* This function returns a specific taint that we have to add to ret *)
-          Taint_domain.add_taint taint_after_call ret_var (Taints (Var.Set.singleton t))
-        | _ -> taint_after_call
+        let export = List.find module_.exported_funcs ~f:(fun (id, _, _) -> Int32.(id = f)) in
+        match export with
+        | Some (_, fname, _) ->
+           Log.info (Printf.sprintf "function is named %s" fname);
+           begin match ret, StringMap.find !taint_specifications fname with
+           | Some ret_var, Some (ret_taint, args_taint) ->
+              (* This function returns a specific taint that we have to add to ret.
+               Moreover, it might taint its argument, so we propagate this taint too. *)
+              Printf.printf "I found it\n";
+              List.fold_left (List.zip_exn (List.rev args) args_taint)
+                 ~init:(Taint_domain.add_taint taint_after_call ret_var ret_taint)
+                 ~f:(fun state (var, taint) ->
+                   Printf.printf "adding taint %s to var %s\n" (Taint_domain.Taint.to_string taint) (Var.to_string var);
+                   Taint_domain.add_taint state var taint)
+           | _ -> taint_after_call
+           end
+        | None ->
+           taint_after_call
     in
     match i.instr with
     | Call (arity, _, f) -> `Simple (apply_summary f arity state)

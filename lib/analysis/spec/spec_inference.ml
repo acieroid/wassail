@@ -103,6 +103,9 @@ module Spec_inference = struct
       | Nop -> state
       | MemorySize -> { state with vstack = ret :: state.vstack }
       | MemoryGrow -> { state with vstack = ret :: drop 1 state.vstack }
+      | MemoryCopy -> { state with vstack = ret :: drop 3 state.vstack }
+      | MemoryFill -> { state with vstack = ret :: drop 3 state.vstack }
+      | MemoryInit _ -> { state with vstack = ret :: drop 3 state.vstack }
       | Drop -> { state with vstack = drop 1 state.vstack }
       | Select _ -> { state with vstack = ret :: (drop 3 state.vstack) }
       | LocalGet l -> { state with vstack = (if !propagate_locals then get l state.locals else ret) :: state.vstack }
@@ -307,7 +310,7 @@ let instr_def (cfg : t Cfg.t) (instr : t Instr.t) : Var.t list =
         | NotBottom s -> s in
       let top_n n = take state_after.vstack n in
       begin match i.instr with
-        | Nop | Drop -> []
+        | Nop | Drop | MemoryCopy | MemoryFill | MemoryInit _ -> []
         | Select _ | MemorySize
         | Unary _ | Binary _ | Compare _ | Test _ | Convert _
         | Const _ | MemoryGrow
@@ -376,6 +379,7 @@ let instr_use (cfg : t Cfg.t) ?var:(var : Var.t option) (instr : t Instr.t) : Va
       | Select _ -> top_n 3
       | MemorySize -> []
       | MemoryGrow -> top_n 1
+      | MemoryCopy | MemoryFill | MemoryInit _ -> top_n 3
       | Const _ -> []
       | Unary _ | Test _ | Convert _ -> top_n 1
       | Binary _ | Compare _ -> top_n 2

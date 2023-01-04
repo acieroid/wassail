@@ -100,6 +100,9 @@ let data_instr_transfer (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (
   | MemoryGrow ->
     (* not modeled precisely: returns the size of the memory before it has grown *)
     state
+  | MemoryCopy | MemoryFill | MemoryInit _ ->
+     (* Not modeled *)
+     state
   | Drop -> state
   | Select _ ->
     let ret = ret i in

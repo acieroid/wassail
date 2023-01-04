@@ -41,6 +41,7 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Domain
        let results = Inter.analyze wasm_mod annotated_scc summaries in
        Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
            let spec_cfg = Int32Map.find_exn scc idx in
+           Printf.printf "%ld call summary: %s\n" idx (Domain.Call.to_string (fst summary));
            (spec_cfg, taint_cfg, summary)))
 
 (** Detects calls to sinks with data coming from the exported functions' arguments.
@@ -80,7 +81,7 @@ let detect_flows_from_sources_to_sinks (module_ : Wasm_module.t) (sources : Stri
   let cg = Call_graph.make module_ in
   let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
   let funcnames = Wasm_module.get_funcnames module_ in
-  let sources_specifications = Int32Map.of_alist_exn (List.filter_map (StringSet.to_list sources) ~f:(fun source_name ->
+  let _sources_specifications = Int32Map.of_alist_exn (List.filter_map (StringSet.to_list sources) ~f:(fun source_name ->
       match StringMap.find funcnames source_name with
       | Some source_idx -> Some (source_idx, Var.Other source_name)
       | None ->
@@ -94,7 +95,8 @@ let detect_flows_from_sources_to_sinks (module_ : Wasm_module.t) (sources : Stri
         Log.warn (Printf.sprintf "sink does not exist in binary (this could be perfectly fine): %s" sink_name);
         None (* This sink does not exist in the binary, so we ignore it *)
     )) in
-  Taintcall_transfer.TaintTransfer.return_taint_specifications := sources_specifications;
+  Log.warn "TODO: source specification";
+  (* Taintcall_transfer.TaintTransfer.return_taint_specifications := sources_specifications; *)
   let results = analyze_inter module_ schedule in
   let found = ref TaintFlowSet.empty in
   Int32Map.iteri results ~f:(fun ~key:fidx ~data:(_spec_cfg, _taint_cfg, summary) ->

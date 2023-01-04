@@ -46,7 +46,8 @@ let control_instr_transfer
         Log.warn (Printf.sprintf "No summary found for function %ld (imported function): assuming taint is preserved" f);
         fst state
       end else
-        failwith (Printf.sprintf "Unexpected: analyzing a function that has no summary: %ld" f)
+        (* This function depend on another function that has not been analyzed yet, so it is part of some recursive loop. It will eventually stabilize *)
+        fst state
     | Some summary ->
       let substituted_summary =
         Int32Map.map (fst summary) ~f:(fun args ->

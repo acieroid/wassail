@@ -188,6 +188,8 @@ let type_of_data
     | Select _ -> ([Any "a"; Any "a"; T Type.I32], [Any "a"])
     | MemorySize -> ([], [T Type.I32])
     | MemoryGrow -> ([T Type.I32], [T Type.I32])
+    | MemoryCopy | MemoryInit _ -> ([T Type.I32; T Type.I32; T Type.I32], [])
+    | MemoryFill -> ([T Type.I32; Any "a"; T Type.I32], [])
     | Const (I32 _) -> ([], [T Type.I32])
     | Const (I64 _) -> ([], [T Type.I64])
     | Const (F32 _) -> ([], [T Type.F32])
@@ -315,11 +317,11 @@ let replace_with_equivalent_instructions (instrs : unit Instr.t list) (cfg : 'a 
   if List.is_empty instrs then instrs else
     let t = instrs_type instrs cfg instructions_map in
     let replaced = List.map (dummy_instrs t next_label) ~f:(fun i -> Instr.Data i) in
-    Log.info (Printf.sprintf "Replacing instructions %s of type %s -> %s with %s"
+(*    Log.info (Printf.sprintf "Replacing instructions %s of type %s -> %s with %s"
                 (String.concat ~sep:"," (List.map ~f:Instr.to_string instrs))
                 (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (fst t)))
                 (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (snd t)))
-                (String.concat ~sep:"," (List.map ~f:Instr.to_string replaced)));
+                (String.concat ~sep:"," (List.map ~f:Instr.to_string replaced))); *)
     replaced
 
 (* Check if the body is empty or only consist only of dummy instructions *)

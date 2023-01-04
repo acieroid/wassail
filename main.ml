@@ -31,6 +31,7 @@ let () =
 
        (* Utilities that requires building the call graph *)
        ; "callgraph", Callgraph.callgraph
+       ; "reduced-callgraph", Callgraph.reduced_callgraph
        ; "schedule", Callgraph.schedule
 
        ; "generate", Generation.generate
