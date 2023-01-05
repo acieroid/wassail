@@ -21,6 +21,6 @@ jobs:
         uses: ocaml/setup-ocaml@v2
         with:
           ocaml-compiler: ${{ matrix.ocaml-version }}
-      - run: opam install core unix
+      - run: opam install core_unix
       - run: opam install . --deps-only --with-doc --with-test
       - run: make test
