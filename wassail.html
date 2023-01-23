@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Wassail</title>
+        <link rel="stylesheet" href="./css/pico.min.css">
+        <link rel="stylesheet" href="./css/graphs.css">
+    </head>
+    <body>
+        <main class="container">
+            <section id="title">
+                <h1>Wassail</h1>
+            </section>
+            <section id="loading">
+                <h3>Loading a program</h3>
+                <label for="file">
+                    First of all, you need to load a WebAssembly program.
+                    <input id="file" type="file" name="file" accept=".wasm,.wat" onchange="load()"/>
+                </label>
+            </section>
+        </main>
+        <script src="https://d3js.org/d3.v5.min.js"></script>
+        <script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.js"></script>
+        <script src="./_build/default/jsbridge.bc.js"></script>
+        <script src="./js/interface.js"></script>
+
+    </body>
+</html>

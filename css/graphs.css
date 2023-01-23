@@ -1,0 +1,33 @@
+body {
+    font: 300 14px 'Helvetica Neue', Helvetica;
+}
+.node rect,
+.node circle,
+.node polygon,
+.node ellipse {
+    stroke: #333;
+    fill: #fff;
+    stroke-width: 1px;
+}
+.edgePath path {
+    stroke: #333;
+    fill: #333;
+    stroke-width: 1.5px;
+}
+.fixed{
+    width: 70%;
+}
+.flex-item{
+    flex-grow: 1;
+}
+.bottom{
+    margin: auto;
+    position:absolute;
+    padding: 5px;
+    height: 60px;
+    bottom: 5px;
+    border: 3px solid;
+    overflow-x: hidden;
+    overflow-x: auto;
+    background-color: white;
+}

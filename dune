@@ -6,4 +6,12 @@
  (libraries wassail core core_unix core_unix.command_unix wasm)
  ;; (link_flags :standard -cclib -static) ;; uncomment to enable static executable
  (preprocess (pps ppx_jane ppx_compare)))
+
+(executable
+  (name jsbridge)
+  (modes js)
+  (modules Jsbridge)
+  (libraries wassail js_of_ocaml js_of_ocaml-ppx)
+  (preprocess (pps ppx_jane ppx_compare js_of_ocaml-ppx)))
+
 (include_subdirs unqualified)
