@@ -114,6 +114,13 @@ let parse_from_lexbuf_textual name lexbuf run =
         [(var_opt, def)])
       extract
 
+let parse_script name lexbuf run =
+  let extract (l : Wasm.Script.script) = List.map ~f:run l in
+    input_from (fun _ ->
+        let res = Wasm.Parse.parse name lexbuf Wasm.Parse.Script in
+        res)
+      extract
+
 let parse_string str run =
   let lexbuf = Lexing.from_string str in
   input_from (fun _ ->
@@ -130,10 +137,19 @@ let apply_to_binary_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
   In_channel.with_file filename ~f:(fun ic ->
       f (Wasm.Decode.decode filename (In_channel.input_all ic)))
 
+let apply_to_script_file (filename : string) (cmd : Wasm.Script.command' -> 'a) : 'a list =
+  In_channel.with_file filename ~f:(fun ic ->
+      let lexbuf = Lexing.from_channel ic in
+      parse_script filename lexbuf (fun command -> cmd command.it))
+
 let apply_to_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
   match Stdlib.Filename.extension filename with
   | ".wat" -> apply_to_textual_file filename f
   | ".wasm" -> apply_to_binary_file filename f
+  | ".wast" -> List.hd_exn
+                 (List.filter_map (apply_to_script_file filename (function
+                   | Wasm.Script.Module (_, { it = Wasm.Script.Textual m; _ }) -> Some (f m)
+                   | _ -> None)) ~f:(fun x -> x))
   | ext -> failwith (Printf.sprintf "Invalid extension for WebAssembly module: %s" ext)
 
 let apply_to_string (string : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
