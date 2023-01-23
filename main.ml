@@ -45,8 +45,6 @@ let () =
        ; "taint-from-exported-to-imported", Analysis.taint_flow_from_exported_to_imported
        ; "taint-from-sources-to-sinks", Analysis.taint_flow_from_sources_to_sinks
        ; "taintcall-cfg", Analysis.taintcall_cfg
-       ; "reltaint-intra", Analysis.reltaint_intra
-       ; "relational-intra", Analysis.relational_intra
        ; "find-indirect-calls", Analysis.find_indirect_calls
 
        (* Slicing *)

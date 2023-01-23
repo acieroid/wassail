@@ -55,7 +55,7 @@ let control_instr_transfer
       Taintcall_domain.Call.join substituted_summary (fst state)
   in
   let add_call (to_state : Taintcall_domain.Call.t) (f : Int32.t) (arity : int * int) : Taintcall_domain.Call.t =
-    let args = List.take (Spec.get_or_fail (fst i.annotation_before)).vstack (fst arity) in
+    let args = List.take (Spec.get_or_fail i.annotation_before).vstack (fst arity) in
     let argsv = List.map args ~f:(Taint_domain.get_taint (snd state)) in
     Int32Map.update to_state f ~f:(function
          | None -> argsv
@@ -65,7 +65,7 @@ let control_instr_transfer
           (Int32Map.map ~f:snd summaries) cfg i (snd state) with
   | `Simple sndstate' ->
     let apply_fun f arity =
-      let args = List.take (Spec.get_or_fail (fst i.annotation_before)).vstack (fst arity) in
+      let args = List.take (Spec.get_or_fail i.annotation_before).vstack (fst arity) in
       add_call (apply_summary f (List.map args ~f:(Taint_domain.get_taint (snd state)))) f arity, sndstate'
     in
     begin match i.instr with

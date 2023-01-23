@@ -30,10 +30,8 @@ module Spec_inference = Spec_inference
 module Spec_analysis = Spec_analysis
 module Spec = Spec
 
-module Relational = Relational
 module Taint = Taint
 module Taintcall = Taintcall
-module Reltaint = Reltaint
 
 module Slicing = Slicing
 module Use_def = Use_def

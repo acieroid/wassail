@@ -16,14 +16,14 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
        Log.info
          (Printf.sprintf "---------- Taint analysis of function %s ----------" (Int32.to_string cfg.idx));
        (* Run the taint analysis *)
-       Options.use_relational := false;
-       let annotated_cfg = Relational.Transfer.dummy_annotate cfg in
+       (* Options.use_relational := false; *)
+       let annotated_cfg = (* Relational.Transfer.dummy_annotate  *) cfg in
        let summaries = Int32Map.map data ~f:fst in
        let (result_cfg, taint_summary) = Intra.analyze wasm_mod annotated_cfg summaries in
        (taint_summary, Some result_cfg))
 
 let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec.t Cfg.t) : Domain.t Cfg.t =
-  let rel_cfg = Relational.Transfer.dummy_annotate spec_cfg in
+  let rel_cfg = (* Relational.Transfer.dummy_annotate *) spec_cfg in
   fst (Intra.analyze wasm_mod rel_cfg summaries)
 
 let check (expected : Summary.t) (actual : Summary.t) : bool =
@@ -47,8 +47,8 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Taint_
          (Printf.sprintf "---------- Taint analysis of SCC {%s} ----------"
             (String.concat ~sep:"," (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
        (* Run the taint analysis *)
-       Options.use_relational := false;
-       let annotated_scc = Int32Map.map scc ~f:Relational.Transfer.dummy_annotate in
+       (* Options.use_relational := false; *)
+       let annotated_scc = scc (* Int32Map.map scc ~f:Relational.Transfer.dummy_annotate *) in
        let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_spec_cfg, _taint_cfg, summary) -> summary) in
        let results = Inter.analyze wasm_mod annotated_scc summaries in
        Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
