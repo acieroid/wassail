@@ -85,6 +85,13 @@ Contributions are welcome! Wassail is licensed under the conditions of the GPLv3
 $ make test
 ```
 
+
+## Using the web interface [WIP]
+
+```sh
+$ make js
+$ open wassail.html
+```
 # References
 
 Wassail has been described in the following publication:

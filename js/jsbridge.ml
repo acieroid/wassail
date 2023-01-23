@@ -9,5 +9,5 @@ let () =
 
        method load program = self##.program := Some program
 
-       method do_something = self##.program
+       method doSomething = self##.program
      end)
