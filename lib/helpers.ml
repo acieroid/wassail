@@ -114,19 +114,16 @@ let parse_from_lexbuf_textual name lexbuf run =
         [(var_opt, def)])
       extract
 
-let parse_script name lexbuf run =
+let apply_to_script name lexbuf run =
   let extract (l : Wasm.Script.script) = List.map ~f:run l in
     input_from (fun _ ->
         let res = Wasm.Parse.parse name lexbuf Wasm.Parse.Script in
         res)
       extract
 
-let parse_string str run =
-  let lexbuf = Lexing.from_string str in
-  input_from (fun _ ->
-      let var_opt, def = Wasm.Parse.parse "no-file" lexbuf Wasm.Parse.Module in
-      [(var_opt, def)])
-    run
+let apply_to_string str run = parse_from_lexbuf_textual "no-file" (Lexing.from_string str) run
+
+let parse_string str = apply_to_string str (fun m -> m)
 
 let apply_to_textual_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
   In_channel.with_file filename ~f:(fun ic ->
@@ -140,7 +137,7 @@ let apply_to_binary_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
 let apply_to_script_file (filename : string) (cmd : Wasm.Script.command' -> 'a) : 'a list =
   In_channel.with_file filename ~f:(fun ic ->
       let lexbuf = Lexing.from_channel ic in
-      parse_script filename lexbuf (fun command -> cmd command.it))
+      apply_to_script filename lexbuf (fun command -> cmd command.it))
 
 let apply_to_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
   match Stdlib.Filename.extension filename with
