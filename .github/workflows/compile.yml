@@ -30,7 +30,7 @@ jobs:
       - name: Compile web version
         run: |
           make js
-          cp ./
+          cp _build/default/jsbridge.bc.js ./js/
       - name: Deploy web version
         uses: JamesIves/github-pages-deploy-action@v4
         with:
