@@ -23,7 +23,8 @@ jobs:
       - name: Install dependencies
         run: |
           opam install core_unix
-          opam install . --deps-only --with-doc --with-test
+          opam install . --deps-only --wihtd-doc --with-test
+          opam install js_of_ocaml js_of_ocaml-ppx
       - name: Compile binary
         run: make
       - name: Compile web version
