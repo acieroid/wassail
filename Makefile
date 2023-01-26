@@ -22,5 +22,6 @@ coverage:
 
 js:
 	opam exec -- dune build jsbridge.bc.js
+	cp _build/default/jsbridge.bc.js ./js
 
 .PHONY: bin js test clean install all

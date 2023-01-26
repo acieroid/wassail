@@ -21,6 +21,17 @@ jobs:
         uses: ocaml/setup-ocaml@v2
         with:
           ocaml-compiler: ${{ matrix.ocaml-version }}
-      - run: opam install core_unix
-      - run: opam install . --deps-only --with-doc --with-test
-      - run: make
+      - name: Install dependencies
+        run: |
+          opam install core_unix
+          opam install . --deps-only --with-doc --with-test
+      - name: Compile binary
+        run: make
+      - name: Compile web version
+        run: |
+          make js
+          cp ./
+      - name: Deploy web version
+        uses: JamesIves/github-pages-depoly-action@v4
+        with:
+          folder: js
