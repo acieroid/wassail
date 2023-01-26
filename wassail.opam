@@ -9,7 +9,7 @@ license: "GPL-3.0-or-later"
 homepage: "https://github.com/acieroid/wassail"
 bug-reports: "https://github.com/acieroid/wassail"
 depends: [
-  "apron" # LGPL
+#  "apron" # LGPL
   "core" # MIT
   "core_kernel" # MIT
   "dune" {>= "2.7.0"} # MIT
