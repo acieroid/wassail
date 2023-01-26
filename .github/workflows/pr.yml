@@ -1,7 +1,7 @@
-name: Compilation and deployment
+name: Compilation on PR
 
 on:
-  - push
+  - pull_request
 
 jobs:
   build:
@@ -30,7 +30,3 @@ jobs:
         run: |
           make js
           cp ./
-      - name: Deploy web version
-        uses: JamesIves/github-pages-deploy-action@v4
-        with:
-          folder: js
