@@ -1,9 +1,13 @@
 # Wassail
 `wassail` (WebAssembly static analyzer and inspection library) is a toolkit to perform both lightweight and heavyweight static analysis of WebAssembly modules.
 
+  - [Web version](#webversion)
   - [Installation](#installation)
   - [Usage](#usage)
   - [Contributing](#contributing)
+
+# Web version
+Parts of Wassail can be run in your web browser [here](https://acieroid.github.com/wassail/).
 
 # Installation
 0. Install [opam](https://opam.ocaml.org/)
