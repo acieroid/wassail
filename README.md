@@ -7,7 +7,7 @@
   - [Contributing](#contributing)
 
 # Web version
-Parts of Wassail can be run in your web browser [here](https://acieroid.github.com/wassail/).
+Parts of Wassail can be run in your web browser [here](https://acieroid.github.io/wassail/).
 
 # Installation
 0. Install [opam](https://opam.ocaml.org/)
