@@ -19,16 +19,21 @@
             <details id="loading" open="">
                 <summary role="button" class="contrast">Loading a program</summary>
                 <label for="file">
-                    First of all, you need to load a WebAssembly program.
-                    <input id="file" type="file" name="file" accept=".wasm,.wat" onchange="load()"/>
+                    First of all, you need to load a WebAssembly program in textual format (<em>.wat</em>).
+                    <input id="file" type="file" name="file" accept=".wat" onchange="load()"/>
                 </label>
                 <p id="loadedProgram"></p>
+            </details>
+            <details id="callgraph">
+                <summary role="button" class="contrast">Call Graph</summary>
+                <button onClick="showCallGraph()">Show call graph</button>
+                <div id="d3-callgraph" style="text-align: center;"></div>
             </details>
             <details id="cfgs">
                 <summary role="button" class="contrast">Control-Flow Graphs</summary>
                 Show CFG of function :
                 <div class="grid" id="listOfCFGs"></div>
-                <div id="graph" style="text-align: center;"></div>
+                <div id="d3-cfg" style="text-align: center;"></div>
             </details>
         </main>
         <script src="https://d3js.org/d3.v5.min.js"></script>

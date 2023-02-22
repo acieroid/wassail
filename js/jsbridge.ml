@@ -17,6 +17,15 @@ let () =
        method cfgs : 'a (* an object mapping function indices to CFGs *) =
          let m = Wasm_module.of_string (Option.value_exn self##.program) in
          let cfgs = Cfg_builder.build_all m in
-         let cfgs_alist = List.map (Int32Map.to_alist cfgs) ~f:(fun (id, cfg) -> (Int32.to_string id, Js.Unsafe.inject (create_cfg cfg)))  in
+         let cfgs_alist = List.map (Int32Map.to_alist cfgs) ~f:(fun (id, cfg) ->
+                              (Int32.to_string id, Js.Unsafe.inject (create_cfg cfg)))  in
          Js.Unsafe.obj (Array.of_list cfgs_alist)
+
+       method callgraph : 'a =
+         let m = Wasm_module.of_string (Option.value_exn self##.program) in
+         let cg = Call_graph.make m in
+         Js.Unsafe.inject (object%js
+                             method toDot = Js.string (Call_graph.to_dot cg)
+                           end)
+
      end)
