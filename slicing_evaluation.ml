@@ -247,7 +247,7 @@ let generate_slice (filename : string) (output_file : string) =
   let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod function_idx) in
   let funcinst = Slicing.slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.of_list (if refined then actual_slicing_criteria else slicing_criteria)) in
   let module_ = Wasm_module.replace_func wasm_mod function_idx funcinst in
-  let only_function = true in (* set to false to generate the whole module *)
+  let only_function = false in (* set to false to generate the whole module *)
   Out_channel.with_file output_file
     ~f:(fun ch -> 
       Out_channel.output_string ch
