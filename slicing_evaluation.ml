@@ -166,7 +166,8 @@ let evaluate =
 
 (* Generate a slice for printf function calls with a specific string *)
 let generate_slice (filename : string) (output_file : string) =
-  let refined = true in (* Set to false if you want to slice the printf call, to true if you want to slice on the second printf argument *)
+  let refined = false in (* Set to false if you want to slice the printf call, to true if you want to slice on the second printf argument *)
+  let only_function = true in (* set to false to generate the whole module *)
   let pattern = "\nORBS:" in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
@@ -210,7 +211,6 @@ let generate_slice (filename : string) (output_file : string) =
       | l -> Some (func.idx, l)) with
   | Some r -> r
   | None -> failwith "cannot find function to slice" in
-  (* TODO: now we know the function to slide, and the label of the call to printf. What we want is actually the definition point of the slicing criterion, which is the second argument to printf *)
   Spec_inference.use_const := false;
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
@@ -247,7 +247,6 @@ let generate_slice (filename : string) (output_file : string) =
   let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod function_idx) in
   let funcinst = Slicing.slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.of_list (if refined then actual_slicing_criteria else slicing_criteria)) in
   let module_ = Wasm_module.replace_func wasm_mod function_idx funcinst in
-  let only_function = false in (* set to false to generate the whole module *)
   Out_channel.with_file output_file
     ~f:(fun ch -> 
       Out_channel.output_string ch
