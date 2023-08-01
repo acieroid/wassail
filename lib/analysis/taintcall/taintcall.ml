@@ -75,7 +75,10 @@ module TaintFlow = struct
   [@@deriving sexp, compare, equal]
 end
 
-module TaintFlowSet = Set.Make(TaintFlow)
+module TaintFlowSet = struct
+  include Set
+  include Set.Make(TaintFlow)
+end
 
 let detect_flows_from_sources_to_sinks (module_ : Wasm_module.t) (sources : StringSet.t) (sinks : StringSet.t) : TaintFlowSet.t =
   let cg = Call_graph.make module_ in

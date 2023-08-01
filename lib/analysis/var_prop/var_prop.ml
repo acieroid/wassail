@@ -27,6 +27,7 @@ module VarEq = struct
   end
   include T
   module Set = struct
+    include Set
     include Set.Make(T)
     let to_string (vs : t) : string =
       String.concat ~sep:";" (List.map ~f:T.to_string (to_list vs))

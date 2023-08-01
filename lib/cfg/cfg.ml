@@ -8,7 +8,10 @@ module Edge = struct
   end
   include T
   let to_string (e : t) : string = string_of_int (fst e)
-  module Set = Set.Make(T)
+  module Set = struct
+    include Set
+    include Set.Make(T)
+  end
 end
 
 module Edges = struct

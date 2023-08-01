@@ -14,40 +14,51 @@ end
 
 (** Sets of integers *)
 module IntSet = struct
+  include Set
   include Set.Make(I)
-  let to_string (s : t) : string = String.concat ~sep:"," (List.map (to_list s) ~f:string_of_int)
+  let to_string (s : t) : string = String.concat ~sep:"," (List.map (Set.to_list s) ~f:string_of_int)
 end
 
 module Int32Set = struct
+  include Set
   include Set.Make(Int32)
-  let to_string (s : t) : string = String.concat ~sep:"," (List.map (to_list s) ~f:Int32.to_string)
+  let to_string (s : t) : string = String.concat ~sep:"," (List.map (Set.to_list s) ~f:Int32.to_string)
 end
 
 (** Sets of pairs of integers *)
 module IntPairSet = struct
+  include Set
   include Set.Make(struct
       type t = int * int
       [@@deriving sexp, compare, equal]
     end)
-  let to_string (s : t) : string = String.concat ~sep:"," (List.map (to_list s) ~f:(fun (x, y) -> Printf.sprintf "(%d,%d)" x y))
+  let to_string (s : t) : string = String.concat ~sep:"," (List.map (Set.to_list s) ~f:(fun (x, y) -> Printf.sprintf "(%d,%d)" x y))
 end
 
 (** Maps of integers *)
 module IntMap = struct
+  include Map
   include Map.Make(I)
-  let to_string (m : 'a t) (f : 'a -> string) : string = String.concat ~sep:", " (List.map (to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%d → %s" k (f v)))
+  let to_string (m : 'a t) (f : 'a -> string) : string = String.concat ~sep:", " (List.map (Map.to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%d → %s" k (f v)))
 end
 
 module Int32Map = struct
+  include Map
   include Map.Make(Int32)
-  let to_string (m : 'a t) (f : 'a -> string) : string = String.concat ~sep:", " (List.map (to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s → %s" (Int32.to_string k) (f v)))
+  let to_string (m : 'a t) (f : 'a -> string) : string = String.concat ~sep:", " (List.map (Map.to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s → %s" (Int32.to_string k) (f v)))
 end
 
 (** Sets of strings *)
-module StringSet = Set.Make(S)
+module StringSet = struct
+  include Set
+  include Set.Make(S)
+end
 
 (** Maps of strings *)
-module StringMap = Map.Make(S)
+module StringMap = struct
+  include Map
+  include Map.Make(S)
+end
 
 module List32 = struct
   let nth_exn = Wasm.Lib.List32.nth

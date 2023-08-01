@@ -41,13 +41,16 @@ module Label = struct
   module Set = struct
     module T = struct
       include Set.Make(T)
-      let to_string (t : t) : string = String.concat ~sep:"," (List.map ~f:T.to_string (to_list t))
+      let to_string (t : t) : string = String.concat ~sep:"," (List.map ~f:T.to_string (Set.to_list t))
     end
+    include Set
     include T
     include Test.HelpersForSet(T)
   end
-  module Map = Map.Make(T)
-  let x = Set.to_array
+  module Map = struct
+    include Map
+    include Map.Make(T)
+  end
 
   (** Test data *)
   module Test = struct
@@ -231,7 +234,7 @@ module Set = struct
   end
   module T = struct
     include Set.Make(TUnit)
-    let to_string (t : t) : string = String.concat ~sep:"," (List.map ~f:TUnit.to_string (to_list t))
+    let to_string (t : t) : string = String.concat ~sep:"," (List.map ~f:TUnit.to_string (Set.to_list t))
   end
   include T
     include Test.HelpersForSet(T)

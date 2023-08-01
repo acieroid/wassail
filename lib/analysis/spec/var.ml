@@ -29,27 +29,32 @@ end
 include T
 
 module OffsetMap = struct
+  include Map
   include Map.Make(struct
       type t = with_offset
       [@@deriving sexp, compare, equal]
     end)
   let map_vars (m : T.t t) ~(f: T.t -> T.t) : T.t t =
-    of_alist_exn (List.map (to_alist m)
+    of_alist_exn (List.map (Map.to_alist m)
                     ~f:(fun ((k, offset), v) ->
                         ((f k, offset), f v)))
 end
 
 module Map = struct
+  include Map
   include Map.Make(T)
   let to_string (m : 'a t) (f : 'a -> string) : string =
-    String.concat ~sep:", " (List.map (to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s -> %s" (to_string k) (f v)))
+    String.concat ~sep:", " (List.map (Map.to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s -> %s" (to_string k) (f v)))
 end
+
 module Set = struct
+  include Set
   module S = struct
     include Set.Make(T)
     let to_string (v : t) : string =
-      String.concat ~sep:"," (List.map ~f:to_string (to_list v))
+      String.concat ~sep:"," (List.map ~f:to_string (Set.to_list v))
   end
+  include Set
   include S
   include Test.Helpers(S)
 

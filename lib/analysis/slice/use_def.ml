@@ -13,8 +13,14 @@ module Use = struct
   end
   include T
 
-  module Set = Set.Make(T)
-  module Map = Map.Make(T)
+  module Set = struct
+    include Set
+    include Set.Make(T)
+  end
+  module Map = struct
+    include Map
+    include Map.Make(T)
+  end
   let make (label : Instr.Label.t) (var : Var.t) = { label; var; }
   let to_dot_identifier (cfg : 'a Cfg.t) (use : t) = Printf.sprintf "block%d:instr%s" (Cfg.find_enclosing_block_exn cfg use.label).idx (Instr.Label.to_string use.label)
   let to_dot_label (use : t) = Var.to_string use.var

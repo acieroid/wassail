@@ -1,6 +1,8 @@
 open Core
 open Helpers
 
+module Time = Time_float (* Time is deprecated in Core, we should use Time_float instead *)
+
 module InSlice = struct
   module T = struct
     (** Intermediary data structure used as part of the slicing to track which
@@ -23,7 +25,10 @@ module InSlice = struct
           | None -> failwith "Did not find the instruction! Should not happen"
       }
   end
-  module Set = Set.Make(T)
+  module Set = struct
+    include Set
+    include Set.Make(T)
+  end
   include T
 end
 
