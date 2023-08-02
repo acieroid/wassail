@@ -1,7 +1,7 @@
 open Core
 open Helpers
 
-module Time = Time_float (* Time is deprecated in Core, we should use Time_float instead *)
+(* module Time = Time_float (* Time is deprecated in Core, we should use Time_float instead *) *)
 
 module InSlice = struct
   module T = struct

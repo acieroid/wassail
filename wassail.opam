@@ -10,7 +10,7 @@ homepage: "https://github.com/acieroid/wassail"
 bug-reports: "https://github.com/acieroid/wassail"
 depends: [
 #  "apron" # LGPL
-  "core" # MIT
+  "core" {< "v0.16"} # MIT
   "core_kernel" # MIT
   "dune" {>= "2.7.0"} # MIT
   "ppx_compare" # MIT

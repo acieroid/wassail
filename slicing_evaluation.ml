@@ -1,8 +1,6 @@
 open Core
 open Wassail
 
-module Time = Time_float (* Time is deprecated in Core, we should use Time_float instead *)
-
 type slicing_result = {
   function_sliced: int32;
   slicing_criterion: Instr.Label.t;

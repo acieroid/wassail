@@ -1,7 +1,5 @@
 open Core
 
-module Time = Time_float (* Time is deprecated in Core, we should use Time_float instead *)
-
 let report_time (msg : string) (t0 : Time.t) (t1 : Time.t) : unit =
   Printf.printf "Time for '%s': %s\n%!" msg (Time.Span.to_string (Time.diff t1 t0))
 
