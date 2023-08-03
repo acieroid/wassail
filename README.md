@@ -90,15 +90,21 @@ $ make test
 ```
 
 
-## Using the web interface [WIP]
+## Using the web interface
+
+You can access the web interface [here](https://acieroid.github.io/wassail/), or compile it for yourself as follows:
 
 ```sh
+$ opam install js_of_ocaml js_of_ocaml-ppx
 $ make js
-$ open wassail.html
+$ open js/index.html
 ```
 # References
 
-Wassail has been described in the following publication:
+The following publications use Wassail:
+
   - [Compositional Information Flow Analysis for WebAssembly Programs](http://soft.vub.ac.be/~qstieven/scam2020wasm/), SCAM 2020. ([pdf](http://soft.vub.ac.be/Publications/2020/vub-tr-soft-20-11.pdf), [video](https://www.youtube.com/watch?v=IX8swyZ4TPI))
   - [Wassail: A WebAssembly Static Analysis Library](https://soft.vub.ac.be/Publications/2021/vub-tr-soft-21-04.pdf), ProWeb 2021.
   - [Static Stack-Preserving Intra-Procedural Slicing of WebAssembly Binaries](https://soft.vub.ac.be/Publications/2022/vub-tr-soft-22-04.pdf), ICSE 2022.
+  - [Dynamic Slicing of WebAssembly Binaries](http://soft.vub.ac.be/Publications/2023/vub-tr-soft-23-11.pdf), ICSME 2023.
+  
