@@ -1,12 +1,42 @@
 open Core
 open Helpers
 
+(** An edge of the call graph *)
+module Edge = struct
+  type t = {
+    target: int32; (* its target *)
+    direct: bool; (* whether the call is direct or indirect *)
+  }
+  [@@deriving sexp, compare, equal]
+end
+
+module EdgeSet = struct
+  include Set
+  include Set.Make(Edge)
+  let to_nodes (edges : t) : Int32Set.t =
+    edges
+    |> to_list
+    |> List.map ~f:(function { target; _ } -> target)
+    |> Int32Set.of_list
+end
+
 (** A call graph *)
 type t = {
   nodes : Int32Set.t; (** Nodes of the call graphs are function indices *)
-  edges : Int32Set.t Int32Map.t; (** Edges are from one node to multiple nodes *)
+  edges : EdgeSet.t Int32Map.t; (** Edges between nodes *)
 }
 [@@deriving sexp, compare, equal]
+
+(** Find an edge *)
+let find_edge (cg : t) (node : int32) (target : int32) : Edge.t option =
+  match Int32Map.find cg.edges node with
+  | Some edges -> EdgeSet.find edges ~f:(fun edge -> Int32.(edge.target = target))
+  | None -> None
+
+let find_edge_exn (cg : t) (node : int32) (target : int32) : Edge.t =
+  match find_edge cg node target with
+  | Some edge -> edge
+  | None -> failwith "find_edge_exn did not find an edge"
 
 let indirect_call_targets (wasm_mod : Wasm_module.t) (typ : Int32.t) : Int32.t list =
   let ftype = Wasm_module.get_type wasm_mod typ in
@@ -30,25 +60,27 @@ let indirect_call_targets (wasm_mod : Wasm_module.t) (typ : Int32.t) : Int32.t l
 let make (wasm_mod : Wasm_module.t) : t =
   let find_targets = indirect_call_targets in
   let nodes = Int32Set.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> Int32.of_int_exn i)) in
-  let rec collect_calls (f : Int32.t) (instr : 'a Instr.t) (edges : Int32Set.t Int32Map.t) : Int32Set.t Int32Map.t = match instr with
+  let rec collect_calls (f : Int32.t) (instr : 'a Instr.t) (edges : EdgeSet.t Int32Map.t) : EdgeSet.t Int32Map.t = match instr with
     | Control { instr = Call (_, _, f'); _ } ->
+      let edge : Edge.t = { target = f'; direct = true } in
       Int32Map.update edges f ~f:(function
-          | None -> Int32Set.singleton f'
-          | Some fs -> Int32Set.add fs f')
+          | None -> EdgeSet.singleton edge
+          | Some fs -> EdgeSet.add fs edge)
     | Control { instr = CallIndirect (_, _, _, typ); _ } ->
       List.fold_left (find_targets wasm_mod typ)
         ~init:edges
         ~f:(fun edges f' ->
+            let edge : Edge.t = { target = f'; direct = false } in
             Int32Map.update edges f ~f:(function
-                | None -> Int32Set.singleton f'
-                | Some fs -> Int32Set.add fs f'))
+                | None -> EdgeSet.singleton edge
+                | Some fs -> EdgeSet.add fs edge))
     | Control { instr = Block (_, _, instrs); _ }
     | Control { instr = Loop (_, _, instrs); _ } ->
       collect_calls_instrs f instrs edges
     | Control { instr = If (_,_, instrs1, instrs2); _ } ->
       collect_calls_instrs f (instrs1 @ instrs2) edges
     | _ -> edges
-  and collect_calls_instrs (f : Int32.t) (instrs : 'a Instr.t list) (edges : Int32Set.t Int32Map.t) : Int32Set.t Int32Map.t =
+  and collect_calls_instrs (f : Int32.t) (instrs : 'a Instr.t list) (edges : EdgeSet.t Int32Map.t) : EdgeSet.t Int32Map.t =
     List.fold_left instrs ~init:edges ~f:(fun edges i -> collect_calls f i edges) in
   let edges = List.fold_left wasm_mod.funcs
       ~init:Int32Map.empty
@@ -66,8 +98,18 @@ let to_dot (cg : t) : string =
             Printf.sprintf "node%s [shape=record, label=\"{%s}\"];" (Int32.to_string n) (Int32.to_string n))))
     (String.concat ~sep:"\n" (List.concat_map (Int32Map.to_alist cg.edges)
                                 ~f:(fun (src, dsts) ->
-                                    List.map (Int32Set.to_list dsts) ~f:(fun dst ->
-                                        Printf.sprintf "node%s -> node%s;\n" (Int32.to_string src) (Int32.to_string dst)))))
+                                    List.map (EdgeSet.to_list dsts) ~f:(fun dst ->
+                                        let extra = if dst.direct then "" else "[style=dashed]" in
+                                        Printf.sprintf "node%s -> node%s %s;\n" (Int32.to_string src) (Int32.to_string dst.target) extra))))
+
+(** Convert call graph to an adjacency list to be printed or saved to a file *)
+let to_adjlist (cg : t) : string =
+  let buf = Buffer.create 16 in
+  Int32Map.iteri cg.edges ~f:(fun ~key:node ~data:edges ->
+      EdgeSet.iter edges ~f:(function { target ; direct } ->
+          let direct_str = if direct then "d" else "i" in
+          Buffer.add_string buf (Printf.sprintf "%s %s %s\n"  (Int32.to_string node) (Int32.to_string target) direct_str)));
+  Buffer.contents buf
 
 (** Keeps only nodes reachable from the given root set *)
 let keep_reachable (cg : t) (from : Int32Set.t) : t =
@@ -84,12 +126,22 @@ let keep_reachable (cg : t) (from : Int32Set.t) : t =
         (* Get all the directly reachable nodes *)
       let directly_reachable_nodes = match Int32Map.find cg.edges node with
         | None -> Int32Set.empty
-        | Some nodes -> nodes in
-      (* Enqueue all of them and recurse with the nodes added to the CG *)
+        | Some edges -> EdgeSet.to_nodes edges in
+      (* Enqueue all of them *)
       Int32Set.iter directly_reachable_nodes ~f:(Queue.enqueue q);
+      (* Compute the new edges *)
+      let edges_to_add : EdgeSet.t =
+        directly_reachable_nodes
+        |> Int32Set.to_list
+        |> List.map ~f:(fun target -> find_edge_exn cg node target)
+        |> EdgeSet.of_list in
+      let old_edges : EdgeSet.t = match Int32Map.find cg.edges node with
+        | Some edges -> edges
+        | None -> EdgeSet.empty in
+      (* and recurse with the nodes added to the CG *)
       loop {
         nodes = Int32Set.add new_cg.nodes node;
-        edges = Int32Map.add_exn new_cg.edges ~key:node ~data:directly_reachable_nodes
+        edges = Int32Map.add_exn new_cg.edges ~key:node ~data:(EdgeSet.union old_edges edges_to_add)
       } in
   loop { nodes = Int32Set.empty; edges = Int32Map.empty }
 
@@ -98,8 +150,8 @@ let remove_imports (cg : t) (nimports : Int32.t) : t =
   let nodes = Int32Set.filter cg.nodes ~f:(fun n -> Int32.(n >= nimports)) in
   let edges = Int32Map.filter_mapi cg.edges ~f:(fun ~key:src ~data:dsts ->
       if Int32.(src >= nimports) then
-        let dsts' = Int32Set.filter dsts ~f:(fun n -> Int32.(n >= nimports)) in
-        if Int32Set.is_empty dsts' then
+        let dsts' = EdgeSet.filter dsts ~f:(fun edge -> Int32.(edge.target >= nimports)) in
+        if EdgeSet.is_empty dsts' then
           None
         else
           Some dsts'
@@ -124,19 +176,19 @@ let scc_topological (cg : t) : (Int32.t list) list =
     index := Int32.(!index + 1l);
     stack := v :: !stack;
     on_stack := Int32Map.set !on_stack ~key:v ~data:true;
-    Int32Set.iter
+    EdgeSet.iter
       (match Int32Map.find cg.edges v with
        | Some ws -> ws
-       | None -> Int32Set.empty)
+       | None -> EdgeSet.empty)
       ~f:(fun w ->
-          match Int32Map.find !indices w with
+          match Int32Map.find !indices w.target with
           | None -> (* w.index is undefined *)
-            strong_connect w;
+            strong_connect w.target;
             lowlinks := Int32Map.set !lowlinks
                 ~key:v
-                ~data:(Int32.min (Int32Map.find_exn !lowlinks v) (Int32Map.find_exn !lowlinks w));
+                ~data:(Int32.min (Int32Map.find_exn !lowlinks v) (Int32Map.find_exn !lowlinks w.target));
           | Some windex ->
-            begin match Int32Map.find !on_stack w with
+            begin match Int32Map.find !on_stack w.target with
               | Some true ->
                 lowlinks := Int32Map.set !lowlinks
                     ~key:v

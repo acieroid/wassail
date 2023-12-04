@@ -21,6 +21,19 @@ let callgraph =
           ~f:(fun ch ->
               Out_channel.output_string ch (Call_graph.to_dot cg)))
 
+let callgraph_adjlist =
+  Command.basic
+    ~summary:"Generate the call graph for the module from file [in], outputs in a textual representation to file [out]"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string)
+      and file_out = anon ("out" %: string) in
+      fun() ->
+        let wasm_mod = Wasm_module.of_file file_in in
+        let cg = Call_graph.make wasm_mod in
+        Out_channel.with_file file_out
+          ~f:(fun ch ->
+              Out_channel.output_string ch (Call_graph.to_adjlist cg)))
+
 let reduced_callgraph =
   Command.basic
     ~summary:"Generate the call graph for the module from file [in], only considering functions reachable from [fidx], outputs as DOT to file [out]"
