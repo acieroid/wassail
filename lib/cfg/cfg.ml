@@ -93,6 +93,32 @@ let to_dot
     end
     extra_data
 
+(** Converts the graph to a textual representation of nodes and its adjacency matrix. *)
+let to_adjlist (cfg : 'a t) : string * string =
+  let nodes = cfg.basic_blocks
+            |> IntMap.to_alist
+            |> List.map ~f:(fun (idx, block) ->
+                let (t, content) = match block.content with
+                | Control instr -> ("c", Instr.control_to_short_string instr.instr)
+                | Data instrs -> ("d", List.map instrs ~f:(fun i -> Instr.data_to_string i.instr) |> String.concat ~sep:":" )
+                in Printf.sprintf "%d:%s:%s" idx t content)
+            |> String.concat ~sep:"\n" in
+  let adj = cfg.edges
+          |> IntMap.to_alist
+          |> List.map ~f:(fun (source, edges) ->
+              edges
+              |> Edge.Set.to_list
+              |> List.map ~f:(fun (dest, branch) ->
+                 Printf.sprintf "%d %d %s"
+                   source dest
+                   (match branch with
+                    | Some true -> "t"
+                    | Some false -> "f"
+                    | None -> "x"))
+              |> String.concat ~sep:"\n")
+          |> String.concat ~sep:"\n" in
+  (nodes, adj)
+
 let find_block (cfg : 'a t) (idx : int) : 'a Basic_block.t option =
   IntMap.find cfg.basic_blocks idx
 

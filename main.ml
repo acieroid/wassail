@@ -23,6 +23,7 @@ let () =
 
        (* Utilities that require building the CFGs *)
        ; "cfg", Cfg.cfg
+       ; "cfg-adjlist", Cfg.cfg_adjlist
        ; "cfgs", Cfg.cfgs
 
        ; "dependencies", Slicing.dependencies
