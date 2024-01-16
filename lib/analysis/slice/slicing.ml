@@ -35,33 +35,33 @@ end
 
 type preanalysis_results = {
   control_dependencies : Instr.Label.Set.t Instr.Label.Map.t;
-  control_time : Time.Span.t;
+  control_time : Time_float.Span.t;
   data_dependencies : Use_def.UseDefChains.t;
-  data_time : Time.Span.t;
+  data_time : Time_float.Span.t;
   mem_dependencies : Memory_deps.t;
-  mem_time : Time.Span.t;
+  mem_time : Time_float.Span.t;
   global_set_instructions : InSlice.Set.t;
-  global_time : Time.Span.t;
+  global_time : Time_float.Span.t;
 }
 
 (** Performs the pre-analysis phase in order to slice a function, according to any slicing criterion *)
 let preanalysis (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) : preanalysis_results =
-  let t0 = Time.now () in
+  let t0 = Time_float.now () in
   let control_dependencies = Control_deps.control_deps_exact_instrs cfg in
-  let t1 = Time.now () in
+  let t1 = Time_float.now () in
   let (_, _, data_dependencies) = Use_def.make cfg in
-  let t2 = Time.now () in
+  let t2 = Time_float.now () in
   let mem_dependencies = Memory_deps.make cfg in
-  let t3 = Time.now () in
+  let t3 = Time_float.now () in
   let global_set_instructions = InSlice.Set.of_list (List.map ~f:(fun label -> InSlice.{ label; reason = None })
                                                        (Instr.Label.Map.keys (Instr.Label.Map.filter cfg_instructions ~f:(function
                                                            | Data { instr = GlobalSet _; _ } -> true
                                                            | _ -> false)))) in
-  let t4 = Time.now () in
-  let control_time = Time.diff t1 t0 in
-  let data_time = Time.diff t2 t1 in
-  let mem_time = Time.diff t3 t2 in
-  let global_time = Time.diff t4 t3 in
+  let t4 = Time_float.now () in
+  let control_time = Time_float.diff t1 t0 in
+  let data_time = Time_float.diff t2 t1 in
+  let mem_time = Time_float.diff t3 t2 in
+  let global_time = Time_float.diff t4 t3 in
   { control_dependencies; control_time;
     data_dependencies; data_time;
     mem_dependencies; mem_time;
@@ -72,9 +72,9 @@ let preanalysis (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.La
     slicing criterion `criterion`, encoded as an instruction index. Returns the
     set of instructions that are part of the slice, as a set of instruction
     labels. *)
-let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (preanalysis : preanalysis_results) (criteria : Instr.Label.Set.t) : (Instr.Label.Set.t * (Time.Span.t * Time.Span.t * Time.Span.t * Time.Span.t * Time.Span.t)) =
+let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (preanalysis : preanalysis_results) (criteria : Instr.Label.Set.t) : (Instr.Label.Set.t * (Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t)) =
   Log.info (Printf.sprintf "Slicing with criteria %s" (Instr.Label.Set.to_string criteria));
-  let t0 = Time.now () in
+  let t0 = Time_float.now () in
   let rec loop (worklist : InSlice.Set.t) (slice : Instr.Label.Set.t) (visited : InSlice.Set.t) : Instr.Label.Set.t =
     (* Perform backward slicing as follows:
        Given an instruction as the slicing criterion (we can derive variable uses from instructions),
@@ -165,8 +165,8 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
           (* Merge instructions do not need to be marked as part of the slice once slicing has been performed *)
           false
         | _ -> true) in
-  let t1 = Time.now () in
-  (slice, (preanalysis.control_time, preanalysis.data_time, preanalysis.mem_time, preanalysis.global_time, Time.diff t1 t0))
+  let t1 = Time_float.now () in
+  (slice, (preanalysis.control_time, preanalysis.data_time, preanalysis.mem_time, preanalysis.global_time, Time_float.diff t1 t0))
 
 type instr_type_element =
   | T of Type.t

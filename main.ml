@@ -1,7 +1,7 @@
 open Core
 
-let report_time (msg : string) (t0 : Time.t) (t1 : Time.t) : unit =
-  Printf.printf "Time for '%s': %s\n%!" msg (Time.Span.to_string (Time.diff t1 t0))
+let report_time (msg : string) (t0 : Time_float.t) (t1 : Time_float.t) : unit =
+  Printf.printf "Time_float for '%s': %s\n%!" msg (Time_float.Span.to_string (Time_float.diff t1 t0))
 
 let () =
   Wassail.Log.enable_info ();

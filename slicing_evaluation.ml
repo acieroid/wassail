@@ -7,14 +7,14 @@ type slicing_result = {
   initial_number_of_instrs : int;
   slice_size_before_adaptation : int;
   slice_size_after_adaptation : int;
-  cfg_time : Time.Span.t;
-  spec_time : Time.Span.t;
-  control_time : Time.Span.t;
-  data_time : Time.Span.t;
-  mem_time : Time.Span.t;
-  global_time : Time.Span.t;
-  slicing_time1 : Time.Span.t;
-  slicing_time2 : Time.Span.t;
+  cfg_time : Time_float.Span.t;
+  spec_time : Time_float.Span.t;
+  control_time : Time_float.Span.t;
+  data_time : Time_float.Span.t;
+  mem_time : Time_float.Span.t;
+  global_time : Time_float.Span.t;
+  slicing_time1 : Time_float.Span.t;
+  slicing_time2 : Time_float.Span.t;
 }
 
 type ignored_reason =
@@ -35,11 +35,11 @@ let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
     ~f:(fun acc instr ->
         Instr.Label.Set.union acc (Instr.all_labels_no_merge instr))
 
-let time (f : unit -> 'a) : 'a * Time.Span.t =
-  let t0 = Time.now () in
+let time (f : unit -> 'a) : 'a * Time_float.Span.t =
+  let t0 = Time_float.now () in
   let res = f () in
-  let t1 = Time.now () in
-  (res, Time.diff t1 t0)
+  let t1 = Time_float.now () in
+  (res, Time_float.diff t1 t0)
 
 let prefix : string ref = ref "."
 
@@ -55,14 +55,14 @@ let output_slicing_result filename = function
                        string_of_int r.initial_number_of_instrs; (* 3 *)
                        string_of_int r.slice_size_before_adaptation; (* 4 *)
                        string_of_int r.slice_size_after_adaptation; (* 5 *)
-                       string_of_float (Time.Span.to_ms r.cfg_time); (* 6 *)
-                       string_of_float (Time.Span.to_ms r.spec_time); (* 7 *)
-                       string_of_float (Time.Span.to_ms r.control_time); (* 8 *)
-                       string_of_float (Time.Span.to_ms r.data_time); (* 9 *)
-                       string_of_float (Time.Span.to_ms r.mem_time); (* 10 *)
-                       string_of_float (Time.Span.to_ms r.global_time); (* 11 *)
-                       string_of_float (Time.Span.to_ms r.slicing_time1); (* 12 *)
-                       string_of_float (Time.Span.to_ms r.slicing_time2)] (* 13 *)
+                       string_of_float (Time_float.Span.to_ms r.cfg_time); (* 6 *)
+                       string_of_float (Time_float.Span.to_ms r.spec_time); (* 7 *)
+                       string_of_float (Time_float.Span.to_ms r.control_time); (* 8 *)
+                       string_of_float (Time_float.Span.to_ms r.data_time); (* 9 *)
+                       string_of_float (Time_float.Span.to_ms r.mem_time); (* 10 *)
+                       string_of_float (Time_float.Span.to_ms r.global_time); (* 11 *)
+                       string_of_float (Time_float.Span.to_ms r.slicing_time1); (* 12 *)
+                       string_of_float (Time_float.Span.to_ms r.slicing_time2)] (* 13 *)
   | Ignored NoFunction ->
     output "nofunction.txt" [filename]
   | Ignored (NoInstruction f) ->
@@ -107,12 +107,12 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
             output_slicing_result filename (Ignored (NoInstruction func.idx))
           else
             try
-              let t0 = Time.now () in
+              let t0 = Time_float.now () in
               let cfg_raw = Cfg_builder.build wasm_mod func.idx in
-              let cfg_time = Time.diff (Time.now ()) t0 in
-              let t0 = Time.now () in
+              let cfg_time = Time_float.diff (Time_float.now ()) t0 in
+              let t0 = Time_float.now () in
               let cfg, () = Spec_inference.Intra.analyze wasm_mod cfg_raw Int32Map.empty in
-              let spec_time = Time.diff (Time.now ()) t0 in
+              let spec_time = Time_float.diff (Time_float.now ()) t0 in
               let cfg_instructions = Cfg.all_instructions cfg in
               let preanalysis = Slicing.preanalysis cfg cfg_instructions in
               List.iter (match criterion_selection with
@@ -123,10 +123,10 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
                     try
                       let instrs_to_keep, (control_time, data_time, mem_time, global_time, slicing_time1) = Slicing.instructions_to_keep cfg cfg_instructions preanalysis (Instr.Label.Set.singleton slicing_criterion) in
                       try
-                        let t0 = Time.now () in
+                        let t0 = Time_float.now () in
                         let sliced_func = Slicing.slice_to_funcinst cfg ~instrs:(Some instrs_to_keep) cfg_instructions (Instr.Label.Set.singleton slicing_criterion) in
-                        let t1 = Time.now () in
-                        let slicing_time2 = Time.diff t1 t0 in
+                        let t1 = Time_float.now () in
+                        let slicing_time2 = Time_float.diff t1 t0 in
                         let sliced_labels = all_labels sliced_func.code.body in
                         (* Printf.printf "fun %ld:%s -- initial: %s, before: %s, after: %d\n" func.idx (Instr.Label.to_string slicing_criterion) (Instr.Label.Set.to_string (all_labels func.code.body)) (Instr.Label.Set.to_string instrs_to_keep) (Instr.Label.Set.length sliced_labels); *)
                         output_slicing_result filename (Success {
@@ -167,7 +167,7 @@ let evaluate =
 (* Generate a slice for printf function calls with a specific string *)
 let generate_slice (filename : string) (output_file : string) =
   let refined = false in (* Set to false if you want to slice the printf call, to true if you want to slice on the second printf argument *)
-  let only_function = true in (* set to false to generate the whole module *)
+  let only_function = false in (* set to false to generate the whole module *)
   let pattern = "\nORBS:" in
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
