@@ -23,6 +23,7 @@ let () =
 
        (* Utilities that require building the CFGs *)
        ; "cfg", Cfg.cfg
+       ; "cfg-adjlist", Cfg.cfg_adjlist
        ; "cfgs", Cfg.cfgs
 
        ; "dependencies", Slicing.dependencies
@@ -31,6 +32,7 @@ let () =
 
        (* Utilities that requires building the call graph *)
        ; "callgraph", Callgraph.callgraph
+       ; "callgraph-adjlist", Callgraph.callgraph_adjlist
        ; "reduced-callgraph", Callgraph.reduced_callgraph
        ; "schedule", Callgraph.schedule
 
