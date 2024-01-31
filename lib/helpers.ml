@@ -158,7 +158,10 @@ let apply_to_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
                  (List.filter_map (apply_to_script_file filename (function
                    | Wasm.Script.Module (_, { it = Wasm.Script.Textual m; _ }) -> Some (f m)
                    | _ -> None)) ~f:(fun x -> x))
-  | ext -> failwith (Printf.sprintf "Invalid extension for WebAssembly module: %s" ext)
+  | ext ->
+    Printf.printf "Invalid extension for WebAssembly module: %s. Assuming .wat extension\n" ext;
+    apply_to_textual_file filename f
+
 
 let apply_to_string (string : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
   let lexbuf = Lexing.from_string string in

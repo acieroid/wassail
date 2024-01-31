@@ -163,18 +163,12 @@ let evaluate =
         end;
         evaluate_file filename (if all then `All else if last then `Last else `Random))
 
-
-(* Generate a slice for printf function calls with a specific string *)
-let generate_slice (filename : string) (output_file : string) =
-  let refined = false in (* Set to false if you want to slice the printf call, to true if you want to slice on the second printf argument *)
-  let only_function = false in (* set to false to generate the whole module *)
-  let pattern = "\nORBS:" in
-  Spec_inference.propagate_globals := false;
-  Spec_inference.propagate_locals := false;
-  Spec_inference.use_const := false;
-  let wasm_mod = Wasm_module.of_file filename in
+(** Find the slicing criterion, i.e., the address at which the string ORBS is *)
+let find_criterion (filename : string) : Int32.t =
   (* Find the specific string in the data section *)
-  let str_pos = match List.find_map wasm_mod.datas ~f:(fun segment ->
+  let wasm_mod = Wasm_module.of_file filename in
+  let pattern = "\nORBS:" in
+  let address = match List.find_map wasm_mod.datas ~f:(fun segment ->
                           match String.substr_index segment.dinit ~pattern with
                           | Some idx -> begin match (Segment_mode.offset segment.dmode) with
                                         | (Instr.Data {instr = Instr.Const (Prim_value.I32 n); _}) :: [] -> Some (Int32.(n + (of_int_exn idx)))
@@ -183,7 +177,18 @@ let generate_slice (filename : string) (output_file : string) =
                           | None -> None) with
   | Some idx -> idx
   | None -> failwith "cannot find pattern in any data segment" in
-  Printf.printf "data segment: %ld\n" str_pos;
+  Printf.printf "%s: %ld\n" filename address;
+  address
+
+(* Generate a slice for printf function calls with a specific string *)
+let generate_slice (filename : string) (output_file : string) =
+  let refined = false in (* Set to false if you want to slice the printf call, to true if you want to slice on the second printf argument *)
+  let only_function = false in (* set to false to generate the whole module *)
+  Spec_inference.propagate_globals := false;
+  Spec_inference.propagate_locals := false;
+  Spec_inference.use_const := false;
+  let wasm_mod = Wasm_module.of_file filename in
+  let address = find_criterion filename in
   (* Find the index of the printf function (it should be exported, otherwise it is unnamed) *)
   let printf_export_idx = match List.find_map wasm_mod.exported_funcs ~f:(fun (idx, name, _type) ->
       if String.equal name "printf" then
@@ -203,7 +208,7 @@ let generate_slice (filename : string) (output_file : string) =
       match List.filter_map (Cfg.all_instructions_list cfg) ~f:(function
           | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
             begin match (Spec.get_or_fail annotation_before).vstack with
-              | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 str_pos)) -> Some label
+              | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 address)) -> Some label
               | _ -> None
             end
           | _ -> None) with
@@ -262,6 +267,14 @@ let gen_slice_specific =
       and output = anon ("output" %: string) in
       fun () ->
         generate_slice file output)
+
+let find_criterion =
+  Command.basic
+    ~summary:"Find the slicing criterion in a program. Prints the address the string ORBS."
+    Command.Let_syntax.(
+      let%map_open file = anon ("file" %: string) in
+      fun () ->
+        let _ = find_criterion file in ())
 
 let count_instructions_in_slice (filename : string) (output_file : string) =
   let output_func (i : Int32.t) (f : Func_inst.t) (put : string -> unit) =

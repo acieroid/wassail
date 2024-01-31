@@ -53,5 +53,6 @@ let () =
        ; "slice", Slicing.slice_line_number
        ; "evaluate-slicing", Slicing_evaluation.evaluate
        ; "gen-slice-specific", Slicing_evaluation.gen_slice_specific
+       ; "find-criterion", Slicing_evaluation.find_criterion
        ; "count-in-slice", Slicing_evaluation.count_in_slice
        ])
