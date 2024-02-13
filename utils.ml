@@ -118,7 +118,7 @@ let mem_exports =
             | _ -> false) in
         Printf.printf "%d\n" count)
 
-let function_instructions =
+let function_instruction_labels =
   Command.basic
     ~summary:"Returns the labels of instructions of a given function"
     Command.Let_syntax.(
@@ -133,6 +133,19 @@ let function_instructions =
                 Instr.Label.Set.union acc (Instr.all_labels_no_blocks_no_merge instr)) in
         Instr.Label.Set.iter labels ~f:(fun label ->
             Printf.printf "%s\n" (Instr.Label.to_string label)))
+
+let function_body =
+  Command.basic
+    ~summary:"Returns the body of a given function"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string)
+      and fidx = anon ("fidx" %: int32) in
+      fun () ->
+        let wasm_mod = Wasm_module.of_file file_in in
+        List.iter
+            (List.find_exn wasm_mod.funcs ~f:(fun f -> Int32.(f.idx = fidx))).code.body
+            ~f:(fun instr ->
+                Printf.printf "%s\n" (Instr.to_string instr)))
 
 let functions =
   Command.basic

@@ -17,7 +17,8 @@ let () =
        ; "sizes", Utils.sizes
        ; "mem-imports", Utils.mem_imports
        ; "mem-exports", Utils.mem_exports
-       ; "function-instructions", Utils.function_instructions
+       ; "function-instruction-labels", Utils.function_instruction_labels
+       ; "function-body", Utils.function_body
        ; "functions", Utils.functions
        ; "count", Utils.count
 
