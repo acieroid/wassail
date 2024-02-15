@@ -112,8 +112,8 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
               let data_deps : InSlice.Set.t = match def with
                 | Use_def.Def.Instruction (instr', var) ->
                   Log.info
-                    (Printf.sprintf "Instruction %s is part of the slice due to its data dependence on %s"
-                       (Instr.Label.to_string instr') (Var.to_string var));
+                    (Printf.sprintf "Instruction %s (%s) is part of the slice due to its data dependence on %s"
+                       (Instr.Label.to_string instr') (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions instr')) (Var.to_string var));
                   InSlice.Set.singleton (InSlice.make instr' (Some var) cfg_instructions)
                 | Use_def.Def.Entry _ -> InSlice.Set.empty
                 | Use_def.Def.Constant _ -> InSlice.Set.empty in
@@ -124,8 +124,8 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
         | Some deps -> InSlice.Set.of_list (List.map (Instr.Label.Set.to_list deps)
                                               ~f:(fun label ->
                                                   Log.info
-                                                    (Printf.sprintf "Instruction %s is part of the slice due to control dependences"
-                                                       (Instr.Label.to_string label));
+                                                    (Printf.sprintf "Instruction %s (%s) is part of the slice due to control dependences"
+                                                       (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
                                                   InSlice.make label None cfg_instructions)) in
       let worklist'' = InSlice.Set.union worklist' control_deps in
       (* For instr' in mem_deps(instr): add instr to W *)
@@ -133,8 +133,8 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
           (InSlice.Set.of_list
              (List.map ~f:(fun label ->
                   Log.info
-                    (Printf.sprintf "Instruction %s is part of the slice due to memory dependences"
-                       (Instr.Label.to_string label));
+                    (Printf.sprintf "Instruction %s (%s) is part of the slice due to memory dependences"
+                       (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
                   InSlice.make label None cfg_instructions)
                 (Instr.Label.Set.to_list (Memory_deps.deps_for preanalysis.mem_dependencies slicepart.label)))) in
       loop (InSlice.Set.remove worklist''' slicepart) slice' visited' in
@@ -220,7 +220,7 @@ let type_of_data
 
 let type_of_control
     (i : ('a Instr.control, 'a) Instr.labelled)
-    (cfg : unit Cfg.t)
+    (_cfg : unit Cfg.t)
     (instructions_map : Spec.t Instr.t Instr.Label.Map.t)
   : instr_type_element list * instr_type_element list =
   let vstack_before = match Cfg.find_instr instructions_map i.label with
@@ -262,7 +262,10 @@ let type_of_control
       let vstack = List.drop vstack_before 1 in
       ([T Type.I32] @ (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i))), [])
     | Return ->
-      (List.mapi vstack_before ~f:(fun i _ -> Any (string_of_int i)), (List.map cfg.return_types ~f:(fun t -> T t)))
+      (List.mapi vstack_before ~f:(fun i _ -> Any (string_of_int i)),
+       (* was this, but it actually doesn't leave anything on the stack:
+         (List.map cfg.return_types ~f:(fun t -> T t)) *)
+      [])
     | Unreachable -> ([], [])
     | Merge -> ([], [])
     | Block _ | Loop _ -> failwith "should not happen" (* because we have the block/loop instructions handled in the first match *)
@@ -322,11 +325,11 @@ let replace_with_equivalent_instructions (instrs : unit Instr.t list) (cfg : 'a 
   if List.is_empty instrs then instrs else
     let t = instrs_type instrs cfg instructions_map in
     let replaced = List.map (dummy_instrs t next_label) ~f:(fun i -> Instr.Data i) in
-(*    Log.info (Printf.sprintf "Replacing instructions %s of type %s -> %s with %s"
+   Log.info (Printf.sprintf "Replacing instructions %s of type %s -> %s with %s"
                 (String.concat ~sep:"," (List.map ~f:Instr.to_string instrs))
                 (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (fst t)))
                 (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (snd t)))
-                (String.concat ~sep:"," (List.map ~f:Instr.to_string replaced))); *)
+                (String.concat ~sep:"," (List.map ~f:Instr.to_string replaced)));
     replaced
 
 (* Check if the body is empty or only consist only of dummy instructions *)

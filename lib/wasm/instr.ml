@@ -219,10 +219,11 @@ let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?anno
 
 (** Converts an instruction to its string representation *)
 and to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot_to_string : 'a -> string = fun _ -> "") (instr : 'a t) : string =
-  Printf.sprintf "%s%s" (* (Label.to_string (label instr)) *) (String.make i ' ')
+  Printf.sprintf "%s%s" (String.make i ' ')
     (match instr with
      | Data instr -> data_to_string instr.instr
      | Control instr -> control_to_string instr.instr ~annot_str:annot_to_string ~sep:sep ~indent:i)
+    (* (Label.to_string (label instr)) *)
 and list_to_string ?indent:(i : int = 0) ?sep:(sep : string = ", ") (l : 'a t list) (annot_to_string : 'a -> string) : string =
   String.concat ~sep:sep (List.map l ~f:(fun instr -> to_string instr ~annot_str:annot_to_string ?sep:(Some sep) ?indent:(Some i)))
 
