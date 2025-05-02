@@ -19,5 +19,5 @@
    Use_def Dominance Control_deps Memory_deps Slicing
    Instruction_counter Sizes)
  (libraries core_kernel wasm sexplib)
- (inline_tests (flags)) ;; To include online one test, use -only-test foo.ml:linenumber
+ (inline_tests (flags)) ;; To include only one test, specify -only-test foo.ml:linenumber as the flag
  (preprocess (pps ppx_jane ppx_compare ppx_inline_test)))

@@ -1,4 +1,5 @@
 (* Implementation of dominance algorithms, based on  Cooper, Keith D.; Harvey, Timothy J; Kennedy, Ken (2001). "A Simple, Fast Dominance Algorithm". *)
+(* XXX: One could have simply used a dataflow implementation, with a set lattice, and a forward/must analysis *)
 open Core
 open Helpers
 
