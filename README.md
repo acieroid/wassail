@@ -108,3 +108,6 @@ The following publications use Wassail:
   - [Static Stack-Preserving Intra-Procedural Slicing of WebAssembly Binaries](https://soft.vub.ac.be/Publications/2022/vub-tr-soft-22-04.pdf), ICSE 2022.
   - [Dynamic Slicing of WebAssembly Binaries](http://soft.vub.ac.be/Publications/2023/vub-tr-soft-23-11.pdf), ICSME 2023.
   
+The following presentations might be useful as extra documentation:
+  - [Building Static Analyses for WebAssembly Binaries with Wassail](https://docs.google.com/presentation/d/15J6EuRAz0WFD2TG4hBwAo_GLDhDXcy77ZAUGSzLj6yA/edit?usp=drive_link), PAW 2022.
+  - [Wassail: A WebAssembly Static Analysis Library](https://docs.google.com/presentation/d/1ozzSdDTWQnMaSzX2o7wZpSC3m1cmzYfwYY6sy2kIqrE/edit?usp=drive_link), ProWeb 2021.
