@@ -46,49 +46,48 @@ module Value_sets = struct
     let bottom_set = empty
   end
 
-  type set = ValueSet.t
+  type valueSet = ValueSet.t
 
   (** Adds a memory block to an existing set of abstract memory locations.
       If TopMemory is added, the result is Top.
       If BottomMemory is added, the original set is returned unchanged.
       If the memory block overlaps or touches others in the set, they are merged.
   *)
-  let add_memory_block (mem : Abstract_memory.t) (value_set : set) : set =
+  let add_memory_block (mem : Abstract_memory.t) (value_set : valueSet) : valueSet =
     match mem with 
     | TopMemory -> ValueSet.top_set
     | BottomMemory -> value_set (* nothing to add *)
     | Mem block ->
-      if (ValueSet.equal value_set ValueSet.top_set) then (
+      if (ValueSet.equal value_set ValueSet.top_set) then
         value_set
-      ) else (
-        if (ValueSet.equal value_set ValueSet.bottom_set) then (
-          ValueSet.singleton mem
-        ) else (
-          let (overlapping_set, non_overlapping_set) =
-            Set.partition_tf value_set ~f:(fun x ->
-              match x with
-              | Mem b -> Memory_block.touching (Some b) (Some block)
-              | _ -> false) in
-          let overlapping  =
-            List.map ~f:(fun x -> 
-              match x with 
-              | Mem b -> b
-              | _ -> failwith "unreachable")
-            (Set.to_list overlapping_set) in 
-          let merged_blocks = Memory_block.merge (Some block) (Memory_block.merge_all overlapping) in
-          let non_overlapping = (Set.to_list non_overlapping_set) in
-          match merged_blocks with 
-          | None -> value_set 
-          | Some merged_blocks ->
-            ValueSet.of_list (Mem merged_blocks :: non_overlapping) (* Je n'ai toujours pas réussi à utiliser ValueSet.add *)
-        )
-      )
+      else if (ValueSet.equal value_set ValueSet.bottom_set) then
+        ValueSet.singleton mem
+      else
+        let (overlapping_set, non_overlapping_set) =
+          Set.partition_tf value_set ~f:(fun x ->
+            match x with
+            | Mem b -> Memory_block.touching (Some b) (Some block)
+            | _ -> false) in
+        let overlapping  =
+          List.map ~f:(fun x -> 
+            match x with 
+            | Mem b -> b
+            | _ -> failwith "unreachable")
+          (Set.to_list overlapping_set) in 
+        let merged_blocks = (List.fold ~init:block ~f:(fun acc x -> 
+          let someAcc = Memory_block.merge (Some acc) (Some x) in
+          match someAcc with 
+          | Some acc -> acc
+          | None -> failwith "unreachable") overlapping) in
+        (* Memory_block.merge (Some block) (Memory_block.merge_all overlapping) in *)
+        let non_overlapping = (Set.to_list non_overlapping_set) in
+        ValueSet.of_list (Mem merged_blocks :: non_overlapping) (* Je n'ai toujours pas réussi à utiliser ValueSet.add *)
 
   (** [value_set_join s1 s2] computes the union of two abstract memory sets [s1] and [s2],
       taking into account potential merging of overlapping memory blocks. The resulting
       set represents all memory locations that may be referred to by either [s1] or [s2].
   *)
-  let value_set_join (s1 :set) (s2 : set) : set =
+  let value_set_join (s1 :valueSet) (s2 : valueSet) : valueSet =
     let s = Set.to_list s1 in
     let s = (Set.to_list s2) @ s in
     let add = fun mem_set mem  ->
@@ -101,7 +100,7 @@ module Value_sets = struct
 
 
   (** The abstract store mapping variables to their value-sets. *)
-  type t = set Variable.Map.t
+  type t = valueSet Variable.Map.t
 
   (** An empty value-set store (bottom element of the domain lattice). *)
   let bottom_value_sets = Variable.Map.empty
@@ -202,9 +201,9 @@ module Value_sets = struct
       let block2 = Memory_block.Absolute 0, Memory_block.ExtendedInt.Int 3, Memory_block.ExtendedInt.Int 6
       (* [4..7] *)
       let block3 = Memory_block.Absolute 0, Memory_block.ExtendedInt.Int 4, Memory_block.ExtendedInt.Int 7
-      (* [5..8] *)
+      (* [5..9] *)
       let block4 = Memory_block.Absolute 5, Memory_block.ExtendedInt.Int 0, Memory_block.ExtendedInt.Int 4
-      (* [6..9] *)
+      (* [6..10] *)
       let block5 = Memory_block.Absolute 6, Memory_block.ExtendedInt.Int 0, Memory_block.ExtendedInt.Int 4
 
       let mem1 = Abstract_memory.Mem block1
@@ -306,6 +305,14 @@ module Value_sets = struct
           ValueSet.to_string s);
         match Set.to_list s with
         | [Mem (Memory_block.Absolute 0, Memory_block.ExtendedInt.Int 0, Memory_block.ExtendedInt.Int 4); Mem (Memory_block.Absolute 6, Memory_block.ExtendedInt.Int 0, Memory_block.ExtendedInt.Int 4)] -> true
+        | _ -> false
+
+      let%test "adding a block that touches two non touching blocks merges them all" =
+        let s1 = ValueSet.bottom_set |> add_memory_block mem1 |> add_memory_block mem5 in 
+        let s = s1 |> add_memory_block mem3 in
+        print_endline ("Adding " ^ Abstract_memory.to_string mem3 ^ " to " ^ ValueSet.to_string s1 ^ " => " ^ ValueSet.to_string s);
+        match Set.to_list s with
+        | [Mem (Memory_block.Absolute 0, Memory_block.ExtendedInt.Int 0, Memory_block.ExtendedInt.Int 10)] -> true
         | _ -> false
     end)
 
