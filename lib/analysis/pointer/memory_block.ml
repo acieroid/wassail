@@ -61,7 +61,7 @@ type upper_bound = ExtendedInt.t
 type t = base_address * lower_bound * upper_bound
 [@@deriving sexp, compare]
 
-(** [subsetOf mem1 mem2] returns [true] if memory block [mem1] is entirely
+(** [subset mem1 mem2] returns [true] if memory block [mem1] is entirely
     contained within memory block [mem2], and [false] otherwise.
 
     For absolute addresses, containment is tested by comparing the concrete
@@ -78,7 +78,7 @@ type t = base_address * lower_bound * upper_bound
     @param mem2 the potentially larger memory block
     @return [true] if [mem1] ⊆ [mem2]; [false] otherwise
 *)
-let subsetOf (mem1 : t) (mem2 : t) : bool =
+let subset (mem1 : t) (mem2 : t) : bool =
   match mem1, mem2 with 
   | (Absolute b1, Int l1, Int u1), (Absolute b2, Int l2, Int u2) ->
     (b1 + l1) >= (b2 + l2) && (b1 + u1) <= (b2 + u2)
@@ -206,12 +206,39 @@ let merge (block1 : t option) (block2 : t option) : t option =
   | Some block, None | None, Some block -> Some block
   | None, None -> None
 
-(** Attempts to merge a list of memory blocks, pairwise.
+
+let intersection (block1 : t option) (block2 : t option) : t option =
+  match block1, block2 with 
+  | None, None | Some _, None | None, Some _ -> None
+  | Some (Absolute b1, Int l1, Int u1), Some (Absolute b2, Int l2, Int u2) ->
+    let lower = max (b1 + l1) (b2 + l2) in
+    let upper = min (b1 + u1) (b2 + u2) in
+    if (lower <= upper) then 
+      Some (Absolute 0, Int lower, Int upper)
+    else
+      None
+  | Some (_, Infinity, Infinity), Some block
+  | Some block, Some (_, Infinity, Infinity) -> Some block
+  | Some (Relative b1, l1, u1), Some (Relative b2, l2, u2) when String.equal b1 b2 ->
+    let lower = ExtendedInt.maximum l1 l2 in
+    let upper = ExtendedInt.minimum u1 u2 in
+    (match lower, upper with
+    | Int l, Int u ->
+      if (l <= u) then 
+        Some (Relative b1, lower, upper)
+      else
+        None
+    | Infinity, Infinity | Infinity, _ | _, Infinity ->
+      Some (Relative b1, lower, upper))
+  | _ -> failwith "impossible to determine whether two memory blocks intersect if their base addresses are undetermined"
+
+  
+(* (* * Attempts to merge a list of memory blocks, pairwise.
     Returns [None] for an empty list, or [Some block] for the merged result. *)
 let merge_all (blocks : t list) : t option =
   match blocks with 
   | [] -> None
-  | x :: xs -> (List.fold ~init:(Some x) ~f:(fun acc b -> merge acc (Some b)) xs)
+  | x :: xs -> (List.fold ~init:(Some x) ~f:(fun acc b -> merge acc (Some b)) xs) *)
 
 
 
