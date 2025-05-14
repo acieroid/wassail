@@ -153,18 +153,40 @@ module Abstract_store = struct
   (** An empty value-set store (bottom element of the domain lattice). *)
   let bottom = Variable.Map.empty
 
+  (** [equal x y] checks if two abstract stores [x] and [y] are equal.
+
+      Two stores are equal if they map the same set of variables to value-sets that are equal
+      (i.e., contain the same abstract memory locations).
+
+      This function is used to compare two analysis states for convergence detection or test validation.
+
+      @param x the first abstract store
+      @param y the second abstract store
+      @return [true] if [x] and [y] are structurally equal, [false] otherwise
+  *)
+  let equal (x : t) (y : t) : bool =
+    let vars_x = Map.keys x and vars_y = Map.keys y in
+    List.equal Variable.equal vars_x vars_y &&
+    List.fold ~init:true ~f:(
+      fun acc var -> 
+        acc && 
+        ValueSet.equal 
+          (Option.value ~default:ValueSet.empty (Map.find x var)) 
+          (Option.value ~default:ValueSet.empty (Map.find y var))
+      ) vars_x
+
   (** [to_string value_sets] returns a string representation of the entire abstract store,
       listing each variable and the value-set it maps to.
   *)
   let to_string (value_sets : t) : string =
-    "Value_sets = [\t" ^
+    "Abstract_store = [\t" ^
     (Map.to_alist value_sets
     |> List.map ~f:(fun (var, mem_set) ->
          let mems =
            ValueSet.to_string mem_set
          in
          Variable.to_string var ^ " ↦ " ^ mems ^ "")
-    |> String.concat ~sep:",\n\t\t")
+    |> String.concat ~sep:",\t")
     ^ "\t]"
 
   (** [join vs1 vs2] computes the least upper bound (join) of two abstract stores [vs1] and [vs2].
@@ -224,8 +246,13 @@ module Abstract_store = struct
         Map.set ~key:var ~data:met_value_sets acc
       ) vars
 
+  let meet_all (stores : t list) : t =
+    List.fold ~init:bottom ~f:meet stores
 
-
+  let less_than (vs1 : t) (vs2 : t) : bool =
+    let greatest_lower_bound = meet vs1 vs2 in
+    let least_upper_bound = join vs1 vs2 in
+    equal greatest_lower_bound vs1 && equal least_upper_bound vs2
 
 
 
@@ -494,4 +521,117 @@ module Abstract_store = struct
 
 
   (* D'autres tests suivront *)
+
+  let%test_module "Value_set store equality" = (module struct
+    let block1 = Memory_block.Absolute 0, Memory_block.ExtendedInt.Int 0, Memory_block.ExtendedInt.Int 4
+    let block2 = Memory_block.Absolute 0, Memory_block.ExtendedInt.Int 4, Memory_block.ExtendedInt.Int 7
+
+    let mem1 = Abstract_memory.Mem block1
+    let mem2 = Abstract_memory.Mem block2
+
+    let x = Variable.Var (Var.Global 1)
+    let y = Variable.Var (Var.Global 2)
+
+    let%test "equal stores with same mappings" =
+      let vs1 = ValueSet.bottom_set |> ValueSet.add_memory_block mem1 in
+      let vs2 = ValueSet.bottom_set |> ValueSet.add_memory_block mem2 in
+      let store1 = bottom |> Map.set ~key:x ~data:vs1 |> Map.set ~key:y ~data:vs2 in
+      let store2 = bottom |> Map.set ~key:x ~data:vs1 |> Map.set ~key:y ~data:vs2 in
+      print_endline ("Store1:\n" ^ to_string store1);
+      print_endline ("Store2:\n" ^ to_string store2);
+      print_endline ("\tequal?: " ^ string_of_bool (equal store1 store2));
+      equal store1 store2
+
+    let%test "non-equal stores with different mappings" =
+      let vs1 = ValueSet.bottom_set |> ValueSet.add_memory_block mem1 in
+      let vs2 = ValueSet.bottom_set |> ValueSet.add_memory_block mem2 in
+      let store1 = bottom |> Map.set ~key:x ~data:vs1 in
+      let store2 = bottom |> Map.set ~key:x ~data:vs2 in
+      print_endline ("Store1:\n" ^ to_string store1);
+      print_endline ("Store2:\n" ^ to_string store2);
+      print_endline ("\tequal?: " ^ string_of_bool (equal store1 store2));
+      not (equal store1 store2)
+
+    let%test "non-equal stores with different variables" =
+      let vs1 = ValueSet.bottom_set |> ValueSet.add_memory_block mem1 in
+      let store1 = bottom |> Map.set ~key:x ~data:vs1 in
+      let store2 = bottom |> Map.set ~key:y ~data:vs1 in
+      print_endline ("Store1:\n" ^ to_string store1);
+      print_endline ("Store2:\n" ^ to_string store2);
+      print_endline ("\tequal?: " ^ string_of_bool (equal store1 store2));
+      not (equal store1 store2)
+
+    (* Additional tests with multiple memory blocks *)
+    let%test "equal stores with multiple mappings" =
+      let block3 = Memory_block.Absolute 100, Memory_block.ExtendedInt.Int 0, Memory_block.ExtendedInt.Int 4 in
+      let mem3 = Abstract_memory.Mem block3 in
+      let vs1 = ValueSet.bottom_set |> ValueSet.add_memory_block mem1 |> ValueSet.add_memory_block mem3 in
+      let vs2 = ValueSet.bottom_set |> ValueSet.add_memory_block mem2 |> ValueSet.add_memory_block mem3 in
+      let store1 = bottom |> Map.set ~key:x ~data:vs1 |> Map.set ~key:y ~data:vs2 in
+      let store2 = bottom |> Map.set ~key:x ~data:vs1 |> Map.set ~key:y ~data:vs2 in
+      print_endline ("Store1:\n" ^ to_string store1);
+      print_endline ("Store2:\n" ^ to_string store2);
+      print_endline ("\tequal?: " ^ string_of_bool (equal store1 store2));
+      equal store1 store2
+
+    let%test "non-equal stores with different multiple mappings" =
+      let block4 = Memory_block.Absolute 200, Memory_block.ExtendedInt.Int 0, Memory_block.ExtendedInt.Int 4 in
+      let mem4 = Abstract_memory.Mem block4 in
+      let vs1 = ValueSet.bottom_set |> ValueSet.add_memory_block mem1 |> ValueSet.add_memory_block mem4 in
+      let vs3 = ValueSet.bottom_set |> ValueSet.add_memory_block mem1 in
+      let store1 = bottom |> Map.set ~key:x ~data:vs1 in
+      let store2 = bottom |> Map.set ~key:x ~data:vs3 in
+      print_endline ("Store1:\n" ^ to_string store1);
+      print_endline ("Store2:\n" ^ to_string store2);
+      print_endline ("\tequal?: " ^ string_of_bool (equal store1 store2));
+      not (equal store1 store2)
+
+    let%test "non-equal stores with different variables and multiple mappings" =
+      let block5 = Memory_block.Absolute 300, Memory_block.ExtendedInt.Int 0, Memory_block.ExtendedInt.Int 4 in
+      let mem5 = Abstract_memory.Mem block5 in
+      let vs1 = ValueSet.bottom_set |> ValueSet.add_memory_block mem1 |> ValueSet.add_memory_block mem5 in
+      let store1 = bottom |> Map.set ~key:x ~data:vs1 in
+      let store2 = bottom |> Map.set ~key:y ~data:vs1 in
+      print_endline ("Store1:\n" ^ to_string store1);
+      print_endline ("Store2:\n" ^ to_string store2);
+      print_endline ("\tequal?: " ^ string_of_bool (equal store1 store2));
+      not (equal store1 store2)
+  end)
+
+  let%test_module "Value_set store less_than" = (module struct
+    let block1 = Memory_block.Absolute 0, Memory_block.ExtendedInt.Int 0, Memory_block.ExtendedInt.Int 4
+    let block2 = Memory_block.Absolute 0, Memory_block.ExtendedInt.Int 4, Memory_block.ExtendedInt.Int 7
+    let block3 = Memory_block.Absolute 0, Memory_block.ExtendedInt.Int 0, Memory_block.ExtendedInt.Int 7
+
+    let mem1 = Abstract_memory.Mem block1
+    let mem2 = Abstract_memory.Mem block2
+    let mem3 = Abstract_memory.Mem block3
+
+    let x = Variable.Var (Var.Global 1)
+
+    let%test "store is less than larger store with union of blocks" =
+      let store1 = bottom |> Map.set ~key:x ~data:(ValueSet.bottom_set |> ValueSet.add_memory_block mem1) in
+      let store2 = bottom |> Map.set ~key:x ~data:(ValueSet.bottom_set |> ValueSet.add_memory_block mem3) in
+      print_endline "Test: store1 ⊆ store2";
+      print_endline ("Store1:\n" ^ to_string store1);
+      print_endline ("Store2:\n" ^ to_string store2);
+      less_than store1 store2
+
+    let%test "equal stores are less than each other" =
+      let store1 = bottom |> Map.set ~key:x ~data:(ValueSet.bottom_set |> ValueSet.add_memory_block mem1) in
+      let store2 = store1 in
+      print_endline "Test: store1 = store2";
+      print_endline ("Store1:\n" ^ to_string store1);
+      print_endline ("Store2:\n" ^ to_string store2);
+      less_than store1 store2
+
+    let%test "store with fewer vars is not greater" =
+      let store1 = bottom |> Map.set ~key:x ~data:(ValueSet.bottom_set |> ValueSet.add_memory_block mem1) in
+      let y = Variable.Var (Var.Global 2) in
+      let store2 = store1 |> Map.set ~key:y ~data:(ValueSet.bottom_set |> ValueSet.add_memory_block mem2) in
+      print_endline "Test: store2 not ⊆ store1";
+      print_endline ("Store1:\n" ^ to_string store1);
+      print_endline ("Store2:\n" ^ to_string store2);
+      not (less_than store2 store1)
+  end)
 end
