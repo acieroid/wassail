@@ -418,6 +418,58 @@ module RIC = struct
     let widened_c = Congruence.widen c1 c2 in
     let widened_i = Interval.widen i1 i2 in 
     of_congruence_and_interval widened_c widened_i 
+
+  let element (i : string * int) (r : t) : bool =
+    match i, r with 
+    | _, Top -> true
+    | (v, i), RIC {stride = s; lower_bound = l; upper_bound = u; offset = (var, o)} when String.equal v var ->
+      begin match l, u with 
+        | Int l, _ ->
+          i >= (s * l + o) && not (ExtendedInt.less_than (ExtendedInt.plus (ExtendedInt.times u (Int s)) (Int o)) (Int i)) &&
+          (i - (s * l + o)) mod s = 0
+        | NegInfinity, Infinity ->
+          (i - o) mod s = 0
+        | NegInfinity, Int u ->
+          i <= (s * u + o) && (i - (s * u + o)) mod s = 0
+        | _ -> false
+      end
+    | _ -> false
+
+  let fully_accessed (s : int) (r : t) (v : Variable.t) : bool =
+    match v with 
+    | Var _ -> false 
+    | Mem {address = addr; size = size} -> 
+      size = s && element addr r 
+
+  let element_but_wrong_size (s : int) (r : t) (v : Variable.t) : bool =
+    match v with 
+    | Var _ -> false 
+    | Mem {address = addr; size = size} -> 
+      size <> s && element addr r 
+
+  let memory_block_partially_in_RIC (s : int) (r : t) (v : Variable.t) : bool =
+    match v with 
+    | Var _ -> false 
+    | Mem {address = addr; size = size} -> 
+      let addresses = Memory_block.extract_addresses {address = addr; size = size} in
+      let is_partially_in = List.fold ~init:false ~f:(fun acc x -> acc || element x r) addresses in 
+      is_partially_in && not (fully_accessed s r v) && not (element_but_wrong_size s r v) 
+
+  
+  let partially_accessed (s : int) (r : t) (v : Variable.t) : bool =
+    element_but_wrong_size s r v || memory_block_partially_in_RIC s r v 
+
+  let fully_accessed_set (vars : Variable.t list) (s : int) (r : t) : Variable.t list =
+    List.filter vars ~f:(fully_accessed s r) 
+
+  let partially_accessed_set (vars : Variable.t list) (s : int) (r : t) : Variable.t list =
+    List.filter vars ~f:(partially_accessed s r) 
+
+  (* *(vs, s)*)
+  let accessed (vars : Variable.t list) (s : int) (r : t) : Variable.t list * (Variable.t list) =
+    let f = fully_accessed_set vars s r in
+    let p = partially_accessed_set vars s r in
+    f, p
 end
 
 
@@ -1397,6 +1449,111 @@ let%test_module "RIC tests" = (module struct
       print_endline ("widen (" ^ to_string r1 ^ ") (" ^ to_string r2 ^ ") → " ^ to_string result);
       RIC.equal result (ric (4, Int 0, Infinity, ("", 3)))
 
+    (* --- Additional tests for RIC.element --- *)
+    let%test "element_in_absolute_ric" =
+      let r = ric (3, Int 0, Int 4, ("", 2)) in
+      let result = element ("", 11) r in
+      print_endline ("Is 11 in " ^ to_string r ^ "? → " ^ string_of_bool result);
+      result
+
+    let%test "element_not_in_absolute_ric" =
+      let r = ric (3, Int 0, Int 4, ("", 2)) in
+      let result = element ("", 10) r in
+      print_endline ("Is 10 in " ^ to_string r ^ "? → " ^ string_of_bool result);
+      not result
+
+    let%test "element_in_relative_ric" =
+      let r = ric (2, Int 0, Int 3, ("x", 4)) in
+      let result = element ("x", 6) r in
+      print_endline ("Is (x, 6) in " ^ to_string r ^ "? → " ^ string_of_bool result);
+      result
+
+    let%test "element_not_in_relative_ric_wrong_var" =
+      let r = ric (2, Int 0, Int 3, ("x", 4)) in
+      let result = element ("y", 6) r in
+      print_endline ("Is (y, 6) in " ^ to_string r ^ "? → " ^ string_of_bool result);
+      not result
+
+    let%test "element_top_always_true" =
+      let result = element ("", 42) Top in
+      print_endline ("Is 42 in ⊤? → " ^ string_of_bool result);
+      result
+
+    let%test "element_bottom_always_false" =
+      let result = element ("", 42) Bottom in
+      print_endline ("Is 42 in ⊥? → " ^ string_of_bool result);
+      not result
+
+    let%test "another element test" =
+      let result = element ("a", 32) (ric (4,Int 0, Int 4, ("a", 0))) in
+      print_endline ("Is a+17 in 4[0,4] + a? → " ^ string_of_bool result);
+      not result
+
+
+    (* --- Additional tests for RIC.fully_accessed --- *)
+    let%test "fully_accessed_true" =
+      let v = Variable.Mem {address = ("", 8); size = 4} in
+      let r = ric (2, Int 0, Int 4, ("", 0)) in
+      let result = fully_accessed 4 r v in
+      print_endline ("fully_accessed " ^ Variable.to_string v ^ " in " ^ to_string r ^ " with expected size 4 → " ^ string_of_bool result);
+      result
+
+    let%test "fully_accessed_false_wrong_size" =
+      let v = Variable.Mem {address = ("", 8); size = 2} in
+      let r = ric (2, Int 0, Int 4, ("", 0)) in
+      let result = fully_accessed 4 r v in
+      print_endline ("fully_accessed " ^ Variable.to_string v ^ " in " ^ to_string r ^ " with expected size 4 → " ^ string_of_bool result);
+      not result
+
+    let%test "fully_accessed_false_not_in_ric" =
+      let v = Variable.Mem {address = ("", 7); size = 4} in
+      let r = ric (2, Int 0, Int 4, ("", 0)) in
+      let result = fully_accessed 4 r v in
+      print_endline ("fully_accessed (Mem(7, size=4)) in " ^ to_string r ^ " → " ^ string_of_bool result);
+      not result
+
+    let%test "fully_accessed_var_is_not_memory" =
+      let v = Variable.Var (Var.Global 0) in
+      let r = ric (1, Int 0, Int 4, ("", 0)) in
+      let result = fully_accessed 4 r v in
+      print_endline ("fully_accessed (Var x) in " ^ to_string r ^ " → " ^ string_of_bool result);
+      not result
+
+
+    let%test "accessed with 5 variables" =
+      let blocks = [
+        Variable.Mem (Memory_block.make ("a", 0) 4);  
+        Variable.Mem (Memory_block.make ("a", 4) 4);  
+        Variable.Mem (Memory_block.make ("c", 2) 3);  
+        Variable.Mem (Memory_block.make ("a", 0) 5);  
+        Variable.Mem (Memory_block.make ("a", 1) 4);
+        Variable.Mem (Memory_block.make ("", 0) 5);  
+        Variable.Mem (Memory_block.make ("a", 17) 5) (* falsly detected as partially accessed *)
+      ] in
+      let r = (ric (4, Int 0, Int 4, ("a", 0))) in
+      let actual = fully_accessed_set blocks 4 r in
+      let printed = List.map actual ~f:Variable.to_string in
+      print_endline ("accessed with 5 variables and RIC = " ^ (to_string r));
+      print_endline "fully_accessed:";
+      List.iter printed ~f:print_endline;
+      let expected = [
+        "mem[a+0,a+3]";
+        "mem[a+4,a+7]"
+      ] in
+      print_endline "expected:";
+      List.iter expected ~f:print_endline;
+
+      let actual = partially_accessed_set blocks 4 r in
+      let printed = List.map actual ~f:Variable.to_string in
+      print_endline "partially_accessed:";
+      List.iter printed ~f:print_endline;
+      let expected = [
+        "mem[a+0,a+4]";
+        "mem[a+1,a+4]"
+      ] in
+      print_endline "expected:";
+      List.iter expected ~f:print_endline;
+      List.equal String.equal (List.sort ~compare:String.compare printed) (List.sort ~compare:String.compare expected)
   end)
 end)
 
