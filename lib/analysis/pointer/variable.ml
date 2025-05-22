@@ -8,25 +8,57 @@
 
 open Core
 
-(** A variable is either:
-    - [Var v]: a regular program variable
-    - [Mem block]: a memory block as defined by the [Memory_block] module *)
-type t = 
-  | Var of Var.t
-  | Mem of Memory_block.t
-[@@deriving sexp, compare, equal]
+module T = struct
+  (** A variable is either:
+      - [Var v]: a regular program variable
+      - [Mem block]: a memory block as defined by the [Memory_block] module *)
+  type t = 
+    | Var of Var.t
+    | Mem of Memory_block.t
+  [@@deriving sexp, compare, equal]
 
-(** Converts a variable to a human-readable string representation. Memory blocks are printed as ranges. *)
-let to_string (var : t) : string =
-  match var with 
-  | Var v -> Var.to_string v
-  | Mem mem_block ->
-    "mem" ^ Memory_block.to_string mem_block
+  (** Converts a variable to a human-readable string representation. Memory blocks are printed as ranges. *)
+  let to_string (var : t) : string =
+    match var with 
+    | Var v -> Var.to_string v
+    | Mem mem_block ->
+      "mem" ^ Memory_block.to_string mem_block
 
-include Comparable.Make(struct
-  type nonrec t = t
-  [@@deriving compare, sexp]
-end)
+  let list_to_string (vs : t list) : string = String.concat ~sep:", " (List.map vs ~f:to_string)
+
+  (* include Comparable.Make(struct
+    type nonrec t = t
+    [@@deriving compare, sexp, equal]
+  end) *)
+end
+include T
+
+module Map = struct
+  include Map
+  include Map.Make(T)
+  let to_string (m : 'a t) (f : 'a -> string) : string =
+    String.concat ~sep:", " (List.map (Map.to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s ↦ %s" (to_string k) (f v)))
+end
+
+module Set = struct
+  include Set
+  module S = struct
+    include Set.Make(T)
+    let to_string (v : t) : string =
+      String.concat ~sep:"," (List.map ~f:to_string (Set.to_list v))
+    
+    let cardinal (v : t) : int =
+      List.length (Set.to_list v)
+  end
+  include Set
+  include S
+  include Test.Helpers(S)
+
+  let of_option (v : T.t option) : t =
+    match v with
+    | Some v -> singleton v
+    | None -> empty
+end
 
 
 
