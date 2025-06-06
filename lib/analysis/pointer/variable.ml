@@ -8,23 +8,76 @@
 
 open Core
 
+open Reduced_interval_congruence
+
+open Maths
+
+
 module T = struct
   (** A variable is either:
       - [Var v]: a regular program variable
-      - [Mem block]: a memory block as defined by the [Memory_block] module *)
+      - [Mem ric]: a memory block as defined by the [ric] module *)
   type t = 
     | Var of Var.t
-    | Mem of Memory_block.t
+    (* | Mem of Memory_block.t *)
+    | Mem of Reduced_interval_congruence.RIC.t
   [@@deriving sexp, compare, equal]
 
   (** Converts a variable to a human-readable string representation. Memory blocks are printed as ranges. *)
   let to_string (var : t) : string =
     match var with 
     | Var v -> Var.to_string v
-    | Mem mem_block ->
-      "mem" ^ Memory_block.to_string mem_block
+    | Mem ric ->
+      "mem[" ^ RIC.to_string ric ^ "]"
 
-  let list_to_string (vs : t list) : string = String.concat ~sep:", " (List.map vs ~f:to_string)
+  let list_to_string (vars : t list) : string = String.concat ~sep:", " (List.map vars ~f:to_string)
+
+  let is_infinite (v : t) : bool =
+    match v with
+    | Var _ -> false
+    | Mem RIC.Top -> true
+    | Mem RIC {stride = _; lower_bound = l; upper_bound = u; offset = _}
+        when ExtendedInt.equal l NegInfinity || ExtendedInt.equal u Infinity -> true
+    | _ -> false
+
+  let is_finite (var : t) : bool = not (is_infinite var)
+
+  let rec to_singletons (var : t) : t list =
+    assert (is_finite var);
+    match var with
+    | Var _ -> [var]
+    | Mem Bottom -> []
+    | Mem RIC {stride = s; lower_bound = Int l; upper_bound = u; offset = (v, o)} ->
+      let new_singleton = Mem (RIC.ric (0, Int 0, Int 0, (v, s * l + o))) in
+      let leftovers = Mem (RIC.ric (s, Int (l + s), u, (v, o))) in
+      new_singleton :: to_singletons leftovers
+    | _ -> assert false
+
+  let share_addresses (var1 : t) (var2 : t) : bool =
+    match var1, var2 with
+    | Mem ric1, Mem ric2 -> not (RIC.equal RIC.Bottom  (RIC.meet ric1 ric2))
+    | _ -> false
+
+  let remove ~(these_addresses : RIC.t) ~(from : t) : t list =
+    match these_addresses, from with
+    | _, Var _ -> [from]
+    | Top, _ -> []
+    | Bottom, _ -> [from] 
+    | ric1, Mem ric2 when RIC.is_subset ric2 ~of_:(RIC.meet ric1 ric2) -> []
+    | ric1, Mem ric2 when not (RIC.comparable_offsets ric1 ric2) -> [from]
+    | _, Mem _ when is_finite from -> 
+      let singletons = to_singletons from in
+      List.filter ~f:(
+        fun v -> 
+          match v with
+          | Mem ric -> RIC.equal RIC.Bottom (RIC.meet ric these_addresses)
+          | _ -> false
+        ) singletons
+
+    | _ -> failwith "not implemented yet"
+
+
+
 
   (* include Comparable.Make(struct
     type nonrec t = t
