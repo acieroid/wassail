@@ -9,6 +9,7 @@ type t = RIC.t Variable.Map.t
 
 (** The bottom element of the domain, mapping no variables to any RICs. *)
 let bottom : t = Variable.Map.empty
+let top : t = Variable.Map.empty (* TODO: better definition of TOP *)
 
 (** Constructs the top element of the domain for a given list of variables.
     Each variable is mapped to [RIC.Top], indicating maximum uncertainty. *)
@@ -62,6 +63,16 @@ let meet (store1 : t) (store2 : t) : t =
       | `Both (x, y) -> Some (RIC.meet x y)
       | `Left _ | `Right _ -> Some (RIC.Bottom))
 
+(* widen store2 relative to store1 ***** TODO: check that it's not the opposite *)
+let widen (store1 : t) (store2 : t) : t =
+  Variable.Map.merge store1 store2 ~f:(fun ~key:k v ->
+      match k, v with
+      | _, `Both (x, y) -> Some (RIC.widen y ~relative_to:x)
+      | Mem _, `Right y -> Some (RIC.widen y ~relative_to:RIC.Top)
+      | Var _, `Right y -> Some (RIC.widen y ~relative_to:RIC.Bottom)
+      | Mem _, `Left x -> Some (RIC.widen RIC.Top ~relative_to:x)
+      | Var _, `Left x -> Some (RIC.widen RIC.Bottom ~relative_to:x))
+
 (** [get_RIC store var] retrieves the RIC associated with [var] in the abstract store [store],
     or returns [RIC.Bottom] if [var] is unbound. TOP IF VAR IS A POINTER ON THE MEMORY *)
 let get_RIC (store : t) (var : Variable.t) : RIC.t =
@@ -103,8 +114,22 @@ let to_bottom_RIC (store : t) (var : Variable.t) : t =
 let to_bottom_RICs (store : t) (vars : Variable.Set.t) : t =
   Variable.Set.fold vars ~init:store ~f:to_bottom_RIC
 
+let set (store : t) ~(var : Variable.t) ~(vs : Reduced_interval_congruence.RIC.t) : t =
+  let is_valid =
+    Variable.Map.fold store ~init:true ~f:(fun ~key:k ~data:_ acc ->
+      acc && 
+      match k, var with
+      | Var _, _ | _, Var _ -> true
+      | Mem _, Mem _ ->
+        Variable.equal k var ||
+        not (Variable.share_addresses k var)) in
+  if not is_valid then
+    failwith "error: trying to update a memory variable that shares addresses with other memory variables"
+  else
+    Variable.Map.set store ~key:var ~data:vs
 
-(* widen_state ?? *)
+let substitute (state : t) (substitutions : (Variable.t * Reduced_interval_congruence.RIC.t) list) : t =
+  List.fold substitutions ~init:state ~f:(fun state (v, vs) -> set state ~var:v ~vs:vs)
 
 
 (** The following functions will be useful when defining the transfer function: *)
@@ -115,6 +140,21 @@ let join_of_set (store : t) (vars : Variable.Set.t) : RIC.t =
   Variable.Set.fold ~init:RIC.Bottom ~f:(fun acc v -> RIC.join acc (get_RIC store v)) vars
 
 (* Get all memory variables *)
+
+let assign_constant_value (store : t) ~(const : int32) ~(to_ : Variable.t): t =
+  let vs = RIC.ric (0, Int 0, Int 0, ("", Option.value_exn (Int32.to_int const))) in
+  Variable.Map.set store ~key:to_ ~data:vs
+
+let copy_value_set (store : t) ~(from : Variable.t) ~(to_ : Variable.t) : t =
+  let vs =
+    match Variable.Map.find store from with
+    | Some vs -> vs
+    | None ->
+      match from with
+      | Var _ -> RIC.Bottom
+      | Mem _ -> RIC.Top
+  in
+  Variable.Map.set store ~key:to_ ~data:vs
 
 
 

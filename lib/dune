@@ -19,16 +19,10 @@
    Use_def Dominance Control_deps Memory_deps Slicing
    Instruction_counter Sizes
    Maths
-   Reduced_interval_congruence
-   Memory_block
    Variable
-   Value_set_domain
-   Points_to_domain Points_to_summary
-   Flow_sensitive_andersen_transfer
-   Flow_sensitive_andersen_options
-   Flow_sensitive_andersen_constraints
-   Flow_sensitive_andersen_summary
-   Steensgaard_options)
+   Value_set 
+   Abstract_store_domain Reduced_interval_congruence Value_set_transfer Value_set_summary
+   )
  (libraries core_kernel wasm sexplib)
  (inline_tests (flags)) ;; To include online one test, use -only-test foo.ml:linenumber
  (preprocess (pps ppx_jane ppx_compare ppx_inline_test)))

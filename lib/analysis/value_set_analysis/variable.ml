@@ -55,7 +55,7 @@ module T = struct
 
   let share_addresses (var1 : t) (var2 : t) : bool =
     match var1, var2 with
-    | Mem ric1, Mem ric2 -> not (RIC.equal RIC.Bottom  (RIC.meet ric1 ric2))
+    | Mem ric1, Mem ric2 -> not (RIC.equal RIC.Bottom (RIC.meet ric1 ric2))
     | _ -> false
 
   let remove ~(these_addresses : RIC.t) ~(from : t) : t list =
