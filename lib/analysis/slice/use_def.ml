@@ -111,7 +111,7 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
   (* Add definitions for all locals, globals, and memory variables *)
   let defs =
     let entry_spec = Cfg.state_before_block cfg cfg.entry_block (Spec_inference.init_state cfg) in
-    let vars = Spec_inference.vars_of entry_spec in
+    let vars = Spec.vars_of entry_spec in
     Var.Set.fold vars ~init:defs ~f:(fun defs var ->
         match Var.Map.add defs ~key:var ~data:(Def.Entry var) with
         | `Duplicate -> failwith "use_def: more than one entry definition for a variable"

@@ -1,7 +1,10 @@
 open Core
 open Helpers
 
-module Make (* : Transfer.TRANSFER *) = struct
+module Make : Transfer.TRANSFER with
+         type annot_expected = Spec.t and
+         type summary = Taint_summary.t and
+         type state = Taint_domain.t = struct
   (** We need the variable names as annotations *)
   type annot_expected = Spec.t
 
@@ -217,7 +220,7 @@ module Make (* : Transfer.TRANSFER *) = struct
                 (* get the spec after that state *)
                 let spec' = Cfg.state_after_block cfg idx init_spec in
                 (* equate all different variables in the post-state with the ones in the pre-state *)
-                List.fold_left (Spec_inference.extract_different_vars spec spec')
+                List.fold_left (Spec.extract_different_vars spec spec')
                   ~init:s
                   ~f:(fun s (x, y) ->
                       (* TODO: should it be x y or y x? *)
@@ -232,24 +235,7 @@ module Make (* : Transfer.TRANSFER *) = struct
             end
         end
 
-  let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
-    let init_spec = (Spec_inference.init_state cfg (*, Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i))) *)) in
-    match Cfg.state_after_block cfg cfg.exit_block init_spec with
-    | Bottom ->
-      (* The function exit is likely unreachable, so we use a bottom summary *)
-      { ret = None;
-        globals = List.init (List.length cfg.global_types) ~f:(fun _ -> Taint_domain.Taint.bottom);
-        mem = Taint_domain.Taint.bottom; }
-    | NotBottom exit_spec ->
-      Taint_summary.make cfg out_state
-        (if List.length cfg.return_types = 1 then List.hd exit_spec.vstack else None)
-        exit_spec.globals
-        (List.concat_map (Var.OffsetMap.to_alist exit_spec.memory)
-           ~f:(fun ((a, _), b) ->
-               (* Log.warn (Printf.sprintf "ignoring offset"); *)
-               [a; b]))
-
   let extract_summary (cfg : annot_expected Cfg.t) (analyzed_cfg : state Cfg.t) : summary =
     let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block (init_state cfg) in
-    summary cfg out_state
+    Taint_summary.summary_of cfg out_state
 end

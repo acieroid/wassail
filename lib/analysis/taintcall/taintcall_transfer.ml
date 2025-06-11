@@ -85,7 +85,7 @@ let control_instr_transfer
 
 let extract_summary (cfg : annot_expected Cfg.t) (analyzed_cfg : state Cfg.t) : summary =
   let out_state = Cfg.state_after_block analyzed_cfg analyzed_cfg.exit_block (init_state cfg) in
-  (fst out_state, TaintTransfer.summary cfg (snd out_state))
+  (fst out_state, Taint_summary.summary_of cfg (snd out_state))
 
 let merge_flows (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * state) list) : state =
   (match List.reduce (List.map ~f:(fun x -> fst (snd x)) states) ~f:Taintcall_domain.Call.join with

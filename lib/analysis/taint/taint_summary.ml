@@ -156,3 +156,21 @@ let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pr
     else
       with_globals in
   with_mem
+
+
+let summary_of (cfg : Spec.t Cfg.t) (out_state : Taint_domain.t) : t =
+  let init_spec = (Spec_inference.init_state cfg (*, Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i))) *)) in
+  match Cfg.state_after_block cfg cfg.exit_block init_spec with
+  | Bottom ->
+    (* The function exit is likely unreachable, so we use a bottom summary *)
+      { ret = None;
+        globals = List.init (List.length cfg.global_types) ~f:(fun _ -> Taint_domain.Taint.bottom);
+        mem = Taint_domain.Taint.bottom; }
+    | NotBottom exit_spec ->
+      make cfg out_state
+        (if List.length cfg.return_types = 1 then List.hd exit_spec.vstack else None)
+        exit_spec.globals
+        (List.concat_map (Var.OffsetMap.to_alist exit_spec.memory)
+           ~f:(fun ((a, _), b) ->
+               (* Log.warn (Printf.sprintf "ignoring offset"); *)
+               [a; b]))

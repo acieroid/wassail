@@ -1,8 +1,10 @@
 open Core
 open Helpers
 
-module Spec_inference = struct
-  include Spec
+module Spec_inference (* : Transfer.TRANSFER
+       with type annot_expected = unit
+        and type summary = unit
+        and type state = Spec.t *) = struct
 
   (** Allows the use of variables encoding constants *)
   let use_const : bool ref = ref true
@@ -73,7 +75,7 @@ module Spec_inference = struct
   (* No widening *)
   let widen_state _ s2 = s2
 
-  let rec compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : SpecWithoutBottom.t) : SpecWithoutBottom.t =
+  let rec compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : Spec.SpecWithoutBottom.t) : Spec.SpecWithoutBottom.t =
     match Cfg.find_enclosing_block cfg label with
     | None -> (* no enclosing block, the stack is initally empty at the beginning of the function, we ignore that *)
       state
@@ -150,29 +152,29 @@ module Spec_inference = struct
         stack_size_at_entry + out_arity in
       match i.instr with
       | Call ((arity_in, arity_out), _, _) ->
-        `Simple (NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) })
+        `Simple (Spec.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) })
       | CallIndirect (_, (arity_in, arity_out), _, _) ->
         (* Like call, but reads the function index from the vstack *)
-        `Simple (NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) })
+        `Simple (Spec.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) })
       | Br n ->
-        `Simple (NotBottom ({ state with vstack = take state.vstack (get_block_return_stack_size n) }))
+        `Simple (Spec.NotBottom ({ state with vstack = take state.vstack (get_block_return_stack_size n) }))
       | BrIf n ->
-        let state' = NotBottom ({ state with vstack = take (drop 1 state.vstack) (get_block_return_stack_size n) }) in
+        let state' = Spec.NotBottom ({ state with vstack = take (drop 1 state.vstack) (get_block_return_stack_size n) }) in
         `Branch (state', state')
       | If _ ->
-        let state' = NotBottom ({ state with vstack = drop 1 state.vstack }) in
+        let state' = Spec.NotBottom ({ state with vstack = drop 1 state.vstack }) in
         `Branch (state', state')
       | BrTable (ns, n) ->
         let arities = List.map (n :: ns) ~f:get_block_return_stack_size in
          (* LIMITATION: we assume all block arities are equal. Not sure this is always the case, but this is a limitation we have *)
         assert (IntSet.length (IntSet.of_list arities) = 1);
         let arity = List.hd_exn arities in
-        `Simple (NotBottom { state with vstack = take (drop 1 state.vstack) arity })
-      | Return -> `Simple (NotBottom ({ state with vstack = take state.vstack (List.length cfg.return_types) }))
+        `Simple (Spec.NotBottom { state with vstack = take (drop 1 state.vstack) arity })
+      | Return -> `Simple (Spec.NotBottom ({ state with vstack = take state.vstack (List.length cfg.return_types) }))
       | Unreachable ->
         (* failwith (Printf.sprintf "unsupported: unreachable") (*  in function %ld cfg.idx *) *)
         `Simple bottom
-      | Merge -> `Simple (NotBottom state)
+      | Merge -> `Simple (Spec.NotBottom state)
       | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr)))
 
   let merge
@@ -186,7 +188,7 @@ module Spec_inference = struct
       counter := !counter + 1;
       res in
     let _ : Var.t = new_var() in
-    let rename_exit (s : SpecWithoutBottom.t) =
+    let rename_exit (s : Spec.SpecWithoutBottom.t) =
       (* If this is the exit block, rename the top of the stack to a new variable *)
       if cfg.exit_block = block.idx then
         { s with vstack = List.mapi s.vstack ~f:(fun i v -> if i = 0 then Var.Return else v) }
@@ -251,12 +253,12 @@ module Spec_inference = struct
               let plug_holes = (function
                   | Var.Hole -> (* add a merge variable *) new_var ()
                   | v -> (* no hole, keep the variable *) v) in
-              lift (fun s -> { vstack = List.map s.vstack ~f:plug_holes;
-                               locals = List.map s.locals ~f:plug_holes;
-                               globals = List.map s.globals ~f:plug_holes;
-                               memory = Var.OffsetMap.map s.memory ~f:plug_holes;
-                               stack_size_at_entry = s.stack_size_at_entry;
-                             }) with_holes
+              Spec.lift (fun s -> { vstack = List.map s.vstack ~f:plug_holes;
+                                    locals = List.map s.locals ~f:plug_holes;
+                                    globals = List.map s.globals ~f:plug_holes;
+                                    memory = Var.OffsetMap.map s.memory ~f:plug_holes;
+                                    stack_size_at_entry = s.stack_size_at_entry;
+                }) with_holes
           end
       end)
     | _ ->
@@ -289,20 +291,20 @@ module Intra = Intra.Make(Spec_inference)
 include Spec_inference
 
 (** Extract vars that have been redefined in a merge block *)
-let new_merge_variables (cfg : t Cfg.t) (merge_block : t Basic_block.t) : (Var.t * Var.t) list =
+let new_merge_variables (cfg : Spec.t Cfg.t) (merge_block : Spec.t Basic_block.t) : (Var.t * Var.t) list =
   (* The predecessors of merge_block *)
   let preds = Cfg.predecessors cfg merge_block.idx in
   let state_after = Cfg.state_after_block cfg merge_block.idx (init_state cfg) in
   List.fold_left preds ~init:[] ~f:(fun acc pred_idx ->
       let state_before = Cfg.state_after_block cfg pred_idx (init_state cfg) in
-      if Spec_inference.equal state_before Spec_inference.bottom then
+      if Spec.equal state_before Spec_inference.bottom then
         (* Ignore bottom state *)
         acc
       else
-        (extract_different_vars state_before state_after) @ acc)
+        (Spec.extract_different_vars state_before state_after) @ acc)
 
 (** Return the list of variables defined by an instruction *)
-let instr_def (cfg : t Cfg.t) (instr : t Instr.t) : Var.t list =
+let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
   let defs = match instr with
     | Instr.Data i ->
       let state_after = match i.annotation_after with
@@ -368,7 +370,7 @@ let instr_def (cfg : t Cfg.t) (instr : t Instr.t) : Var.t list =
 (** Return the list of variables used by an instruction.
     If var is provided, only the use related the computation of this specific var will be return (This is only relevant for mere blocks)
  *)
-let instr_use (cfg : t Cfg.t) ?var:(var : Var.t option) (instr : t Instr.t) : Var.t list = match instr with
+let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Instr.t) : Var.t list = match instr with
   | Instr.Data i ->
     let top_n n = match i.annotation_before with
       | Bottom -> failwith "bottom annotation"
@@ -428,4 +430,3 @@ let instr_use (cfg : t Cfg.t) ?var:(var : Var.t option) (instr : t Instr.t) : Va
       | Br _ | Unreachable -> []
     end
 
-module Spec_inference_opaque : Transfer.TRANSFER = Spec_inference
