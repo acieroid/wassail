@@ -42,7 +42,7 @@ let check (expected : Summary.t) (actual : Summary.t) : bool =
 let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Taint_domain.t Cfg.t * Summary.t) Int32Map.t =
   Analysis_helpers.mk_inter
     (fun _cfgs _wasm_mod -> Int32Map.empty)
-    (fun wasm_mod scc cfgs_and_summaries ->
+    (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
        Log.info
          (Printf.sprintf "---------- Taint analysis of SCC {%s} ----------"
             (String.concat ~sep:"," (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
@@ -54,10 +54,10 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Taint_
            ~init:summaries
            ~f:(fun summaries (idx, name, (args, ret)) ->
                Int32Map.set summaries ~key:idx ~data:(Summary.of_import name wasm_mod.nglobals args ret)) in
-       let results = Inter.analyze wasm_mod annotated_scc summaries' in
+       let results = Inter.analyze wasm_mod ~cfgs:annotated_scc ~summaries:summaries' in
        Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
            let spec_cfg = Int32Map.find_exn scc idx in
-           (spec_cfg, taint_cfg, summary)))
+           (spec_cfg, taint_cfg, Option.value_exn summary)))
 
 (** Extracts the index of functions that are considered sinks, based on their names *)
 let find_sinks_from_names (module_ : Wasm_module.t) (names : StringSet.t) : Int32Set.t =

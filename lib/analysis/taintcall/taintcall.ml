@@ -31,18 +31,19 @@ let annotate (wasm_mod : Wasm_module.t) (summaries : summary Int32Map.t) (spec_c
 let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Domain.t Cfg.t * summary) Int32Map.t =
   Analysis_helpers.mk_inter
     (fun _cfgs _wasm_mod -> Int32Map.empty)
-    (fun wasm_mod scc cfgs_and_summaries ->
+    (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
        Log.info
          (Printf.sprintf "---------- CallTaint analysis of SCC {%s} ----------"
             (String.concat ~sep:"," (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
        (* Run the taint analysis *)
        let annotated_scc = scc (* Int32Map.map scc ~f:Relational.Transfer.dummy_annotate *) in
        let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_spec_cfg, _taint_cfg, summary) -> summary) in
-       let results = Inter.analyze wasm_mod annotated_scc summaries in
+       let results = Inter.analyze wasm_mod ~cfgs:annotated_scc ~summaries in
        Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
            let spec_cfg = Int32Map.find_exn scc idx in
-           Printf.printf "%ld call summary: %s\n" idx (Domain.Call.to_string (fst summary));
-           (spec_cfg, taint_cfg, summary)))
+           let actual_summary = Option.value_exn summary in
+           Printf.printf "%ld call summary: %s\n" idx (Domain.Call.to_string (fst actual_summary));
+           (spec_cfg, taint_cfg, actual_summary)))
 
 (** Detects calls to sinks with data coming from the exported functions' arguments.
     Sinks are declared as a set of function indices. *)

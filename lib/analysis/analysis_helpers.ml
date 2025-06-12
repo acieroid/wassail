@@ -21,7 +21,7 @@ let mk_intra
 
 let mk_inter
     (init_data : unit Cfg.t Int32Map.t -> Wasm_module.t -> 'a Int32Map.t)
-    (analysis : Wasm_module.t -> Spec.t Cfg.t Int32Map.t -> 'a Int32Map.t -> 'a Int32Map.t)
+    (analysis : Wasm_module.t -> cfgs:Spec.t Cfg.t Int32Map.t -> summaries:'a Int32Map.t -> 'a Int32Map.t)
   : Wasm_module.t -> Int32.t list list -> 'a Int32Map.t = fun wasm_mod sccs ->
   let cfgs = Cfg_builder.build_all wasm_mod in
   let annotated_cfgs = Int32Map.map cfgs ~f:(fun cfg -> Spec_inference.Intra.analyze wasm_mod cfg Int32Map.empty) in
@@ -30,7 +30,7 @@ let mk_inter
     ~f:(fun summaries funs ->
         let scc_cfgs_and_summaries = Int32Map.filter_keys annotated_cfgs ~f:(fun idx -> List.mem funs idx ~equal:Stdlib.(=)) in
         let scc_cfgs = Int32Map.map ~f:fst scc_cfgs_and_summaries in
-        let updated_summaries = analysis wasm_mod scc_cfgs summaries in
+        let updated_summaries = analysis wasm_mod ~cfgs:scc_cfgs ~summaries in
         Int32Map.fold updated_summaries
           ~init:summaries
           ~f:(fun ~key:idx ~data:sum acc ->

@@ -4,16 +4,40 @@ open Helpers
 module type INTER = sig
   type annot_expected
   type state
-  val analyze : Wasm_module.t -> annot_expected Cfg.t IntMap.t -> state Cfg.t IntMap.t
+  type summary
+  val analyze : Wasm_module.t ->
+                cfgs:annot_expected Cfg.t Int32Map.t ->
+                summaries: summary Int32Map.t ->
+                (state Cfg.t * summary option) Int32Map.t
 end
 
-module Make (Intra : Intra.INTRA) (*: INTER*) = struct
+(** This constructs a top-down inter-procedural analysis: starting from the entry point of the program, it then analyzes the entry point, jumping into the called function every time a call is encountered *)
+(* module MakeGlobal (Intra : Intra.INTRA) = struct
+  type annot_expected = Intra.annot_expected
+  type state = Intra.state
+  type summary = Intra.summary
+
+  let analyze (module_ : Wasm_module.t) (cfgs : annot_expected Cfg.t Int32Map.t) (summaries : summary Int32Map.t): (state Cfg.t * summary) Int32Map.t =
+
+
+end *)
+
+(** This constructs a bottom-up inter-procedural summary-based analysis: starting
+   from the leafs of the call graph, it computes summaries for each function,
+   using these summaries in the callers. *)
+module Make (Intra : Intra.INTRA) : INTER
+  with type annot_expected = Intra.annot_expected
+   and type state = Intra.state
+   and type summary = Intra.summary = struct
   type annot_expected = Intra.annot_expected
   type state = Intra.state
   type summary = Intra.summary
 
   (** Analyze multiple CFGs, returns a map of the analyzed CFG and their summary. Relies on summaries produced for the depended-upon functions. *)
-  let analyze (module_ : Wasm_module.t) (cfgs : annot_expected Cfg.t Int32Map.t) (summaries : summary Int32Map.t): (state Cfg.t * summary) Int32Map.t =
+  let analyze (module_ : Wasm_module.t)
+        ~(cfgs : annot_expected Cfg.t Int32Map.t)
+        ~(summaries : summary Int32Map.t):
+        (state Cfg.t * summary option) Int32Map.t =
     let deps : Int32Set.t Int32Map.t =
       (* The dependencies are a map from CFGs indices to the indices of their callers and callees *)
       Int32Map.map cfgs ~f:(fun cfg ->
@@ -23,11 +47,14 @@ module Make (Intra : Intra.INTRA) (*: INTER*) = struct
              This is because the inter analysis runs on an SCC of the call graph: we only need to fixpoint over that SCC *)
           Int32Set.filter (Int32Set.union callees callers) ~f:(fun idx -> Int32Map.mem cfgs idx)) in
     (* The fixpoint loop, using a worklist algorithm, and the different domain values *)
-    let rec fixpoint (worklist : Int32Set.t) (annotated_cfgs : state Cfg.t Int32Map.t) (summaries : summary Int32Map.t) : (state Cfg.t * summary) Int32Map.t =
+    let rec fixpoint (worklist : Int32Set.t)
+              (annotated_cfgs : state Cfg.t Int32Map.t)
+              (summaries : summary Int32Map.t)
+              : (state Cfg.t * summary option) Int32Map.t =
       if Int32Set.is_empty worklist then
         (* Worklist is empty, produce the results *)
         Int32Map.merge annotated_cfgs summaries ~f:(fun ~key:_fid -> function
-            | `Both (cfg, summary) -> Some (cfg, summary)
+            | `Both (cfg, summary) -> Some (cfg, Some summary)
             | `Left _cfg -> failwith "Unexpected: a summary is missing during inter analysis"
             | `Right _summary -> None (* we haven't analyzed that CFG *))
           (* was: Int32Map.mapi cfgs ~f:(fun ~key:idx ~data:cfg ->
