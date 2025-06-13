@@ -19,6 +19,7 @@ module Tree = Tree
 module Dominance = Dominance
 module Cfg = Cfg
 module Cfg_builder = Cfg_builder
+module ICFG = Icfg
 module Codegen = Codegen
 
 module Call_graph = Call_graph

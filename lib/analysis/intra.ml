@@ -3,6 +3,9 @@ open Helpers
 
 (** The interface of an intra analysis *)
 module type INTRA = sig
+
+  module Cfg : Cfg_base.CFG_LIKE
+
   (** The state of the analysis *)
   type state
 
@@ -15,11 +18,12 @@ module type INTRA = sig
   (** The annotations expected on the CFG for analysis *)
   type annot_expected
 
-  (** Analyze a method (represented by its CFG) from the module *)
+  (** Analyze a function (represented by its CFG) from the module *)
   val analyze : Wasm_module.t -> annot_expected Cfg.t -> summary Int32Map.t -> state Cfg.t * summary
 
   (** Similar to analyze, but keep previous annotations *)
-  val analyze_keep : Wasm_module.t -> annot_expected Cfg.t -> summary Int32Map.t -> (annot_expected * state) Cfg.t * summary
+  (* Not used anymore *)
+  (* val analyze_keep : Wasm_module.t -> annot_expected Cfg.t -> summary Int32Map.t -> (annot_expected * state) Cfg.t * summary *)
 end
 
 module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
@@ -30,7 +34,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
   type result =
     | Uninitialized (** Meaning it has not been computed yet *)
     | Simple of state (** A single successor *)
-    | Branch of state * state (** Upon a `brif`, there are two successor states: one where the condition holds, and where where it does not hold. This is used to model that. *)
+    | Branch of state * state (** Upon a `br_if`, there are two successor states: one where the condition holds, and where where it does not hold. This is used to model that. *)
   [@@deriving compare]
 
   (** The results of an intra analysis are a mapping from instruction labels to their in and out values *)
@@ -136,7 +140,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
              We join with the previous results *)
           let new_out_state =
             (* TODO: Join may not be necessary here, as long as out_state is greater than previous_out_state *)
-            if IntSet.mem cfg.loop_heads block_idx then
+            if Cfg.is_loop_head cfg block_idx then
               widen_result previous_out_state (join_result previous_out_state out_state)
             else
               join_result previous_out_state out_state
@@ -154,7 +158,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
         block_data := IntMap.set !block_data ~key:block_idx ~data:(Simple in_state, out_state);
         _narrow blocks
     in
-    fixpoint (IntSet.singleton cfg.entry_block) 1;
+    fixpoint (IntSet.singleton (Cfg.entry cfg)) 1;
     (* _narrow (IntMap.keys cfg.basic_blocks); *)
     !instr_data
 
@@ -167,7 +171,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
     let summary = Transfer.extract_summary cfg analyzed_cfg in
     analyzed_cfg, summary
 
-  let analyze_keep (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (summaries : summary Int32Map.t) : (annot_expected * state) Cfg.t * summary =
+  let _analyze_keep (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (summaries : summary Int32Map.t) : (annot_expected * state) Cfg.t * summary =
     let to_state_keep (previous : annot_expected * annot_expected) (results_pair : result * result) : ((annot_expected * state) * (annot_expected * state)) =
       ((fst previous, result_to_state cfg (fst results_pair)),
        (snd previous, result_to_state cfg (snd results_pair))) in
@@ -180,11 +184,4 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
         ~f:(fun i -> to_state_keep (Instr.annotation_before i, Instr.annotation_after i) (Instr.Label.Map.find_exn instr_data (Instr.label i))) in
     let summary = Transfer.extract_summary cfg analyzed_cfg in
     analyzed_keep_cfg, summary
-
-  (** Extract the out state from intra-procedural results *)
-  let final_state (cfg_before : annot_expected Cfg.t) (cfg : state Cfg.t) : state =
-    Cfg.state_after_block cfg cfg.exit_block (Transfer.init_state cfg_before)
-
-  let final_state_kept (_cfg : (annot_expected * state) Cfg.t) : state =
-    failwith "TODO, was: snd (Cfg.state_after_block cfg cfg.exit_block)"
 end

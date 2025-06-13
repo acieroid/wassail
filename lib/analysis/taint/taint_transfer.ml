@@ -1,10 +1,13 @@
 open Core
 open Helpers
 
-module Make : Transfer.TRANSFER with
-         type annot_expected = Spec.t and
-         type summary = Taint_summary.t and
-         type state = Taint_domain.t = struct
+module Make : Transfer.TRANSFER
+  with type annot_expected = Spec.t
+   and type summary = Taint_summary.t
+   and type state = Taint_domain.t
+   and module Cfg = Cfg.Cfg = struct
+  module Cfg = Cfg.Cfg
+
   (** We need the variable names as annotations *)
   type annot_expected = Spec.t
 
@@ -27,9 +30,9 @@ module Make : Transfer.TRANSFER with
   (** In the initial state, we only set the taint for for parameters and the globals. *)
   let init_state (cfg : 'a Cfg.t) : state =
     Var.Map.of_alist_exn
-      ((List.mapi cfg.arg_types ~f:(fun i _ -> (Var.Local i,
+      ((List.mapi (Cfg.arg_types cfg) ~f:(fun i _ -> (Var.Local i,
                                                 Taint_domain.Taint.taint (Var.Local i)))) @
-       (List.mapi cfg.global_types ~f:(fun i _ -> (Var.Global i,
+       (List.mapi (Cfg.global_types cfg) ~f:(fun i _ -> (Var.Global i,
                                                  Taint_domain.Taint.taint (Var.Global i)))))
 
   let bottom_state (_cfg : 'a Cfg.t) : state = Taint_domain.bottom

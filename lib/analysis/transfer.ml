@@ -2,6 +2,9 @@ open Helpers
 
 (** The expected interface for a transfer function *)
 module type TRANSFER = sig
+
+  module Cfg : Cfg_base.CFG_LIKE
+
   (** The annotations expected by the analysis *)
   type annot_expected
 

@@ -1,6 +1,8 @@
 open Core
 open Helpers
 
+module Cfg = Cfg.Cfg
+
 module TaintTransfer = Taint_transfer.Make
 
 (** Need to match the taint analysis expected annotations *)

@@ -2,6 +2,7 @@ open Core
 open Helpers
 
 module type INTER = sig
+  module Cfg : Cfg_base.CFG_LIKE
   type annot_expected
   type state
   type summary
@@ -11,27 +12,19 @@ module type INTER = sig
                 (state Cfg.t * summary option) Int32Map.t
 end
 
-(** This constructs a top-down inter-procedural analysis: starting from the entry point of the program, it then analyzes the entry point, jumping into the called function every time a call is encountered *)
-(* module MakeGlobal (Intra : Intra.INTRA) = struct
-  type annot_expected = Intra.annot_expected
-  type state = Intra.state
-  type summary = Intra.summary
-
-  let analyze (module_ : Wasm_module.t) (cfgs : annot_expected Cfg.t Int32Map.t) (summaries : summary Int32Map.t): (state Cfg.t * summary) Int32Map.t =
-
-
-end *)
-
 (** This constructs a bottom-up inter-procedural summary-based analysis: starting
    from the leafs of the call graph, it computes summaries for each function,
    using these summaries in the callers. *)
 module Make (Intra : Intra.INTRA) : INTER
   with type annot_expected = Intra.annot_expected
    and type state = Intra.state
-   and type summary = Intra.summary = struct
+   and type summary = Intra.summary
+   and module Cfg = Intra.Cfg = struct
   type annot_expected = Intra.annot_expected
   type state = Intra.state
   type summary = Intra.summary
+
+  module Cfg = Intra.Cfg
 
   (** Analyze multiple CFGs, returns a map of the analyzed CFG and their summary. Relies on summaries produced for the depended-upon functions. *)
   let analyze (module_ : Wasm_module.t)
@@ -72,13 +65,13 @@ module Make (Intra : Intra.INTRA) : INTER
             | Some r -> r
             | None -> failwith "Inter: can't find CFG" in
           Log.info
-            (Printf.sprintf "Analyzing cfg %s (name: %s)\n" (Int32.to_string cfg_idx) cfg.name);
+            (Printf.sprintf "Analyzing cfg %s (name: %s)\n" (Int32.to_string cfg_idx) (Cfg.name cfg));
           (* Perform intra-procedural analysis *)
           let (results, summary) = Intra.analyze module_ cfg summaries in
           (* Check difference with previous state, if there was any *)
           let previous_results = Int32Map.find annotated_cfgs cfg_idx in
           match previous_results with
-          | Some res when Cfg.equal Intra.equal_state results res ->
+          | Some res when Cfg.equal Intra.equal_state results res -> (* TODO: CFG equality might be slow *)
             (* Same results as before, we can just recurse without having do anything *)
             fixpoint (Int32Set.remove worklist cfg_idx) annotated_cfgs summaries
           | _ ->

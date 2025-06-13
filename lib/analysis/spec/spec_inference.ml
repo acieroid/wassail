@@ -6,6 +6,8 @@ module Spec_inference (* : Transfer.TRANSFER
         and type summary = unit
         and type state = Spec.t *) = struct
 
+  module Cfg = Cfg.Cfg
+
   (** Allows the use of variables encoding constants *)
   let use_const : bool ref = ref true
 
@@ -57,10 +59,10 @@ module Spec_inference (* : Transfer.TRANSFER
     vstack = []; (* the vstack is initially empty *)
     locals =
       if !use_const then
-        (List.mapi cfg.arg_types ~f:(fun i _ -> Var.Local i)) @ (List.map cfg.local_types ~f:(fun _ -> Var.Const (Prim_value.I32 0l)))
+        (List.mapi (Cfg.arg_types cfg) ~f:(fun i _ -> Var.Local i)) @ (List.map (Cfg.local_types cfg) ~f:(fun _ -> Var.Const (Prim_value.I32 0l)))
       else
-        List.mapi (cfg.arg_types @ cfg.local_types) ~f:(fun i _ -> Var.Local i);
-    globals = List.mapi cfg.global_types ~f:(fun i _ -> Var.Global i);
+        List.mapi ((Cfg.arg_types cfg) @ (Cfg.local_types cfg)) ~f:(fun i _ -> Var.Local i);
+    globals = List.mapi (Cfg.global_types cfg) ~f:(fun i _ -> Var.Global i);
     memory = Var.OffsetMap.empty;
     stack_size_at_entry = Instr.Label.Map.empty;
   }
@@ -77,7 +79,7 @@ module Spec_inference (* : Transfer.TRANSFER
 
   let rec compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : Spec.SpecWithoutBottom.t) : Spec.SpecWithoutBottom.t =
     match Cfg.find_enclosing_block cfg label with
-    | None -> (* no enclosing block, the stack is initally empty at the beginning of the function, we ignore that *)
+    | None -> (* no enclosing block, the stack is initially empty at the beginning of the function, we ignore that *)
       state
     | Some block_label ->
       begin match Instr.Label.Map.find state.stack_size_at_entry block_label with
@@ -148,7 +150,7 @@ module Spec_inference (* : Transfer.TRANSFER
               fst arity
             else
               snd arity
-          | None -> List.length cfg.return_types in
+          | None -> List.length (Cfg.return_types cfg) in
         stack_size_at_entry + out_arity in
       match i.instr with
       | Call ((arity_in, arity_out), _, _) ->
@@ -170,7 +172,7 @@ module Spec_inference (* : Transfer.TRANSFER
         assert (IntSet.length (IntSet.of_list arities) = 1);
         let arity = List.hd_exn arities in
         `Simple (Spec.NotBottom { state with vstack = take (drop 1 state.vstack) arity })
-      | Return -> `Simple (Spec.NotBottom ({ state with vstack = take state.vstack (List.length cfg.return_types) }))
+      | Return -> `Simple (Spec.NotBottom ({ state with vstack = take state.vstack (List.length (Cfg.return_types cfg)) }))
       | Unreachable ->
         (* failwith (Printf.sprintf "unsupported: unreachable") (*  in function %ld cfg.idx *) *)
         `Simple bottom
@@ -190,7 +192,7 @@ module Spec_inference (* : Transfer.TRANSFER
     let _ : Var.t = new_var() in
     let rename_exit (s : Spec.SpecWithoutBottom.t) =
       (* If this is the exit block, rename the top of the stack to a new variable *)
-      if cfg.exit_block = block.idx then
+      if Cfg.exit_block cfg = block.idx then
         { s with vstack = List.mapi s.vstack ~f:(fun i v -> if i = 0 then Var.Return else v) }
       else
         s
@@ -294,9 +296,9 @@ include Spec_inference
 let new_merge_variables (cfg : Spec.t Cfg.t) (merge_block : Spec.t Basic_block.t) : (Var.t * Var.t) list =
   (* The predecessors of merge_block *)
   let preds = Cfg.predecessors cfg merge_block.idx in
-  let state_after = Cfg.state_after_block cfg merge_block.idx (init_state cfg) in
+  let state_after = Cfg.state_after_block cfg merge_block.idx (Spec_inference.init_state cfg) in
   List.fold_left preds ~init:[] ~f:(fun acc pred_idx ->
-      let state_before = Cfg.state_after_block cfg pred_idx (init_state cfg) in
+      let state_before = Cfg.state_after_block cfg pred_idx (Spec_inference.init_state cfg) in
       if Spec.equal state_before Spec_inference.bottom then
         (* Ignore bottom state *)
         acc
@@ -310,7 +312,7 @@ let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
       let state_after = match i.annotation_after with
         | Bottom -> failwith "bottom annotation, this an unreachable instruction"
         | NotBottom s -> s in
-      let top_n n = take state_after.vstack n in
+      let top_n n = Spec_inference.take state_after.vstack n in
       begin match i.instr with
         | Nop | Drop | MemoryCopy | MemoryFill | MemoryInit _ -> []
         | Select _ | MemorySize
@@ -318,22 +320,22 @@ let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
         | Const _ | MemoryGrow
         | RefIsNull | RefNull _ | RefFunc _ -> top_n 1
         | LocalGet _ ->
-          if !propagate_locals then
+          if !Spec_inference.propagate_locals then
             []
           else
             top_n 1
         | GlobalGet _ ->
-          if !propagate_globals then
+          if !Spec_inference.propagate_globals then
             []
           else
             top_n 1
         | LocalSet l | LocalTee l ->
-          if !propagate_locals then
+          if !Spec_inference.propagate_locals then
             []
           else
             [get_nth state_after.locals l]
         | GlobalSet g ->
-          if !propagate_globals then
+          if !Spec_inference.propagate_globals then
             []
           else
             [get_nth state_after.globals g]
@@ -344,14 +346,14 @@ let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
     | Instr.Control i ->
       let top_n n = match i.annotation_after with
         | Bottom -> failwith "bottom annotation"
-        | NotBottom s -> take s.vstack n in
+        | NotBottom s -> Spec_inference.take s.vstack n in
         begin match i.instr with
         | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
         | If _ -> [] (* We could say that if defines its "resulting" value, but that will be handled by the merge node *)
         | Call ((_, arity_out), _, _) -> top_n arity_out
         | CallIndirect (_, (_, arity_out), _, _) -> top_n arity_out
         | Merge ->
-          (* Merge instruction defines new variabes *)
+          (* Merge instruction defines new variables *)
           let block = Cfg.find_enclosing_block_exn cfg (Instr.label instr) in
           let vars = List.map (new_merge_variables cfg block) ~f:snd in
           (* There might be duplicates. For example, i3 becomes m0 from one branch, and i4 becomes m0 from another branch.
@@ -374,7 +376,7 @@ let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Ins
   | Instr.Data i ->
     let top_n n = match i.annotation_before with
       | Bottom -> failwith "bottom annotation"
-      | NotBottom s -> take s.vstack n in
+      | NotBottom s -> Spec_inference.take s.vstack n in
     begin match i.instr with
       | Nop -> []
       | Drop -> top_n 1
@@ -405,7 +407,7 @@ let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Ins
   | Instr.Control i ->
     let top_n n = match i.annotation_before with
         | Bottom -> failwith "bottom annotation"
-        | NotBottom s -> take s.vstack n in
+        | NotBottom s -> Spec_inference.take s.vstack n in
     begin match i.instr with
       | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
       | If _ -> top_n 1 (* relies on top value to decide the branch taken *)
@@ -426,7 +428,6 @@ let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Ins
                   None)
         end
       | Return ->
-        top_n (List.length cfg.return_types)
+        top_n (List.length (Cfg.return_types cfg))
       | Br _ | Unreachable -> []
     end
-

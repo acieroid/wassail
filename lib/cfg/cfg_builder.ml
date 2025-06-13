@@ -302,9 +302,9 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
       block.idx, block :: actual_blocks, (block.idx, first_block, None) :: actual_edges in
 
   let edges = IntMap.map (IntMap.of_alist_multi (List.map actual_edges' ~f:(fun (src, dst, data) -> (src, (dst, data)))))
-      ~f:(fun es -> Cfg.Edge.Set.of_list es) in
+      ~f:(fun es -> Cfg_base.Edge.Set.of_list es) in
   let back_edges = IntMap.map (IntMap.of_alist_multi (List.map actual_edges' ~f:(fun (left, right, data) -> (right, (left, data)))))
-      ~f:(fun es -> Cfg.Edge.Set.of_list es) in
+      ~f:(fun es -> Cfg_base.Edge.Set.of_list es) in
   let basic_blocks = IntMap.of_alist_exn (List.map actual_blocks' ~f:(fun b -> (b.idx, b))) in
 
   let label_to_instr =
