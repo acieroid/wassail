@@ -77,12 +77,19 @@ module T = struct
     | _ -> failwith "not implemented yet"
 
 
-
-
-  (* include Comparable.Make(struct
-    type nonrec t = t
-    [@@deriving compare, sexp, equal]
-  end) *)
+  (* TODO: Test this function *)
+  let is_covered ~(by : t list) (v : t) : bool =
+    let v_addr = match v with | Mem r -> r | _ -> assert false in
+    let not_covered = List.fold ~init:[v_addr]
+                                ~f:(fun acc x ->
+                                  match x with
+                                  | Var _ -> acc
+                                  | Mem addr -> 
+                                    List.concat (List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y) acc))
+                                by in
+    let not_covered = List.filter ~f:(fun x -> not (RIC.equal RIC.Bottom x)) not_covered in
+    List.is_empty not_covered
+    
 end
 include T
 

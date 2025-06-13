@@ -116,6 +116,8 @@ module RIC = struct
       | Bottom, _ | _, Bottom -> Bottom 
       | Congruence {stride = 0; offset = (v1, o1)}, 
         Congruence {stride = 0; offset = (v2, o2)} when String.equal v1 v2 && o1 = o2 -> c1
+      | Congruence {stride = 0;  _}, 
+        Congruence {stride = 0;  _} -> Bottom
       | Congruence {stride = 0; offset = (v1, o1)}, 
         Congruence {stride = s2; offset = (v2, o2)} when String.equal v1 v2 -> 
           if o1 mod s2 = o2 then c1 else Bottom
@@ -141,13 +143,12 @@ module RIC = struct
       | Top, _ | _, Top -> Top
       | Bottom, c -> c
       | c, Bottom -> c
-      | Congruence {offset = (v1,_); _}, 
-        Congruence {offset = (v2, _); _} when not (String.equal v1 v2) -> Top
-      | Congruence {stride = s1; offset = (v,o1)}, 
-        Congruence {stride = s2; offset = (_, o2); _} ->
+      | Congruence {stride = s1; offset = ("",o1)}, 
+        Congruence {stride = s2; offset = ("", o2); _} ->
           let new_stride = gcd s1 s2 in
-          let new_offset = (v, o1 + o2) in
+          let new_offset = ("", o1 + o2) in
           Congruence {stride = new_stride; offset = new_offset}
+      | _ -> assert false
   end
 
   (** Integer Interval Domain
@@ -330,6 +331,9 @@ module RIC = struct
       | s, l, u, o -> RIC {stride = s; lower_bound = l; upper_bound = u; offset = o}
     )
 
+  let relative_ric (var : string) : t =
+    ric (0, Int 0, Int 0, (var, 0))
+
   let is_singleton (r : t) : bool =
     let r = reduce r in
     match r with
@@ -457,6 +461,9 @@ module RIC = struct
     let c = Congruence.meet c1 c2 in
     let i = Interval.meet i1 i2 in 
     of_congruence_and_interval c i
+  
+  let disjoint (ric1 : t) (ric2 : t) : bool =
+    equal Bottom (meet ric1 ric2)
 
   (** [join r1 r2] returns the union over-approximation of two RIC values. *)
   let join (ric1 : t) (ric2 : t) : t =
@@ -502,7 +509,7 @@ module RIC = struct
     match r with
     | Top -> Top 
     | Bottom -> Bottom
-    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (v,o)} -> reduce (ric (s, l, u, (v, o + c)))
+    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (v,o)} -> ric (s, l, u, (v, o + c))
 
   (** [remove_lower_bound r] removes the lower bound constraint in [r]. *)
   let remove_lower_bound (r : t) : t =
@@ -557,7 +564,6 @@ module RIC = struct
         aux (i - 1) (add_offset r (i + 3 + size - 1) :: acc)
       | _ -> assert false
     in
-
     let accessed = aux (-3) []
     in
     if size <> 4 || (not (is_singleton r)) && (match r with | RIC {stride = s; _} when s < 4 -> true | _ -> false) then
@@ -571,12 +577,82 @@ module RIC = struct
     fully : t;
     partially : t list
   }
-  (** [accessed ~value_set size] computes memory cells fully and partially accessed. *)
-  let accessed ~(value_set : t) (size : int) : accessed =
+  (** [accessed ~value_set ~size] computes memory cells fully and partially accessed. *)
+  let accessed ~(value_set : t) ~(size : int) : accessed =
     let stride = match value_set with | RIC {stride = s; _} -> s | Top -> 1 | Bottom -> 0 in
-    let f = if size = 4 && stride >= 4 then value_set else Bottom in
+    let f = if size = 4 && (stride >= 4 || is_singleton value_set) then value_set else Bottom in
     let p = partially_accessed ~by:value_set ~size:size in
     {fully = f; partially = p}
+
+  let extract_relative_offset (r : t) : string =
+    match r with
+    | Bottom | Top -> ""
+    | RIC {offset = (relative, _); _} -> relative
+  
+  let set_relative_offset (r : t) (offset : string) : t =
+    match r with
+    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
+      ric (s, l, u, (offset, o))
+    | _ -> assert false
+
+  (* Should this function go somewhere else? *)
+  let remove_first_occurence ~(of_ : string) ~(in_ : string list) : string list =
+    let rec aux acc = function
+      | [] -> List.rev acc
+      | y :: ys ->
+        if String.equal of_ y then List.rev_append acc ys
+        else aux (y :: acc) ys
+    in
+    aux [] in_
+
+  let rec cancel_negation (pos : string list) (neg : string list) : string list =
+    match pos with
+    | [] -> neg
+    | x :: xs ->
+      let neg_x = "neg" ^ x in
+      if List.mem neg neg_x ~equal:String.equal then
+        cancel_negation xs (remove_first_occurence ~of_:neg_x ~in_:neg)
+      else
+        cancel_negation xs (x :: neg)
+
+  let add_relative_offsets (o1 : string) (o2 : string) : string =
+    let result =
+      if String.equal o1 "" then
+        o2
+      else if String.equal o2 "" then
+        o1
+      else
+        let o1_list = String.split_on_chars o1 ~on:['+'] in
+        let o2_list = String.split_on_chars o2 ~on:['+'] in
+        let o_list = o1_list @ o2_list in
+        let pos = 
+          List.rev 
+            (List.sort ~compare:String.compare (List.fold o_list ~init:[] ~f:(fun acc o -> 
+              if String.is_prefix o ~prefix:"neg" then
+                acc
+              else
+                o :: acc)))
+        in
+        let neg = 
+          List.sort ~compare:String.compare (List.fold o_list ~init:[] ~f:(fun acc o -> 
+            if String.is_prefix o ~prefix:"neg" then
+              o ::acc
+            else
+              acc))
+        in
+        let offsets = cancel_negation pos neg in
+        String.concat ~sep:"+" offsets 
+    in
+    (* print_endline ("------------------" ^ o1 ^ " + " ^ o2 ^ " = " ^ result); *)
+    result
+
+  (** [remove_relative_offset r] returns a copy of [r] with a concrete (empty) variable. *)
+  let remove_relative_offset (r : t) : t =
+    match r with
+    | Top -> Top
+    | Bottom -> Bottom
+    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (_, o)} -> 
+      ric (s, l, u, ("", o))
 
   (** [plus r1 r2] returns the sum over-approximation of [r1] and [r2]. *)
   let plus (ric1 : t) (ric2 : t) : t =
@@ -592,14 +668,17 @@ module RIC = struct
       Log.warn warning_msg;
       ric1
     | _ ->
-      if comparable_offsets ric1 ric2 then
-        let c1, i1 = to_congruence_and_interval ric1 and
-        c2, i2 = to_congruence_and_interval ric2 in
-        let new_congruence = Congruence.sum c1 c2 and
-        new_interval = Interval.sum i1 i2 in
-        of_congruence_and_interval new_congruence new_interval
-      else
-        Top
+      let offset1 = extract_relative_offset ric1 in
+      let offset2 = extract_relative_offset ric2 in
+      let relative_offset = add_relative_offsets offset1 offset2 in
+      let ric1 = remove_relative_offset ric1 in
+      let ric2 = remove_relative_offset ric2 in
+      let c1, i1 = to_congruence_and_interval ric1 and
+      c2, i2 = to_congruence_and_interval ric2 in
+      let new_congruence = Congruence.sum c1 c2 and
+      new_interval = Interval.sum i1 i2 in
+      let result = of_congruence_and_interval new_congruence new_interval in
+      set_relative_offset result relative_offset
 
   (** [negative r] returns the RIC representing [-r]. *)
   let negative (r : t) : t =
@@ -608,15 +687,12 @@ module RIC = struct
     | Bottom -> Bottom
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
       ric (s, ExtendedInt.times (Int (-1)) u, ExtendedInt.times (Int (-1)) l, ("", - o))
-    | _ -> assert false
-
-  (** [remove_relative_offset r] returns a copy of [r] with a concrete (empty) variable. *)
-  let remove_relative_offset (r : t) : t =
-    match r with
-    | Top -> Top
-    | Bottom -> Bottom
-    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (_, o)} -> 
-      ric (s, l, u, ("", o))
+    
+    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (v, o)} ->
+      if String.is_prefix v ~prefix:"neg" then
+        ric (s, ExtendedInt.times (Int (-1)) u, ExtendedInt.times (Int (-1)) l, (String.drop_prefix v 3, - o))
+      else
+        ric (s, ExtendedInt.times (Int (-1)) u, ExtendedInt.times (Int (-1)) l, ("neg" ^ v, - o))
 
   (** [minus r1 r2] returns the difference over-approximation of [r1] and [r2]. *)
   let minus (ric1 : t) (ric2 : t) : t =
@@ -988,6 +1064,13 @@ let%test_module "RIC tests" = (module struct
       let m = Congruence.meet c1 c2 in 
       print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
       Congruence.equal m Congruence.Bottom
+
+    let%test "add_relative_offsets cancels negation" =
+      let result = RIC.add_relative_offsets "a+negb+negd" "c+b+d+b" in
+      print_endline "Test: add_relative_offsets \"a+negb\" \"b+b+c\"";
+      print_endline ("Result: " ^ result);
+      print_endline "Expected: a+b+c";
+      String.equal result "a+b+c"
   end)
 
   (*                                                                                         
@@ -2088,23 +2171,25 @@ let%test_module "RIC tests" = (module struct
       let r1 = ric (3, Int 0, Int 2, ("x", 4)) in
       let r2 = ric (6, Int 1, Int 3, ("x", 1)) in
       let result = plus r1 r2 in
-      let expected = ric (3, Int 0, Int 6, ("x", 11)) in
+      let expected = ric (3, Int 0, Int 6, ("x+x", 11)) in
       print_endline ("(" ^ to_string r1 ^ ") ⊕ (" ^ to_string r2 ^ ") = " ^ to_string result);
       RIC.equal result expected
 
-    let%test "RIC.plus: absolute + relative = Top" =
+    let%test "RIC.plus: absolute + relative" =
       let r1 = ric (3, Int 0, Int 2, ("", 1)) in
       let r2 = ric (2, Int 1, Int 2, ("x", 4)) in
       let result = plus r1 r2 in
+      let expected = ric(1, Int 0, Int 8, ("x",7)) in 
       print_endline ("(" ^ to_string r1 ^ ") ⊕ (" ^ to_string r2 ^ ") = " ^ to_string result);
-      RIC.equal result Top
+      RIC.equal result expected
 
-    let%test "RIC.plus: relative + relative different vars = Top" =
+    let%test "RIC.plus: relative + relative different vars" =
       let r1 = ric (3, Int 0, Int 2, ("x", 1)) in
       let r2 = ric (2, Int 1, Int 3, ("y", 2)) in
       let result = plus r1 r2 in
+      let expected = ric (1, Int 0, Int 10, ("x+y", 5)) in 
       print_endline ("(" ^ to_string r1 ^ ") ⊕ (" ^ to_string r2 ^ ") = " ^ to_string result);
-      RIC.equal result Top
+      RIC.equal result expected
 
     let%test "RIC.plus: Top + anything = Top" =
       let r = ric (3, Int 0, Int 2, ("", 4)) in
@@ -2138,7 +2223,7 @@ let%test_module "RIC tests" = (module struct
       let r1 = ric (4, Int 1, Int 2, ("x", 0)) in
       let r2 = ric (2, Int 0, Int 1, ("x", 2)) in
       let result = plus r1 r2 in
-      let expected = ric (2, Int 0, Int 3, ("x", 6)) in
+      let expected = ric (2, Int 0, Int 3, ("x+x", 6)) in
       print_endline ("(4[1,2]+x) ⊕ (2[0,1]+(x+2)) = " ^ to_string result);
       RIC.equal result expected
 

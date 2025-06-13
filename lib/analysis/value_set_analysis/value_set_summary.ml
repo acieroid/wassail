@@ -40,8 +40,12 @@ let to_string (s : t) : string =
 
 (* TODO: of_string, if necessary *)
 
-let bottom (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
-  let globals = List.map cfg.global_types ~f:(fun _ -> Reduced_interval_congruence.RIC.Bottom) in
+let bottom (cfg : 'a Cfg.t) (vars : Var.Set.t) : t =
+  (* let globals = List.map (Var.Set.to_list vars) ~f:(fun v -> Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, (Var.to_string v, 0))) in
+  print_endline ("initial globals: " ^ (List.to_string ~f:Reduced_interval_congruence.RIC.to_string globals)); *)
+  (* let globals = List.map cfg.global_types ~f:(fun _ -> Reduced_interval_congruence.RIC.Bottom) in *)
+  let globals = List.map (Var.Set.to_list vars) ~f:(fun g -> Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, (Var.to_string g, 0))) in
+  print_endline ("globals: " ^ List.to_string ~f:(Reduced_interval_congruence.RIC.to_string) globals);
   let ret = match cfg.return_types with
       | [] -> None
       | _ :: [] -> Some Reduced_interval_congruence.RIC.Bottom
@@ -59,6 +63,7 @@ let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
   { ret; globals; mem }
 
 let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : Type.t list) : t =
+  print_endline "making summary from imports";
   match name with
   | "fd_write" | "fd_close" | "fd_seek" | "fd_fdstat_get" | "proc_exit" ->
     (* Globals are unchanged *)
@@ -85,20 +90,24 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
     { globals; ret; mem = Abstract_store_domain.top }
 
 let initial_summaries (cfgs : 'a Cfg.t Int32Map.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t Int32Map.t =
+  print_endline "initial summaries?";
   List.fold_left module_.imported_funcs
     ~init:(Int32Map.map cfgs ~f:(fun cfg ->
+        let globals = Var.Set.of_list (List.init (List.length cfg.global_types) ~f:(fun i -> Var.Global i)) in
+        print_endline "initializing!";
         (match typ with
          | `Bottom -> bottom
-         | `Top -> top) cfg Var.Set.empty))
+         | `Top -> top) cfg globals))
     ~f:(fun summaries (idx, name, (args, ret)) ->
+        print_endline "of_import";
         Int32Map.set summaries ~key:idx ~data:(of_import name module_.nglobals args ret))
 
 let make (_cfg : 'a Cfg.t) (state : Abstract_store_domain.t)
     (ret : Variable.t option) (globals_post : Variable.t list)
     (mem_post : (Variable.t * Reduced_interval_congruence.RIC.t) list)
   : t =
-  let globals = List.map globals_post ~f:(fun g -> Abstract_store_domain.get_RIC state g) in
-  let ret = Option.map ret ~f:(fun r -> Abstract_store_domain.get_RIC state r) in
+  let globals = List.map globals_post ~f:(fun g -> Abstract_store_domain.get state ~var:g) in
+  let ret = Option.map ret ~f:(fun r -> Abstract_store_domain.get state ~var:r) in
   let mem = List.fold mem_post 
     ~init:Abstract_store_domain.bottom
     ~f:(fun store (x, r) -> Abstract_store_domain.set store ~var:x ~vs:r) in

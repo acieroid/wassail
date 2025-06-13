@@ -47,11 +47,6 @@ let taint_intra =
     (fun fid data ->
       Printf.printf "function %ld: %s\n" fid (Taint.Summary.to_string (fst data)))
 
-let value_set_intra =
-  mk_intra "intra-procedural value-set analysis" Value_set.analyze_intra
-    (fun fid data ->
-      Printf.printf "function %ld: %s\n" fid (Value_set.Summary.to_string (fst data)))
-
 (** 
   Command that performs intra-procedural taint analysis and outputs the taint-annotated CFG 
   of the last function in the input list to the specified DOT file.
@@ -69,6 +64,25 @@ let taint_cfg =
         (* We only output the latest analyzed CFG *)
         let annotated_cfg = Option.value_exn (snd (Int32Map.find_exn results (List.last_exn funs))) in
         output_to_file file_out (Cfg.to_dot annotated_cfg ~annot_str:Taint.Domain.only_non_id_to_string))
+
+let value_set_intra =
+  mk_intra "intra-procedural value-set analysis" Value_set.analyze_intra
+    (fun fid data ->
+      Printf.printf "function %ld: %s\n" fid (Value_set.Summary.to_string (fst data)))
+
+let value_set_cfg =
+  Command.basic
+    ~summary:"Generate a DOT file representing the value-set-annotated CFG of function [fid] from the wasm file [in], in file [out]"
+    Command.Let_syntax.(
+      let%map_open file_in = anon ("in" %: string) and
+      file_out = anon ("out" %: string) and
+      funs = anon (sequence ("funs" %: int32)) in
+      fun () ->
+        Spec_inference.use_const := true;
+        let results = Value_set.analyze_intra (Wasm_module.of_file file_in) funs in
+        (* We only output the latest analyzed CFG *)
+        let annotated_cfg = Option.value_exn (snd (Int32Map.find_exn results (List.last_exn funs))) in
+        output_to_file file_out (Cfg.to_dot annotated_cfg ~annot_str:Value_set.Domain.to_string))
 
 (* let relational_intra =
   mk_intra "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)" Relational.analyze_intra

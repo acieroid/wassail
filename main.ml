@@ -58,5 +58,7 @@ let () =
        ; "count-in-slice", Slicing_evaluation.count_in_slice
 
        (* Pointer analysis *)
-       (* ; "value-set-intra", Analysis.value_set_intra *)
+       ; "value-set-intra", Analysis.value_set_intra
+       ; "value-set-cfg", Analysis.value_set_cfg
+       
        ])

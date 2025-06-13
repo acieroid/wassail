@@ -11,12 +11,11 @@ type t = RIC.t Variable.Map.t
 let bottom : t = Variable.Map.empty
 let top : t = Variable.Map.empty (* TODO: better definition of TOP *)
 
-(** Constructs the top element of the domain for a given list of variables.
-    Each variable is mapped to [RIC.Top], indicating maximum uncertainty. *)
-(* let top (variables : Variable.t list) : t =
-  let set_top_value_set (s : t) (v : Variable.t) : t =
-    Variable.Map.set s ~key:v ~data:RIC.Top in
-  List.fold_left variables ~init:bottom ~f:set_top_value_set *)
+let extract_memory_variables (store : t) : Variable.t list =
+  let all_vars = Variable.Map.keys store in
+  List.filter ~f:(fun v -> match v with | Var _ -> false | Mem _ -> true) all_vars
+
+
 
 (** [subsumes t1 t2] returns [true] if [t1] over-approximates [t2], meaning
     each RIC in [t2] is subsumed by the corresponding RIC in [t1]. *)
@@ -75,13 +74,13 @@ let widen (store1 : t) (store2 : t) : t =
 
 (** [get_RIC store var] retrieves the RIC associated with [var] in the abstract store [store],
     or returns [RIC.Bottom] if [var] is unbound. TOP IF VAR IS A POINTER ON THE MEMORY *)
-let get_RIC (store : t) (var : Variable.t) : RIC.t =
+(* let get_RIC (store : t) (var : Variable.t) : RIC.t =
   match Variable.Map.find store var with 
   | Some r -> r
   | None -> 
     match var with
     | Mem _ -> RIC.Top 
-    | _ -> RIC.Bottom 
+    | _ -> RIC.Bottom  *)
 
 (** Resets the RIC associated with a single variable to [RIC.Bottom]. *)
 let reset_RIC (store : t) (var : Variable.t) : t =
@@ -128,16 +127,62 @@ let set (store : t) ~(var : Variable.t) ~(vs : Reduced_interval_congruence.RIC.t
   else
     Variable.Map.set store ~key:var ~data:vs
 
+let get (store : t) ~(var : Variable.t) : Reduced_interval_congruence.RIC.t =
+  match Variable.Map.find store var with
+    | Some vs -> vs
+    | None ->
+      match var with
+      | Var _ -> Reduced_interval_congruence.RIC.relative_ric (Variable.to_string var)
+      | Mem _ -> RIC.Top
+
 let substitute (state : t) (substitutions : (Variable.t * Reduced_interval_congruence.RIC.t) list) : t =
   List.fold substitutions ~init:state ~f:(fun state (v, vs) -> set state ~var:v ~vs:vs)
 
+  
+let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : RIC.accessed) : t =
+  let vs = get store ~var:var in
+  let store = Variable.Map.remove store var in
+  let accessed = accessed_addresses.fully :: accessed_addresses.partially in
+  let untouched_addresses =
+    match var with
+    | Var _ -> assert false
+    | Mem addr ->
+      (List.fold ~init:[addr]
+                 ~f:(fun acc x -> List.concat (List.map ~f:(fun y -> RIC.remove ~this:x ~from:y) acc))
+                 accessed)
+  in
+  let untouched_variables = Variable.Set.of_list (List.map ~f:(fun x -> Variable.Mem x) untouched_addresses) in
+  update_all store untouched_variables vs
+
+
+let update_accessed_vars (store : t) (accessed_addresses : RIC.accessed) : t =
+  let memory_vars = extract_memory_variables store in
+  List.fold ~init:store ~f:(fun store var -> truncate_memory_var store ~var:var ~accessed_addresses:accessed_addresses) memory_vars
+
+let weak_update (store : t) ~(previous_state : t) ~(var : Variable.t) ~(vs : RIC.t) : t =
+  let address = 
+    match var with
+    | Variable.Var _ -> assert false
+    | Variable.Mem address -> address
+  in
+  let affected_variables = 
+    List.map ~f:(fun v -> 
+        match v with 
+        | Variable.Var _ -> assert false
+        | Variable.Mem addr -> (Variable.Mem (RIC.meet addr address)), (get previous_state ~var:v))
+      (extract_memory_variables previous_state)
+  in
+  List.fold ~init:store
+            ~f:(fun store (v, prev_vs) -> 
+              set store ~var:v ~vs:(RIC.join prev_vs vs))
+            affected_variables
 
 (** The following functions will be useful when defining the transfer function: *)
 
 (* Utility functions *)
 (* Join of a set of RICs *)
 let join_of_set (store : t) (vars : Variable.Set.t) : RIC.t =
-  Variable.Set.fold ~init:RIC.Bottom ~f:(fun acc v -> RIC.join acc (get_RIC store v)) vars
+  Variable.Set.fold ~init:RIC.Bottom ~f:(fun acc v -> RIC.join acc (get store ~var:v)) vars
 
 (* Get all memory variables *)
 
@@ -146,16 +191,64 @@ let assign_constant_value (store : t) ~(const : int32) ~(to_ : Variable.t): t =
   Variable.Map.set store ~key:to_ ~data:vs
 
 let copy_value_set (store : t) ~(from : Variable.t) ~(to_ : Variable.t) : t =
-  let vs =
-    match Variable.Map.find store from with
-    | Some vs -> vs
-    | None ->
-      match from with
-      | Var _ -> RIC.Bottom
-      | Mem _ -> RIC.Top
-  in
-  Variable.Map.set store ~key:to_ ~data:vs
+  match to_ with
+  | Var Var.Const _ -> store
+  | _ ->
+    let vs = get store ~var:from in
+      (* match Variable.Map.find store from with
+      | Some vs -> vs
+      | None ->
+        match from with
+        | Var _ -> Reduced_interval_congruence.RIC.relative_ric (Variable.to_string from)
+        | Mem _ -> RIC.Top
+    in *)
+    Variable.Map.set store ~key:to_ ~data:vs
 
+let i32_add (store : t) ~(x : Variable.t) ~(y : Variable.t) ~(result : Variable.t) : t =
+  let vs =
+    match x, y with
+    | Var Var.Const Prim_value.I32 x, Var Var.Const Prim_value.I32 y -> 
+      let x = Option.value_exn (Int32.to_int x) in
+      let y = Option.value_exn (Int32.to_int y) in
+      RIC.ric (0, Int 0, Int 0, ("", x + y))
+    | Var Var.Const Prim_value.I32 x, Var y -> 
+      let x = Option.value_exn (Int32.to_int x) in
+      let vs_y = get store ~var:(Variable.Var y) in
+      RIC.add_offset vs_y x
+    | Var x, Var Var.Const Prim_value.I32 y -> 
+      let y = Option.value_exn (Int32.to_int y) in
+      let vs_x = get store ~var:(Variable.Var x) in
+      RIC.add_offset vs_x y
+    | Var x, Var y ->
+      let vs_x = get store ~var:(Variable.Var x) in
+      let vs_y = get store ~var:(Variable.Var y) in
+      RIC.plus vs_x vs_y
+    | _ -> failwith "error" 
+  in
+  set store ~var:result ~vs:vs
+
+let i32_sub (store : t) ~(x : Variable.t) ~(y : Variable.t) ~(result : Variable.t) : t =
+  let vs =
+    match x, y with
+    | Var Var.Const Prim_value.I32 x, Var Var.Const Prim_value.I32 y -> 
+      let x = Option.value_exn (Int32.to_int x) in
+      let y = Option.value_exn (Int32.to_int y) in
+      RIC.ric (0, Int 0, Int 0, ("", y - x))
+    | Var Var.Const Prim_value.I32 x, Var y -> 
+      let x = - (Option.value_exn (Int32.to_int x)) in
+      let vs_y = get store ~var:(Variable.Var y) in
+      RIC.add_offset vs_y x
+    | Var x, Var Var.Const Prim_value.I32 y -> 
+      let y = Option.value_exn (Int32.to_int y) in
+      let vs_x = RIC.negative (get store ~var:(Variable.Var x)) in
+      RIC.add_offset vs_x y
+    | Var x, Var y ->
+      let vs_x = RIC.negative (get store ~var:(Variable.Var x)) in
+      let vs_y = get store ~var:(Variable.Var y) in
+      RIC.plus vs_x vs_y
+    | _ -> failwith "error" 
+  in
+  set store ~var:result ~vs:vs
 
 
 (* v1 = v2 + c *)
