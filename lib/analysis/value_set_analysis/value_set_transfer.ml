@@ -261,12 +261,28 @@ module Make (*: Transfer.TRANSFER *) = struct
 
   let merge_flows 
       (_module_ : Wasm_module.t) 
-      (_cfg : annot_expected Cfg.t) 
-      (_block : annot_expected Basic_block.t)
-      (_states : (int * state) list) 
+      (cfg : annot_expected Cfg.t) 
+      (block : annot_expected Basic_block.t)
+      (states : (int * state) list) 
     : state =
+    (* let init_spec = (Spec_inference.init_state cfg) in *)
+    match states with
+    | [] -> init_state cfg
+    | _ ->
+      begin match block.content with
+      | Control { instr = Merge; _ } ->
+        (* let spec = Cfg.state_after_block cfg block.idx init_spec in *)
+        let states' = List.map ~f:(fun (_, s) -> s) states in
+        List.reduce_exn states' ~f:join_state
+          (* Join all previous states *)
+      | _ -> 
+        begin match states with
+        | (_, s) :: [] -> s
+        | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
+        end
+      end
     (* TODO: Write the rest of this function *)
-    bottom_state _cfg
+    
 
 
   (** [summary cfg out_state] computes a taint summary for a function based on its final state and annotations at the function exit. *)
