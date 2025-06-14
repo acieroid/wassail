@@ -67,6 +67,12 @@ module ExtendedInt = struct
       | NegInfinity, i -> if less_than (Int 0) i then NegInfinity else Infinity
       | Int x, Int y -> Int (x / y)
 
+    let divide_ceiling (x : t) (y : t) : t =
+      match x, y with
+      | Int a, Int b when not (a mod b = 0) ->
+        plus (divide x y) (Int 1)
+      | _ -> divide x y
+
 end
 
 let rec gcd (a : int) (b : int) : int =

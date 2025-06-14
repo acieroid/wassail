@@ -15,6 +15,14 @@ let extract_memory_variables (store : t) : Variable.t list =
   let all_vars = Variable.Map.keys store in
   List.filter ~f:(fun v -> match v with | Var _ -> false | Mem _ -> true) all_vars
 
+let get (store : t) ~(var : Variable.t) : Reduced_interval_congruence.RIC.t =
+  match Variable.Map.find store var with
+    | Some vs -> vs
+    | None ->
+      match var with
+      | Var _ -> Reduced_interval_congruence.RIC.relative_ric (Variable.to_string var)
+      | Mem _ -> RIC.Top
+
 
 
 (** [subsumes t1 t2] returns [true] if [t1] over-approximates [t2], meaning
@@ -48,19 +56,84 @@ let to_string_without_bottoms (vs : t) : string =
     not (RIC.equal RIC.Bottom d)) in
   to_string restricted
 
+
+(** [update_all store vars new_RIC] sets [new_RIC] as the RIC of all [vars] in [store]. *)
+let update_all (store : t) (vars : Variable.Set.t) (new_RIC : RIC.t) : t =
+  Variable.Set.fold vars ~init:store ~f:(fun acc v -> Variable.Map.set acc ~key:v ~data:new_RIC)
+
+(* let to_singletons (store : t) : t =
+  let mem_vars = extract_memory_variables store in
+  let non_singletons = 
+    List.filter 
+      ~f:(fun m -> 
+        match m with
+        | Variable.Mem vs -> not (RIC.is_singleton vs)
+        | _ -> assert false)
+      mem_vars
+  in
+  List.fold 
+    ~init:store
+    ~f:(fun store m ->
+      match m with
+      | Variable.Mem _ when Variable.is_finite m -> 
+        let vs = get store ~var:m in
+        let store = Variable.Map.remove store m in
+        let singletons = Variable.to_singletons m in
+        update_all store (Variable.Set.of_list singletons) vs
+      | _ -> store) 
+    non_singletons *)
+
+let make_compatible ~(this_store : t) ~(relative_to : t) : t =
+  let store1 = this_store in
+  let store2 = relative_to in
+  let mems1 = extract_memory_variables store1 in
+  let mems2 = extract_memory_variables store2 in
+  List.fold
+    ~init:store1
+    ~f:(fun store m2 ->
+      match m2 with
+      | Variable.Mem addr_m2 -> 
+        List.fold
+          ~init:store
+          ~f:(fun store m1 ->
+            match m1 with
+            | Variable.Mem addr_m1 ->
+              let met_addrs = RIC.meet addr_m2 addr_m1 in
+              if RIC.equal RIC.Bottom met_addrs then
+                store
+              else
+                let new_addresses = met_addrs :: (RIC.remove ~this:met_addrs ~from:addr_m1) in
+                let new_mem_vars = List.map ~f:(fun addr -> Variable.Mem addr) new_addresses in
+                let vs = get store ~var:m1 in
+                let store = Variable.Map.remove store m1 in
+                update_all store (Variable.Set.of_list new_mem_vars) vs
+            | _ -> store )
+          mems1
+      | _ -> store)
+    mems2
+
+
 (** Computes the least upper bound (join) of two value sets, combining their information. *)
 let join (store1 : t) (store2 : t) : t =
-  Variable.Map.merge store1 store2 ~f:(fun ~key:_ v -> 
+  let store1 = make_compatible ~this_store:store1 ~relative_to:store2 in
+  let store2 = make_compatible ~this_store:store2 ~relative_to:store1 in
+  Variable.Map.merge store1 store2 ~f:(fun ~key:var v -> 
       match v with
       | `Both (x, y) -> Some (RIC.join x y)
-      | `Left x | `Right x -> Some x)
+      | `Left x | `Right x -> 
+        match var with
+        | Variable.Mem _ -> None (* absent values are considered to be TOP *)
+        | _ -> Some x)
 
 (** Computes the greatest lower bound (meet) of two value sets, retaining only shared information. *)
 let meet (store1 : t) (store2 : t) : t =
-  Variable.Map.merge store1 store2 ~f:(fun ~key:_ v ->
-      match v with 
+  Variable.Map.merge store1 store2 ~f:(fun ~key:var vs ->
+      match vs with 
       | `Both (x, y) -> Some (RIC.meet x y)
-      | `Left _ | `Right _ -> Some (RIC.Bottom))
+      | `Left x | `Right x -> 
+        match var with
+        | Variable.Mem _ -> Some x (* vs meet TOP returns vs *)
+        | _ -> Some (RIC.Bottom))
 
 (* widen store2 relative to store1 ***** TODO: check that it's not the opposite *)
 let widen (store1 : t) (store2 : t) : t =
@@ -93,10 +166,6 @@ let reset_RIC (store : t) (var : Variable.t) : t =
 let reset_RICs (store : t) (vars : Variable.Set.t) : t =
   Variable.Set.fold vars ~init:store ~f:reset_RIC
 
-(** [update_all store vars new_RIC] sets [new_RIC] as the RIC of all [vars] in [store]. *)
-let update_all (store : t) (vars : Variable.Set.t) (new_RIC : RIC.t) : t =
-  Variable.Set.fold vars ~init:store ~f:(fun acc v -> Variable.Map.set acc ~key:v ~data:new_RIC)
-
 (** [to_TOP_RIC store var] sets the RIC of [var] to [RIC.Top]. *)
 let to_top_RIC (store : t) (var : Variable.t) : t =
   Variable.Map.set store ~key:var ~data:RIC.Top
@@ -126,14 +195,6 @@ let set (store : t) ~(var : Variable.t) ~(vs : Reduced_interval_congruence.RIC.t
     failwith "error: trying to update a memory variable that shares addresses with other memory variables"
   else
     Variable.Map.set store ~key:var ~data:vs
-
-let get (store : t) ~(var : Variable.t) : Reduced_interval_congruence.RIC.t =
-  match Variable.Map.find store var with
-    | Some vs -> vs
-    | None ->
-      match var with
-      | Var _ -> Reduced_interval_congruence.RIC.relative_ric (Variable.to_string var)
-      | Mem _ -> RIC.Top
 
 let substitute (state : t) (substitutions : (Variable.t * Reduced_interval_congruence.RIC.t) list) : t =
   List.fold substitutions ~init:state ~f:(fun state (v, vs) -> set state ~var:v ~vs:vs)
@@ -362,4 +423,22 @@ let%test_module "abstract store tests" = (module struct
     in
     print_endline (to_string store1 ^ "\n\tMeet " ^ to_string store2 ^ "\n\t\t= " ^ to_string met);
     equal met expected
+
+  let%test "make two stores compatible to join" =
+    let m1 = Variable.Mem (RIC.ric (1, Int 1, Int 4, ("", 0))) in
+    let vs1 = RIC.ric (0, Int 0, Int 0, ("", 42)) in
+    let m2 = Variable.Mem (RIC.ric (2, Int 0, Int 4, ("", 0))) in
+    let vs2 = RIC.ric (0, Int 0, Int 0, ("", 36)) in
+    let store1 = set bottom ~var:m1 ~vs:vs1 in
+    let store2 = set bottom ~var:m2 ~vs:vs2 in
+    print_endline "Making two stores compatible for joining or meeting:";
+    print_endline ("\tstore1: " ^ to_string store1);
+    print_endline ("\tstore2: " ^ to_string store2);
+    let store1 = make_compatible ~this_store:store1 ~relative_to:store2 in
+    let store2 = make_compatible ~this_store:store2 ~relative_to:store1 in
+    print_endline ("\tcompatible store1: " ^ to_string store1);
+    print_endline ("\tcompatible store2: " ^ to_string store2);
+    print_endline ("\tjoin: " ^ to_string (join store1 store2));
+    let expected = set bottom ~var:(Variable.Mem (RIC.ric (2, Int 0, Int 1, ("", 2)))) ~vs:(RIC.ric (6, Int 0, Int 1, ("", 36))) in
+    equal (join store1 store2) expected
 end)

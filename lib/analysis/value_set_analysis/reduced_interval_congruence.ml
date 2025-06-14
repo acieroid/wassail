@@ -372,7 +372,7 @@ module RIC = struct
         | Bottom -> Bottom
         | Interval {lower_bound = l; upper_bound = u} ->
           let lower = 
-            ExtendedInt.divide (ExtendedInt.minus l (ExtendedInt.Int o)) (ExtendedInt.Int s) in
+            ExtendedInt.divide_ceiling (ExtendedInt.minus l (ExtendedInt.Int o)) (ExtendedInt.Int s) in
           let upper = 
             ExtendedInt.divide (ExtendedInt.minus u (ExtendedInt.Int o)) (ExtendedInt.Int s) in
           ric (s, lower, upper, (var, o))
@@ -433,7 +433,7 @@ module RIC = struct
       let interval = Interval.to_string (Interval.Interval {lower_bound = l; upper_bound = u}) in
       let stride = if s = 1 then "" else string_of_int s in
       match stride, interval, offset with 
-      | "0", _, "" -> "⊥"
+      | "0", _, "" -> "0"
       | "0", _, o -> if String.equal "+" (String.sub o ~pos:0 ~len:1) then String.sub o ~pos:1 ~len:(String.length o - 1) else o
       | "", "]-∞,∞[", _ -> "⊤"
       | _ -> stride ^ interval ^ offset
@@ -1469,6 +1469,14 @@ let%test_module "RIC tests" = (module struct
       Interval.equal i (Interval.Interval {lower_bound = Int 7; upper_bound = Int 7})
 
     (* --- Additional tests for RIC.meet and RIC.join --- *)
+    let%test "meet {1,2,3,4} with {2,4,6,8}" =
+      let r1 = ric (1, Int 1, Int 4, ("", 0)) in
+      let r2 = ric (2, Int 0, Int 4, ("", 0)) in
+      let m = meet r1 r2 in
+      let expected = ric (2, Int 1, Int 2, ("", 0)) in
+      print_endline ("RIC.meet: " ^ to_string r1 ^ " ⊓ " ^ to_string r2 ^ " = " ^ to_string m);
+      RIC.equal m expected
+
     let%test "meet_top_and_r" =
       let r = ric (2, Int 0, Int 4, ("", 5)) in
       let m = meet Top r in
@@ -1836,6 +1844,13 @@ let%test_module "RIC tests" = (module struct
       let compl = complement r in
       print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
       List.length compl = 5 
+
+    let%test "complement of {2,4}" =
+      let r = ric (2, Int 0, Int 1, ("", 2)) in
+      let compl = complement r in
+      print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
+      List.length compl = 3 
+
 
 
     let%test "partially_accessed_by_singleton_size_2" =
@@ -2329,6 +2344,14 @@ let%test_module "RIC tests" = (module struct
       let from = ric (1, Int 0, Int 6, ("", 1)) in
       let result = remove ~this ~from in
       let expected = [ric (2, Int 0, Int 2, ("", 2)); ric (0, Int 0, Int 0, ("", 7))] in
+      print_endline ("remove: " ^ to_string from ^ " \\ " ^ to_string this ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      List.equal equal result expected
+
+    let%test "remove {2,4} from {0,2,4,6,8}" =
+      let this = ric(2, Int 1, Int 2, ("", 0)) in
+      let from = ric(2, Int 0, Int 4, ("", 0)) in
+      let result = remove ~this ~from in
+      let expected = [ric(0,Int 0, Int 0, ("", 0)); ric (2, Int 0, Int 1, ("", 6))] in
       print_endline ("remove: " ^ to_string from ^ " \\ " ^ to_string this ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result expected
 

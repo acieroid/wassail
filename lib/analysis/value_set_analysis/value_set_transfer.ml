@@ -209,7 +209,6 @@ module Make (*: Transfer.TRANSFER *) = struct
         begin match address with
         | Const (Prim_value.I32 addr) -> RIC.ric (0, Int 0, Int 0, ("", Int32.to_int_exn addr))
         | _ -> Abstract_store_domain.get state ~var:(Variable.Var address)
-        (* | _ -> assert false *)
         end
       in
       let vs2 = 
