@@ -51,10 +51,6 @@ module type CFG_LIKE = sig
 
   val equal : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
 
-  val all_block_indices : 'a t -> IntSet.t
-
-  val all_instruction_labels : 'a t -> Instr.Label.Set.t
-
   val find_block_exn : 'a t -> int -> 'a Basic_block.t
 
   val incoming_edges : 'a t -> int -> Edge.t list
@@ -71,14 +67,6 @@ module type CFG_LIKE = sig
 
   val callers : 'a t Int32Map.t -> 'a t -> Int32Set.t
 
-  val global_types : 'a t -> Type.t list
-
-  val arg_types : 'a t -> Type.t list
-
-  val local_types : 'a t -> Type.t list
-
-  val return_types : 'a t -> Type.t list
-
   val find_enclosing_block : 'a t -> Instr.Label.t -> Instr.Label.t option
 
   val find_nth_parent_block : 'a t -> Instr.Label.t -> int32 -> Instr.Label.t option
@@ -90,8 +78,6 @@ module type CFG_LIKE = sig
   val exit_block : 'a t -> int
 
   val predecessors : 'a t -> int -> int list
-
-  val state_after_block : 'a t -> int -> 'a -> 'a
 
   val find_enclosing_block_exn : 'a t -> Instr.Label.t -> 'a Basic_block.t
 end

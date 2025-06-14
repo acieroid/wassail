@@ -28,6 +28,7 @@ module Label = struct
     let to_string (l : t) : string = match l.section with
       | Function _ -> Printf.sprintf "%d" l.id (* Printed differently to have a cleaner output *)
       | _ -> Printf.sprintf "%s_%d" (section_to_string l.section) l.id
+
   end
   include T
 
@@ -108,7 +109,6 @@ module T = struct
     | RefNull of Ref_type.t
     | RefFunc of Int32.t
     | RefIsNull
-
 
   (** Control instructions *)
   and 'a control =

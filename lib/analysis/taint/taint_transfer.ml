@@ -1,7 +1,8 @@
 open Core
 open Helpers
 
-module Make : Transfer.TRANSFER
+module Make
+  : Transfer.TRANSFER
   with type annot_expected = Spec.t
    and type summary = Taint_summary.t
    and type state = Taint_domain.t

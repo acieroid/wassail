@@ -70,13 +70,6 @@ let all_direct_instruction_labels (b : 'a t) : Instr.Label.Set.t =
   | Control i -> Instr.Label.Set.singleton i.label
   | Data d -> Instr.Label.Set.of_list (List.map d ~f:(fun i -> i.label))
 
-(** Return all the labels of the instructions contained within this block *)
-let all_instruction_labels (b : 'a t) : Instr.Label.Set.t =
-  match b.content with
-  | Control i -> Instr.all_labels (Control i)
-  | Data d -> List.fold_left d ~init:Instr.Label.Set.empty ~f:(fun acc i ->
-      Instr.Label.Set.union acc (Instr.all_labels (Data i)))
-
 (** Return all annotations *)
 let all_annots (b : 'a t) : 'a list =
   match b.content with

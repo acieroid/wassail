@@ -57,14 +57,12 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
   let analyze_ (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (summaries : summary Int32Map.t) : intra_results =
     let bottom = Uninitialized in
     (* Data of the analysis, per block *)
-    let block_data : (result * result) IntMap.t ref =
-      ref (IntMap.of_alist_exn (List.map (IntSet.to_list (Cfg.all_block_indices cfg))
-                                  ~f:(fun idx -> (idx, (bottom, bottom))))) in
+    let block_out : result IntMap.t ref = ref IntMap.empty in
+    let after_block (block_idx : int) : result = match IntMap.find !block_out block_idx with
+      | Some r -> r
+      | None -> bottom in
     (* Data of the analysis, per instruction *)
-    let instr_data : intra_results ref =
-      ref (Instr.Label.Map.of_alist_exn (List.map (Instr.Label.Set.to_list (Cfg.all_instruction_labels cfg))
-                                  ~f:(fun idx -> (idx, (bottom, bottom))))) in
-
+    let instr_data : intra_results ref = ref Instr.Label.Map.empty in
     (* Applies the transfer function to an entire block *)
     let transfer (b : 'a Basic_block.t) (state : Transfer.state) : result =
       match b.content with
@@ -82,14 +80,14 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
         poststate in
 
     (* Analyzes one block, returning the pre and post states *)
-    let analyze_block (block_idx : int) : Transfer.state * result =
+    let analyze_block (block_idx : int) : result =
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
       let incoming = Cfg.incoming_edges cfg block_idx in
       (* in_state is the join of all the the out_state of the predecessors.
          Special case: if the out_state of a predecessor is not a simple one, that means we are the target of a break.
          If this is the case, we pick the right branch, according to the edge data *)
-      let pred_states = (List.map incoming ~f:(fun (idx, d) -> match (snd (IntMap.find_exn !block_data idx), d) with
+      let pred_states = (List.map incoming ~f:(fun (idx, d) -> match (after_block idx, d) with
           | Simple s, _ -> (idx, s)
           | Branch (t, _), Some true -> (idx, t)
           | Branch (_, f), Some false -> (idx, f)
@@ -97,8 +95,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
           | Uninitialized, _ -> (idx, Transfer.bottom_state cfg))) in
       let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
-      let result = transfer block in_state in
-      (in_state, result)
+      transfer block in_state
     in
     let join_result  (r1 : result) (r2 : result) =
     match (r1, r2) with
@@ -127,10 +124,10 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
       else
         let block_idx = IntSet.min_elt_exn worklist in
         Log.debug (Printf.sprintf "-----------------------\n Analyzing block %d\n" block_idx);
-        let (in_state, out_state) = analyze_block block_idx in
+        let out_state = analyze_block block_idx in
         Log.debug (Printf.sprintf "out_state is: %s\n" (result_to_string out_state));
         (* Has out state changed? *)
-        let previous_out_state = snd (IntMap.find_exn !block_data block_idx) in
+        let previous_out_state = after_block block_idx in
         match previous_out_state with
         | st when compare_result out_state st = 0 ->
           (* Didn't change, we can safely ignore the successors *)
@@ -145,7 +142,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
             else
               join_result previous_out_state out_state
           in
-          block_data := IntMap.set !block_data ~key:block_idx ~data:(Simple in_state, new_out_state);
+          block_out := IntMap.set !block_out ~key:block_idx ~data:new_out_state;
           (* And recurse by adding all successors *)
           let successors = Cfg.successors cfg block_idx in
           fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors)) (iteration+1)
@@ -154,8 +151,8 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
     let rec _narrow (blocks : int list) : unit = match blocks with
       | [] -> ()
       | block_idx :: blocks ->
-        let (in_state, out_state) = analyze_block block_idx in
-        block_data := IntMap.set !block_data ~key:block_idx ~data:(Simple in_state, out_state);
+        let out_state = analyze_block block_idx in
+        block_out := IntMap.set !block_out ~key:block_idx ~data:out_state;
         _narrow blocks
     in
     fixpoint (IntSet.singleton (Cfg.entry cfg)) 1;
@@ -167,7 +164,9 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
       (result_to_state cfg (fst results_pair), result_to_state cfg (snd results_pair)) in
     let instr_data = analyze_ module_ cfg summaries in
     let analyzed_cfg = Cfg.map_annotations cfg
-        ~f:(fun i -> to_state (Instr.Label.Map.find_exn instr_data (Instr.label i))) in
+        ~f:(fun i -> to_state (match Instr.Label.Map.find instr_data (Instr.label i) with
+            | Some v -> v
+            | None -> (Uninitialized, Uninitialized))) in
     let summary = Transfer.extract_summary cfg analyzed_cfg in
     analyzed_cfg, summary
 

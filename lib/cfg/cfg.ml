@@ -243,10 +243,6 @@ module Cfg = struct
   let all_block_indices (cfg : 'a t) : IntSet.t =
     IntSet.of_list (IntMap.keys cfg.basic_blocks)
 
-  let all_instruction_labels (cfg : 'a t) : Instr.Label.Set.t =
-    IntMap.fold cfg.basic_blocks ~init:Instr.Label.Set.empty ~f:(fun ~key:_ ~data:block l ->
-        Instr.Label.Set.union (Basic_block.all_instruction_labels block) l)
-
   let all_annots (cfg : 'a t) : 'a list =
     IntMap.fold cfg.basic_blocks ~init:[] ~f:(fun ~key:_ ~data:block l -> (Basic_block.all_annots block) @ l)
 
@@ -300,7 +296,7 @@ module Cfg = struct
         | pred :: [] ->
           (* INCORRECT: go one more block before *)
           state_after_block cfg pred entry_state
-        | _ -> failwith "state_after_bloc: multiple successors for an empty block"
+        | _ -> failwith "state_after_block: multiple successors for an empty block"
       end
     | Data l -> Instr.annotation_after (Data (List.last_exn l))
 

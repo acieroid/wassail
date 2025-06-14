@@ -59,6 +59,7 @@ let indirect_call_targets (wasm_mod : Wasm_module.t) (typ : Int32.t) : Int32.t l
 (** Builds a call graph for a module *)
 let make (wasm_mod : Wasm_module.t) : t =
   let find_targets = indirect_call_targets in
+  (* Nodes of the call graph, i.e., all functions (imported and defined functions) *)
   let nodes = Int32Set.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> Int32.of_int_exn i)) in
   let rec collect_calls (f : Int32.t) (instr : 'a Instr.t) (edges : EdgeSet.t Int32Map.t) : EdgeSet.t Int32Map.t = match instr with
     | Control { instr = Call (_, _, f'); _ } ->
