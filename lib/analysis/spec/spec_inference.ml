@@ -132,7 +132,13 @@ module Spec_inference (* : Transfer.TRANSFER
       | RefFunc _ -> { state with vstack = ret :: state.vstack }
       | RefNull _ -> { state with vstack = ret :: state.vstack })
 
-  let control_instr_transfer (_module_ : Wasm_module.t) _summaries (cfg : 'a Cfg.t) (i : ('a Instr.control, 'a) Instr.labelled) : state -> [`Simple of state | `Branch of state * state ] = Spec.wrap ~default:(`Simple bottom) (function state ->
+  let control_instr_transfer
+      (_module_ : Wasm_module.t)
+      _summaries
+      (cfg : 'a Cfg.t)
+      (i : ('a Instr.control, 'a) Instr.labelled)
+    : state -> [ `Simple of state | `Branch of state * state | `Multiple of state list ] =
+    Spec.wrap ~default:(`Simple bottom) (function state ->
       let ret = Var.Var i.label in
       let state = compute_stack_size_at_entry cfg i.label state in
       let get_block_return_stack_size n =

@@ -40,6 +40,7 @@ module Make (Transfer : Transfer.TRANSFER)
     | Uninitialized (** Meaning it has not been computed yet *)
     | Simple of state (** A single successor *)
     | Branch of state * state (** Upon a `br_if`, there are two successor states: one where the condition holds, and where where it does not hold. This is used to model that. *)
+    | Multiple of state list (** Upon a call_indirect (or br_table), there could be more than two successors *)
   [@@deriving compare]
 
   (** The results of an intra analysis are a mapping from instruction labels to their in and out values *)
@@ -50,11 +51,13 @@ module Make (Transfer : Transfer.TRANSFER)
     | Uninitialized -> bottom_state cfg
     | Simple s -> s
     | Branch (s1, s2) -> join_state s1 s2
+    | Multiple states -> List.fold_left states ~init:(bottom_state cfg) ~f:join_state
 
   let result_to_string (r : result) : string = match r with
     | Uninitialized -> "uninit"
     | Simple s -> Printf.sprintf "simple: %s" (state_to_string s)
     | Branch (s1, s2) -> Printf.sprintf "branch: %s\nand: %s" (state_to_string s1) (state_to_string s2)
+    | Multiple states -> Printf.sprintf "multiple: [%s]" (String.concat ~sep:"," (List.map ~f:state_to_string states))
 
   (** Analyzes a CFG. Returns the final state after computing the transfer of the entire function. That final state is a pair where the first element are the results per block, and the second element are the results per instructions.
       @param module_ is the overall WebAssembly module, needed to access type information, tables, etc.
@@ -62,8 +65,8 @@ module Make (Transfer : Transfer.TRANSFER)
   let analyze_ (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (summaries : summary Int32Map.t) : intra_results =
     let bottom = Uninitialized in
     (* Data of the analysis, per block *)
-    let block_out : result IntMap.t ref = ref IntMap.empty in
-    let after_block (block_idx : int) : result = match IntMap.find !block_out block_idx with
+    let block_out : result Cfg.BlockIdx.Map.t ref = ref Cfg.BlockIdx.Map.empty in
+    let after_block (block_idx : Cfg.BlockIdx.t) : result = match Map.find !block_out block_idx with
       | Some r -> r
       | None -> bottom in
     (* Data of the analysis, per instruction *)
@@ -80,12 +83,13 @@ module Make (Transfer : Transfer.TRANSFER)
         let poststate = match Transfer.control_instr_transfer module_ summaries cfg instr state with
           | `Simple s -> Simple s
           | `Branch (s1, s2) -> Branch (s1, s2)
+          | `Multiple states -> Multiple states
         in
         instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple state, poststate);
         poststate in
 
-    (* Analyzes one block, returning the pre and post states *)
-    let analyze_block (block_idx : int) : result =
+    (* Analyzes one block, returning the state after this block *)
+    let analyze_block (block_idx : Cfg.BlockIdx.t) : result =
       (* The block to analyze *)
       let block = Cfg.find_block_exn cfg block_idx in
       let incoming = Cfg.incoming_edges cfg block_idx in
@@ -96,7 +100,10 @@ module Make (Transfer : Transfer.TRANSFER)
           | Simple s, _ -> (idx, s)
           | Branch (t, _), Some true -> (idx, t)
           | Branch (_, f), Some false -> (idx, f)
-          | Branch _, None -> failwith (Printf.sprintf "invalid branch state at block %d, from block %d" block_idx idx)
+          | Branch _, None -> failwith (Printf.sprintf "invalid branch state at block %s, from block %s"
+                                          (Cfg.BlockIdx.to_string block_idx)
+                                          (Cfg.BlockIdx.to_string idx))
+          | Multiple states, _ -> (idx, Transfer.merge_flows module_ cfg block (List.map ~f:(fun s -> (idx, s)) states))
           | Uninitialized, _ -> (idx, Transfer.bottom_state cfg))) in
       let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
@@ -123,12 +130,12 @@ module Make (Transfer : Transfer.TRANSFER)
         Branch (Transfer.widen_state st1 st1',
                 Transfer.widen_state st2 st2')
       | _ -> failwith "Cannot widen results" in
-    let rec fixpoint (worklist : IntSet.t) (iteration : int) : unit =
+    let rec fixpoint (worklist : Cfg.BlockIdx.Set.t) (iteration : int) : unit =
       if IntSet.is_empty worklist then
         () (* No more elements to consider. We can stop here *)
       else
-        let block_idx = IntSet.min_elt_exn worklist in
-        Log.debug (Printf.sprintf "-----------------------\n Analyzing block %d\n" block_idx);
+        let block_idx = Set.min_elt_exn worklist in
+        Log.debug (Printf.sprintf "-----------------------\n Analyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
         let out_state = analyze_block block_idx in
         Log.debug (Printf.sprintf "out_state is: %s\n" (result_to_string out_state));
         (* Has out state changed? *)
@@ -150,17 +157,17 @@ module Make (Transfer : Transfer.TRANSFER)
           block_out := IntMap.set !block_out ~key:block_idx ~data:new_out_state;
           (* And recurse by adding all successors *)
           let successors = Cfg.successors cfg block_idx in
-          fixpoint (IntSet.union (IntSet.remove worklist block_idx) (IntSet.of_list successors)) (iteration+1)
+          fixpoint (IntSet.union (IntSet.remove worklist block_idx) (Cfg.BlockIdx.Set.of_list successors)) (iteration+1)
     in
     (* Performs narrowing by re-analyzing once each block *)
-    let rec _narrow (blocks : int list) : unit = match blocks with
+    let rec _narrow (blocks : Cfg.BlockIdx.t list) : unit = match blocks with
       | [] -> ()
       | block_idx :: blocks ->
         let out_state = analyze_block block_idx in
         block_out := IntMap.set !block_out ~key:block_idx ~data:out_state;
         _narrow blocks
     in
-    fixpoint (IntSet.singleton (Cfg.entry_block cfg)) 1;
+    fixpoint (Cfg.BlockIdx.Set.singleton (Cfg.entry_block cfg)) 1;
     (* _narrow (IntMap.keys cfg.basic_blocks); *)
     !instr_data
 

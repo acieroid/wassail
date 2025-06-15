@@ -1,5 +1,10 @@
 open Helpers
 
+(* TODO: there would be 3 cases of transfer functions:
+   1. fully intra-procedural: no summary, no `Multiple
+   2. summary-based interprocedural: summary type and "apply_summary" function for call instruction
+   3. classic interprocedural: call and return functions *)
+
 (** The expected interface for a transfer function *)
 module type TRANSFER = sig
 
@@ -42,7 +47,10 @@ module type TRANSFER = sig
     -> annot_expected Cfg.t (* the CFG of the function to analyze *)
     -> annot_expected Instr.labelled_control (* the control instruction to analyze *)
     -> state (* the state before this instruction *)
-    -> [`Simple of state | `Branch of state * state ] (* the resulting state after applying the transfer function *)
+    (* the resulting state after applying the transfer function *)
+    -> [ `Simple of state (* This is the state for the only successor *)
+       | `Branch of state * state (* In case of br_if, there is one "true" and one "false" successor *)
+       | `Multiple of state list ] (* In other branching cases (br_table, call_indirect), there can be an unbounded number of successors *)
 
   (** Transfer function for data instructions *)
   val data_instr_transfer
@@ -57,7 +65,7 @@ module type TRANSFER = sig
     : Wasm_module.t (* the wasm module *)
     -> annot_expected Cfg.t (* the CFG *)
     -> annot_expected Basic_block.t (* the basic block for which flows should be merged *)
-    -> (int * state) list (* the predecessor flows, as pairs of block indices and state *)
+    -> (Cfg.BlockIdx.t * state) list (* the predecessor flows, as pairs of block indices and state *)
     -> state (* the state resulting from the merge *)
 
   (** Extract a fully-analyzed CFG into a summary *)

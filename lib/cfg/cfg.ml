@@ -4,6 +4,13 @@ open Cfg_base
 
 module Cfg = struct
 
+  module BlockIdx = struct
+    type t = int
+    let to_string = string_of_int
+    module Set = IntSet
+    module Map = IntMap
+  end
+
   type 'a t = {
     (** Is this an exported function? *)
     exported: bool;

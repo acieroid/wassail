@@ -153,7 +153,7 @@ module Make
       (_cfg : annot_expected Cfg.t) (* The CFG analyzed *)
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : state) (* The pre state *)
-    : [`Simple of state | `Branch of state * state ] =
+    : [`Simple of state | `Branch of state * state | `Multiple of state list ] =
     let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
       Log.info (Printf.sprintf "applying summary of function %ld" f);
       match Int32Map.find summaries f with

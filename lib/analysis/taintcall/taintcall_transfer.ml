@@ -40,7 +40,7 @@ let control_instr_transfer
     (cfg : annot_expected Cfg.t) (* The CFG analyzed *)
     (i : annot_expected Instr.labelled_control) (* The instruction *)
     (state : state) (* The pre state *)
-  : [`Simple of state | `Branch of state * state ] =
+  : [`Simple of state | `Branch of state * state | `Multiple of state list] =
   let apply_summary (f : Int32.t) (argsv : Taint_domain.Taint.t list) : Taintcall_domain.Call.t =
     match Int32Map.find summaries f with
     | None ->
@@ -84,6 +84,7 @@ let control_instr_transfer
       | _ -> `Simple (fst state, sndstate')
     end
   | `Branch (s1, s2) -> `Branch ((fst state, s1), (fst state, s2))
+  | `Multiple states -> `Multiple (List.map ~f:(fun s -> (fst state, s)) states)
 
 let extract_summary (cfg : annot_expected Cfg.t) (analyzed_cfg : state Cfg.t) : summary =
   let out_state = Cfg.state_after_block analyzed_cfg analyzed_cfg.exit_block (init_state cfg) in

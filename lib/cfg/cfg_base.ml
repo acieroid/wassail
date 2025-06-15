@@ -47,28 +47,34 @@ end
 module type CFG_LIKE = sig
   type 'a t
 
+  module BlockIdx : sig
+    type t
+    val to_string : t -> string
+    module Set : Set.S with type Elt.t = t
+    module Map : Map.S with type Key.t = t
+  end
+
   val name : 'a t -> string
 
   val equal : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
 
-  val find_block_exn : 'a t -> int -> 'a Basic_block.t
+  val find_block_exn : 'a t -> BlockIdx.t -> 'a Basic_block.t
 
-  val incoming_edges : 'a t -> int -> Edge.t list
+  val incoming_edges : 'a t -> BlockIdx.t -> (BlockIdx.t * bool option) list
 
-  val is_loop_head : 'a t -> int -> bool
+  val is_loop_head : 'a t -> BlockIdx.t -> bool
 
-  val successors : 'a t -> int -> int list
+  val successors : 'a t -> BlockIdx.t -> BlockIdx.t list
 
-  val entry_block : 'a t -> int
+  val predecessors : 'a t -> int -> int list
 
-  val exit_block : 'a t -> int
+  val entry_block : 'a t -> BlockIdx.t
+
+  val exit_block : 'a t -> BlockIdx.t
 
   val map_annotations : 'a t ->  f:('a Instr.t -> 'b * 'b) -> 'b t
 
-  val callees : 'a t -> Int32Set.t
-
-  val callers : 'a t Int32Map.t -> 'a t -> Int32Set.t
-
+  (* These are for specific analyses, may be moved out *)
   val find_enclosing_block : 'a t -> Instr.Label.t -> Instr.Label.t option
 
   val find_enclosing_block_exn : 'a t -> Instr.Label.t -> 'a Basic_block.t
@@ -79,5 +85,10 @@ module type CFG_LIKE = sig
 
   val is_loop_exn : 'a t -> Instr.Label.t -> bool
 
-  val predecessors : 'a t -> int -> int list
+
+  (* TODO: move the below functions inside inter.ml *)
+  val callees : 'a t -> Int32Set.t
+
+  val callers : 'a t Int32Map.t -> 'a t -> Int32Set.t
+
 end
