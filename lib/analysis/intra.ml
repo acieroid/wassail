@@ -26,7 +26,12 @@ module type INTRA = sig
   (* val analyze_keep : Wasm_module.t -> annot_expected Cfg.t -> summary Int32Map.t -> (annot_expected * state) Cfg.t * summary *)
 end
 
-module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
+module Make (Transfer : Transfer.TRANSFER)
+  : INTRA
+    with type state = Transfer.state
+     and type summary = Transfer.summary
+     and type annot_expected = Transfer.annot_expected
+     and module Cfg = Transfer.Cfg = struct
   (* Include transfer to get a definition for state, equal_state, and annot_expected *)
   include Transfer
 
@@ -155,7 +160,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
         block_out := IntMap.set !block_out ~key:block_idx ~data:out_state;
         _narrow blocks
     in
-    fixpoint (IntSet.singleton (Cfg.entry cfg)) 1;
+    fixpoint (IntSet.singleton (Cfg.entry_block cfg)) 1;
     (* _narrow (IntMap.keys cfg.basic_blocks); *)
     !instr_data
 

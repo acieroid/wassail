@@ -77,7 +77,7 @@ module Cfg = struct
   let exit_block (cfg : 'a t) : int =
     cfg.exit_block
 
-  let entry (cfg : 'a t) : int =
+  let entry_block (cfg : 'a t) : int =
     cfg.entry_block
 
   let to_string (cfg : 'a t) : string = Printf.sprintf "CFG of function %s" (Int32.to_string cfg.idx)

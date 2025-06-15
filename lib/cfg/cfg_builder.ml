@@ -295,7 +295,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
   (* Create the entry block if needed *)
   let first_block = Option.value_exn (List.min_elt (List.map actual_blocks ~f:(fun b -> b.idx)) ~compare:Stdlib.compare) in
   (* In general, the first block is the entry block. But in some cases, it could be a block with back edges, and we want to avoid that. So we check if there's an edge to the entry block: if there is one, we need an extra entry block *)
-  let entry_block, actual_blocks', actual_edges' = match List.find actual_edges ~f:(fun (_, idx, _) -> idx = first_block) with
+  let entry, actual_blocks', actual_edges' = match List.find actual_edges ~f:(fun (_, idx, _) -> idx = first_block) with
     | None -> first_block, actual_blocks, actual_edges
     | Some _ ->
       let block = mk_empty_block () in
@@ -344,7 +344,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     (* The backward edges *)
     back_edges;
     (* The entry block *)
-    entry_block = entry_block;
+    entry_block = entry;
     (* The exit block is the return block *)
     exit_block = return_block.idx;
     (* The loop heads *)

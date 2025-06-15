@@ -59,7 +59,9 @@ module type CFG_LIKE = sig
 
   val successors : 'a t -> int -> int list
 
-  val entry : 'a t -> int
+  val entry_block : 'a t -> int
+
+  val exit_block : 'a t -> int
 
   val map_annotations : 'a t ->  f:('a Instr.t -> 'b * 'b) -> 'b t
 
@@ -69,15 +71,13 @@ module type CFG_LIKE = sig
 
   val find_enclosing_block : 'a t -> Instr.Label.t -> Instr.Label.t option
 
+  val find_enclosing_block_exn : 'a t -> Instr.Label.t -> 'a Basic_block.t
+
   val find_nth_parent_block : 'a t -> Instr.Label.t -> int32 -> Instr.Label.t option
 
   val block_arity : 'a t -> Instr.Label.t -> int * int
 
   val is_loop_exn : 'a t -> Instr.Label.t -> bool
 
-  val exit_block : 'a t -> int
-
   val predecessors : 'a t -> int -> int list
-
-  val find_enclosing_block_exn : 'a t -> Instr.Label.t -> 'a Basic_block.t
 end
