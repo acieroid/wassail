@@ -27,8 +27,7 @@ module T = struct
   let to_string (var : t) : string =
     match var with 
     | Var v -> Var.to_string v
-    | Mem ric ->
-      "mem[" ^ RIC.to_string ric ^ "]"
+    | Mem ric -> "mem[" ^ RIC.to_string ric ^ "]"
 
   let list_to_string (vars : t list) : string = String.concat ~sep:", " (List.map vars ~f:to_string)
 

@@ -438,6 +438,9 @@ module RIC = struct
       | "", "]-∞,∞[", _ -> "⊤"
       | _ -> stride ^ interval ^ offset
 
+  let list_to_string (l : t list) : string =
+    let l = List.map ~f:to_string l in
+    String.concat ~sep:", " l
 
   (** [of_list l] constructs a RIC value that represents exactly the integers in [l]. *)
   let of_list (l : int list) : t =

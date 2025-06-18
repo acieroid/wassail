@@ -20,6 +20,8 @@ let get (store : t) ~(var : Variable.t) : Reduced_interval_congruence.RIC.t =
     | Some vs -> vs
     | None ->
       match var with
+      | Var Const I32 n -> Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, ("", Option.value_exn (Int32.to_int n)))
+      | Var Const _ -> Reduced_interval_congruence.RIC.Bottom
       | Var _ -> Reduced_interval_congruence.RIC.relative_ric (Variable.to_string var)
       | Mem _ -> RIC.Top
 
@@ -42,7 +44,7 @@ let subsumes (t1 : t) (t2 : t) : bool =
 
 (** Converts an abstract store to a human-readable string representation, including all bindings. *)
 let to_string (vs : t) : string =
-  Printf.sprintf "[%s]" (String.concat ~sep:", "
+  Printf.sprintf "[%s]" (String.concat ~sep:";\n "
                           (List.map (Variable.Map.to_alist vs)
                             ~f:(fun (k, t) ->
                                 Printf.sprintf "%s ↦ %s"
