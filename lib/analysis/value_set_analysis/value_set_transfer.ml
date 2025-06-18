@@ -322,7 +322,8 @@ module Make (*: Transfer.TRANSFER *) = struct
           end
         in
         (* print_endline ("previous value-sets: " ^ List.to_string ~f:RIC.to_string previous_value_sets); *)
-        let merge_variables = List.take merge_variables (List.length previous_value_sets) in
+        (* let merge_variables = List.rev (List.take (List.rev merge_variables) (List.length previous_value_sets)) in *)
+        let merge_variables = List.drop merge_variables (nb_of_merge_variables - (List.length previous_value_sets)) in
         assert (List.length previous_value_sets = List.length merge_variables);
         List.fold2_exn 
           ~init:new_state_without_merges
