@@ -132,12 +132,10 @@ module Make (*: Transfer.TRANSFER *) = struct
           ~to_:variable
       end
     | Const c -> 
-      print_endline "constant added to the stack: ";
       let variable = (Variable.Var (pop (Spec.get_or_fail i.annotation_after).vstack)) in
-      print_endline ("\t" ^ Variable.to_string variable);
       begin match c with
-      | Prim_value.I32 n -> print_endline ("\ti32 detected: " ^ Int32.to_string n); state
-      | _ -> state
+      | Prim_value.I32 _ -> print_endline ("i32.const " ^ Variable.to_string variable); state
+      | _ -> print_endline "Non i32 constant added to the stack: "; state
       end
     | Binary binop -> 
       let x, y = pop2 (Spec.get_or_fail i.annotation_before).vstack in
@@ -255,17 +253,69 @@ module Make (*: Transfer.TRANSFER *) = struct
     | CallIndirect _ -> failwith "indirect calls not yet implemented"
     | Br _ -> `Simple state
     | BrIf _ | If _ -> `Branch (state, state) (* Not sure if that's right. What about if V1 < V2 ? *)
-    | Return -> `Simple state
+    | Return -> 
+      let top_of_stack = Variable.Var (pop (Spec.get_or_fail i.annotation_before).vstack) in
+      print_endline "return";
+      let vs = Abstract_store_domain.get state ~var:top_of_stack in
+      print_endline ("\treturned value-set: " ^ RIC.to_string vs);
+      `Simple (Abstract_store_domain.set state ~var:(Variable.Var Var.Return) ~vs:vs)
     | Unreachable -> `Simple  Abstract_store_domain.bottom
     | _ -> `Simple state
 
 
+  let get_predecessors 
+      (cfg : annot_expected Cfg.t) 
+      (block : annot_expected Basic_block.t) 
+    : annot_expected Basic_block.t list =
+    let predecessors = Cfg.predecessors cfg block.idx in
+    List.filter ~f:(fun blk -> List.mem predecessors blk.idx ~equal:Int.equal) 
+                         (Cfg.all_predecessors cfg block)
+
+
+  let get_previous_stacks
+      (cfg : annot_expected Cfg.t)
+      (predecessors : annot_expected Basic_block.t list)
+    : (int * Var.t list) list =
+    let previous_annotations = 
+      List.fold ~init:[] 
+                ~f:(fun acc blk ->
+                  (blk.idx, Cfg.state_after_block cfg blk.idx (Spec_inference.init_state cfg)) :: acc)
+                predecessors
+      in
+      List.map 
+        ~f:(fun x ->
+          match x with
+          | idx, Spec.Bottom -> idx, []
+          | idx, NotBottom x -> idx, x.vstack)
+        previous_annotations
 
   let rec get_nth_state (n : int) (states : (int * state) list) : state =
     match states with
     | [] -> Abstract_store_domain.bottom
     | (i, state) :: _ when i = n -> state
     | _ :: states -> get_nth_state n states
+
+
+  let get_previous_stack_value_sets 
+      (cfg : annot_expected Cfg.t) 
+      (block : annot_expected Basic_block.t)  
+      (states : (int * state) list)
+    : RIC.t list =
+    let predecessors = get_predecessors cfg block in
+    let previous_stacks = get_previous_stacks cfg predecessors in
+    let previous_value_sets = 
+      List.map 
+        ~f:(fun (idx, stk) ->
+          List.map 
+            ~f:(fun var ->
+              let state = get_nth_state idx states in
+              Abstract_store_domain.get state ~var:(Variable.Var var))
+            stk)
+        previous_stacks in
+    match previous_value_sets with
+    | [] -> []
+    | first_stack :: rest ->
+      List.fold ~init:first_stack ~f:(fun acc x -> List.map2_exn ~f:RIC.join acc x) rest 
 
 
   let merge_flows 
@@ -275,60 +325,32 @@ module Make (*: Transfer.TRANSFER *) = struct
       (states : (int * state) list) 
     : state =
     (* let init_spec = (Spec_inference.init_state cfg) in *)
-    let block_idx = block.idx in
     match states with
     | [] -> init_state cfg
     | _ ->
       begin match block.content with
       | Control { instr = Merge; _ } ->
-        (* let spec = Cfg.state_after_block cfg block.idx init_spec in *)
         let states' = List.map ~f:(fun (_, s) -> s) states in
-        let new_state_without_merges = List.reduce_exn states' ~f:join_state in (* Join all previous states *)
-        (* Merge stack elements that need to be merged *)
-        let merge_variables = Var.Set.to_list (Var.Set.of_list (List.map ~f:snd (Spec_inference.new_merge_variables cfg block))) in
-        let nb_of_merge_variables = List.length merge_variables in
-        print_endline ("MERGE: Control block #" ^ string_of_int block_idx);
-        print_endline ("\tMerge variables: " ^ Var.list_to_string merge_variables);
-        let predecessors = Cfg.predecessors cfg block.idx in
-        let predecessors = 
-          List.filter ~f:(fun blk -> List.mem predecessors blk.idx ~equal:Int.equal) 
-                      (Cfg.all_predecessors cfg block) in
-        let previous_annotations = 
-          List.fold ~init:[] 
-                    ~f:(fun acc blk ->
-                      (blk.idx, Cfg.state_after_block cfg blk.idx (Spec_inference.init_state cfg)) :: acc)
-                    predecessors in
-        let previous_stacks =
-          List.map ~f:(fun x ->
-            match x with
-            | idx, Spec.Bottom -> idx, []
-            | idx, NotBottom x -> idx, List.take (x.vstack) nb_of_merge_variables
-          )
-          previous_annotations in
-        let previous_value_sets = 
-          List.map 
-            ~f:(fun (idx, stk) ->
-              List.map 
-                ~f:(fun var ->
-                  let state = get_nth_state idx states in
-                  Abstract_store_domain.get state ~var:(Variable.Var var))
-                stk)
-            previous_stacks in
-        let previous_value_sets = 
-          begin match previous_value_sets with
-          | [] -> []
-          | first_stack :: rest ->
-            List.fold ~init:first_stack ~f:(fun acc x -> List.map2_exn ~f:RIC.join acc x) rest 
-          end
-        in
-        (* print_endline ("previous value-sets: " ^ List.to_string ~f:RIC.to_string previous_value_sets); *)
-        (* let merge_variables = List.rev (List.take (List.rev merge_variables) (List.length previous_value_sets)) in *)
-        let merge_variables = List.drop merge_variables (nb_of_merge_variables - (List.length previous_value_sets)) in
-        assert (List.length previous_value_sets = List.length merge_variables);
+        (* Join all previous states: *)
+        let new_state_without_merges = List.reduce_exn states' ~f:join_state in 
+        let merged_annotation = (Cfg.state_before_block cfg block.idx (Spec_inference.init_state cfg)) in
+        let merged_stack =
+          match merged_annotation with
+          | Spec.Bottom -> []
+          | NotBottom annot -> annot.vstack in
+        (* Merge stack elements that need to be merged: *)
+        print_endline ("MERGE: Control block #" ^ string_of_int block.idx);
+        print_endline ("\tmerged stack: " ^ List.to_string ~f:Var.to_string merged_stack);
+        let previous_value_sets = get_previous_stack_value_sets cfg block states in
+        print_endline ("\tprevious stack value-sets (joined from all branches): " ^ List.to_string ~f:RIC.to_string previous_value_sets);
+        assert (List.length merged_stack = List.length previous_value_sets);
         List.fold2_exn 
           ~init:new_state_without_merges
-          ~f:(fun state var vs -> Abstract_store_domain.set state ~var:(Variable.Var var) ~vs:vs)
-          merge_variables
+          ~f:(fun state var vs -> 
+            match var with
+            | Merge (i, _) when i = block.idx -> Abstract_store_domain.set state ~var:(Variable.Var var) ~vs:vs
+            | _ -> state)
+          merged_stack
           previous_value_sets
       | _ -> 
         begin match states with
@@ -336,7 +358,6 @@ module Make (*: Transfer.TRANSFER *) = struct
         | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
         end
       end
-    (* TODO: Write the rest of this function *)
     
 
 
