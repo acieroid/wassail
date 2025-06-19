@@ -158,6 +158,10 @@ let join (s1 : t) (s2 : t) : t =
       | `Both (x, y) -> Some (Taint.join x y)
       | `Left x | `Right x -> Some x)
 
+
+let widen (_s1 : t) (s2 : t) : t =
+  s2 (* no widening *)
+
 (** Get the taint of a variable in the taint map *)
 let get_taint (s : t) (var : Var.t) : Taint.t =
   match Var.Map.find s var with

@@ -62,12 +62,12 @@ let make (wasm_mod : Wasm_module.t) : t =
   (* Nodes of the call graph, i.e., all functions (imported and defined functions) *)
   let nodes = Int32Set.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> Int32.of_int_exn i)) in
   let rec collect_calls (f : Int32.t) (instr : 'a Instr.t) (edges : EdgeSet.t Int32Map.t) : EdgeSet.t Int32Map.t = match instr with
-    | Control { instr = Call (_, _, f'); _ } ->
+    | Call { instr = CallDirect (_, _, f'); _ } ->
       let edge : Edge.t = { target = f'; direct = true } in
       Int32Map.update edges f ~f:(function
           | None -> EdgeSet.singleton edge
           | Some fs -> EdgeSet.add fs edge)
-    | Control { instr = CallIndirect (_, _, _, typ); _ } ->
+    | Call { instr = CallIndirect (_, _, _, typ); _ } ->
       List.fold_left (find_targets wasm_mod typ)
         ~init:edges
         ~f:(fun edges f' ->

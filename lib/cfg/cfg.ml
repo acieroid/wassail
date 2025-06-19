@@ -6,6 +6,7 @@ module Cfg = struct
 
   module BlockIdx = struct
     type t = int
+    [@@deriving sexp, compare, equal]
     let to_string = string_of_int
     module Set = IntSet
     module Map = IntMap
@@ -114,6 +115,7 @@ module Cfg = struct
                 |> IntMap.to_alist
                 |> List.map ~f:(fun (idx, block) ->
                     let (t, content) = match block.content with
+                      | Call instr -> ("c", Instr.call_to_string instr.instr)
                       | Control instr -> ("c", Instr.control_to_short_string instr.instr)
                       | Data instrs -> ("d", List.map instrs ~f:(fun i -> Instr.data_to_string i.instr) |> String.concat ~sep:":" )
                     in Printf.sprintf "%d:%s:%s" idx t content)
@@ -200,7 +202,7 @@ module Cfg = struct
     IntMap.fold cfg.basic_blocks
       ~init:Int32Set.empty
       ~f:(fun ~key:_ ~data:block callees -> match block.content with
-          | Control { instr = Call (_, _, n); _} -> Int32Set.union (Int32Set.singleton n) callees
+          | Call { instr = CallDirect (_, _, n); _} -> Int32Set.union (Int32Set.singleton n) callees
           | _ -> callees)
 
   let callers (cfgs : 'a t Int32Map.t) (cfg : 'a t) : Int32Set.t =
@@ -216,6 +218,7 @@ module Cfg = struct
     IntMap.fold cfg.basic_blocks ~init:Instr.Label.Map.empty ~f:(fun ~key:_ ~data:block acc ->
         match block.content with
         | Control i -> Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Control i)
+        | Call i -> Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Call i)
         | Data d -> List.fold_left d ~init:acc ~f:(fun acc i ->
             Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Data i)))
 
@@ -268,6 +271,7 @@ module Cfg = struct
     let block = find_block_exn cfg block_idx in
     match block.content with
     | Control i -> Instr.annotation_before (Control i)
+    | Call i -> Instr.annotation_before (Call i)
     | Data (i :: _) -> Instr.annotation_before (Data i)
     | Data [] -> begin match non_empty_predecessors cfg block_idx with
         | [] ->
@@ -288,8 +292,8 @@ module Cfg = struct
     (* This implementation is the complement of state_before_block *)
     let block = find_block_exn cfg block_idx in
     match block.content with
-    | Control i ->
-      Instr.annotation_after (Control i)
+    | Control i -> Instr.annotation_after (Control i)
+    | Call i -> Instr.annotation_after (Call i)
     | Data [] -> begin match non_empty_predecessors cfg block_idx with
         | [] -> begin match predecessors cfg block_idx with
             | [] ->
@@ -402,12 +406,12 @@ module Cfg = struct
   let is_loop_exn (cfg : 'a t) (label : Instr.Label.t) : bool =
     match Instr.Label.Map.find cfg.label_to_instr label with
     | None -> failwith "Cfg.is_loop_exn: did not find the instruction"
-    | Some (Data _)  -> failwith "Cfg.is_loop_exn: this is not a control instruction"
     | Some (Control i) -> begin match i.instr with
         | Loop _ -> true
         | Block _ | If _ -> false
         | _ -> failwith "Cfg.is_loop_exn: this is not a block"
       end
+    | Some _  -> failwith "Cfg.is_loop_exn: this is not a control instruction"
 
 end
 

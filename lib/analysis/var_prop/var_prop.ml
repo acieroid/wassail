@@ -66,7 +66,7 @@ let eqs_data_instr (instr : (Instr.data, Spec.t) Instr.labelled) : VarEq.Set.t =
 
 (** Perform variable propagation *)
 let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
-  let init_spec = Spec_inference.init_state cfg in
+  let init_spec = Spec_inference.init cfg in
   (* Go over each instruction and basic block, record all equality constraints that can be derived *)
   let equalities : VarEq.Set.t = List.fold_left (Cfg.all_blocks cfg)
       ~init:VarEq.Set.empty
@@ -91,7 +91,7 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
                        ((List.map2_exn ~f:VarEq.of_vars pred_spec.vstack spec.vstack) @
                         (List.map2_exn ~f:VarEq.of_vars pred_spec.locals spec.locals) @
                         (List.map2_exn ~f:VarEq.of_vars pred_spec.globals spec.globals))))
-          | Control _ -> eqs (* No equality arises from other control blocks *)
+          | _ -> eqs (* No equality arises from other blocks *)
         )
   in
   (* Filter out tautologies *)

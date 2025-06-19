@@ -5,6 +5,7 @@ module T = struct
   type 'a block_content =
     | Control of ('a Instr.control, 'a) Instr.labelled
     | Data of (Instr.data, 'a) Instr.labelled list
+    | Call of (Instr.call, 'a) Instr.labelled
   [@@deriving sexp, compare, equal]
 
   (** A basic block *)
@@ -17,8 +18,10 @@ end
 include T
 
 (** Convert a block to its string representation *)
-let to_string ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : string = Printf.sprintf "block %d, %s" b.idx (match b.content with
+let to_string ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : string =
+  Printf.sprintf "block %d, %s" b.idx (match b.content with
     | Control instr -> Printf.sprintf "control block: %s" (Instr.control_to_string instr.instr ~annot_str)
+    | Call instr -> Printf.sprintf "call block: %s" (Instr.call_to_string instr.instr)
     | Data instrs -> Printf.sprintf "data block: %s" (String.concat ~sep:"\\l"
          (List.map instrs
             ~f:(fun instr ->
@@ -50,7 +53,18 @@ let to_dot ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : stri
                   (Instr.Label.to_string instr.label)
                   (Instr.data_to_string instr.instr)
                   annot_after)))
-
+  | Call instr ->
+    Printf.sprintf "block%d [shape=Mrecord, label=\"{Call block %d|%s<instr%s>%s:%s%s}\"];"
+      b.idx b.idx
+      (match annot_str instr.annotation_before with
+       | "" -> ""
+       | s -> Printf.sprintf "{%s}|" s)
+      (Instr.Label.to_string instr.label)
+      (Instr.Label.to_string instr.label)
+      (Instr.call_to_string instr.instr)
+      (match annot_str instr.annotation_after with
+       | "" -> ""
+       | s -> Printf.sprintf "|{%s}" s)
   | Control instr ->
     Printf.sprintf "block%d [shape=Mrecord, label=\"{Control block %d|%s<instr%s>%s:%s%s}\"];"
       b.idx b.idx
@@ -67,19 +81,21 @@ let to_dot ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : stri
 (** Return all the labels of the instructions directly contained in this block *)
 let all_direct_instruction_labels (b : 'a t) : Instr.Label.Set.t =
   match b.content with
-  | Control i -> Instr.Label.Set.singleton i.label
+  | Control { label; _ } | Call { label; _ } -> Instr.Label.Set.singleton label
   | Data d -> Instr.Label.Set.of_list (List.map d ~f:(fun i -> i.label))
 
 (** Return all annotations *)
 let all_annots (b : 'a t) : 'a list =
   match b.content with
-  | Control i -> [i.annotation_before; i.annotation_after]
+  | Control { annotation_before; annotation_after; _ }
+  | Call { annotation_before; annotation_after; _} -> [annotation_before; annotation_after]
   | Data d -> List.fold_left d ~init:[] ~f:(fun acc i -> [i.annotation_before; i.annotation_after] @ acc)
 
 (** Map a function over annotations of the block *)
 let map_annotations (b : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
   { b with content = begin match b.content with
         | Control c -> Control (Instr.map_annotation_control c ~f)
+        | Call c -> Call (Instr.map_annotation_call c ~f)
         | Data instrs -> Data (List.map instrs ~f:(Instr.map_annotation_data ~f))
       end }
 
@@ -96,14 +112,14 @@ let is_merge (b : 'a t) : bool =
 (** Check if the block is a call or call_indirect block *)
 let is_call (b : 'a t) : bool =
   match b.content with
-  | Control { instr = Instr.Call (_, _, _); _ } -> true
-  | Control { instr = Instr.CallIndirect (_, _, _, _); _ } -> true
+  | Call { instr = Instr.CallDirect (_, _, _); _ } -> true
+  | Call { instr = Instr.CallIndirect (_, _, _, _); _ } -> true
   | _ -> false
 
 (** Check if the block is a direct call *)
 let is_direct_call (b : 'a t) : bool =
   match b.content with
-  | Control { instr = Instr.Call (_, _, _); _ } -> true
+  | Call { instr = Instr.CallDirect (_, _, _); _ } -> true
   | _ -> false
 
 (** Check if the block is a data block *)

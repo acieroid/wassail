@@ -1,4 +1,4 @@
-open Core
+(* open Core
 open Helpers
 
 module Domain = Taintcall_domain
@@ -216,3 +216,4 @@ module Test = struct
     check_equal actual expected
 
 end
+*)

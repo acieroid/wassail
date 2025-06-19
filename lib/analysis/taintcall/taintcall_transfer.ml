@@ -1,4 +1,4 @@
-open Core
+(* open Core
 open Helpers
 
 module Cfg = Cfg.Cfg
@@ -13,9 +13,9 @@ type state = Taintcall_domain.t
 
 let bottom : state = Taintcall_domain.bottom
 
-let init_state (cfg : 'a Cfg.t) : state = (Taintcall_domain.Call.bottom, TaintTransfer.init_state cfg)
+let init_state (cfg : 'a Cfg.t) : state = (Taintcall_domain.Call.bottom, TaintTransfer.init cfg)
 
-let bottom_state (cfg : 'a Cfg.t) : state = (Taintcall_domain.Call.bottom, TaintTransfer.bottom_state cfg)
+let bottom_state (cfg : 'a Cfg.t) : state = (Taintcall_domain.Call.bottom, TaintTransfer.bottom cfg)
 
 let state_to_string (s : state) : string = Taintcall_domain.to_string s
 
@@ -25,14 +25,14 @@ let widen_state (_s1 : state) (s2 : state) : state = s2 (* no widening *)
 
 type summary = Taintcall_domain.Call.t * TaintTransfer.summary
 
-let data_instr_transfer
+let data
     (module_ : Wasm_module.t)
     (cfg : annot_expected Cfg.t)
     (i : annot_expected Instr.labelled_data)
     (state : state)
   : state =
   (* No call can arise in a data instruction, so the state remains the same *)
-  (fst state, TaintTransfer.data_instr_transfer module_ cfg i (snd state))
+  (fst state, TaintTransfer.data module_ cfg i (snd state))
 
 let control_instr_transfer
     (module_ : Wasm_module.t) (* The wasm module (read-only) *)
@@ -95,3 +95,4 @@ let merge_flows (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : 
    | None -> init_state cfg
    | Some s' -> s',
    TaintTransfer.merge_flows module_ cfg block (List.map states ~f:(fun x -> (fst x, (snd (snd x))))))
+ *)

@@ -159,7 +159,7 @@ let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pr
 
 
 let summary_of (cfg : Spec.t Cfg.t) (out_state : Taint_domain.t) : t =
-  let init_spec = (Spec_inference.init_state cfg (*, Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i))) *)) in
+  let init_spec = (Spec_inference.init cfg (*, Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i))) *)) in
   match Cfg.state_after_block cfg cfg.exit_block init_spec with
   | Bottom ->
     (* The function exit is likely unreachable, so we use a bottom summary *)

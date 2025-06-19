@@ -345,6 +345,10 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
           | Convert ({typ = F64; op = Convertop.ReinterpretInt}) -> op 0xbf
           | _ -> assert false
         end
+      | Call c -> begin match c.instr with
+          | CallDirect (_, _, x) -> op 0x10; var x
+          | CallIndirect (y, _, _, x) -> op 0x11; var y; var x
+        end
       | Control c -> begin match c.instr with
           | Unreachable -> op 0x00
 
@@ -359,8 +363,6 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
           | BrIf x -> op 0x0d; var x
           | BrTable (xs, x) -> op 0x0e; vec var xs; var x
           | Return -> op 0x0f
-          | Call (_, _, x) -> op 0x10; var x
-          | CallIndirect (y, _, _, x) -> op 0x11; var y; var x
           | Merge -> ()
         end
 

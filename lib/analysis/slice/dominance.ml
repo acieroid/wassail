@@ -151,13 +151,13 @@ let branch_condition (cfg : Spec.t Cfg.t) (block : Spec.t Basic_block.t) : Var.t
       | BrIf _ | BrTable _ | If _ ->
         (* These are the only conditionals in the language, and they all depend
            on the top stack variable before their execution *)
-        begin match (Cfg.state_before_block cfg block.idx (Spec_inference.init_state cfg)) with
+        begin match (Cfg.state_before_block cfg block.idx (Spec_inference.init cfg)) with
         | Spec.Bottom -> None
         | Spec.NotBottom s -> List.hd s.vstack
         end
       | _ -> None
     end
-  | Data _ -> None
+  | _ -> None
 
 (** Computes the dominator tree of a CFG . *)
 let cfg_dominator (cfg : Spec.t Cfg.t) : Tree.t =

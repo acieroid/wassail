@@ -1,12 +1,13 @@
 open Core
 open Helpers
 
-module Spec_inference (* : Transfer.TRANSFER
-       with type annot_expected = unit
-        and type summary = unit
-        and type state = Spec.t *) = struct
+module Spec_inference
+  (* : Transfer.INTRA_ONLY_TRANSFER with module State = Spec and type annot_expected = unit *)
+  = struct
 
   module Cfg = Cfg.Cfg
+
+  module State = Spec
 
   (** Allows the use of variables encoding constants *)
   let use_const : bool ref = ref true
@@ -14,6 +15,20 @@ module Spec_inference (* : Transfer.TRANSFER
   let propagate_locals : bool ref = ref true
 
   let propagate_globals : bool ref = ref true
+
+  let init (cfg : 'a Cfg.t) : State.t = Spec.NotBottom {
+    vstack = []; (* the vstack is initially empty *)
+    locals =
+      if !use_const then
+        (List.mapi (Cfg.arg_types cfg) ~f:(fun i _ -> Var.Local i)) @ (List.map (Cfg.local_types cfg) ~f:(fun _ -> Var.Const (Prim_value.I32 0l)))
+      else
+        List.mapi ((Cfg.arg_types cfg) @ (Cfg.local_types cfg)) ~f:(fun i _ -> Var.Local i);
+    globals = List.mapi (Cfg.global_types cfg) ~f:(fun i _ -> Var.Global i);
+    memory = Var.OffsetMap.empty;
+    stack_size_at_entry = Instr.Label.Map.empty;
+  }
+
+  let bottom _ : State.t = Spec.Bottom
 
   (*---- Types ----*)
   (** Spec inference does not require any annotation *)
@@ -38,7 +53,7 @@ module Spec_inference (* : Transfer.TRANSFER
 
   let take (l : Var.t list) (n : int) =
     if List.length l < n then
-      failwith "Spec_inference.take: not enough element in var list"
+      failwith "Spec_inference.take: not enough elements in var list"
     else
       List.take l n
 
@@ -48,34 +63,6 @@ module Spec_inference (* : Transfer.TRANSFER
     | _ -> failwith "Spec_inference.get: nth exception"
 
   let set (n : Int32.t) (l : Var.t list) (v : Var.t) = List.mapi l ~f:(fun i v' -> if i = (Int32.to_int_exn n) then v else v')
-
-  (*---- State ----*)
-  type state = Spec.t
-  [@@deriving compare, equal]
-
-  let state_to_string = Spec.to_string
-
-  let init_state (cfg : 'a Cfg.t) : state = Spec.NotBottom {
-    vstack = []; (* the vstack is initially empty *)
-    locals =
-      if !use_const then
-        (List.mapi (Cfg.arg_types cfg) ~f:(fun i _ -> Var.Local i)) @ (List.map (Cfg.local_types cfg) ~f:(fun _ -> Var.Const (Prim_value.I32 0l)))
-      else
-        List.mapi ((Cfg.arg_types cfg) @ (Cfg.local_types cfg)) ~f:(fun i _ -> Var.Local i);
-    globals = List.mapi (Cfg.global_types cfg) ~f:(fun i _ -> Var.Global i);
-    memory = Var.OffsetMap.empty;
-    stack_size_at_entry = Instr.Label.Map.empty;
-  }
-
-  let bottom : state = Spec.Bottom
-
-  let bottom_state _ = bottom
-
-  let join_state (_s1 : state) (s2 : state) : state =
-    s2 (* only keep the "most recent" state, this is safe for this analysis *)
-
-  (* No widening *)
-  let widen_state _ s2 = s2
 
   let rec compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : Spec.SpecWithoutBottom.t) : Spec.SpecWithoutBottom.t =
     match Cfg.find_enclosing_block cfg label with
@@ -94,13 +81,14 @@ module Spec_inference (* : Transfer.TRANSFER
           (* we already computed it *)
           state
       end
+
   (*---- Transfer functions ----*)
 
-  let data_instr_transfer
+  let data
       (_module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t)
       (i : annot_expected Instr.labelled_data)
-    : state -> state = Spec.lift (function state ->
+    : State.t -> State.t = Spec.lift (function state ->
       let ret = Var.Var i.label in
       let state = compute_stack_size_at_entry cfg i.label state in
       match i.instr with
@@ -132,14 +120,12 @@ module Spec_inference (* : Transfer.TRANSFER
       | RefFunc _ -> { state with vstack = ret :: state.vstack }
       | RefNull _ -> { state with vstack = ret :: state.vstack })
 
-  let control_instr_transfer
+  let control
       (_module_ : Wasm_module.t)
-      _summaries
       (cfg : 'a Cfg.t)
-      (i : ('a Instr.control, 'a) Instr.labelled)
-    : state -> [ `Simple of state | `Branch of state * state | `Multiple of state list ] =
-    Spec.wrap ~default:(`Simple bottom) (function state ->
-      let ret = Var.Var i.label in
+      (i : annot_expected Instr.labelled_control)
+    : State.t -> [ `Simple of State.t | `Branch of State.t * State.t | `Multiple of State.t list ] =
+    Spec.wrap ~default:(`Simple (bottom cfg)) (function state ->
       let state = compute_stack_size_at_entry cfg i.label state in
       let get_block_return_stack_size n =
         let stack_size_at_entry = match Cfg.find_enclosing_block cfg i.label with
@@ -159,11 +145,6 @@ module Spec_inference (* : Transfer.TRANSFER
           | None -> List.length (Cfg.return_types cfg) in
         stack_size_at_entry + out_arity in
       match i.instr with
-      | Call ((arity_in, arity_out), _, _) ->
-        `Simple (Spec.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) })
-      | CallIndirect (_, (arity_in, arity_out), _, _) ->
-        (* Like call, but reads the function index from the vstack *)
-        `Simple (Spec.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) })
       | Br n ->
         `Simple (Spec.NotBottom ({ state with vstack = take state.vstack (get_block_return_stack_size n) }))
       | BrIf n ->
@@ -181,15 +162,30 @@ module Spec_inference (* : Transfer.TRANSFER
       | Return -> `Simple (Spec.NotBottom ({ state with vstack = take state.vstack (List.length (Cfg.return_types cfg)) }))
       | Unreachable ->
         (* failwith (Printf.sprintf "unsupported: unreachable") (*  in function %ld cfg.idx *) *)
-        `Simple bottom
+        `Simple (bottom cfg)
       | Merge -> `Simple (Spec.NotBottom state)
       | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr)))
+
+  let call
+      (_module : Wasm_module.t)
+      (cfg : annot_expected Cfg.t)
+      (i : annot_expected Instr.labelled_call)
+      : State.t -> [ `Simple of State.t | `Multiple of State.t list ] =
+    Spec.wrap ~default:(`Simple (bottom cfg)) (function state ->
+      let state = compute_stack_size_at_entry cfg i.label state in
+      let ret = Var.Var i.label in
+      match i.instr with
+      | CallDirect ((arity_in, arity_out), _, _) ->
+        `Simple (Spec.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) })
+      | CallIndirect (_, (arity_in, arity_out), _, _) ->
+        (* Like call, but reads the function index from the vstack *)
+        `Simple (Spec.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) }))
 
   let merge
       (_module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t)
       (block : annot_expected Basic_block.t)
-      (states : state list) : state =
+      (states : State.t list) : State.t =
     let counter = ref 0 in
     let new_var () : Var.t =
       let res = Var.Merge (block.idx, !counter) in
@@ -209,17 +205,17 @@ module Spec_inference (* : Transfer.TRANSFER
       (Spec.lift rename_exit) (begin match states with
         | [] ->
           (* entry node *)
-          init_state cfg
+          init cfg
         | s :: [] ->
           (* single predecessor node?! *)
           s
         | _ ->
           (* multiple predecessors *)
-          let bot = bottom_state cfg in
-          begin match List.filter states ~f:(fun s -> not (equal_state s bot)) with
+          let bot = bottom cfg in
+          begin match List.filter states ~f:(fun s -> not (State.equal s bot)) with
             | [] ->
               (* No predecessors have been analyzed. Return bottom. In practice, this should only happen if one of the predecessors is the empty entry block. TODO: it should be cleaned so that this does not arise and we can throw an exception here *)
-              init_state cfg
+              init cfg
             | s :: [] -> (* only one non-bottom predecessor *) s
             | state :: states ->
               (* multiple predecessors to merge *)
@@ -272,7 +268,7 @@ module Spec_inference (* : Transfer.TRANSFER
     | _ ->
       (* not a control-flow merge, should only be one predecessor (or none if it is the entry point) *)
       begin match states with
-        | [] -> init_state cfg
+        | [] -> init cfg
         | s :: [] -> s
         | _ ->  failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
       end
@@ -281,8 +277,8 @@ module Spec_inference (* : Transfer.TRANSFER
       (module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t)
       (block : annot_expected Basic_block.t)
-      (states : (int * state) list)
-    : state =
+      (states : (int * State.t) list)
+    : State.t =
     (* Checks the validity of the merge and dispatches to `merge` *)
     begin match states with
       | _ :: _ :: _ -> begin match block.content with
@@ -295,17 +291,18 @@ module Spec_inference (* : Transfer.TRANSFER
 
 end
 
-module Intra = Intra.Make(Spec_inference)
+module Intra = Intra.MakeIntraOnly(Spec_inference)
 include Spec_inference
 
 (** Extract vars that have been redefined in a merge block *)
 let new_merge_variables (cfg : Spec.t Cfg.t) (merge_block : Spec.t Basic_block.t) : (Var.t * Var.t) list =
   (* The predecessors of merge_block *)
+  let cfg_no_annot = Cfg.clear_annotations cfg in
   let preds = Cfg.predecessors cfg merge_block.idx in
-  let state_after = Cfg.state_after_block cfg merge_block.idx (Spec_inference.init_state cfg) in
+  let state_after = Cfg.state_after_block cfg merge_block.idx (Spec_inference.init cfg_no_annot) in
   List.fold_left preds ~init:[] ~f:(fun acc pred_idx ->
-      let state_before = Cfg.state_after_block cfg pred_idx (Spec_inference.init_state cfg) in
-      if Spec.equal state_before Spec_inference.bottom then
+      let state_before = Cfg.state_after_block cfg pred_idx (Spec_inference.init cfg_no_annot) in
+      if Spec.equal state_before (Spec_inference.bottom cfg_no_annot) then
         (* Ignore bottom state *)
         acc
       else
@@ -349,15 +346,18 @@ let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
         | Store _ ->
           []
       end
-    | Instr.Control i ->
+    | Instr.Call i ->
       let top_n n = match i.annotation_after with
         | Bottom -> failwith "bottom annotation"
         | NotBottom s -> Spec_inference.take s.vstack n in
-        begin match i.instr with
+      begin match i.instr with
+        | CallDirect ((_, arity_out), _, _) -> top_n arity_out
+        | CallIndirect (_, (_, arity_out), _, _) -> top_n arity_out
+      end
+    | Instr.Control i ->
+      begin match i.instr with
         | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
         | If _ -> [] (* We could say that if defines its "resulting" value, but that will be handled by the merge node *)
-        | Call ((_, arity_out), _, _) -> top_n arity_out
-        | CallIndirect (_, (_, arity_out), _, _) -> top_n arity_out
         | Merge ->
           (* Merge instruction defines new variables *)
           let block = Cfg.find_enclosing_block_exn cfg (Instr.label instr) in
@@ -378,7 +378,8 @@ let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
 (** Return the list of variables used by an instruction.
     If var is provided, only the use related the computation of this specific var will be return (This is only relevant for mere blocks)
  *)
-let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Instr.t) : Var.t list = match instr with
+let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Instr.t) : Var.t list =
+  match instr with
   | Instr.Data i ->
     let top_n n = match i.annotation_before with
       | Bottom -> failwith "bottom annotation"
@@ -410,6 +411,14 @@ let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Ins
       | RefIsNull  -> top_n 1
       | RefNull _ | RefFunc _ -> []
     end
+  | Instr.Call i ->
+    let top_n n = match i.annotation_before with
+        | Bottom -> failwith "bottom annotation"
+        | NotBottom s -> Spec_inference.take s.vstack n in
+    begin match i.instr with
+      | CallDirect ((arity_in, _), _, _) -> top_n arity_in (* uses the n arguments from the stack *)
+      | CallIndirect (_, (arity_in, _), _, _) -> top_n (arity_in + 1) (* + 1 because we need to pop the index that will refer to the called function, on top of the arguments *)
+    end
   | Instr.Control i ->
     let top_n n = match i.annotation_before with
         | Bottom -> failwith "bottom annotation"
@@ -417,8 +426,6 @@ let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Ins
     begin match i.instr with
       | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
       | If _ -> top_n 1 (* relies on top value to decide the branch taken *)
-      | Call ((arity_in, _), _, _) -> top_n arity_in (* uses the n arguments from the stack *)
-      | CallIndirect (_, (arity_in, _), _, _) -> top_n (arity_in + 1) (* + 1 because we need to pop the index that will refer to the called function, on top of the arguments *)
       | BrIf _ | BrTable _ -> top_n 1
       | Merge ->
         (* Merge instruction uses the variables it redefines *)

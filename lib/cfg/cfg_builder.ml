@@ -5,7 +5,7 @@ let compute_block_arities (instrs : unit Instr.t list) : (int * int) Instr.Label
   let rec loop (instrs : unit Instr.t list) (acc : (int * int) Instr.Label.Map.t) =
     match instrs with
     | [] -> acc
-    | (Data _) :: rest -> loop rest acc
+    | (Data _) :: rest | (Call _) :: rest -> loop rest acc
     | (Control i) :: rest -> loop rest (match i.instr with
         | Block (_, arity, body) ->
           loop body (Instr.Label.Map.set acc ~key:i.label ~data:arity)
@@ -25,7 +25,8 @@ let compute_enclosing_blocks (instrs : unit Instr.t list) : Instr.Label.t Instr.
   let rec loop (instrs : unit Instr.t list) (current_block : Instr.Label.t option) (acc : Instr.Label.t Instr.Label.Map.t) =
     match instrs with
     | [] -> acc
-    | (Data i) :: rest -> loop rest current_block (add i.label current_block acc)
+    | (Data { label; _ }) :: rest
+    | (Call { label; _ }) :: rest -> loop rest current_block (add label current_block acc)
     | (Control i) :: rest ->
       let acc = add i.label current_block acc in
       loop rest current_block (match i.instr with
@@ -56,6 +57,8 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     Basic_block.{ idx = new_idx (); content = Data instrs; } in
   let mk_control_block (instr : (unit Instr.control, unit) Instr.labelled) : unit Basic_block.t =
     Basic_block.{ idx = new_idx () ; content = Control instr } in
+  let mk_call_block (instr : (Instr.call, unit) Instr.labelled) : unit Basic_block.t =
+    Basic_block.{ idx = new_idx () ; content = Call instr } in
   let mk_merge_block () =
     let idx = new_idx () in
     Basic_block.{ idx ; content = Control {
@@ -69,7 +72,6 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
   let mk_empty_block () : unit Basic_block.t =
     Basic_block.{ idx = new_idx () ; content = Data []; } in
   let loop_heads = ref IntSet.empty in
-  let entry_exit = ref [] in (* TODO: can be removed *)
   let rec helper (instrs : (Instr.data, unit) Instr.labelled list) (remaining : 'a Instr.t list) : (
     (* The blocks created *)
     'a Basic_block.t list *
@@ -91,6 +93,21 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     | Data instr :: rest ->
       (* Instruction instr is part of the block, but not the end of it so we continue *)
       helper (instr :: instrs) rest
+    | Call instr :: rest ->
+      (* Similar to br, but connects the edges differently. Moreover,
+             we don't include the call in this block because it has to be
+             treated differently. *)
+      let block = mk_data_block instrs in
+      let call_block = mk_call_block instr in
+      let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
+      ((* add the current block and the function block *)
+        block :: call_block :: blocks,
+        (* connect current block to function block, and function block to the rest *)
+        (block.idx, call_block.idx, None) :: (call_block.idx, entry', None) :: edges,
+        (* no break and no return*)
+        breaks,
+        returns,
+        block.idx, exit')
     | Control instr :: rest -> begin match instr.instr with
         | Merge -> failwith "cfg_builder: There should be no merge instructions before constructing the CFG"
         | BrIf level ->
@@ -121,7 +138,6 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
           let (blocks', edges', breaks', returns', else_entry, else_exit) = helper [] instrs2 in
           (* Construct the merge block *)
           let merge_block = mk_merge_block () in
-          entry_exit := (if_block.idx, merge_block.idx) :: !entry_exit;
           (* Construct the rest of the CFG *)
           let (blocks'', edges'', breaks'', returns'', entry, exit') = helper [] rest in
           (* Compute the new break levels (just like for Block and Loop)
@@ -166,21 +182,6 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
            (br_block.idx, level, None) :: (List.map table ~f:(fun lvl -> (br_block.idx, lvl, None))) @ breaks (* add all the breaks *),
            returns,
            block.idx, exit')
-        | Call _ | CallIndirect _ ->
-          (* Also similar to br, but connects the edges differently. Moreover,
-             we don't include the call in this block because it has to be
-             treated differently. *)
-          let block = mk_data_block instrs in
-          let call_block = mk_control_block instr in
-          let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
-          ((* add the current block and the function block *)
-            block :: call_block :: blocks,
-            (* connect current block to function block, and function block to the rest *)
-            (block.idx, call_block.idx, None) :: (call_block.idx, entry', None) :: edges,
-            (* no break and no return*)
-            breaks,
-            returns,
-            block.idx, exit')
         | ((Block (_bt, _arity, instrs')) as b)
         | ((Loop (_bt, _arity, instrs')) as b) ->
           (* Create a new block with all instructions collected, without the current instruction *)
@@ -198,7 +199,6 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
           let (blocks, edges, breaks, returns, entry', exit') = helper [] instrs' in
           (* Create a node for the exit of the block *)
           let block_exit = if is_loop then mk_empty_block () else mk_merge_block () in
-          entry_exit := (block_entry.idx, block_exit.idx) :: !entry_exit;
           (* Recurse after the block *)
           let (blocks', edges', breaks', returns', entry'', exit'') = helper [] rest in
           (* Compute the new break levels:

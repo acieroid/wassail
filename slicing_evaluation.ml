@@ -111,7 +111,7 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
               let cfg_raw = Cfg_builder.build wasm_mod func.idx in
               let cfg_time = Time_float.diff (Time_float.now ()) t0 in
               let t0 = Time_float.now () in
-              let cfg, () = Spec_inference.Intra.analyze wasm_mod cfg_raw Int32Map.empty in
+              let cfg = Spec_inference.Intra.analyze wasm_mod cfg_raw () in
               let spec_time = Time_float.diff (Time_float.now ()) t0 in
               let cfg_instructions = Cfg.all_instructions cfg in
               let preanalysis = Slicing.preanalysis cfg cfg_instructions in
@@ -206,7 +206,7 @@ let generate_slice (filename : string) (output_file : string) =
   let (function_idx, slicing_criteria) = match List.find_map wasm_mod.funcs ~f:(fun func ->
       let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
       match List.filter_map (Cfg.all_instructions_list cfg) ~f:(function
-          | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
+          | Instr.Call ({instr = CallDirect (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
             begin match (Spec.get_or_fail annotation_before).vstack with
               | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 address)) -> Some label
               | _ -> None
@@ -226,7 +226,7 @@ let generate_slice (filename : string) (output_file : string) =
                 let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
                 let (_, _, use_def) = Use_def.make cfg in
                 match List.filter_map (Cfg.all_instructions_list cfg) ~f:(function
-                          | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
+                          | Instr.Call ({instr = CallDirect (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
                              begin match (Spec.get_or_fail annotation_before).vstack with
                              | second_arg :: _ when List.mem slicing_criteria label ~equal:Instr.Label.equal ->
                                 Printf.printf "second arg is: %s\n" (Var.to_string second_arg);
@@ -326,7 +326,7 @@ let count_instructions_in_slice (filename : string) (output_file : string) =
           ~f:(fun ch -> output_func func.idx func (Out_channel.output_string ch));
        let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 wasm_mod func.idx) in
        List.find_map (Cfg.all_instructions_list cfg) ~f:(function
-           | Instr.Control ({instr = Call (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
+           | Instr.Call ({instr = CallDirect (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
              begin match (Spec.get_or_fail annotation_before).vstack with
                | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 str_pos)) -> Some (func.idx, label)
                | _ -> None

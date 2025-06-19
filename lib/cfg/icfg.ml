@@ -6,11 +6,21 @@ module ICFG (* : Cfg_base.CFG_LIKE *)= struct
   module Edge = Call_graph.Edge
   module EdgeSet = Call_graph.EdgeSet
 
+  module BlockIdx = struct
+    module T = struct
+      type t = Int32.t * Cfg.BlockIdx.t
+      [@@deriving sexp, compare, equal]
+      let to_string ((f, idx) : t) : string =
+        Printf.sprintf "%ld_%s" f (Cfg.BlockIdx.to_string idx)
+    end
+    include T
+    module Set = Set.Make(T)
+    module Map = Map.Make(T)
+  end
+
   (** An interprocedural CFG is simply represented as a set of CFGs. The only
       difference is in the way the successor of a call is extracted. *)
   type 'a t = {
-    (** The name of the program *)
-    name : string;
     (** The entry function *)
     entry : Int32.t;
     (** The CFGs, indexed by the function index. *)
@@ -30,10 +40,10 @@ module ICFG (* : Cfg_base.CFG_LIKE *)= struct
       | None -> EdgeSet.singleton edge
       | Some fs -> EdgeSet.add fs edge in
     let rec collect_calls (instr : 'a Instr.t) : unit = match instr with
-      | Control { instr = Call (_, _, callee); _ } ->
+      | Call { instr = CallDirect (_, _, callee); _ } ->
         let edge : Edge.t = { target = callee; direct = true } in
         calls := Int32Map.update !calls (Instr.label instr) ~f:(add_edge edge)
-      | Control { instr = CallIndirect (_, _, _, typ); _ } ->
+      | Call { instr = CallIndirect (_, _, _, typ); _ } ->
         calls := List.fold_left (find_targets wasm_mod typ)
             ~init:!calls
             ~f:(fun calls f' ->
@@ -57,10 +67,29 @@ module ICFG (* : Cfg_base.CFG_LIKE *)= struct
   let make (wasm_mod : Wasm_module.t) : 'a t =
     let cfgs = Cfg_builder.build_all wasm_mod in
     let entry = Option.value_exn ~message:"ICFG.make expects a program with an entry point" wasm_mod.start in
-    { name = "TODO"; entry; cfgs; calls = make_calls wasm_mod }
+    { entry; cfgs; calls = make_calls wasm_mod }
 
-  let name (cfg : 'a t) : string =
-    cfg.name
+  let find_block_exn (_icfg : 'a t) (_block_idx : BlockIdx.t) : 'a Basic_block.t =
+    failwith "TODO: find_block_exn"
+
+  let incoming_edges (_icfg : 'a t) (_block_idx : BlockIdx.t) : (BlockIdx.t * bool option) list =
+    failwith "TODO: incoming_edges"
+
+  let is_loop_head (_icfg : 'a t) (_block_idx : BlockIdx.t) : bool =
+    failwith "TODO: is_loop_head"
+
+  let successors (_icfg : 'a t) (_block_idx : BlockIdx.t) : BlockIdx.t list =
+    failwith "TODO: successors"
+
+  let predecessors (_icfg : 'a t) (_block_idx : BlockIdx.t) : BlockIdx.t list =
+    failwith "TODO: predecessors"
+
+  let entry_block (_icfg : 'a t) : BlockIdx.t =
+    failwith "TODO: entry_block"
+
+  let map_annotations (_icfg : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
+    ignore f;
+    failwith "TODO: map_annotations"
 
 end
 
@@ -82,7 +111,8 @@ module Test = struct
      local.get 0)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))"
+  (global (;0;) (mut i32) (i32.const 66560))
+  (start 0))"
       (Instr.Label.Map.of_alist_exn [
           (Instr.Label.{ section = Function 0l; id = 1; },
            (EdgeSet.of_list [{ target = 1l; direct = true }]))])

@@ -5,8 +5,8 @@ module Options = Taint_options
 module Domain = Taint_domain
 module Transfer = Taint_transfer.Make
 module Summary = Taint_summary
-module Intra = Intra.Make(Transfer)
-module Inter = Inter.Make(Intra)
+module Intra = Intra.MakeSummaryBased(Transfer)
+module Inter = Inter.Make(Transfer)(Intra)
 
 let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t option) Int32Map.t =
   Analysis_helpers.mk_intra
@@ -19,12 +19,13 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
        (* Options.use_relational := false; *)
        let annotated_cfg = (* Relational.Transfer.dummy_annotate  *) cfg in
        let summaries = Int32Map.map data ~f:fst in
-       let (result_cfg, taint_summary) = Intra.analyze wasm_mod annotated_cfg summaries in
+       let result_cfg = Intra.analyze wasm_mod annotated_cfg summaries in
+       let taint_summary = Transfer.extract_summary annotated_cfg result_cfg in
        (taint_summary, Some result_cfg))
 
 let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec.t Cfg.t) : Domain.t Cfg.t =
   let rel_cfg = (* Relational.Transfer.dummy_annotate *) spec_cfg in
-  fst (Intra.analyze wasm_mod rel_cfg summaries)
+  Intra.analyze wasm_mod rel_cfg summaries
 
 let check (expected : Summary.t) (actual : Summary.t) : bool =
   if Summary.subsumes actual expected then
@@ -57,7 +58,7 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Taint_
        let results = Inter.analyze wasm_mod ~cfgs:annotated_scc ~summaries:summaries' in
        Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
            let spec_cfg = Int32Map.find_exn scc idx in
-           (spec_cfg, taint_cfg, Option.value_exn summary)))
+           (spec_cfg, taint_cfg, summary)))
 
 (** Extracts the index of functions that are considered sinks, based on their names *)
 let find_sinks_from_names (module_ : Wasm_module.t) (names : StringSet.t) : Int32Set.t =

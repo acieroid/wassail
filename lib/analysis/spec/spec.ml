@@ -135,6 +135,12 @@ module Spec = struct
       | Some ret -> ret
       | None -> failwith "Spec.ret: no value on the vstack"
 
+
+  let join (_s1 : t) (s2 : t) : t =
+    s2 (* only keep the "most recent" state, this is safe for this analysis *)
+
+  let widen _ s2 = s2 (* No widening *)
+
 end
 
 include Spec

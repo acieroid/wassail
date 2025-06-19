@@ -217,6 +217,26 @@ let type_of_data
     | RefNull _ -> ([], [Any "any"])
     | RefFunc _ -> ([], [Any "any"])
 
+let type_of_call
+    (i : (Instr.call, 'a) Instr.labelled)
+    (_cfg : unit Cfg.t)
+    (instructions_map : Spec.t Instr.t Instr.Label.Map.t)
+  : instr_type_element list * instr_type_element list =
+  let vstack_before = match Cfg.find_instr instructions_map i.label with
+    | None -> None
+    | Some reachable_instruction ->
+      match Instr.annotation_before reachable_instruction with
+      | Bottom -> None (* unreachable because it hasn't been spec-analyzed! *)
+      | NotBottom s -> Some s.vstack in
+  match i.instr, vstack_before with
+  | (_, None) ->
+    Log.warn (Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
+    (* instruction is unreachable, treating it as having no effect *)
+    ([], [])
+  | (CallDirect (_, (in_type, out_type), _), _) -> (List.map in_type ~f:(fun t -> T t), List.map out_type ~f:(fun t -> T t))
+  | (CallIndirect (_, _, (in_type, out_type), _), _) ->
+      ((List.map in_type ~f:(fun t -> T t)) @ [T Type.I32], (List.map out_type ~f:(fun t -> T t)))
+
 let type_of_control
     (i : ('a Instr.control, 'a) Instr.labelled)
     (_cfg : unit Cfg.t)
@@ -242,9 +262,6 @@ let type_of_control
   | (_, Some vstack_before) ->
     (* instruction is reachable *)
     match i.instr with
-    | Call (_, (in_type, out_type), _) -> (List.map in_type ~f:(fun t -> T t), List.map out_type ~f:(fun t -> T t))
-    | CallIndirect (_, _, (in_type, out_type), _) ->
-      ((List.map in_type ~f:(fun t -> T t)) @ [T Type.I32], (List.map out_type ~f:(fun t -> T t)))
     | If (bt, _, _, _) ->
       (* the net effect of the head, which drops the first element of the stack *)
       ([T Type.I32], match bt with
@@ -297,6 +314,7 @@ let type_of (i : 'a Instr.t) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t
   match i with
   | Data d -> type_of_data d cfg instructions_map
   | Control c -> type_of_control c cfg instructions_map
+  | Call c -> type_of_call c cfg instructions_map
 
 let instrs_type (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : (instr_type_element list * instr_type_element list) =
   let input, output = List.fold_left instrs ~init:([], []) ~f:(fun (initial_stack, current_stack) instr ->
@@ -393,7 +411,7 @@ let slice_to_funcinst (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t In
 (** Return the indices of each call_indirect instructions *)
 let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : Instr.Label.t list =
   List.filter_map (Cfg.all_instructions_list cfg) ~f:(fun instr -> match instr with
-      | Control {label; instr = CallIndirect _; _} -> Some label
+      | Call {label; instr = CallIndirect _; _} -> Some label
       | _ -> None)
 
 module Test = struct

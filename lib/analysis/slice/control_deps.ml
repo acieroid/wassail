@@ -87,6 +87,7 @@ let control_dep (cfg : Spec.t Cfg.t) (is_immediate_post_dom : int -> Var.t -> bo
   let link (block : Spec.t Basic_block.t) (pred : Pred.t) : (Var.t * Pred.t) list =
     let defined = match block.content with
       | Control instr -> Spec_inference.instr_def cfg (Instr.Control instr)
+      | Call instr -> Spec_inference.instr_def cfg (Instr.Call instr)
       | Data instrs -> List.fold_left instrs ~init:[] ~f:(fun acc instr ->
           (Spec_inference.instr_def cfg (Instr.Data instr)) @ acc) in
     List.map defined ~f:(fun d -> (d, pred)) in

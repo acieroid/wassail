@@ -67,6 +67,7 @@ let taint_inter =
     Taint.analyze_inter
     (fun fid (_, _, summary) -> Printf.printf "function %ld: %s\n" fid (Taint.Summary.to_string summary))
 
+(*
 let taint_flow_from_exported_to_imported =
   Command.basic
     ~summary:"Detects unsafe flows from exported functions to imported functions"
@@ -105,7 +106,7 @@ let taintcall_cfg =
             let file_out = Printf.sprintf "%ld.dot" idx in
             Out_channel.with_file file_out
               ~f:(fun ch ->
-                  Out_channel.output_string ch (Cfg.to_dot cfg ~annot_str:Taintcall.Domain.to_string))))
+                  Out_channel.output_string ch (Cfg.to_dot cfg ~annot_str:Taintcall.Domain.to_string)))) *)
 
 let find_indirect_calls =
   Command.basic
