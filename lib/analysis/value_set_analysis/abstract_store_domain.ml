@@ -44,7 +44,7 @@ let subsumes (t1 : t) (t2 : t) : bool =
 
 (** Converts an abstract store to a human-readable string representation, including all bindings. *)
 let to_string (vs : t) : string =
-  Printf.sprintf "[%s]" (String.concat ~sep:";\n "
+  Printf.sprintf "[%s]" (String.concat ~sep:"; "
                           (List.map (Variable.Map.to_alist vs)
                             ~f:(fun (k, t) ->
                                 Printf.sprintf "%s ↦ %s"
@@ -124,8 +124,14 @@ let join (store1 : t) (store2 : t) : t =
       | `Both (x, y) -> Some (RIC.join x y)
       | `Left x | `Right x -> 
         match var with
-        | Variable.Mem _ -> None (* absent values are considered to be TOP *)
+        | Variable.Mem _ -> Some RIC.Top (* absent values are considered to be TOP *)
         | _ -> Some x)
+
+let join_loop_head (store1 : t) (store2 : t) : t =
+  match store1, store2 with
+  | b, s2 when equal b bottom -> s2
+  | s1, b when equal b bottom -> s1
+  | _ -> join store1 store2
 
 (** Computes the greatest lower bound (meet) of two value sets, retaining only shared information. *)
 let meet (store1 : t) (store2 : t) : t =
@@ -137,9 +143,9 @@ let meet (store1 : t) (store2 : t) : t =
         | Variable.Mem _ -> Some x (* vs meet TOP returns vs *)
         | _ -> Some (RIC.Bottom))
 
-(* widen store2 relative to store1 ***** TODO: check that it's not the opposite *)
+(** widen store1 relative to store2 *)
 let widen (store1 : t) (store2 : t) : t =
-  Variable.Map.merge store1 store2 ~f:(fun ~key:k v ->
+  Variable.Map.merge store2 store1 ~f:(fun ~key:k v ->
       match k, v with
       | _, `Both (x, y) -> Some (RIC.widen y ~relative_to:x)
       | Mem _, `Right y -> Some (RIC.widen y ~relative_to:RIC.Top)
@@ -204,7 +210,8 @@ let substitute (state : t) (substitutions : (Variable.t * Reduced_interval_congr
   
 let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : RIC.accessed) : t =
   let vs = get store ~var:var in
-  let store = Variable.Map.remove store var in
+  (* let store = Variable.Map.remove store var in *)
+  let store = set store ~var:var ~vs:RIC.Top in
   let accessed = accessed_addresses.fully :: accessed_addresses.partially in
   let untouched_addresses =
     match var with
@@ -228,13 +235,36 @@ let weak_update (store : t) ~(previous_state : t) ~(var : Variable.t) ~(vs : RIC
     | Variable.Var _ -> assert false
     | Variable.Mem address -> address
   in
+  print_endline ("address: " ^ RIC.to_string address);
+  let memory_variables = extract_memory_variables previous_state in
+  print_endline ("all mem vars: " ^ List.to_string ~f:Variable.to_string memory_variables);
   let affected_variables = 
-    List.map ~f:(fun v -> 
-        match v with 
-        | Variable.Var _ -> assert false
-        | Variable.Mem addr -> (Variable.Mem (RIC.meet addr address)), (get previous_state ~var:v))
-      (extract_memory_variables previous_state)
+    List.filter ~f:(fun (v, _) -> not (Variable.equal v (Mem RIC.Bottom)))
+      (List.map ~f:(fun v -> 
+          match v with 
+          | Variable.Var _ -> assert false
+          | Variable.Mem addr -> (Variable.Mem (RIC.meet addr address)), (get previous_state ~var:v))
+        memory_variables)
   in
+  let leftover_addresses = 
+    List.fold 
+      ~init:[address]
+      ~f:(fun acc var ->
+          match var with
+          | Var _-> assert false
+          | Mem addr ->
+            List.concat (List.map ~f:(fun x -> RIC.remove ~this:addr ~from:x) acc)
+        )
+      memory_variables
+  in
+  let leftover_variables =
+    Variable.Set.of_list (List.map ~f:(fun vs -> Variable.Mem vs) leftover_addresses) in
+  print_endline ("all leftover vars: " ^ List.to_string ~f:Variable.to_string (Variable.Set.to_list leftover_variables));
+  let store = 
+    if Variable.Set.is_empty leftover_variables then
+      store
+    else
+      update_all store leftover_variables RIC.Top in
   List.fold ~init:store
             ~f:(fun store (v, prev_vs) -> 
               set store ~var:v ~vs:(RIC.join prev_vs vs))

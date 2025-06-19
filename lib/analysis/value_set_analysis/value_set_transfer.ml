@@ -31,7 +31,15 @@ module Make (*: Transfer.TRANSFER *) = struct
 
   let join_state (s1 : state) (s2 : state) : state = Abstract_store_domain.join s1 s2
 
-  let widen_state (s1 : state) (s2 : state) : state = Abstract_store_domain.widen s1 s2
+  let join_loop_head (s1 : state) (s2 : state) : state = Abstract_store_domain.join_loop_head s1 s2
+
+  let widen_state (s1 : state) (s2 : state) : state = 
+    print_endline "WIDENING IN PROGRESS:";
+    print_endline ("\tstate1: " ^ Abstract_store_domain.to_string s1);
+    print_endline ("\tstate2: " ^ Abstract_store_domain.to_string s2);
+    let widened_state = Abstract_store_domain.widen s1 s2 in
+    print_endline ("\twidened state: " ^ Abstract_store_domain.to_string widened_state);
+    widened_state
 
   type summary = Value_set_summary.t  (* probably won't be needed *)
 
@@ -43,6 +51,10 @@ module Make (*: Transfer.TRANSFER *) = struct
     print_endline ("g1:" ^ Variable.to_string g1);
     print_endline ("g2:" ^ Variable.to_string g2)
 
+  let remove_temporary_variable (state : state) (var : Var.t) : state =
+    match var with
+    | Var _ | Merge _ -> Variable.Map.remove state (Variable.Var var)
+    | _ -> state
 
   let data_instr_transfer
       (_module_ : Wasm_module.t)
@@ -69,22 +81,25 @@ module Make (*: Transfer.TRANSFER *) = struct
       print_endline ("local.set " ^ Int32.to_string l);
       let variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
       let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in
-      begin match top_of_stack with
-      | Var.Const (Prim_value.I32 n) ->
-        print_endline ("\tadding constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
-        Abstract_store_domain.assign_constant_value state
-        ~const:n
-        ~to_:variable
-      | Var.Const (Prim_value.F32 _) ->
-        Abstract_store_domain.to_top_RIC state variable
-      | Var.Const _ ->
-        Abstract_store_domain.to_bottom_RIC state variable
-      | _ ->
-        print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to local variable " ^ Variable.to_string variable);
-        Abstract_store_domain.copy_value_set state 
-          ~from:(Variable.Var top_of_stack)
+      let new_state =
+        begin match top_of_stack with
+        | Var.Const (Prim_value.I32 n) ->
+          print_endline ("\tadding constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
+          Abstract_store_domain.assign_constant_value state
+          ~const:n
           ~to_:variable
-      end
+        | Var.Const (Prim_value.F32 _) ->
+          Abstract_store_domain.to_top_RIC state variable
+        | Var.Const _ ->
+          Abstract_store_domain.to_bottom_RIC state variable
+        | _ ->
+          print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to local variable " ^ Variable.to_string variable);
+          Abstract_store_domain.copy_value_set state 
+            ~from:(Variable.Var top_of_stack)
+            ~to_:variable
+        end
+      in
+      remove_temporary_variable new_state top_of_stack
     | LocalTee l ->
       let variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
       Abstract_store_domain.copy_value_set
@@ -115,22 +130,25 @@ module Make (*: Transfer.TRANSFER *) = struct
       print_endline ("global.set " ^ Int32.to_string g);
       let variable = Variable.Var (Var.Global (Int32.to_int_exn g)) in
       let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in
-      begin match top_of_stack with
-      | Var.Const (Prim_value.I32 n) ->
-        print_endline ("\tadding constant value " ^ Int32.to_string n ^ " to global variable " ^ Variable.to_string variable);
-        Abstract_store_domain.assign_constant_value state
-        ~const:n
-        ~to_:variable
-      | Var.Const (Prim_value.F32 _) ->
-        Abstract_store_domain.to_top_RIC state variable
-      | Var.Const _ ->
-        Abstract_store_domain.to_bottom_RIC state variable
-      | _ ->
-        print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to global variable " ^ Variable.to_string variable);
-        Abstract_store_domain.copy_value_set state 
-          ~from:(Variable.Var top_of_stack)
+      let new_state =
+        begin match top_of_stack with
+        | Var.Const (Prim_value.I32 n) ->
+          print_endline ("\tadding constant value " ^ Int32.to_string n ^ " to global variable " ^ Variable.to_string variable);
+          Abstract_store_domain.assign_constant_value state
+          ~const:n
           ~to_:variable
-      end
+        | Var.Const (Prim_value.F32 _) ->
+          Abstract_store_domain.to_top_RIC state variable
+        | Var.Const _ ->
+          Abstract_store_domain.to_bottom_RIC state variable
+        | _ ->
+          print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to global variable " ^ Variable.to_string variable);
+          Abstract_store_domain.copy_value_set state 
+            ~from:(Variable.Var top_of_stack)
+            ~to_:variable
+        end
+      in
+      remove_temporary_variable new_state top_of_stack
     | Const c -> 
       let variable = (Variable.Var (pop (Spec.get_or_fail i.annotation_after).vstack)) in
       begin match c with
@@ -140,19 +158,22 @@ module Make (*: Transfer.TRANSFER *) = struct
     | Binary binop -> 
       let x, y = pop2 (Spec.get_or_fail i.annotation_before).vstack in
       let result = pop (Spec.get_or_fail i.annotation_after).vstack in
-      begin match binop with
-      | { op = Add; typ = I32 } -> (* i32 addition *) 
-        print_endline ("i32.add " ^ Var.to_string x ^ " + " ^ Var.to_string y ^ " -> " ^ Var.to_string result);
-        Abstract_store_domain.i32_add state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result:(Variable.Var result)
-      | { op = Sub; typ = I32 } -> (* i32 subtraction *) 
-        print_endline ("i32.sub " ^ Var.to_string y ^ " - " ^ Var.to_string x ^ " -> " ^ Var.to_string result);
-        Abstract_store_domain.i32_sub state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result:(Variable.Var result)
-      | { typ = I32; _ } 
-      | { typ = F32; _ } -> (* other 32 bit operations result in a pointer that can point anywhere *)
-        Abstract_store_domain.to_top_RIC state (Variable.Var result)
-      | _ -> state (* i64 or f64 operations do not concern pointers *)
-        (* Abstract_store_domain.to_bottom_RIC state (Variable.Var result) why include them? *)
-      end
+      let new_state =
+        begin match binop with
+        | { op = Add; typ = I32 } -> (* i32 addition *) 
+          print_endline ("i32.add " ^ Var.to_string x ^ " + " ^ Var.to_string y ^ " -> " ^ Var.to_string result);
+          Abstract_store_domain.i32_add state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result:(Variable.Var result)
+        | { op = Sub; typ = I32 } -> (* i32 subtraction *) 
+          print_endline ("i32.sub " ^ Var.to_string y ^ " - " ^ Var.to_string x ^ " -> " ^ Var.to_string result);
+          Abstract_store_domain.i32_sub state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result:(Variable.Var result)
+        | { typ = I32; _ } 
+        | { typ = F32; _ } -> (* other 32 bit operations result in a pointer that can point anywhere *)
+          Abstract_store_domain.to_top_RIC state (Variable.Var result)
+        | _ -> state (* i64 or f64 operations do not concern pointers *)
+          (* Abstract_store_domain.to_bottom_RIC state (Variable.Var result) why include them? *)
+        end
+      in
+      remove_temporary_variable (remove_temporary_variable new_state x) y
     | Load load ->
       let address = pop (Spec.get_or_fail i.annotation_before).vstack in
       let result = pop (Spec.get_or_fail i.annotation_after).vstack in
@@ -202,7 +223,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         Abstract_store_domain.set state ~var:(Variable.Var result) ~vs:vs
       end
     | Store store ->
-      let address, value = pop2 (Spec.get_or_fail i.annotation_before).vstack in
+      let value, address = pop2 (Spec.get_or_fail i.annotation_before).vstack in
       let vs1 = 
         begin match address with
         | Const (Prim_value.I32 addr) -> RIC.ric (0, Int 0, Int 0, ("", Int32.to_int_exn addr))
@@ -212,32 +233,36 @@ module Make (*: Transfer.TRANSFER *) = struct
       let vs2 = 
         begin match value with
         | Const (Prim_value.I32 addr) -> RIC.ric (0, Int 0, Int 0, ("", Int32.to_int_exn addr))
-        | Var _ -> Abstract_store_domain.get state ~var:(Variable.Var value)
-        | _ -> assert false
+        | Const _ -> RIC.Bottom
+        | _ -> Abstract_store_domain.get state ~var:(Variable.Var value)
+        (* | _ -> assert false *)
         end
       in
-      begin match store with
-      | { typ = I32; offset = offset; _ } ->
-        print_endline ("i32.store offset=" ^ string_of_int offset);
-        print_endline ("\tstoring value-set " ^ RIC.to_string vs2 ^ " into memory variable " ^ Variable.to_string (Variable.Mem (RIC.add_offset vs1 offset)));
-        let accessed = RIC.accessed ~value_set:(RIC.add_offset vs1 offset) ~size:4 in
-        print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
-        print_endline ("\tpartially accessed memory: " ^ List.to_string ~f:RIC.to_string accessed.partially);
-        let new_state = Abstract_store_domain.update_accessed_vars state accessed in
-        if RIC.is_singleton (accessed.fully) then
-          (print_endline "\tperforming STRONG update!";
-          Abstract_store_domain.set new_state ~var:(Variable.Mem accessed.fully) ~vs:vs2) (* STRONG update *)
-        else
-          (print_endline "\tperforming weak update :(";
-          Abstract_store_domain.weak_update new_state ~previous_state:state ~var:(Variable.Mem accessed.fully) ~vs:vs2)
-      | { typ = F32; offset = offset; _ } ->
-        let accessed = RIC.accessed ~value_set:(RIC.add_offset vs1 offset) ~size:4 in
-        Abstract_store_domain.update_accessed_vars state accessed
-      | { typ = I64; offset = offset; _ }
-      | { typ = F64; offset = offset; _ } -> 
-        let accessed = RIC.accessed ~value_set:(RIC.add_offset vs1 offset) ~size:8 in
-        Abstract_store_domain.update_accessed_vars state accessed
-      end
+      let new_state =
+        begin match store with
+        | { typ = I32; offset = offset; _ } ->
+          print_endline ("i32.store offset=" ^ string_of_int offset);
+          print_endline ("\tstoring value-set " ^ RIC.to_string vs2 ^ " into memory variable " ^ Variable.to_string (Variable.Mem (RIC.add_offset vs1 offset)));
+          let accessed = RIC.accessed ~value_set:(RIC.add_offset vs1 offset) ~size:4 in
+          print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
+          print_endline ("\tpartially accessed memory: " ^ List.to_string ~f:RIC.to_string accessed.partially);
+          let new_state = Abstract_store_domain.update_accessed_vars state accessed in
+          if RIC.is_singleton (accessed.fully) then
+            (print_endline "\tperforming STRONG update!";
+            Abstract_store_domain.set new_state ~var:(Variable.Mem accessed.fully) ~vs:vs2) (* STRONG update *)
+          else
+            (print_endline "\tperforming weak update :(";
+            Abstract_store_domain.weak_update new_state ~previous_state:state ~var:(Variable.Mem accessed.fully) ~vs:vs2)
+        | { typ = F32; offset = offset; _ } ->
+          let accessed = RIC.accessed ~value_set:(RIC.add_offset vs1 offset) ~size:4 in
+          Abstract_store_domain.update_accessed_vars state accessed
+        | { typ = I64; offset = offset; _ }
+        | { typ = F64; offset = offset; _ } -> 
+          let accessed = RIC.accessed ~value_set:(RIC.add_offset vs1 offset) ~size:8 in
+          Abstract_store_domain.update_accessed_vars state accessed
+        end
+      in
+      remove_temporary_variable (remove_temporary_variable new_state value) address
     | Compare _ -> (* TODO: write this case *) state
     | Unary _ | Test _ | Convert _ -> (* TODO: write this case *) state
 
@@ -254,11 +279,12 @@ module Make (*: Transfer.TRANSFER *) = struct
     | Br _ -> `Simple state
     | BrIf _ | If _ -> `Branch (state, state) (* Not sure if that's right. What about if V1 < V2 ? *)
     | Return -> 
-      let top_of_stack = Variable.Var (pop (Spec.get_or_fail i.annotation_before).vstack) in
+      let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in
       print_endline "return";
-      let vs = Abstract_store_domain.get state ~var:top_of_stack in
+      let vs = Abstract_store_domain.get state ~var:(Variable.Var top_of_stack) in
       print_endline ("\treturned value-set: " ^ RIC.to_string vs);
-      `Simple (Abstract_store_domain.set state ~var:(Variable.Var Var.Return) ~vs:vs)
+      let new_state = Abstract_store_domain.set state ~var:(Variable.Var Var.Return) ~vs:vs in
+      `Simple (remove_temporary_variable new_state top_of_stack)
     | Unreachable -> `Simple  Abstract_store_domain.bottom
     | _ -> `Simple state
 
@@ -332,6 +358,12 @@ module Make (*: Transfer.TRANSFER *) = struct
       | Control { instr = Merge; _ } ->
         let states' = List.map ~f:(fun (_, s) -> s) states in
         (* Join all previous states: *)
+        let join_state =
+          if IntSet.mem cfg.loop_heads block.idx then
+            join_loop_head
+          else
+            join_state
+        in
         let new_state_without_merges = List.reduce_exn states' ~f:join_state in 
         let merged_annotation = (Cfg.state_before_block cfg block.idx (Spec_inference.init_state cfg)) in
         let merged_stack =
@@ -339,7 +371,7 @@ module Make (*: Transfer.TRANSFER *) = struct
           | Spec.Bottom -> []
           | NotBottom annot -> annot.vstack in
         (* Merge stack elements that need to be merged: *)
-        print_endline ("MERGE: Control block #" ^ string_of_int block.idx);
+        print_endline ("======================================================= MERGE: Control block #" ^ string_of_int block.idx);
         print_endline ("\tmerged stack: " ^ List.to_string ~f:Var.to_string merged_stack);
         let previous_value_sets = get_previous_stack_value_sets cfg block states in
         print_endline ("\tprevious stack value-sets (joined from all branches): " ^ List.to_string ~f:RIC.to_string previous_value_sets);
@@ -352,7 +384,15 @@ module Make (*: Transfer.TRANSFER *) = struct
             | _ -> state)
           merged_stack
           previous_value_sets
+      | Control _ ->
+        print_endline ("======================================================= CONTROL BLOCK #" ^ string_of_int block.idx);
+        print_endline ("Loop heads: " ^ IntSet.to_string cfg.loop_heads);
+        begin match states with
+        | (_, s) :: [] -> s
+        | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
+        end
       | _ -> 
+        print_endline ("======================================================= DATA BLOCK #" ^ string_of_int block.idx);
         begin match states with
         | (_, s) :: [] -> s
         | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)

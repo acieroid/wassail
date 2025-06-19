@@ -464,6 +464,9 @@ module RIC = struct
     let c = Congruence.meet c1 c2 in
     let i = Interval.meet i1 i2 in 
     of_congruence_and_interval c i
+
+  let meet_with_list (ric1 : t) (ric2 : t list) : t list =
+    List.map ~f:(meet ric1) ric2
   
   let disjoint (ric1 : t) (ric2 : t) : bool =
     equal Bottom (meet ric1 ric2)
