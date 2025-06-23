@@ -11,9 +11,9 @@ module type INTRA_ONLY = sig
   (** Analyze a function (represented by its CFG) from the module *)
   val analyze
     : Wasm_module.t
-    -> Transfer.annot_expected Cfg.t
+    -> Transfer.annot_expected Transfer.Cfg.t
     -> extra
-    -> Transfer.State.t Cfg.t
+    -> Transfer.State.t Transfer.Cfg.t
 
 end
 
@@ -23,9 +23,9 @@ module type INTRA_FOR_SUMMARY = sig
 
   val analyze
     : Wasm_module.t
-    -> Transfer.annot_expected Cfg.t
+    -> Transfer.annot_expected Transfer.Cfg.t
     -> extra
-    -> Transfer.State.t Cfg.t
+    -> Transfer.State.t Transfer.Cfg.t
 end
 
 module type CALL_ADAPTER = sig
@@ -223,6 +223,7 @@ module IntraOnlyCallAdapter (Transfer : Transfer.INTRA_ONLY_TRANSFER)
     Transfer.call module_ cfg instr state
 end
 
+(** TODO: this is an exact duplicate of Make, for typing purpose. It should be possible to avoid this *)
 module MakeSumm
     (Transfer : Transfer.SUMMARY_TRANSFER)
     (CallAdapter : CALL_ADAPTER with module Transfer = Transfer) = struct
@@ -416,6 +417,28 @@ module SummaryCallAdapter (Transfer : Transfer.SUMMARY_TRANSFER)
         ~init:state
         ~f:(fun acc idx -> Transfer.State.join (apply_summary idx arity state) acc))
 end
+
+(*
+module ClassicalInterCallAdapter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER)
+  : CALL_ADAPTER with module Transfer = Transfer and type extra = unit = struct
+  module Transfer = Transfer
+  (** As extra, we have the result of other intra analyses. Currently, only context-insensitive. *)
+  type extra = State.t Int32Map.t
+
+  let analyze_call
+    (module_ : Wasm_module.t)
+    (_cfg : Transfer.annot_expected Cfg.t)
+    (instr : Transfer.annot_expected Instr.labelled_call)
+    (state : Transfer.State.t)
+    (() : extra)
+    : [ `Simple of Transfer.State.t | `Multiple of Transfer.State.t list ] =
+    (** TODO:
+        for call, we need to create a new local state, bind locals to the x top values in the stack, then return that state.
+        We also need a "return" node, and in this one, adapt the result to restore the previous stack and push the return value.
+        The trick is: how do we know how to adapt it? We can find the enclosing function, but then what?
+        We probably need to match call/return when building the ICFG. With this information, we can recover the state after the previous call instruction, and restore it + put the arguments. This needs to be handled by the intra analysis. *)
+
+end *)
 
 module MakeIntraOnly (Transfer : Transfer.INTRA_ONLY_TRANSFER) = Make(Transfer)(IntraOnlyCallAdapter(Transfer))
 module MakeSummaryBased (Transfer : Transfer.SUMMARY_TRANSFER)
