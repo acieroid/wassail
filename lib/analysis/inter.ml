@@ -15,7 +15,7 @@ end
 (** This constructs a bottom-up inter-procedural summary-based analysis: starting
    from the leafs of the call graph, it computes summaries for each function,
    using these summaries in the callers. *)
-module Make (Transfer : Transfer.SUMMARY_TRANSFER)(Intra : Intra.INTRA_FOR_SUMMARY with module Transfer = Transfer) : SUMMARY_BASED_INTER
+module MakeSummaryBased (Transfer : Transfer.SUMMARY_TRANSFER)(Intra : Intra.INTRA_FOR_SUMMARY with module Transfer = Transfer) : SUMMARY_BASED_INTER
   with module Cfg = Cfg.Cfg
    and module Transfer = Transfer
 = struct

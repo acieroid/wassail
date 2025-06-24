@@ -6,7 +6,7 @@ module Domain = Taint_domain
 module Transfer = Taint_transfer.Make
 module Summary = Taint_summary
 module Intra = Intra.MakeSummaryBased(Transfer)
-module Inter = Inter.Make(Transfer)(Intra)
+module Inter = Inter.MakeSummaryBased(Transfer)(Intra)
 
 let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t option) Int32Map.t =
   Analysis_helpers.mk_intra
