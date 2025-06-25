@@ -15,7 +15,6 @@
    Spec Spec_inference Spec_analysis
    Var_prop
    Taint Taint_options Taint_domain Taint_transfer Taint_summary
-   Taintcall_domain Taintcall_transfer Taintcall
    Use_def Dominance Control_deps Memory_deps Slicing
    Instruction_counter Sizes)
  (libraries core_kernel wasm sexplib)
