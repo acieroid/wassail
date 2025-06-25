@@ -100,4 +100,11 @@ module type CLASSICAL_INTER_TRANSFER = sig
     (* the resulting state after applying the transfer function *)
     -> [ `Simple of State.t (* This is the state for the only successor *)
        | `Multiple of State.t list ] (* In other branching cases (br_table, call_indirect), there can be an unbounded number of successors *)
+
+  val return
+    : Wasm_module.t
+    -> annot_expected Cfg.t
+    -> annot_expected Instr.labelled_call
+    -> State.t
+    -> State.t
 end
