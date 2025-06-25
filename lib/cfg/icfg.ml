@@ -219,41 +219,50 @@ let to_dot
       end
     | _ -> failwith "not a call?" in
 
-  (* All nodes = all nodes from the CFGs *)
-  (* TODO: use clusters: https://graphviz.org/Gallery/directed/cluster.html *)
   (* Each CFG is put into a cluster *)
   let clusters = List.map (Int32Map.to_alist icfg.cfgs) ~f:(fun (fidx, cfg) ->
-      let prefix = Int32.to_string fidx in
+      let prefix = Printf.sprintf "%ld_" fidx in
       (* The nodes are the same than the CFG ones, but we introduce extra nodes for returns *)
       let nodes = String.concat ~sep:"\n" (List.concat_map (IntMap.to_alist cfg.basic_blocks)
                                              ~f:(fun (_, b) ->
-                                                 (Basic_block.to_dot ~prefix ~annot_str b) ::
+                                                 let color =
+                                                   if b.idx = cfg.entry_block then
+                                                     "green"
+                                                   else if b.idx = cfg.exit_block then
+                                                     "red"
+                                                   else
+                                                     "black" in
+                                                 (Basic_block.to_dot ~prefix ~color ~annot_str b) ::
+                                                 (* If this is a call node, we add an extra return edge *)
                                                  (if Basic_block.is_call b then
-                                                   [Printf.sprintf "block%ld%dreturn [shape=Mrecord, label=\"{Return %ld%d}\"];" fidx b.idx fidx b.idx]
+                                                   [Printf.sprintf "block%ld_%dreturn [shape=Mrecord, label=\"{Return %ld_%d}\"];" fidx b.idx fidx b.idx]
                                                  else
                                                    []))) in
-      (* The edges of the CFGs, with the edges from call dashed (TODO) *)
+      (* The edges of the CFGs, with the edges from call dashed *)
       let edges = String.concat ~sep:"\n" (List.concat_map (IntMap.to_alist cfg.edges) ~f:(fun (src, dsts) ->
           if Basic_block.is_call (IntMap.find_exn cfg.basic_blocks src) then
             (* The call node will be connected to the entry node in the called
                function, and the exit node of the called function will be
                connected to the return node. We just have to connect the return
                node to the next block *)
-            List.map (Edge.Set.to_list dsts) ~f:(fun (dst, _) -> Printf.sprintf "block%ld%dreturn -> block%ld%d;\n" fidx src fidx dst)
+            List.concat_map (Edge.Set.to_list dsts) ~f:(fun (dst, _) ->
+                [Printf.sprintf "block%ld_%dreturn -> block%ld_%d;\n" fidx src fidx dst;
+                 Printf.sprintf "block%ld_%d -> block%ld_%dreturn [style=dashed];\n" fidx src fidx src])
           else
-            List.map (Edge.Set.to_list dsts) ~f:(fun (dst, br) -> Printf.sprintf "block%ld%d -> block%ld%d [label=\"%s\"];\n" fidx src fidx dst (match br with
+            (* This is a regular edge *)
+            List.map (Edge.Set.to_list dsts) ~f:(fun (dst, br) -> Printf.sprintf "block%ld_%d -> block%ld_%d [label=\"%s\"];\n" fidx src fidx dst (match br with
                 | Some true -> "t"
                 | Some false -> "f"
                 | None -> "")))) in
-      Printf.sprintf "%s\n%s\n" nodes edges) in
+      Printf.sprintf "subgraph cluster_%ld {label=\"function %ld\";\ncolor=blue;\n%s\n%s\n}\n" fidx fidx nodes edges) in
   (* The edges between calls and returns *)
   let inter_edges = String.concat ~sep:"\n" (List.concat_map (Int32Map.to_alist icfg.cfgs) ~f:(fun (fidx, cfg) ->
       List.concat_map (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, b) ->
           if Basic_block.is_call b then
             List.concat_map (find_entry_exit b) ~f:(fun (target_fidx, entry_block, exit_block) ->
             [
-              Printf.sprintf "block%ld%d -> block%ld%d" fidx b.idx target_fidx entry_block;
-              Printf.sprintf "block%ld%d -> block%ld%dreturn" target_fidx exit_block fidx b.idx;
+              Printf.sprintf "block%ld_%d -> block%ld_%d" fidx b.idx target_fidx entry_block;
+              Printf.sprintf "block%ld_%d -> block%ld_%dreturn" target_fidx exit_block fidx b.idx;
             ])
           else
             []))) in
@@ -263,7 +272,9 @@ module Test = struct
   let expect (module_str : string) (calls : Edge.Set.t Instr.Label.Map.t) : bool =
     let module_ = Wasm_module.of_string module_str in
     let icfg = make module_ in
-    Printf.printf "------\n%s------\n" (to_dot icfg);
+    (* Printf.printf "------\n%s------\n" (to_dot icfg); *)
+    (* Printf.printf "%s\n" (String.concat ~sep:"," (List.map ~f:Instr.Label.to_string (Instr.Label.Map.keys calls)));
+       Printf.printf "%s\n" (String.concat ~sep:"," (List.map ~f:Instr.Label.to_string (Instr.Label.Map.keys icfg.calls))); *)
     Instr.Label.Map.equal Edge.Set.equal icfg.calls calls
 
   let%test "ICFG for module with two functions and one direct call" =
@@ -282,5 +293,80 @@ module Test = struct
           (Instr.Label.{ section = Function 0l; id = 1; },
            (Edge.Set.of_list [{ target = 1l; direct = true }]))])
 
+  let%test "ICFG for word count" =
+    expect "(module
+  (type (;0;) (func))
+  (type (;1;) (func (result i32)))
+  (start 1)
+  (func (;0;) (type 1) ;; char getchar()
+    i32.const 0)
+  (func (;1;) (type 0) ;; void main()
+    (local i32 i32 i32 i32 i32)
+    ;; Local 0: c
+    ;; Local 1: nl
+    ;; Local 2: nw
+    ;; Local 3: nc
+    ;; Local 4: inword
+    ;; EOF = -1
+    ;; '\\n' = 10
+    ;; ' ' = 32
+    ;; '\\t' = 9
+    call 0 ;; getchar();
+    local.tee 0 ;; c = result of getchar();
+    i32.const 0 ;; EOF
+    i32.ne ;; c != EOF
+    if ;; label = @1
+      loop ;; label = @2
+        local.get 3
+        i32.const 1
+        i32.add
+        local.set 3 ;; nc = nc + 1
+        local.get 0
+        i32.const 10
+        i32.eq ;; c = '\\n'
+        if
+          local.get 1
+          i32.const 1
+          i32.add
+          local.set 1 ;; nl = nl + 1
+        end
+        local.get 0
+        i32.const 32
+        i32.eq ;; c == ' '
+        ;; In the original program, the condition is c == ' ' || c == '\\n' || c = '\\t'
+        if
+          i32.const 0
+          local.set 4 ;; inword = NO
+        else
+          local.get 4
+          if ;; inword == NO
+            i32.const 1
+            local.set 4 ;; inword = YES
+            local.get 2
+            i32.const 1
+            i32.add
+            local.set 2 ;; nw = nw + 1
+          end
+        end
+        call 0
+        local.tee 0
+        i32.const 0 ;; EOF
+        i32.ne ;; c != EOF
+        br_if 0
+      end
+    end
+    local.get 0 ;; c
+    drop
+    local.get 1 ;; nl
+    drop
+    local.get 2 ;; nw
+    drop
+    local.get 3 ;; nc
+    drop
+    local.get 4 ;; inword
+    drop))"
+      (Instr.Label.Map.of_alist_exn [
+          (Instr.Label.{ section = Function 1l; id = 0; }, Edge.Set.of_list [{ target = 0l; direct = true }]);
+          (Instr.Label.{ section = Function 1l; id = 32; }, Edge.Set.of_list [{ target = 0l; direct = true }])])
 
 end

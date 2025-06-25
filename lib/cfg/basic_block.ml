@@ -30,7 +30,7 @@ let to_string ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : s
                 Printf.sprintf "%s" (Instr.data_to_string instr.instr)))))
 
 (** Convert a basic block to its dot representation *)
-let to_dot ?prefix:(prefix : string = "") ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : string =
+let to_dot ?prefix:(prefix : string = "") ?color:(color : string = "") ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : string =
   (* TODO: also add block annotations *)
   match b.content with
   | Data instrs ->
@@ -41,8 +41,10 @@ let to_dot ?prefix:(prefix : string = "") ?annot_str:(annot_str : 'a -> string =
           | s -> Printf.sprintf "{%s}|" s
         end
       | None -> "" in
-    Printf.sprintf "block%s%d [shape=record, label=\"{Data block %s%d|%s%s}\"];"
-      prefix b.idx prefix b.idx
+    Printf.sprintf "block%s%d [shape=record, color=%s, label=\"{Data block %s%d|%s%s}\"];"
+      prefix b.idx
+      color
+      prefix b.idx
       first_annot
       (String.concat ~sep:"|"
          (List.map instrs
@@ -56,8 +58,10 @@ let to_dot ?prefix:(prefix : string = "") ?annot_str:(annot_str : 'a -> string =
                   (Instr.data_to_string instr.instr)
                   annot_after)))
   | Call instr ->
-    Printf.sprintf "block%s%d [shape=Mrecord, label=\"{Call block %s%d|%s<instr%s>%s:%s%s}\"];"
-      prefix b.idx prefix b.idx
+    Printf.sprintf "block%s%d [shape=Mrecord, color=%s, label=\"{Call block %s%d|%s<instr%s>%s:%s%s}\"];"
+      prefix b.idx
+      color
+      prefix b.idx
       (match annot_str instr.annotation_before with
        | "" -> ""
        | s -> Printf.sprintf "{%s}|" s)
@@ -69,8 +73,10 @@ let to_dot ?prefix:(prefix : string = "") ?annot_str:(annot_str : 'a -> string =
        | s -> Printf.sprintf "|{%s}" s)
   | Return _ -> "" (* not represented *)
   | Control instr ->
-    Printf.sprintf "block%s%d [shape=Mrecord, label=\"{Control block %s%d|%s<instr%s>%s:%s%s}\"];"
-      prefix b.idx prefix b.idx
+    Printf.sprintf "block%s%d [shape=Mrecord, color=%s, label=\"{Control block %s%d|%s<instr%s>%s:%s%s}\"];"
+      prefix b.idx
+      color
+      prefix b.idx
       (match annot_str instr.annotation_before with
        | "" -> ""
        | s -> Printf.sprintf "{%s}|" s)
