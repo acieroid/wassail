@@ -80,7 +80,7 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
             let spec = Cfg.state_after_block cfg block.idx init_spec in
             List.fold_left (Cfg.predecessors cfg block.idx)
               ~init:eqs
-              ~f:(fun eqs pred ->
+              ~f:(fun eqs (pred, _) ->
                   let pred_spec = Spec.get_or_fail (Cfg.state_after_block cfg pred init_spec) in
                   let spec = Spec.get_or_fail spec in
                   assert (List.length pred_spec.vstack = List.length spec.vstack);

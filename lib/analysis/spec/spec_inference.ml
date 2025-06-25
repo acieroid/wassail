@@ -300,7 +300,7 @@ let new_merge_variables (cfg : Spec.t Cfg.t) (merge_block : Spec.t Basic_block.t
   let cfg_no_annot = Cfg.clear_annotations cfg in
   let preds = Cfg.predecessors cfg merge_block.idx in
   let state_after = Cfg.state_after_block cfg merge_block.idx (Spec_inference.init cfg_no_annot) in
-  List.fold_left preds ~init:[] ~f:(fun acc pred_idx ->
+  List.fold_left preds ~init:[] ~f:(fun acc (pred_idx, _) ->
       let state_before = Cfg.state_after_block cfg pred_idx (Spec_inference.init cfg_no_annot) in
       if Spec.equal state_before (Spec_inference.bottom cfg_no_annot) then
         (* Ignore bottom state *)

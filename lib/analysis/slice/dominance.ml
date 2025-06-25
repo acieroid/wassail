@@ -140,7 +140,7 @@ let graph_of_cfg (cfg : 'a Cfg.t) : int Graph.t =
     List.map edges ~f:fst
   in
   let preds (node : int) : int list =
-    let back_edges = Cfg.incoming_edges cfg node in
+    let back_edges = Cfg.predecessors cfg node in
     List.map back_edges ~f:fst in
   { entry; exit; nodes; succs; preds; }
 

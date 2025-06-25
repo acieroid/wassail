@@ -5,7 +5,7 @@ open Helpers
 module Edge = struct
   module T = struct
     type t = {
-      target: int32; (* its target *)
+      target: Int32.t; (* its target *)
       direct: bool; (* whether the call is direct or indirect *)
     }
     [@@deriving sexp, compare, equal]

@@ -56,13 +56,11 @@ module type CFG_LIKE = sig
 
   val find_block_exn : 'a t -> BlockIdx.t -> 'a Basic_block.t
 
-  val incoming_edges : 'a t -> BlockIdx.t -> (BlockIdx.t * bool option) list
-
   val is_loop_head : 'a t -> BlockIdx.t -> bool
 
-  val successors : 'a t -> BlockIdx.t -> BlockIdx.t list
+  val predecessors : 'a t -> BlockIdx.t -> (BlockIdx.t * bool option) list
 
-  val predecessors : 'a t -> BlockIdx.t -> BlockIdx.t list
+  val successors : 'a t -> BlockIdx.t -> BlockIdx.t list
 
   val entry_block : 'a t -> BlockIdx.t
 

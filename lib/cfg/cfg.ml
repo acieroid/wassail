@@ -52,8 +52,10 @@ module Cfg = struct
         the number of values expected on the stack before the block, and the
         number of values remaining on the stack after the execution of block *)
     block_arities: (int * int) Instr.Label.Map.t;
-    (** Maps labels to the block that contains the corresponding instruction *)
+    (** Maps labels to the label of the block that contains the corresponding instruction *)
     label_to_enclosing_block: Instr.Label.t Instr.Label.Map.t;
+    (** Maps labels to the id of the block that contains them *)
+    label_to_enclosing_block_id: int Instr.Label.Map.t;
   }
   [@@deriving compare, equal]
 
@@ -180,23 +182,20 @@ module Cfg = struct
   let successors (cfg : 'a t) (idx : int) : int list =
     List.map (outgoing_edges cfg idx) ~f:fst
 
-  let incoming_edges (cfg : 'a t) (idx : int) : Edge.t list =
+  let predecessors (cfg : 'a t) (idx : int) : Edge.t list =
     Edges.from cfg.back_edges idx
-
-  let predecessors (cfg : 'a t) (idx : int) : int list =
-    List.map (incoming_edges cfg idx) ~f:fst
 
   let rec non_empty_predecessors (cfg :'a t) (idx : int) : int list =
     let preds = predecessors cfg idx in
-    let non_empty = List.filter preds ~f:(fun pred ->
+    let non_empty = List.filter preds ~f:(fun (pred, _) ->
         let block = find_block_exn cfg pred in
         match block.content with
         | Data [] -> false
         | _ -> true) in
     if List.is_empty non_empty then
-      List.concat_map preds ~f:(non_empty_predecessors cfg)
+      List.concat_map preds ~f:(fun (pred, _) -> non_empty_predecessors cfg pred)
     else
-      non_empty
+      List.map ~f:fst non_empty
 
   let callees (cfg : 'a t) : Int32Set.t =
     (* Loop through all the blocks of the cfg, collecting the targets of call instructions *)
@@ -282,7 +281,7 @@ module Cfg = struct
               (* Can only be the entry block? *)
               assert (block_idx = cfg.entry_block);
               entry_state
-            | pred :: [] -> state_before_block cfg pred entry_state
+            | (pred, _) :: [] -> state_before_block cfg pred entry_state
             | _ -> failwith "state_before_block: multiple predecessors for an empty block"
           end
         | pred :: [] ->
@@ -302,7 +301,7 @@ module Cfg = struct
               if block_idx <> cfg.entry_block then
                 failwith "state_after_block: state is empty and has no predecessor";
               entry_state
-            | pred :: [] ->
+            | (pred, _) :: [] ->
               state_after_block cfg pred entry_state
             | _ -> failwith "state_after_block: multiple predecessors of an empty block"
           end

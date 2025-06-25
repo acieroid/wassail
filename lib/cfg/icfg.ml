@@ -1,16 +1,39 @@
 open Core
 open Helpers
 
+
 module ICFG (* : Cfg_base.CFG_LIKE *)= struct
 
   module Edge = Call_graph.Edge
+  (** A reverse call-graph edge. *)
+  module ReverseEdge = struct
+    module T = struct
+      type t = {
+        source_block : Cfg.BlockIdx.t;
+        source_fidx : Int32.t;
+        direct: bool;
+      }
+      [@@deriving sexp, compare, equal]
+    end
+    include T
+
+    module Set = struct
+      include Set
+      include Set.Make(T)
+    end
+  end
 
   module BlockIdx = struct
     module T = struct
-      type t = Int32.t * Cfg.BlockIdx.t
+      type t = {
+        fidx: Int32.t;
+        block_idx: Cfg.BlockIdx.t;
+        return: bool;
+      }
       [@@deriving sexp, compare, equal]
-      let to_string ((f, idx) : t) : string =
-        Printf.sprintf "%ld_%s" f (Cfg.BlockIdx.to_string idx)
+      let to_string (block_idx : t) : string =
+        Printf.sprintf "%ld_%s%s" block_idx.fidx (Cfg.BlockIdx.to_string block_idx.block_idx)
+          (if block_idx.return then "return" else "")
     end
     include T
     module Set = Set.Make(T)
@@ -24,14 +47,12 @@ module ICFG (* : Cfg_base.CFG_LIKE *)= struct
     entry : Int32.t;
     (** The CFGs, indexed by the function index. *)
     cfgs: 'a Cfg.t Int32Map.t;
-    (** The call graph, represented as a map from instruction label to function index *)
-    calls : Edge.Set.t Instr.Label.Map.t; (* TODO: from basic block *)
+    (** The call graph, represented as a map from instruction label to function index (from callers to callees) *)
+    calls : Edge.Set.t Instr.Label.Map.t;
+    (** And the reverse call graph, from callees to callers *)
+    reverse_calls : ReverseEdge.Set.t Int32Map.t;
   }
   [@@deriving equal]
-
-  (* TODO: a successor is the usual successor, except for:
-     - call nodes: it is the entry of the called function
-     - exit block of a function: it is a ficticious "return" node, with the same id as the call node? *)
 
   (* Inspired by Call_graph's constructor. Some differences:
      - The nodes are either call instructions, or function entries
@@ -70,29 +91,113 @@ module ICFG (* : Cfg_base.CFG_LIKE *)= struct
   let make (wasm_mod : Wasm_module.t) : 'a t =
     let cfgs = Cfg_builder.build_all wasm_mod in
     let entry = Option.value_exn ~message:"ICFG.make expects a program with an entry point" wasm_mod.start in
-    { entry; cfgs; calls = make_calls wasm_mod }
+    let calls = make_calls wasm_mod in
+    let reverse_calls = Map.to_alist calls
+                        |> List.concat_map ~f:(fun (source, edges) ->
+                            let source_fidx = match source.section with
+                              | Function n | MergeInFunction n -> n
+                              | _ -> failwith "invalid instruction source" in
+                            let cfg = Map.find_exn cfgs source_fidx in
+                            let source_block = Map.find_exn cfg.label_to_enclosing_block_id source in
+                            Edge.Set.to_list edges
+                            |> List.map ~f:(fun edge -> (edge.target, ReverseEdge.{
+                                source_fidx;
+                                source_block;
+                                direct = edge.direct
+                              })))
+                        |> Int32Map.of_alist_multi
+                        |> Int32Map.map ~f:ReverseEdge.Set.of_list in
+    { entry; cfgs; calls; reverse_calls }
 
-  let find_block_exn (_icfg : 'a t) (_block_idx : BlockIdx.t) : 'a Basic_block.t =
-    failwith "TODO: find_block_exn"
+  let find_block_exn (icfg : 'a t) (block_idx : BlockIdx.t) : 'a Basic_block.t =
+    let cfg = Int32Map.find_exn icfg.cfgs block_idx.fidx in
+    let block = Cfg.find_block_exn cfg block_idx.block_idx in
+    if block_idx.return then
+      match block.content with
+      | Call instr -> { block with content = Return instr }
+      | _ -> failwith "Unexpected: got a return block for a non-call"
+    else
+      block
 
-  let incoming_edges (_icfg : 'a t) (_block_idx : BlockIdx.t) : (BlockIdx.t * bool option) list =
-    failwith "TODO: incoming_edges"
+  let is_loop_head (icfg : 'a t) (block_idx : BlockIdx.t) : bool =
+    let cfg = Int32Map.find_exn icfg.cfgs block_idx.fidx in
+    Cfg.is_loop_head cfg block_idx.block_idx
 
-  let is_loop_head (_icfg : 'a t) (_block_idx : BlockIdx.t) : bool =
-    failwith "TODO: is_loop_head"
+  let predecessors (icfg : 'a t) (block_idx : BlockIdx.t) : (BlockIdx.t * bool option) list =
+    let make_block_idx (fidx : Int32.t) (internal_block_idx : int) : BlockIdx.t =
+      { fidx;
+        block_idx = internal_block_idx;
+        return =
+          (* If the predecessor was a call node, then we mark it as the return *)
+          Basic_block.is_call (Cfg.find_block_exn (Int32Map.find_exn icfg.cfgs fidx) internal_block_idx)
+      } in
+    (* If it is a return node, its predecessors are the exit node of the callee *)
+    let cfg = Int32Map.find_exn icfg.cfgs block_idx.fidx in
+    if block_idx.return then
+      match Cfg.find_block_exn cfg block_idx.block_idx with
+      | { content = Return call_instr; _ } ->
+        let callees = Map.find_exn icfg.calls call_instr.label in
+        callees |> Set.to_list
+        |> List.map ~f:(fun { target = callee; _ } ->
+            let callee_cfg = Map.find_exn icfg.cfgs callee in
+            make_block_idx callee_cfg.idx callee_cfg.exit_block, None)
+      | _ -> failwith "not a return"
+    else
+      (* If it is an entry node, its predecessors are the calls that map to it *)
+      if block_idx.block_idx = cfg.entry_block then
+        let callers = Map.find_exn icfg.reverse_calls block_idx.fidx in
+        callers
+        |> Set.to_list
+        |> List.map ~f:(fun { source_fidx = caller; source_block = caller_block; _ } ->
+            make_block_idx caller caller_block, None
+          )
+      else
+        (* Otherwise, it is the same as for a regular CFG *)
+        Cfg.predecessors cfg block_idx.block_idx
+        |> List.map ~f:(fun (idx, opt) -> make_block_idx block_idx.fidx idx, opt)
 
-  let successors (_icfg : 'a t) (_block_idx : BlockIdx.t) : BlockIdx.t list =
-    failwith "TODO: successors"
+  let successors (icfg : 'a t) (block_idx : BlockIdx.t) : BlockIdx.t list =
+    let make_block_idx (fidx : Int32.t) (internal_block_idx : int) (return : bool) : BlockIdx.t =
+      { fidx;
+        block_idx = internal_block_idx;
+        return;
+        (* return = Basic_block.is_call (Cfg.find_block_exn (Int32Map.find_exn icfg.cfgs fidx) internal_block_idx) *)
+      } in
+    let cfg = Map.find_exn icfg.cfgs block_idx.fidx in
+    let bb = Map.find_exn cfg.basic_blocks block_idx.block_idx in
+    (* If it is a call node, its successor is the entry node of the callee *)
+    if Basic_block.is_call bb then
+      match bb.content with
+      | Call { label; _ } ->
+        let callees = Map.find_exn icfg.calls label in
+        callees
+        |> Set.to_list
+        |> List.map ~f:(fun { target = callee; _ } ->
+            let callee_cfg = Map.find_exn icfg.cfgs callee in
+            make_block_idx callee_cfg.idx callee_cfg.entry_block false)
+      | _ -> failwith "Unexpected, expected call"
+    else
+      (* If it is an exit node, its successor is the return node of the caller's call instr *)
+      if block_idx.block_idx = cfg.exit_block then
+        let callers = Map.find_exn icfg.reverse_calls cfg.idx in
+        callers
+        |> Set.to_list
+      |> List.map ~f:(fun { source_block; source_fidx; _ } ->
+            make_block_idx source_fidx source_block false)
+      else
+        (* Otherwise, it is the same as for a regular CFG *)
+        Cfg.successors cfg block_idx.block_idx
+        |> List.map ~f:(fun idx -> make_block_idx block_idx.fidx idx false)
 
-  let predecessors (_icfg : 'a t) (_block_idx : BlockIdx.t) : BlockIdx.t list =
-    failwith "TODO: predecessors"
+  let entry_block (icfg : 'a t) : BlockIdx.t =
+    let cfg = Int32Map.find_exn icfg.cfgs icfg.entry in
+    { fidx = icfg.entry;
+      block_idx = cfg.entry_block;
+      return = false; }
 
-  let entry_block (_icfg : 'a t) : BlockIdx.t =
-    failwith "TODO: entry_block"
-
-  let map_annotations (_icfg : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
-    ignore f;
-    failwith "TODO: map_annotations"
+  let map_annotations (icfg : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
+    { icfg with
+      cfgs = Int32Map.map icfg.cfgs ~f:(Cfg.map_annotations ~f) }
 
 end
 

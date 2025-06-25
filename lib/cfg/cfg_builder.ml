@@ -40,6 +40,15 @@ let compute_enclosing_blocks (instrs : unit Instr.t list) : Instr.Label.t Instr.
   in
   loop instrs None Instr.Label.Map.empty
 
+let compute_enclosing_block_id (basic_blocks : unit Basic_block.t list) : int Instr.Label.Map.t =
+  basic_blocks
+  |> List.concat_map ~f:(fun bb ->
+      Basic_block.all_direct_instruction_labels bb
+      |> Instr.Label.Set.to_list
+      |> List.map ~f:(fun label ->
+          (label, bb.idx)))
+  |> Instr.Label.Map.of_alist_exn
+
 (** Constructs a CFG for function `fid` in a module. *)
 let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
   (* TODO: this implementation is really not ideal and should be cleaned *)
@@ -357,6 +366,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     block_arities = compute_block_arities funcinst.code.body;
     (* Mapping from label to enclosing block *)
     label_to_enclosing_block = compute_enclosing_blocks funcinst.code.body;
+    label_to_enclosing_block_id = compute_enclosing_block_id (List.map ~f:snd (IntMap.to_alist basic_blocks));
   }
 
 let build_all (mod_ : Wasm_module.t) : unit Cfg.t Int32Map.t =
