@@ -1,26 +1,22 @@
 open Core 
-
 open Maths
 
-(** Reduced Interval Congruence (RIC) Domain for Pointer Analysis
+(** The Reduced Interval Congruence (RIC) domain for pointer analysis.
 
-    This module defines an abstract domain for representing sets of possible integer values in 
-    pointer analysis.
+    This module defines an abstract domain used to represent possible integer values in
+    pointer analysis. It combines:
+    - A congruence domain for arithmetic progressions of the form [stride * ℤ + offset].
+    - An interval domain for bounding integer ranges.
 
-    The RIC abstraction combines:
-    - A congruence domain for arithmetic progressions: `stride * ℤ + offset`
-    - An interval domain for bounding values with a lower and upper bound
-
-    These domains are reduced together to ensure consistency and precision.
-    The RIC domain supports standard abstract operations such as join, meet, widening, and 
-    arithmetic operations, and is used for modeling address sets in static analyses of memory.
+    RIC values are reduced for precision and support standard abstract operations such as
+    join, meet, widening, addition, and subtraction.
 *)
 module RIC = struct
 
-  (** Arithmetic Congruence Domain
+  (** The congruence domain for arithmetic progressions of the form [stride * ℤ + offset].
 
-      Represents integer sets of the form `stride * ℤ + offset`, where the offset may be absolute or 
-      relative. Provides standard abstract operations and equality up to congruence equivalence.
+      Offsets may be absolute or relative. Provides standard abstract operations and
+      equality up to congruence equivalence.
   *)
   module Congruence = struct
     type congruence = {
@@ -33,37 +29,31 @@ module RIC = struct
       | Bottom (* ∅ *)
       | Congruence of congruence
 
-    (** [equal c1 c2] checks structural and semantic equality between two congruence elements. *)
+    (** [equal c1 c2] returns [true] if congruences [c1] and [c2] are equivalent. *)
     let equal (c1 : t) (c2 : t) : bool =
       match c1, c2 with 
-      | Top, Top -> true
-      | Top, Congruence c when c.stride = 1 -> true 
-      | Congruence c, Top when c.stride = 1 -> true
-      | Bottom, Bottom -> true
-      | Congruence c1, Congruence c2 when c1.stride = 1 && c2.stride = 1 -> true
-      | Congruence c1, Congruence c2 when c1.stride = 0 && c2.stride = 0 ->
-        begin match c1.offset, c2.offset with 
-          | (v1, o1), (v2, o2) -> String.equal v1 v2 && o1 = o2
-        end
-      | Congruence c1, Congruence c2 ->
-        c1.stride = c2.stride && 
-        begin match c1.offset, c2.offset with 
-          | (v1, o1), (v2, o2) -> String.equal v1 v2 && (o1 - o2) mod c1.stride = 0
-        end
+      | Top, Top | Bottom, Bottom -> true
+      | Top, Congruence { stride = 1; _ }
+      | Congruence { stride = 1; _ }, Top -> true 
+      | Congruence { stride = 1; _ }, Congruence { stride = 1; _ } -> true
+      | Congruence { stride = 0; offset = (v1, o1) }, Congruence { stride = 0; offset = (v2, o2) } ->
+        String.equal v1 v2 && o1 = o2
+      | Congruence { stride = s1; offset = (v1, o1) }, Congruence { stride = s2; offset = (v2, o2) } ->
+        s1 = s2 && String.equal v1 v2 && (o1 - o2) mod s1 = 0
       | _ -> false
 
     let to_string (c : t) : string =
       match c with 
       | Top -> "ℤ" 
       | Bottom -> "∅"
-      | Congruence c ->
+      | Congruence { stride = s; offset = offset } ->
         let stride = 
-          if c.stride = 0 then
+          if s = 0 then
             ""
           else
-            (if (c.stride = 1) then "" else string_of_int c.stride) ^ "ℤ" in
+            (if (s = 1) then "" else string_of_int s) ^ "ℤ" in
         let offset = 
-          match c.offset with 
+          match offset with 
           | ("", offset) ->
             if offset = 0 then
               ""
@@ -82,79 +72,56 @@ module RIC = struct
         | stride, "" -> stride 
         | stride, offset -> stride ^ "+" ^ offset
 
-    let to_string2 (c : t) : string =
-      match c with 
-      | Top -> "ℤ"
-      | Bottom ->  "∅"
-      | Congruence {stride = s; offset = (v, o)} -> 
-        "stride=" ^ string_of_int s ^ "; offset=(" ^ v ^ ", " ^ string_of_int o ^ ")"
-
-    (** [join c1 c2] computes the least upper bound (union) of two congruences. *)
+    (** [join c1 c2] returns the least upper bound (union) of [c1] and [c2]. *)
     let join (c1 : t) (c2 : t) : t =
       match c1, c2 with 
       | Top, _ | _, Top -> Top 
-      | Bottom, c -> c
-      | c, Bottom -> c 
-      | Congruence c1, Congruence c2 ->
-        begin match c1.offset, c2.offset with 
-          | ("", o1), ("", o2) -> 
-            let new_offset = ("", (min o1 o2)) in 
-            let new_stride = gcd (gcd c1.stride c2.stride) (abs (o1 - o2)) in
-            Congruence {stride = new_stride; offset = new_offset}
-          | (v1, o1), (v2, o2) when String.equal v1 v2 ->
-            let new_offset = (v1, min o1 o2) in
-            let new_stride = gcd (gcd c1.stride c2.stride) (abs (o1 - o2)) in 
-            Congruence {stride = new_stride; offset = new_offset}
-          | _ -> Top
-        end
+      | Bottom, c | c, Bottom -> c 
+      | Congruence { stride = s1; offset = (v1, o1) }, Congruence { stride = s2; offset = (v2, o2) } ->
+        if String.equal v1 v2 then
+          let new_offset = (v1, min o1 o2) in
+          let stride_difference = abs (o1 - o2) in
+          let new_stride = gcd (gcd s1 s2) stride_difference in
+          Congruence { stride = new_stride; offset = new_offset }
+        else
+          Top
 
-    (** [meet c1 c2] computes the greatest lower bound (meet) of two congruences. *)
+    (** [meet c1 c2] returns the greatest lower bound (intersection) of [c1] and [c2]. *)
     let meet (c1 : t) (c2 : t) : t =
       match c1, c2 with
-      | Top, c -> c
-      | c, Top -> c 
+      | Top, c | c, Top -> c 
       | Bottom, _ | _, Bottom -> Bottom 
-      | Congruence {stride = 0; offset = (v1, o1)}, 
-        Congruence {stride = 0; offset = (v2, o2)} when String.equal v1 v2 && o1 = o2 -> c1
-      | Congruence {stride = 0;  _}, 
-        Congruence {stride = 0;  _} -> Bottom
-      | Congruence {stride = 0; offset = (v1, o1)}, 
-        Congruence {stride = s2; offset = (v2, o2)} when String.equal v1 v2 -> 
-          if o1 mod s2 = o2 then c1 else Bottom
-      | Congruence {stride = s2; offset = (v2, o2)}, 
-        Congruence {stride = 0; offset = (v1, o1)} when String.equal v1 v2 -> 
-          if o1 mod s2 = o2 then c2 else Bottom
-      | Congruence c1, Congruence c2 ->
-        let gcd_stride = gcd c1.stride c2.stride in 
-        begin match c1.offset, c2.offset with 
-          | (v1, o1), (v2, o2) 
-            when String.equal v1 v2 && (o1 - o2) mod gcd_stride = 0 -> 
-              let new_stride = lcm c1.stride c2.stride in 
-              let new_offset, _ = chinese_remainder c1.stride o1 c2.stride o2 in
+      | Congruence {stride = 0; offset = (v1, o1)}, Congruence {stride = 0; offset = (v2, o2)} ->
+        if String.equal v1 v2 && o1 = o2 then c1 else Bottom
+      | Congruence {stride = 0; offset = (v1, o1)}, Congruence {stride = s2; offset = (v2, o2)} ->
+        if String.equal v1 v2 && o1 mod s2 = o2 then Congruence {stride = 0; offset = (v1, o1)} else Bottom
+      | Congruence {stride = s2; offset = (v2, o2)}, Congruence {stride = 0; offset = (v1, o1)} ->
+        if String.equal v1 v2 && o1 mod s2 = o2 then Congruence {stride = 0; offset = (v1, o1)} else Bottom
+      | Congruence {stride = s1; offset = (v1, o1)}, Congruence {stride = s2; offset = (v2, o2)} ->
+        let gcd_stride = gcd s1 s2 in 
+        if String.equal v1 v2 && (o1 - o2) mod gcd_stride = 0 then 
+              let new_stride = lcm s1 s2 in 
+              let new_offset, _ = chinese_remainder s1 o1 s2 o2 in
               let new_offset = (v1, new_offset) in
               Congruence {stride = new_stride; offset = new_offset}
-          | _ -> Bottom
-        end
+        else
+          Bottom
     
     let widen (c1 :t) (c2 : t) : t = join c1 c2
 
+    (** [sum c1 c2] returns the over-approximation of the sum [c1 + c2]. *)
     let sum (c1 : t) (c2 : t) : t =
       match c1, c2 with
       | Top, _ | _, Top -> Top
-      | Bottom, c -> c
-      | c, Bottom -> c
-      | Congruence {stride = s1; offset = ("",o1)}, 
-        Congruence {stride = s2; offset = ("", o2); _} ->
-          let new_stride = gcd s1 s2 in
-          let new_offset = ("", o1 + o2) in
-          Congruence {stride = new_stride; offset = new_offset}
-      | _ -> assert false
+      | Bottom, c | c, Bottom -> c
+      | Congruence {stride = s1; offset = (v1, o1)},
+        Congruence {stride = s2; offset = (v2, o2)} ->
+          Congruence {stride = gcd s1 s2; offset = add_relative_offsets v1 v2, o1 + o2}
   end
 
-  (** Integer Interval Domain
+  (** The integer interval domain, representing bounded or unbounded intervals using extended integers.
 
-      Represents bounded or unbounded intervals over integers using extended integers.
-      Supports standard abstract domain operations such as join, meet, and widening.
+      Supports standard abstract operations such as join, meet, and widening.
   *)
   module Interval = struct
     type interval = {
@@ -169,10 +136,9 @@ module RIC = struct
 
     let equal (i1 : t) (i2 : t) : bool =
       match i1, i2 with 
-      | Top, Top -> true 
-      | Top, Interval {lower_bound = NegInfinity; upper_bound = Infinity} -> true
+      | Top, Top | Bottom, Bottom -> true  
+      | Top, Interval {lower_bound = NegInfinity; upper_bound = Infinity}
       | Interval {lower_bound = NegInfinity; upper_bound = Infinity}, Top -> true
-      | Bottom, Bottom -> true 
       | Bottom, Interval {lower_bound = l; upper_bound = u} 
         when ExtendedInt.less_than u l -> true
       | Interval {lower_bound = l; upper_bound = u}, Bottom 
@@ -197,18 +163,16 @@ module RIC = struct
             "[" ^ string_of_int l ^ "," ^ ExtendedInt.to_string Infinity ^ "["
           | NegInfinity, Int u -> 
             "]" ^ ExtendedInt.to_string NegInfinity ^ "," ^ string_of_int u ^ "]"
-          | Infinity, _ | _, NegInfinity -> assert false 
           | Int l, Int u when l <= u -> "[" ^ string_of_int l ^ "," ^ string_of_int u ^ "]"
           | _ -> assert false
         end
 
-    (** [join i1 i2] computes the least upper bound (union) of two intervals. *)
+    (** [join i1 i2] returns the least upper bound (union) of [i1] and [i2]. *)
     let join (i1 : t) (i2 : t) : t =
       let join =
         match i1, i2 with 
         | Top, _ | _, Top -> Top
-        | Bottom, i -> i
-        | i, Bottom -> i
+        | Bottom, i | i, Bottom -> i
         | i1, i2 when equal Bottom i1 -> i2
         | i1, i2 when equal Bottom i2 -> i1
         | Interval i1, Interval i2 -> Interval {
@@ -218,13 +182,12 @@ module RIC = struct
       in
       if equal join Top then Top else if equal Bottom join then Bottom else join
 
-    (** [meet i1 i2] computes the greatest lower bound (meet) of two intervals. *)
+    (** [meet i1 i2] returns the greatest lower bound (intersection) of [i1] and [i2]. *)
     let meet (i1 : t) (i2 : t) : t =
       let meet =
         match i1, i2 with 
         | Bottom, _ | _, Bottom -> Bottom 
-        | Top, i -> i
-        | i, Top -> i
+        | Top, i | i, Top -> i
         | i1, _ when equal Bottom i1 -> Bottom
         | _, i2 when equal Bottom i2 -> Bottom
         | Interval i1, Interval i2 ->
@@ -235,10 +198,8 @@ module RIC = struct
 
     let widen (i1 : t) (i2 : t) : t =
       match i1, i2 with 
-      | Top, _ -> Top
-      | _, Top -> Top
-      | Bottom, _ -> i2
-      | _, Bottom -> i1
+      | Top, _ | _, Top -> Top
+      | Bottom, i | i, Bottom -> i
       | i1, _ when equal Bottom i1 -> i2
       | _, i2 when equal Bottom i2 -> i1
       | Interval {lower_bound = l1; upper_bound = u1}, 
@@ -247,25 +208,19 @@ module RIC = struct
           let upper = if ExtendedInt.less_than u1 u2 then ExtendedInt.Infinity else u1 in
           Interval {lower_bound = lower; upper_bound = upper}
 
+    (** [sum i1 i2] returns the over-approximation of the sum [i1 + i2]. *)
     let sum (i1 : t) (i2 : t) : t =
       match i1, i2 with
       | Top, _ | _, Top -> Top
-      | Bottom, i -> i
-      | i, Bottom -> i
+      | Bottom, i | i, Bottom -> i
       | Interval {lower_bound = l1; upper_bound = u1}, 
         Interval {lower_bound = l2; upper_bound = u2} ->
           let new_lower = ExtendedInt.plus l1 l2 in
           let new_upper = ExtendedInt.plus u1 u2 in
           Interval {lower_bound = new_lower; upper_bound = new_upper}
-      
   end
 
-  (** RIC values combine a congruence with an interval and an offset.
-
-      - [stride]: spacing between values
-      - [lower_bound, upper_bound]: bounds on the integer factor
-      - [offset]: base offset (absolute or relative)
-  *)
+  (** A reduced interval congruence value: [stride * {lower_bound..upper_bound} + offset]. *)
   type ric = {
     stride : int;
     lower_bound : ExtendedInt.t;
@@ -274,18 +229,14 @@ module RIC = struct
   }
   [@@deriving sexp, compare, equal]
 
-  (** Abstract value in the RIC domain. *)
+  (** An abstract value in the RIC domain. *)
   type t =
-    | Top 
-    | Bottom 
+    | Top
+    | Bottom
     | RIC of ric
   [@@deriving sexp, compare, equal]
 
-  (** [reduce r] normalizes the representation of a RIC value. 
-
-      Ensures the interval starts at 0 and shifts the offset accordingly.
-      Returns [Top] or [Bottom] if the value represents the full or empty set.
-  *)
+  (** [reduce r] normalizes the RIC [r] by shifting the offset and resetting the lower bound to 0. *)
   let reduce (r : t) : t =
     match r with 
     | Top -> Top 
@@ -325,25 +276,26 @@ module RIC = struct
         in
         RIC {stride = new_stride; lower_bound = new_lower; upper_bound = new_upper; offset = new_offset}
 
+  (** [ric (s, l, u, o)] constructs and reduces a RIC from stride [s], bounds [l] and [u], and offset [o]. *)
   let ric (r : int * ExtendedInt.t * ExtendedInt.t * (string * int)) : t =
     reduce (
       match r with 
       | s, l, u, o -> RIC {stride = s; lower_bound = l; upper_bound = u; offset = o}
     )
 
+  (** [relative_ric var] returns a RIC with zero stride and offset set to the variable [var]. *)
   let relative_ric (var : string) : t =
     ric (0, Int 0, Int 0, (var, 0))
 
+  (** [is_singleton r] returns [true] if [r] contains exactly one value. *)
   let is_singleton (r : t) : bool =
     let r = reduce r in
     match r with
     | RIC {stride = 0; _} -> true
     | _ -> false
 
-  (** [of_congruence_and_interval c i] constructs a RIC value from a congruence and interval.
-
-      Automatically reduces the result for consistency.
-  *)
+  (** [of_congruence_and_interval c i] constructs a RIC value from congruence [c] and interval [i],
+      and reduces the result for consistency. *)
   let of_congruence_and_interval (c : Congruence.t) (i : Interval.t) : t =
     match c with
     | Top ->
@@ -378,10 +330,7 @@ module RIC = struct
           ric (s, lower, upper, (var, o))
       end
 
-  (** [to_congruence_and_interval r] decomposes a RIC value into its congruence and interval components.
-
-      The result captures the semantics of the RIC value.
-  *)
+  (** [to_congruence_and_interval r] decomposes [r] into its congruence and interval components. *)
   let to_congruence_and_interval (r : t) : Congruence.t * Interval.t =
     (* let r = reduce r in *)
     match r with 
@@ -392,19 +341,17 @@ module RIC = struct
       Interval {lower_bound = ExtendedInt.plus (ExtendedInt.Int o) (ExtendedInt.times (ExtendedInt.Int s) l); 
                 upper_bound = ExtendedInt.plus (ExtendedInt.Int o) (ExtendedInt.times (ExtendedInt.Int s) u)}
       
-    
-
-  (** [equal r1 r2] returns true if two RIC values represent the same set. *)
+  (** [equal r1 r2] returns [true] if [r1] and [r2] represent the same set. *)
   let equal (ric1 : t) (ric2 : t) : bool =
     let ric1, ric2 = reduce ric1, reduce ric2 in
     match ric1, ric2 with 
     | Top, Top | Bottom, Bottom -> true
-    | RIC {stride = s1; lower_bound = l1; upper_bound = u1; offset = o1},  
-      RIC {stride = s2; lower_bound = l2; upper_bound = u2; offset = o2} ->
-        s1 = s2 && ExtendedInt.equal l1 l2 && ExtendedInt.equal u1 u2 &&
-        begin match o1, o2 with 
-          | (v1, o1), (v2, o2) -> String.equal v1 v2 && o1 = o2
-        end
+    | RIC {stride = s1; lower_bound = l1; upper_bound = u1; offset = (v1, o1)},  
+      RIC {stride = s2; lower_bound = l2; upper_bound = u2; offset = (v2, o2)} ->
+        s1 = s2 
+        && ExtendedInt.equal l1 l2 
+        && ExtendedInt.equal u1 u2 
+        && String.equal v1 v2 && o1 = o2
     | _ -> false
 
   (** [comparable_offsets r1 r2] returns true if two RICs can be compared, i.e., they have matching base variables. *)
@@ -414,6 +361,7 @@ module RIC = struct
       RIC {offset = (v2, _); _} -> String.equal v1 v2 
     | _ -> true
 
+  (** [to_string r] returns a human-readable string representation of RIC [r]. *)
   let to_string (r : t) : string =
     let r = reduce r in
     match r with
@@ -438,12 +386,8 @@ module RIC = struct
       | "", "]-∞,∞[", _ -> "⊤"
       | _ -> stride ^ interval ^ offset
 
-  let list_to_string (l : t list) : string =
-    let l = List.map ~f:to_string l in
-    String.concat ~sep:", " l
-
-  (** [of_list l] constructs a RIC value that represents exactly the integers in [l]. *)
-  let of_list (l : int list) : t =
+  (* [of_list l] constructs a RIC value that represents exactly the integers in [l]. *)
+  (* let of_list (l : int list) : t =
     let l = List.dedup_and_sort ~compare:Int.compare l in
     match l with
     | [] -> Bottom
@@ -455,23 +399,21 @@ module RIC = struct
       let lower = ExtendedInt.Int list_minimum in 
       let upper = ExtendedInt.Int (List.fold ~init:x1 ~f:max rest) in
       let interval = Interval.Interval {lower_bound = lower; upper_bound = upper} in
-      of_congruence_and_interval congruence interval
+      of_congruence_and_interval congruence interval *)
 
-  (** [meet r1 r2] returns the intersection of two RIC values. *)
+  (** [meet r1 r2] returns the intersection of [r1] and [r2]. *)
   let meet (ric1 : t) (ric2 : t) : t =
     let (c1, i1) = to_congruence_and_interval ric1 in
     let (c2, i2) = to_congruence_and_interval ric2 in
     let c = Congruence.meet c1 c2 in
     let i = Interval.meet i1 i2 in 
     of_congruence_and_interval c i
-
-  let meet_with_list (ric1 : t) (ric2 : t list) : t list =
-    List.map ~f:(meet ric1) ric2
   
+  (** [disjoint r1 r2] returns [true] if [r1] and [r2] have no values in common. *)
   let disjoint (ric1 : t) (ric2 : t) : bool =
     equal Bottom (meet ric1 ric2)
 
-  (** [join r1 r2] returns the union over-approximation of two RIC values. *)
+  (** [join r1 r2] returns the union (over-approximation) of [r1] and [r2]. *)
   let join (ric1 : t) (ric2 : t) : t =
     let (c1, i1) = to_congruence_and_interval ric1 in
     let (c2, i2) = to_congruence_and_interval ric2 in
@@ -479,7 +421,7 @@ module RIC = struct
     let i = Interval.join i1 i2 in 
     of_congruence_and_interval c i
 
-  (** [is_subset r1 ~of_:r2] returns true if [r1] is a subset of [r2]. *)
+  (** [is_subset r1 ~of_:r2] returns [true] if [r1] is a subset of [r2]. *)
   let is_subset (ric1 : t) ~(of_ : t) : bool =
     let m = meet ric1 of_ in
     let j = join ric1 of_ in 
@@ -489,35 +431,41 @@ module RIC = struct
     | _, j when equal j of_ -> assert false
     | _ -> false
 
-  (** [subsumes r1 r2] returns true if [r1] over-approximates [r2]. *)
+  (** [subsumes r1 r2] returns [true] if [r1] over-approximates [r2]. *)
   let subsumes (ric1 : t) (ric2 : t) : bool = 
     is_subset ric2 ~of_:ric1
 
-  (** [complement r] returns a list of RICs that together represent the complement of [r]. *)
+  (** [complement r] returns a list of RICs representing the complement of [r]. *)
   let complement (r : t) : t list =
-    let r = reduce r in
-    match r with
+    match reduce r with
     | Top -> [Bottom]
     | Bottom -> [Top]
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (v, o)} ->
-      let inferior_RIC = if ExtendedInt.equal l NegInfinity then [] else [(ric (1, NegInfinity, ExtendedInt.minus l (Int 1), (v, o)))] in
-      let superior_RIC = if ExtendedInt.equal u Infinity then [] else [ric (1, ExtendedInt.plus (Int (o + if s = 0 then 1 else s)) (ExtendedInt.times (Int s) u) , Infinity, (v, 0))] in 
-      let rec make_overlapping_complement (i : int) (acc : t list) : t list =
-        match i with
-        | i when i = s -> acc
-        | i -> make_overlapping_complement (i + 1) (ric (s, l, u, (v, o + i)) :: acc)
+      let inferior_RIC = 
+        if ExtendedInt.equal l NegInfinity then []
+        else [ric (1, NegInfinity, ExtendedInt.minus l (Int 1), (v, o))]
       in
-      let overlapping_complement = if s = 0 then [] else make_overlapping_complement 1 [] in
+      let superior_RIC =
+        if ExtendedInt.equal u Infinity then []
+        else [ric (1,
+                   ExtendedInt.plus (Int (o + if s = 0 then 1 else s)) (ExtendedInt.times (Int s) u),
+                   Infinity,
+                   (v, 0))]
+      in
+      let overlapping_complement =
+        if s = 0 then []
+        else List.init (s - 1) ~f:(fun i -> ric (s, l, u, (v, o + i + 1)))
+      in
       inferior_RIC @ overlapping_complement @ superior_RIC
 
-  (** [add_offset r c] shifts the offset of [r] by integer [c]. *)
+  (** [add_offset r c] returns [r] with its offset increased by [c]. *)
   let add_offset (r : t) (c : int) : t =
     match r with
     | Top -> Top 
     | Bottom -> Bottom
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (v,o)} -> ric (s, l, u, (v, o + c))
 
-  (** [remove_lower_bound r] removes the lower bound constraint in [r]. *)
+  (** [remove_lower_bound r] returns [r] with its lower bound removed (set to -∞). *)
   let remove_lower_bound (r : t) : t =
     let r = reduce r in
     match r with 
@@ -531,7 +479,7 @@ module RIC = struct
           ric (s, NegInfinity, u, o)
       )
 
-  (** [remove_upper_bound r] removes the upper bound constraint in [r]. *)
+  (** [remove_upper_bound r] returns [r] with its upper bound removed (set to ∞). *)
   let remove_upper_bound (r : t) : t =
     let r = reduce r in
     match r with 
@@ -545,7 +493,7 @@ module RIC = struct
           ric (s, l, Infinity, o)
       )
 
-  (** [widen r ~relative_to] computes the widening of [r] relative to the previous value. *)
+  (** [widen r ~relative_to] returns the widening of [r] with respect to [relative_to]. *)
   let widen (ric1 : t) ~(relative_to : t) : t =
     let (c1, i1) = to_congruence_and_interval ric1 in
     let (c2, i2) = to_congruence_and_interval relative_to in
@@ -553,7 +501,7 @@ module RIC = struct
     let widened_i = Interval.widen i1 i2 in 
     of_congruence_and_interval widened_c widened_i 
 
-  (** [partially_accessed ~by ~size] returns RICs that may partially overlap with [by] of given size. *)
+  (** [partially_accessed ~by ~size] returns RICs that may be partially accessed by a memory access of [size] bytes. *)
   let partially_accessed ~(by : t) ~(size : int) : t list =
     let r = reduce by in
     let rec aux (i : int) (acc : t list) : t list =
@@ -578,81 +526,34 @@ module RIC = struct
       List.dedup_and_sort ~compare:compare (List.filter ~f:(fun x -> not (equal x r)) accessed)
 
   
-  (** Access classification: fully and partially accessed RICs. *)
+  (** The result of a memory access: fully and partially accessed RICs. *)
   type accessed = {
     fully : t;
     partially : t list
   }
-  (** [accessed ~value_set ~size] computes memory cells fully and partially accessed. *)
+  
+  (** [accessed ~value_set ~size] returns the fully and partially accessed RICs for a memory access 
+      of [size] bytes from [value_set]. *)
   let accessed ~(value_set : t) ~(size : int) : accessed =
     let stride = match value_set with | RIC {stride = s; _} -> s | Top -> 1 | Bottom -> 0 in
     let f = if size = 4 && (stride >= 4 || is_singleton value_set) then value_set else Bottom in
     let p = partially_accessed ~by:value_set ~size:size in
     {fully = f; partially = p}
 
+  (** [extract_relative_offset r] returns the variable name used in the offset of [r]. *)
   let extract_relative_offset (r : t) : string =
     match r with
     | Bottom | Top -> ""
     | RIC {offset = (relative, _); _} -> relative
   
+  (** [set_relative_offset r offset] sets the variable name in the offset of [r] to [offset]. *)
   let set_relative_offset (r : t) (offset : string) : t =
     match r with
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
       ric (s, l, u, (offset, o))
     | _ -> assert false
 
-  (* Should this function go somewhere else? *)
-  let remove_first_occurence ~(of_ : string) ~(in_ : string list) : string list =
-    let rec aux acc = function
-      | [] -> List.rev acc
-      | y :: ys ->
-        if String.equal of_ y then List.rev_append acc ys
-        else aux (y :: acc) ys
-    in
-    aux [] in_
-
-  let rec cancel_negation (pos : string list) (neg : string list) : string list =
-    match pos with
-    | [] -> neg
-    | x :: xs ->
-      let neg_x = "neg" ^ x in
-      if List.mem neg neg_x ~equal:String.equal then
-        cancel_negation xs (remove_first_occurence ~of_:neg_x ~in_:neg)
-      else
-        cancel_negation xs (x :: neg)
-
-  let add_relative_offsets (o1 : string) (o2 : string) : string =
-    let result =
-      if String.equal o1 "" then
-        o2
-      else if String.equal o2 "" then
-        o1
-      else
-        let o1_list = String.split_on_chars o1 ~on:['+'] in
-        let o2_list = String.split_on_chars o2 ~on:['+'] in
-        let o_list = o1_list @ o2_list in
-        let pos = 
-          List.rev 
-            (List.sort ~compare:String.compare (List.fold o_list ~init:[] ~f:(fun acc o -> 
-              if String.is_prefix o ~prefix:"neg" then
-                acc
-              else
-                o :: acc)))
-        in
-        let neg = 
-          List.sort ~compare:String.compare (List.fold o_list ~init:[] ~f:(fun acc o -> 
-            if String.is_prefix o ~prefix:"neg" then
-              o ::acc
-            else
-              acc))
-        in
-        let offsets = cancel_negation pos neg in
-        String.concat ~sep:"+" offsets 
-    in
-    (* print_endline ("------------------" ^ o1 ^ " + " ^ o2 ^ " = " ^ result); *)
-    result
-
-  (** [remove_relative_offset r] returns a copy of [r] with a concrete (empty) variable. *)
+  (** [remove_relative_offset r] returns [r] with its relative variable removed (set to ""). *)
   let remove_relative_offset (r : t) : t =
     match r with
     | Top -> Top
@@ -660,18 +561,16 @@ module RIC = struct
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (_, o)} -> 
       ric (s, l, u, ("", o))
 
-  (** [plus r1 r2] returns the sum over-approximation of [r1] and [r2]. *)
+  (** [plus r1 r2] returns the over-approximation of the sum [r1] + [r2]. *)
   let plus (ric1 : t) (ric2 : t) : t =
     match ric1, ric2 with
     | Top, _ | _, Top -> Top
     | Bottom, Bottom -> Bottom
     | Bottom, _ ->
-      let warning_msg = "Adding Bottom state to an RIC - result will return the RIC unchanged: " ^ to_string ric2 in
-      Log.warn warning_msg;
+      Log.warn ("Adding Bottom state to an RIC - result will return the RIC unchanged: " ^ to_string ric2);
       ric2
     | _, Bottom -> 
-      let warning_msg = "Adding Bottom state to an RIC - result will return the RIC unchanged: " ^ to_string ric1 in
-      Log.warn warning_msg;
+      Log.warn ("Adding Bottom state to an RIC - result will return the RIC unchanged: " ^ to_string ric1);
       ric1
     | _ ->
       let offset1 = extract_relative_offset ric1 in
@@ -686,21 +585,20 @@ module RIC = struct
       let result = of_congruence_and_interval new_congruence new_interval in
       set_relative_offset result relative_offset
 
-  (** [negative r] returns the RIC representing [-r]. *)
+  (** [negative r] returns the RIC representing the negation [-r]. *)
   let negative (r : t) : t =
     match r with
     | Top -> Top
     | Bottom -> Bottom
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
       ric (s, ExtendedInt.times (Int (-1)) u, ExtendedInt.times (Int (-1)) l, ("", - o))
-    
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (v, o)} ->
       if String.is_prefix v ~prefix:"neg" then
         ric (s, ExtendedInt.times (Int (-1)) u, ExtendedInt.times (Int (-1)) l, (String.drop_prefix v 3, - o))
       else
         ric (s, ExtendedInt.times (Int (-1)) u, ExtendedInt.times (Int (-1)) l, ("neg" ^ v, - o))
 
-  (** [minus r1 r2] returns the difference over-approximation of [r1] and [r2]. *)
+  (** [minus r1 r2] returns the over-approximation of the difference [r1] - [r2]. *)
   let minus (ric1 : t) (ric2 : t) : t =
     if not (comparable_offsets ric1 ric2) then
       Top
@@ -710,14 +608,13 @@ module RIC = struct
       let negative_ric2 = negative ric2 in
       plus ric1 negative_ric2
 
-  (** [remove ~this ~from] returns parts of [from] that are not in [this]. *)
+  (** [remove ~this ~from] returns the parts of [from] that are not in [this]. *)
   let remove ~(this : t) ~(from : t) : t list =
     if comparable_offsets this from then
       let this_complement = complement this in
       List.filter ~f:(fun r -> not (equal r Bottom)) (List.map ~f:(meet from) this_complement)
     else
       []
-
 end
 
 
@@ -756,6 +653,9 @@ TTTTTT  T:::::T  TTTTTT  E:::::E       EEEEEES:::::S            TTTTTT  T:::::T 
 let%test_module "RIC tests" = (module struct
   open RIC
 
+  let%test "RIC_tests" =
+    print_endline "\n_______ ____________________________ _______\n        Reduced interval congruences        \n------- ---------------------------- -------\n"; true
+
   (*
       cccccccccccccccc   ooooooooooo   nnnn  nnnnnnnn       ggggggggg   gggggrrrrr   rrrrrrrrr   
     cc:::::::::::::::c oo:::::::::::oo n:::nn::::::::nn    g:::::::::ggg::::gr::::rrr:::::::::r  
@@ -778,6 +678,9 @@ let%test_module "RIC tests" = (module struct
                                                                 gggggg                      
   *)
   let%test_module "Congruence tests" = (module struct
+
+    let%test "Congruence_tests" =
+      print_endline "------- CONGRUENCE MODULE -------\n"; true
 
     (* Top should be equal to Congruence with stride 1 and offset 0. *)
     let%test "Congruence: top equals stride1 offset0" =
@@ -929,7 +832,7 @@ let%test_module "RIC tests" = (module struct
       let c1 = Congruence.Congruence {stride = 2; offset = ("", 3)} in
       let c2 = Congruence.Congruence {stride = 2; offset = ("", 2)} in 
       let j = Congruence.join c1 c2 in 
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string j);
+      print_endline ("[JOIN of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string j);
       Congruence.equal j Congruence.Top
 
     (* Joining congruences with different offsets. *)
@@ -937,7 +840,7 @@ let%test_module "RIC tests" = (module struct
       let c1 = Congruence.Congruence {stride = 10; offset = ("", 3)} in
       let c2 = Congruence.Congruence {stride = 10; offset = ("", 8)} in 
       let j = Congruence.join c1 c2 in 
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string j);
+      print_endline ("[JOIN of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string j);
       Congruence.equal j (Congruence.Congruence {stride = 5; offset = ("", 3)})
 
     (* Joining congruences with different types of offsets should return Top. *)
@@ -945,7 +848,7 @@ let%test_module "RIC tests" = (module struct
       let c1 = (Congruence.Congruence {stride = 2; offset = ("", 3)}) in
       let c2 = (Congruence.Congruence {stride = 2; offset = ("x", 3)}) in
       let j = Congruence.join c1 c2 in
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string j);
+      print_endline ("[JOIN of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string j);
       Congruence.equal j Congruence.Top
 
     (* Joining congruences with equivalent relative offsets. *)
@@ -953,7 +856,7 @@ let%test_module "RIC tests" = (module struct
       let c1 = Congruence.Congruence {stride = 20; offset = ("v", 3)} in
       let c2 = Congruence.Congruence {stride = 20; offset = ("v", 23)} in 
       let j = Congruence.join c1 c2 in 
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string j);
+      print_endline ("[JOIN of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string j);
       Congruence.equal j c1
 
     (* Joining congruences with equivalent relative offsets. *)
@@ -961,7 +864,7 @@ let%test_module "RIC tests" = (module struct
       let c1 = Congruence.Congruence {stride = 20; offset = ("v", 3)} in
       let c2 = Congruence.Congruence {stride = 20; offset = ("v", 21)} in 
       let j = Congruence.join c1 c2 in 
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string j);
+      print_endline ("[JOIN of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string j);
       Congruence.equal j (Congruence.Congruence {stride = 2; offset = ("v", 1)}
       )
 
@@ -970,7 +873,7 @@ let%test_module "RIC tests" = (module struct
       let c1 = Congruence.Congruence {stride = 20; offset = ("v", 3)} in
       let c2 = Congruence.Congruence {stride = 20; offset = ("x", 23)} in 
       let j = Congruence.join c1 c2 in 
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string j);
+      print_endline ("[JOIN of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string j);
       Congruence.equal j Congruence.Top
 
     (* Meeting Bottom with anything should return Bottom. *)
@@ -1005,7 +908,7 @@ let%test_module "RIC tests" = (module struct
       let c1 = (Congruence.Congruence {stride = 2; offset = ("", 3)}) in
       let c2 = (Congruence.Congruence {stride = 4; offset = ("", 3)}) in
       let m = Congruence.meet c1 c2 in
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
+      print_endline ("[MEET of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
       Congruence.equal m c2
 
       (* Meeting congruences with same offset but different stride. *)
@@ -1013,7 +916,7 @@ let%test_module "RIC tests" = (module struct
       let c1 = (Congruence.Congruence {stride = 2; offset = ("", 3)}) in
       let c2 = (Congruence.Congruence {stride = 5; offset = ("", 3)}) in
       let m = Congruence.meet c1 c2 in
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
+      print_endline ("[MEET of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
       Congruence.equal m (Congruence.Congruence {stride = 10; offset = ("", 3)}) (* stride = lcm 2 5*)
 
     (* Meeting congruences with different offsets. *)
@@ -1021,7 +924,7 @@ let%test_module "RIC tests" = (module struct
       let c1 = Congruence.Congruence {stride = 2; offset = ("", 3)} in
       let c2 = Congruence.Congruence {stride = 2; offset = ("", 2)} in 
       let m = Congruence.meet c1 c2 in 
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
+      print_endline ("[MEET of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
       Congruence.equal m Congruence.Bottom
 
     (* Meeting congruences with different offsets. *)
@@ -1029,7 +932,7 @@ let%test_module "RIC tests" = (module struct
       let c1 = Congruence.Congruence {stride = 10; offset = ("", 3)} in
       let c2 = Congruence.Congruence {stride = 10; offset = ("", 8)} in 
       let m = Congruence.meet c1 c2 in 
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
+      print_endline ("[MEET of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
       Congruence.equal m Congruence.Bottom
 
     (* Joining congruences with different types of offsets should return Top. *)
@@ -1037,7 +940,7 @@ let%test_module "RIC tests" = (module struct
       let c1 = (Congruence.Congruence {stride = 2; offset = ("", 3)}) in
       let c2 = (Congruence.Congruence {stride = 2; offset = ("x", 3)}) in
       let m = Congruence.meet c1 c2 in
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
+      print_endline ("[MEET of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
       Congruence.equal m Congruence.Bottom
 
     (* Meeting congruences with equivalent relative offsets. *)
@@ -1045,14 +948,14 @@ let%test_module "RIC tests" = (module struct
       let c1 = Congruence.Congruence {stride = 20; offset = ("v", 3)} in
       let c2 = Congruence.Congruence {stride = 20; offset = ("v", 23)} in 
       let m = Congruence.meet c1 c2 in 
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
+      print_endline ("[MEET of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
       Congruence.equal m c1
 
     let%test "Congruence: meet with singleton congruence" =
       let c1 = Congruence.Congruence {stride = 0; offset = ("v", 3)} in
       let c2 = Congruence.Congruence {stride = 20; offset = ("v", 3)} in
       let  m = Congruence.meet c1 c2 in 
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
+      print_endline ("[MEET of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
       Congruence.equal m (Congruence.Congruence {stride = 0; offset = ("v", 3)})
 
     (* Meeting congruences with equivalent relative offsets. *)
@@ -1060,7 +963,7 @@ let%test_module "RIC tests" = (module struct
       let c1 = Congruence.Congruence {stride = 20; offset = ("v", 3)} in
       let c2 = Congruence.Congruence {stride = 20; offset = ("v", 21)} in 
       let m = Congruence.meet c1 c2 in 
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
+      print_endline ("[MEET of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊓ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
       Congruence.equal m Congruence.Bottom
 
     (* Meeting congruences with different relative variables returns Bottom. *)
@@ -1068,15 +971,8 @@ let%test_module "RIC tests" = (module struct
       let c1 = Congruence.Congruence {stride = 20; offset = ("v", 3)} in
       let c2 = Congruence.Congruence {stride = 20; offset = ("x", 23)} in 
       let m = Congruence.meet c1 c2 in 
-      print_endline ("(" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
+      print_endline ("[MEET of congruences]     (" ^ Congruence.to_string c1 ^ ") ⊔ (" ^ Congruence.to_string c2 ^ ") = " ^ Congruence.to_string m);
       Congruence.equal m Congruence.Bottom
-
-    let%test "add_relative_offsets cancels negation" =
-      let result = RIC.add_relative_offsets "a+negb+negd" "c+b+d+b" in
-      print_endline "Test: add_relative_offsets \"a+negb\" \"b+b+c\"";
-      print_endline ("Result: " ^ result);
-      print_endline "Expected: a+b+c";
-      String.equal result "a+b+c"
   end)
 
   (*                                                                                         
@@ -1097,6 +993,9 @@ let%test_module "RIC tests" = (module struct
     i::::::i  n::::n    n::::n        tt:::::::::::tt  ee:::::::::::::e   r:::::r            
     iiiiiiii  nnnnnn    nnnnnn          ttttttttttt      eeeeeeeeeeeeee   rrrrrrr  *)
   let%test_module "Interval tests" = (module struct
+    let%test "Congruence_tests" =
+      print_endline "\n------- Interval MODULE -------\n"; true
+
     (* Top is equal to Top. *)
     let%test "equal_top_top" =
       Interval.equal Interval.Top Interval.Top
@@ -1141,59 +1040,59 @@ let%test_module "RIC tests" = (module struct
     (* to_string of Top should be "ℤ". *)
     let%test "to_string_top" =
       let s = Interval.to_string Interval.Top in
-      print_endline ("Top → " ^ s);
+      print_endline ("[Interval.to_string]     Top → " ^ s);
       String.equal s "ℤ"
 
     (* to_string of Bottom should be "∅". *)
     let%test "to_string_bottom" =
       let s = Interval.to_string Interval.Bottom in
-      print_endline ("Bottom → " ^ s);
+      print_endline ("[Interval.to_string]     Bottom → " ^ s);
       String.equal s "∅"
 
     (* to_string of [0, 5] should be "[0, 5]". *)
     let%test "to_string_0_5" =
       let s = Interval.to_string (Interval.Interval {lower_bound = Int 0; upper_bound = Int 5}) in
-      print_endline ("[0,5] → " ^ s);
+      print_endline ("[Interval.to_string]     [0,5] → " ^ s);
       String.equal s "[0,5]"
 
     (* to_string of [-∞, 10] should be "[-∞, 10]". *)
     let%test "to_string_neg_inf_10" =
       let s = Interval.to_string (Interval.Interval {lower_bound = NegInfinity; upper_bound = Int 10}) in
-      print_endline ("]-∞,10] → " ^ s);
+      print_endline ("[Interval.to_string]     ]-∞,10] → " ^ s);
       String.equal s "]-∞,10]"
 
     (* to_string of [4, ∞] should be "[4, ∞]". *)
     let%test "to_string_4_pos_inf" =
       let s = Interval.to_string (Interval.Interval {lower_bound = Int 4; upper_bound = Infinity}) in
-      print_endline ("[4,∞[ → " ^ s);
+      print_endline ("[Interval.to_string]     [4,∞[ → " ^ s);
       String.equal s "[4,∞["
 
     (* to_string of [-∞, ∞] should be "ℤ". *)
     let%test "to_string_neg_inf_pos_inf" =
       let s = Interval.to_string (Interval.Interval {lower_bound = NegInfinity; upper_bound = Infinity}) in
-      print_endline ("[-∞,∞] → " ^ s);
+      print_endline ("[Interval.to_string]     [-∞,∞] → " ^ s);
       String.equal s "ℤ"
 
 
     (* join of Top with anything is Top. *)
     let%test "join_top" =
       let joined = Interval.join Interval.Top (Interval.Interval {lower_bound = Int 0; upper_bound = Int 5}) in
-      print_endline ("Top ⊔ [0, 5] → " ^ Interval.to_string joined);
+      print_endline ("[JOIN of intervals]     Top ⊔ [0, 5] → " ^ Interval.to_string joined);
       Interval.equal joined Interval.Top
 
     (* join of Bottom with an interval is that interval. *)
     let%test "join_bottom" =
       let i = Interval.Interval {lower_bound = Int 2; upper_bound = Int 4} in
       let joined = Interval.join Interval.Bottom i in
-      print_endline ("⊥ ⊔ [2, 4] → " ^ Interval.to_string joined);
+      print_endline ("[JOIN of intervals]     ⊥ ⊔ [2, 4] → " ^ Interval.to_string joined);
       Interval.equal joined i
 
     (* join of two intervals gives correct bounds. *)
-    let%test "join_0_5_3_10" =
+    let%test "[JOIN of intervals]     join_0_5_3_10" =
       let a = Interval.Interval {lower_bound = Int 0; upper_bound = Int 5} in
       let b = Interval.Interval {lower_bound = Int 3; upper_bound = Int 10} in
       let joined = Interval.join a b in
-      print_endline ("[0, 5] ⊔ [3, 10] → " ^ Interval.to_string joined);
+      print_endline ("[JOIN of intervals]     [0, 5] ⊔ [3, 10] → " ^ Interval.to_string joined);
       Interval.equal joined (Interval.Interval {lower_bound = Int 0; upper_bound = Int 10})
 
     (* join of two disjoint intervals gives correct bounds. *)
@@ -1201,14 +1100,14 @@ let%test_module "RIC tests" = (module struct
       let a = Interval.Interval {lower_bound = Int 0; upper_bound = Int 5} in
       let b = Interval.Interval {lower_bound = Int 7; upper_bound = Int 10} in
       let joined = Interval.join a b in
-      print_endline ("[0, 5] ⊔ [7, 10] → " ^ Interval.to_string joined);
+      print_endline ("[JOIN of intervals]     [0, 5] ⊔ [7, 10] → " ^ Interval.to_string joined);
       Interval.equal joined (Interval.Interval {lower_bound = Int 0; upper_bound = Int 10})
 
     (* meet of Top and an interval is that interval. *)
     let%test "meet_top" =
       let i = Interval.Interval {lower_bound = Int 1; upper_bound = Int 7} in
       let met = Interval.meet Interval.Top i in
-      print_endline ("Top ⊓ [1, 7] → " ^ Interval.to_string met);
+      print_endline ("[MEET of intervals]     Top ⊓ [1, 7] → " ^ Interval.to_string met);
       Interval.equal met i
 
     (* meet of disjoint intervals is Bottom. *)
@@ -1216,7 +1115,7 @@ let%test_module "RIC tests" = (module struct
       let a = Interval.Interval {lower_bound = Int 0; upper_bound = Int 2} in
       let b = Interval.Interval {lower_bound = Int 5; upper_bound = Int 10} in
       let met = Interval.meet a b in
-      print_endline ("[0, 2] ⊓ [5, 10] → " ^ Interval.to_string met);
+      print_endline ("[MEET of intervals]     [0, 2] ⊓ [5, 10] → " ^ Interval.to_string met);
       Interval.equal met Interval.Bottom
 
     (* meet of overlapping intervals gives the intersection. *)
@@ -1224,7 +1123,7 @@ let%test_module "RIC tests" = (module struct
       let a = Interval.Interval {lower_bound = Int 0; upper_bound = Int 10} in
       let b = Interval.Interval {lower_bound = Int 5; upper_bound = Int 15} in
       let met = Interval.meet a b in
-      print_endline ("[0, 10] ⊓ [5, 15] → " ^ Interval.to_string met);
+      print_endline ("[MEET of intervals]     [0, 10] ⊓ [5, 15] → " ^ Interval.to_string met);
       Interval.equal met (Interval.Interval {lower_bound = Int 5; upper_bound = Int 10})
   end)
 
@@ -1246,75 +1145,129 @@ let%test_module "RIC tests" = (module struct
     r:::::r            i::::::i  cc:::::::::::::::c
     rrrrrrr            iiiiiiii    cccccccccccccccc*)
   let%test_module "RIC tests" = (module struct
-    let%test "add_offset_to_top" =
-      let r = Top in
-      let result = add_offset r 5 in
-      print_endline ("⊤ ⊞ 5 → " ^ to_string result);
-      RIC.equal result Top
-
-    let%test "add_offset_to_bottom" =
-      let r = Bottom in
-      let result = add_offset r 3 in
-      print_endline ("⊥ ⊞ 3 → " ^ to_string result);
-      RIC.equal result Bottom
-
-    let%test "add_offset_to_absolute" =
-      let r = ric (4, Int 0, Int 2, ("", 4)) in
-      let result = add_offset r 12 in
-      print_endline ("(4[0, 2] + 4) ⊞ 12 → " ^ to_string result);
-      RIC.equal result (ric (4, Int 0, Int 2, ("", 16)))
-
-    let%test "add_offset_to_relative" =
-      let r = ric (3, Int 0, Int 2, ("x", 1)) in
-      let result = add_offset r (-2) in
-      print_endline ("(3[0, 2] + (x+1)) ⊞ (-2) → " ^ to_string result);
-      RIC.equal result (ric (3, Int 0, Int 2, ("x", -1)))
-
-    let%test "add_offset_to_stride_zero" =
-      let r = ric (0, Int 0, Int 0, ("", 5)) in
-      let result = add_offset r 10 in
-      print_endline ("(0[0, 0] + 5) ⊞ 10 → " ^ to_string result);
-      RIC.equal result (ric (0, Int 0, Int 0, ("", 15)))
+    let%test "Congruence_tests" =
+      print_endline "\n------- RIC MODULE -------\n"; true
 
     let%test "reduce_top" =
+      print_endline ("[RIC.reduce]     ⊤ → " ^ to_string (reduce Top));
       RIC.equal (reduce Top) Top
 
     let%test "reduce_bottom" =
+      print_endline ("[RIC.reduce]     ⊥ → " ^ to_string (reduce Bottom));
       RIC.equal (reduce Bottom) Bottom
 
     let%test "reduce_identity" =
       let r = ric (2, Int 0, Int 5, ("", 3)) in
+      print_endline ("[RIC.reduce]     " ^ to_string r ^ " → " ^ to_string (reduce r));
       RIC.equal (reduce r) r
 
     let%test "reduce_to_bottom" =
       let r = ric (4, Int 10, Int 5, ("", 0)) in
+      print_endline ("[RIC.reduce]     " ^ to_string r ^ " → " ^ to_string (reduce r));
       RIC.equal (reduce r) Bottom
 
     let%test "reduce_to_top" =
       let r = ric (1, NegInfinity, Infinity, ("", 0)) in
+      print_endline ("[RIC.reduce]     " ^ to_string r ^ " → " ^ to_string (reduce r));
       RIC.equal (reduce r) Top
 
     let%test "reduce_stride_zero" =
       let r = ric (0, Int 2, Int 2, ("", 5)) in
       let reduced = reduce r in
+      print_endline ("[RIC.reduce]     " ^ to_string r ^ " → " ^ to_string reduced);
       RIC.equal reduced (ric (0, Int 0, Int 0, ("", 5)))
 
     let%test "reduce_relative_offset" =
       let r = ric (3, Int 2, Int 5, ("x", 4)) in
       let reduced = reduce r in
+      print_endline ("[RIC.reduce]     " ^ to_string r ^ " → " ^ to_string reduced);
       RIC.equal reduced (ric (3, Int 0, Int 3, ("x", 10)))
 
     let%test "reduce_shift_and_normalize" =
       let original = ric (4, Int 1, Int 2, ("", 1)) in
       let reduced = reduce original in
-      print_endline ("reduce (4[1, 2] + 1) → " ^ to_string reduced);
+      print_endline ("[RIC.reduce]     (4[1,2]+1) → " ^ to_string reduced);
       RIC.equal reduced (ric (4, Int 0, Int 1, ("", 5)))
 
     let%test "reduce_neg_infinity" =
       let original = ric (4, NegInfinity, Int 5, ("", 10)) in
       let reduced = reduce original in
-      print_endline ("reduce (4[-∞, 5] + 10) → " ^ to_string reduced);
+      print_endline ("[RIC.reduce]     (4[-∞,5]+10) → " ^ to_string reduced);
       RIC.equal reduced (ric (4, NegInfinity, Int 5, ("", 10)))
+
+    let%test "of_congruence_and_interval_top_top" =
+      let r = of_congruence_and_interval Congruence.Top Interval.Top in
+      print_endline ("[of congruence and interval]     (ℤ, ℤ) → " ^ to_string r);
+      RIC.equal r Top
+
+    let%test "of_congruence_and_interval_bottom_top" =
+      let r = of_congruence_and_interval Congruence.Bottom Interval.Top in
+      print_endline ("[of congruence and interval]     (⊥, ℤ) → " ^ to_string r);
+      RIC.equal r Bottom
+
+    let%test "of_congruence_and_interval_top_bottom" =
+      let r = of_congruence_and_interval Congruence.Top Interval.Bottom in
+      print_endline ("[of congruence and interval]     (ℤ, ⊥) → " ^ to_string r);
+      RIC.equal r Bottom
+
+    let%test "of_congruence_and_interval_abs" =
+      let c = Congruence.Congruence {stride = 2; offset = ("", 1)} in
+      let i = Interval.Interval {lower_bound = Int 1; upper_bound = Int 7} in
+      let r = of_congruence_and_interval c i in
+      print_endline ("[of congruence and interval]     (2ℤ + 1, [1, 7]) → " ^ to_string r);
+      RIC.equal r (ric (2, Int 0, Int 3, ("", 1)))  (* (1 + 2*[0..3]) = {1,3,5,7} *)
+
+    let%test "of_congruence_and_interval_relative" =
+      let c = Congruence.Congruence {stride = 3; offset = ("x", 2)} in
+      let i = Interval.Interval {lower_bound = Int 5; upper_bound = Int 17} in
+      let r = of_congruence_and_interval c i in
+      print_endline ("[of congruence and interval]     (3ℤ + (x+2), [5, 17]) → " ^ to_string r);
+      RIC.equal r (ric (3, Int 1, Int 5, ("x", 2)))  (* (x+2 + 3*[1..5]) = [5..17] *)
+
+    let%test "of_congruence_and_interval_stride_0" =
+      let c = Congruence.Congruence {stride = 0; offset = ("", 8)} in
+      let i = Interval.Interval {lower_bound = Int 8; upper_bound = Int 8} in
+      let r = of_congruence_and_interval c i in
+      print_endline ("[of congruence and interval]     (0ℤ + 8, [8, 8]) → " ^ to_string r);
+      RIC.equal r (ric (0, Int 0, Int 0, ("", 8)))
+
+    let%test "to_congruence_and_interval_top" =
+      let c, i = to_congruence_and_interval Top in
+      print_endline ("[to congruence and interval]     Top → (" ^ Congruence.to_string c ^ ", " ^ Interval.to_string i ^ ")");
+      Congruence.equal c Congruence.Top && Interval.equal i Interval.Top
+
+    let%test "to_congruence_and_interval_bottom" =
+      let c, i = to_congruence_and_interval Bottom in
+      print_endline ("[to congruence and interval]     Bottom → (" ^ Congruence.to_string c ^ ", " ^ Interval.to_string i ^ ")");
+      Congruence.equal c Congruence.Bottom && Interval.equal i Interval.Bottom
+
+    let%test "to_congruence_and_interval_absolute" =
+      let r = ric (2, Int 0, Int 3, ("", 5)) in
+      let c, i = to_congruence_and_interval r in
+      print_endline ("[to congruence and interval]     (2[0, 3] + 5) → (" ^ Congruence.to_string c ^ ", " ^ Interval.to_string i ^ ")");
+      Congruence.equal c (Congruence.Congruence {stride = 2; offset = ("", 5)}) &&
+      Interval.equal i (Interval.Interval {lower_bound = Int 5; upper_bound = Int 11})
+
+    let%test "to_congruence_and_interval_absolute2" =
+      let r = ric (3, Int 1, Int 4, ("", 2)) in
+      let c, i = to_congruence_and_interval r in
+      print_endline ("[to congruence and interval]     (3[1, 4] + 2) → (" ^ Congruence.to_string c ^ ", " ^ Interval.to_string i ^ ")");
+      Congruence.equal c (Congruence.Congruence {stride = 3; offset = ("", 2)}) &&
+      Interval.equal i (Interval.Interval {lower_bound = Int 5; upper_bound = Int 14})
+
+    let%test "to_congruence_and_interval_relative" =
+      let r = ric (3, Int 1, Int 4, ("x", 2)) in
+      let c, i = to_congruence_and_interval r in
+      print_endline ("[to congruence and interval]     (3[1, 4] + (x + 2)) → (" ^ Congruence.to_string c ^ ", " ^ Interval.to_string i ^ ")");
+      Congruence.equal c (Congruence.Congruence {stride = 3; offset = ("x", 2)}) &&
+      Interval.equal i (Interval.Interval {lower_bound = Int 5; upper_bound = Int 14})
+
+    let%test "to_congruence_and_interval_stride_zero" =
+      let r = ric (0, Int 0, Int 0, ("", 7)) in
+      let c, i = to_congruence_and_interval r in
+      print_endline ("[to congruence and interval]     (0[0, 0] + 7) → (" ^ Congruence.to_string c ^ ", " ^ Interval.to_string i ^ ")");
+      Congruence.equal c (Congruence.Congruence {stride = 0; offset = ("", 7)}) &&
+      Interval.equal i (Interval.Interval {lower_bound = Int 7; upper_bound = Int 7})
 
     let%test "equal_top_top" =
       RIC.equal Top Top
@@ -1347,379 +1300,191 @@ let%test_module "RIC tests" = (module struct
       let r2 = ric (2, Int 0, Int 3, ("", 5)) in
       RIC.equal r1 r2
 
+    let%test "equal_neg_infinity_shifted_absolute" =
+      let r1 = ric (3, NegInfinity, Int 3, ("", 10)) in
+      let r2 = ric (3, NegInfinity, Int 5, ("", 4)) in
+      print_endline ("[RIC.equal]     " ^ to_string r1 ^ " = " ^ to_string r2 ^ " → " ^ string_of_bool (equal r1 r2));
+      equal r1 r2
+
+    let%test "equal_neg_infinity_shifted_relative" =
+      let r1 = ric (3, NegInfinity, Int 3, ("x", 10)) in
+      let r2 = ric (3, NegInfinity, Int 5, ("x", 4)) in
+      print_endline ("[RIC.equal]     " ^ to_string r1 ^ " = " ^ to_string r2 ^ " → " ^ string_of_bool (equal r1 r2));
+      equal r1 r2
+
     let%test "to_string_top" =
       let s = to_string Top in
-      print_endline ("Top → " ^ s);
+      print_endline ("[RIC.to_string]     Top → " ^ s);
       String.equal s "⊤"
 
     let%test "to_string_bottom" =
       let s = to_string Bottom in
-      print_endline ("Bottom → " ^ s);
+      print_endline ("[RIC.to_string]     Bottom → " ^ s);
       String.equal s "⊥"
 
     let%test "to_string_absolute" =
       let s = to_string (ric (2, Int 0, Int 4, ("", 5))) in
-      print_endline ("2[0,4]+5 → " ^ s);
+      print_endline ("[RIC.to_string]     2[0,4]+5 → " ^ s);
       String.equal s "2[0,4]+5"
 
     let%test "to_string_relative" =
       let s = to_string (ric (3, Int 0, Int 3, ("x", 2))) in
-      print_endline ("3[0,3]+(x+2) → " ^ s);
+      print_endline ("[RIC.to_string]     3[0,3]+(x+2) → " ^ s);
       String.equal s "3[0,3]+(x+2)"
 
     let%test "to_string_relative_offset_0" =
       let s = to_string (ric (3, Int 0, Int 3, ("x", 0))) in
-      print_endline ("3[0,3]+x → " ^ s);
+      print_endline ("[RIC.to_string]     3[0,3]+x → " ^ s);
       String.equal s "3[0,3]+x"
 
     let%test "to_string_stride_1" =
       let s = to_string (ric (1, Int 0, Int 3, ("", 0))) in
-      print_endline ("1[0,3]+0 → " ^ s);
+      print_endline ("[RIC.to_string]     1[0,3]+0 → " ^ s);
       String.equal s "[0,3]"
 
-    let%test "of_list_empty" =
-      RIC.equal (of_list []) Bottom
-
-    let%test "of_list_singleton" =
-      let r = of_list [5] in
-      print_endline ("of_list [5] → " ^ to_string r);
-      RIC.equal r (ric (0, Int 0, Int 0, ("", 5)))
-
-    let%test "of_list_regular" =
-      let r = of_list [1; 3; 5; 7] in
-      print_endline ("of_list [1; 3; 5; 7] → " ^ to_string r);
-      RIC.equal r (ric (2, Int 0, Int 3, ("", 1)))
-
-    let%test "of_list_irregular_stride" =
-      let r = of_list [4; 10; 16] in
-      print_endline ("of_list [4; 10; 16] → " ^ to_string r);
-      RIC.equal r (ric (6, Int 0, Int 2, ("", 4)))
-
-    let%test "of_list_negative_values" =
-      let r = of_list [-36; -28; -20] in
-      print_endline ("of_list [-36; -28; -20] → " ^ to_string r);
-      RIC.equal r (ric (8, Int 0, Int 2, ("", -36)))
-
-    let%test "of_congruence_and_interval_top_top" =
-      let r = of_congruence_and_interval Congruence.Top Interval.Top in
-      print_endline ("(ℤ, ℤ) → " ^ to_string r);
-      RIC.equal r Top
-
-    let%test "of_congruence_and_interval_bottom_top" =
-      let r = of_congruence_and_interval Congruence.Bottom Interval.Top in
-      print_endline ("(⊥, ℤ) → " ^ to_string r);
-      RIC.equal r Bottom
-
-    let%test "of_congruence_and_interval_top_bottom" =
-      let r = of_congruence_and_interval Congruence.Top Interval.Bottom in
-      print_endline ("(ℤ, ⊥) → " ^ to_string r);
-      RIC.equal r Bottom
-
-    let%test "of_congruence_and_interval_abs" =
-      let c = Congruence.Congruence {stride = 2; offset = ("", 1)} in
-      let i = Interval.Interval {lower_bound = Int 1; upper_bound = Int 7} in
-      let r = of_congruence_and_interval c i in
-      print_endline ("(2ℤ + 1, [1, 7]) → " ^ to_string r);
-      RIC.equal r (ric (2, Int 0, Int 3, ("", 1)))  (* (1 + 2*[0..3]) = {1,3,5,7} *)
-
-    let%test "of_congruence_and_interval_relative" =
-      let c = Congruence.Congruence {stride = 3; offset = ("x", 2)} in
-      let i = Interval.Interval {lower_bound = Int 5; upper_bound = Int 17} in
-      let r = of_congruence_and_interval c i in
-      print_endline ("(3ℤ + (x+2), [5, 17]) → " ^ to_string r);
-      RIC.equal r (ric (3, Int 1, Int 5, ("x", 2)))  (* (x+2 + 3*[1..5]) = [5..17] *)
-
-    let%test "of_congruence_and_interval_stride_0" =
-      let c = Congruence.Congruence {stride = 0; offset = ("", 8)} in
-      let i = Interval.Interval {lower_bound = Int 8; upper_bound = Int 8} in
-      let r = of_congruence_and_interval c i in
-      print_endline ("(0ℤ + 8, [8, 8]) → " ^ to_string r);
-      RIC.equal r (ric (0, Int 0, Int 0, ("", 8)))
-
-    let%test "to_congruence_and_interval_top" =
-      let c, i = to_congruence_and_interval Top in
-      print_endline ("Top → (" ^ Congruence.to_string c ^ ", " ^ Interval.to_string i ^ ")");
-      Congruence.equal c Congruence.Top && Interval.equal i Interval.Top
-
-    let%test "to_congruence_and_interval_bottom" =
-      let c, i = to_congruence_and_interval Bottom in
-      print_endline ("Bottom → (" ^ Congruence.to_string c ^ ", " ^ Interval.to_string i ^ ")");
-      Congruence.equal c Congruence.Bottom && Interval.equal i Interval.Bottom
-
-    let%test "to_congruence_and_interval_absolute" =
-      let r = ric (2, Int 0, Int 3, ("", 5)) in
-      let c, i = to_congruence_and_interval r in
-      print_endline ("(2[0, 3] + 5) → (" ^ Congruence.to_string c ^ ", " ^ Interval.to_string i ^ ")");
-      Congruence.equal c (Congruence.Congruence {stride = 2; offset = ("", 5)}) &&
-      Interval.equal i (Interval.Interval {lower_bound = Int 5; upper_bound = Int 11})
-
-    let%test "to_congruence_and_interval_absolute2" =
-      let r = ric (3, Int 1, Int 4, ("", 2)) in
-      let c, i = to_congruence_and_interval r in
-      print_endline ("(3[1, 4] + 2) → (" ^ Congruence.to_string c ^ ", " ^ Interval.to_string i ^ ")");
-      Congruence.equal c (Congruence.Congruence {stride = 3; offset = ("", 2)}) &&
-      Interval.equal i (Interval.Interval {lower_bound = Int 5; upper_bound = Int 14})
-
-    let%test "to_congruence_and_interval_relative" =
-      let r = ric (3, Int 1, Int 4, ("x", 2)) in
-      let c, i = to_congruence_and_interval r in
-      print_endline ("(3[1, 4] + (x + 2)) → (" ^ Congruence.to_string c ^ ", " ^ Interval.to_string i ^ ")");
-      Congruence.equal c (Congruence.Congruence {stride = 3; offset = ("x", 2)}) &&
-      Interval.equal i (Interval.Interval {lower_bound = Int 5; upper_bound = Int 14})
-
-    let%test "to_congruence_and_interval_stride_zero" =
-      let r = ric (0, Int 0, Int 0, ("", 7)) in
-      let c, i = to_congruence_and_interval r in
-      print_endline ("(0[0, 0] + 7) → (" ^ Congruence.to_string c ^ ", " ^ Interval.to_string i ^ ")");
-      Congruence.equal c (Congruence.Congruence {stride = 0; offset = ("", 7)}) &&
-      Interval.equal i (Interval.Interval {lower_bound = Int 7; upper_bound = Int 7})
-
-    (* --- Additional tests for RIC.meet and RIC.join --- *)
     let%test "meet {1,2,3,4} with {2,4,6,8}" =
       let r1 = ric (1, Int 1, Int 4, ("", 0)) in
       let r2 = ric (2, Int 0, Int 4, ("", 0)) in
       let m = meet r1 r2 in
       let expected = ric (2, Int 1, Int 2, ("", 0)) in
-      print_endline ("RIC.meet: " ^ to_string r1 ^ " ⊓ " ^ to_string r2 ^ " = " ^ to_string m);
+      print_endline ("[MEET of RICs]     " ^ to_string r1 ^ " ⊓ " ^ to_string r2 ^ " = " ^ to_string m);
       RIC.equal m expected
 
     let%test "meet_top_and_r" =
       let r = ric (2, Int 0, Int 4, ("", 5)) in
       let m = meet Top r in
-      print_endline ("⊤ ⊓ " ^ to_string r ^ " → " ^ to_string m);
+      print_endline ("[MEET of RICs]     ⊤ ⊓ " ^ to_string r ^ " → " ^ to_string m);
       RIC.equal m r
 
     let%test "meet_bottom_and_r" =
       let r = ric (2, Int 0, Int 4, ("", 5)) in
       let m = meet Bottom r in
-      print_endline ("⊥ ⊓ " ^ to_string r ^ " → " ^ to_string m);
+      print_endline ("[MEET of RICs]     ⊥ ⊓ " ^ to_string r ^ " → " ^ to_string m);
       RIC.equal m Bottom
 
     let%test "meet_regular" =
       let r1 = ric (2, Int 0, Int 4, ("", 1)) in
       let r2 = ric (4, Int 0, Int 2, ("", 1)) in
       let m = meet r1 r2 in
-      print_endline (to_string r1 ^ " ⊓ " ^ to_string r2 ^ " → " ^ to_string m);
+      print_endline ("[MEET of RICs]     " ^ to_string r1 ^ " ⊓ " ^ to_string r2 ^ " → " ^ to_string m);
       RIC.equal m (ric (4, Int 0, Int 2, ("", 1)))
 
     let%test "meet_disjoint" =
       let r1 = ric (2, Int 0, Int 1, ("", 1)) in
       let r2 = ric (2, Int 0, Int 1, ("", 2)) in
       let m = meet r1 r2 in
-      print_endline (to_string r1 ^ " ⊓ " ^ to_string r2 ^ " → " ^ to_string m);
+      print_endline ("[MEET of RICs]     " ^ to_string r1 ^ " ⊓ " ^ to_string r2 ^ " → " ^ to_string m);
       RIC.equal m Bottom
 
     let%test "join_top_and_r" =
       let r = ric (2, Int 0, Int 4, ("", 5)) in
       let j = join Top r in
-      print_endline ("⊤ ⊔ " ^ to_string r ^ " → " ^ to_string j);
+      print_endline ("[JOIN of RICs]     ⊤ ⊔ " ^ to_string r ^ " → " ^ to_string j);
       RIC.equal j Top
 
     let%test "join_bottom_and_r" =
       let r = ric (2, Int 0, Int 4, ("", 5)) in
       let j = join Bottom r in
-      print_endline ("⊥ ⊔ " ^ to_string r ^ " → " ^ to_string j);
+      print_endline ("[JOIN of RICs]     ⊥ ⊔ " ^ to_string r ^ " → " ^ to_string j);
       RIC.equal j r
 
     let%test "join_regular" =
       let r1 = ric (2, Int 0, Int 2, ("", 1)) in
       let r2 = ric (2, Int 3, Int 4, ("", 1)) in
       let j = join r1 r2 in
-      print_endline (to_string r1 ^ " ⊔ " ^ to_string r2 ^ " → " ^ to_string j);
+      print_endline ("[JOIN of RICs]     " ^ to_string r1 ^ " ⊔ " ^ to_string r2 ^ " → " ^ to_string j);
       RIC.equal j (ric (2, Int 0, Int 4, ("", 1)))
 
     let%test "join_different_stride" =
       let r1 = ric (2, Int 0, Int 2, ("", 1)) in
       let r2 = ric (4, Int 1, Int 2, ("", 1)) in
       let j = join r1 r2 in
-      print_endline (to_string r1 ^ " ⊔ " ^ to_string r2 ^ " → " ^ to_string j);
+      print_endline ("[JOIN of RICs]     " ^ to_string r1 ^ " ⊔ " ^ to_string r2 ^ " → " ^ to_string j);
       RIC.equal j (ric (2, Int 0, Int 4, ("", 1)))
 
-
-    (* --- Additional tests for RIC.subset_of --- *)
     let%test "subset_of_top" =
       let a = ric (2, Int 0, Int 3, ("", 1)) in
       let b = Top in
       let result = is_subset a ~of_:b in
-      print_endline (to_string a ^ " ⊆ " ^ to_string b ^ " → " ^ string_of_bool result ^ " [subset_of_top]");
+      print_endline ( "[subset_of_top]     " ^ to_string a ^ " ⊆ " ^ to_string b ^ " → " ^ string_of_bool result);
       result
 
     let%test "subset_of_bottom" =
       let a = Bottom in
       let b = ric (2, Int 0, Int 3, ("", 1)) in
       let result = is_subset a ~of_:b in
-      print_endline (to_string a ^ " ⊆ " ^ to_string b ^ " → " ^ string_of_bool result ^ " [subset_of_bottom]");
+      print_endline ("[subset_of_bottom]     " ^ to_string a ^ " ⊆ " ^ to_string b ^ " → " ^ string_of_bool result);
       result
 
     let%test "bottom_subset_of_bottom" =
       let a = Bottom in
       let b = Bottom in
       let result = is_subset a ~of_:b in
-      print_endline (to_string a ^ " ⊆ " ^ to_string b ^ " → " ^ string_of_bool result ^ " [bottom_subset_of_bottom]");
+      print_endline ("[bottom_subset_of_bottom]     " ^ to_string a ^ " ⊆ " ^ to_string b ^ " → " ^ string_of_bool result);
       result
 
     let%test "top_subset_of_top" =
       let a = Top in
       let b = Top in
       let result = is_subset a ~of_:b in
-      print_endline (to_string a ^ " ⊆ " ^ to_string b ^ " → " ^ string_of_bool result ^ " [top_subset_of_top]");
+      print_endline ("[top_subset_of_top]     " ^ to_string a ^ " ⊆ " ^ to_string b ^ " → " ^ string_of_bool result);
       result
 
     let%test "subset_of_itself" =
       let r = ric (4, Int 0, Int 2, ("", 8)) in
       let result = is_subset r ~of_:r in
-      print_endline (to_string r ^ " ⊆ " ^ to_string r ^ " → " ^ string_of_bool result ^ " [subset_of_itself]");
+      print_endline ("[subset_of_itself]     " ^ to_string r ^ " ⊆ " ^ to_string r ^ " → " ^ string_of_bool result);
       result
 
     let%test "smaller_range_subset" =
       let r1 = ric (2, Int 0, Int 2, ("", 1)) in
       let r2 = ric (2, Int 0, Int 4, ("", 1)) in
       let result = is_subset r1 ~of_:r2 in
-      print_endline (to_string r1 ^ " ⊆ " ^ to_string r2 ^ " → " ^ string_of_bool result ^ " [smaller_range_subset]");
+      print_endline ("[smaller_range_subset]     " ^ to_string r1 ^ " ⊆ " ^ to_string r2 ^ " → " ^ string_of_bool result);
       result
 
     let%test "different_stride_not_subset" =
       let r1 = ric (4, Int 0, Int 2, ("", 8)) in
       let r2 = ric (2, Int 0, Int 2, ("", 8)) in
       let result = not (is_subset r1 ~of_:r2) in
-      print_endline (to_string r1 ^ " ⊆ " ^ to_string r2 ^ " → " ^ string_of_bool (not result) ^ " [different_stride_not_subset]");
+      print_endline ("[different_stride_not_subset     ]" ^ to_string r1 ^ " ⊆ " ^ to_string r2 ^ " → " ^ string_of_bool (not result));
       result
 
     let%test "different_offset_not_subset" =
       let r1 = ric (2, Int 0, Int 2, ("", 3)) in
       let r2 = ric (2, Int 0, Int 2, ("", 5)) in
       let result = not (is_subset r1 ~of_:r2) in
-      print_endline (to_string r1 ^ " ⊆ " ^ to_string r2 ^ " → " ^ string_of_bool (not result) ^ " [different_offset_not_subset]");
+      print_endline ("[different_offset_not_subset]     " ^ to_string r1 ^ " ⊆ " ^ to_string r2 ^ " → " ^ string_of_bool (not result));
       result
 
     let%test "overlap_not_subset" =
       let r1 = ric (2, Int 0, Int 2, ("", 3)) in
       let r2 = ric (2, Int 1, Int 3, ("", 3)) in
       let result = not (is_subset r1 ~of_:r2) in
-      print_endline (to_string r1 ^ " ⊆ " ^ to_string r2 ^ " → " ^ string_of_bool (not result) ^ " [overlap_not_subset]");
+      print_endline ("[overlap_not_subset]     " ^ to_string r1 ^ " ⊆ " ^ to_string r2 ^ " → " ^ string_of_bool (not result));
       result
 
     let%test "subset_of_relative_equal" =
       let r1 = ric (5, Int 1, Int 2, ("x", 0)) in
       let r2 = ric (5, Int 0, Int 3, ("x", 0)) in
       let result = is_subset r1 ~of_:r2 in
-      print_endline (to_string r1 ^ " ⊆ " ^ to_string r2 ^ " → " ^ string_of_bool result ^ " [subset_of_relative_equal]");
+      print_endline ("[subset_of_relative_equal]     " ^ to_string r1 ^ " ⊆ " ^ to_string r2 ^ " → " ^ string_of_bool result);
       result
 
     let%test "subset_of_relative_different_stride" =
       let r1 = ric (4, Int 0, Int 2, ("x", 0)) in
       let r2 = ric (2, Int 0, Int 2, ("x", 0)) in
       let result = not (is_subset r1 ~of_:r2) in
-      print_endline (to_string r1 ^ " ⊆ " ^ to_string r2 ^ " → " ^ string_of_bool (not result) ^ " [subset_of_relative_different_stride]");
+      print_endline ("[subset_of_relative_different_stride]     " ^ to_string r1 ^ " ⊆ " ^ to_string r2 ^ " → " ^ string_of_bool (not result));
       result
 
     let%test "top_is_not_subset_of_bottom" =
       let a = Top in
       let b = Bottom in
       let result = not (is_subset a ~of_:b) in
-      print_endline (to_string a ^ " ⊆ " ^ to_string b ^ " → " ^ string_of_bool (not result) ^ " [top_is_not_subset_of_bottom]");
+      print_endline ("[top_is_not_subset_of_bottom     ]" ^ to_string a ^ " ⊆ " ^ to_string b ^ " → " ^ string_of_bool (not result));
       result
 
-    (* --- Tests for remove_lower_bound and remove_upper_bound --- *)
-    let%test "remove_lower_bound_top" =
-      let r = Top in
-      let result = remove_lower_bound r in
-      print_endline ("remove_lower_bound ⊤ → " ^ to_string result);
-      RIC.equal result Top
-
-    let%test "remove_lower_bound_bottom" =
-      let r = Bottom in
-      let result = remove_lower_bound r in
-      print_endline ("remove_lower_bound ⊥ → " ^ to_string result);
-      RIC.equal result Bottom
-
-    let%test "remove_lower_bound_regular" =
-      let r = ric (3, Int 2, Int 5, ("x", 4)) in
-      let result = remove_lower_bound r in
-      print_endline ("remove_lower_bound " ^ to_string r ^ " → " ^ to_string result);
-      RIC.equal result (ric (3, NegInfinity, Int 5, ("x", 4)))
-
-    let%test "remove_upper_bound_top" =
-      let r = Top in
-      let result = remove_upper_bound r in
-      print_endline ("remove_upper_bound ⊤ → " ^ to_string result);
-      RIC.equal result Top
-
-    let%test "remove_upper_bound_bottom" =
-      let r = Bottom in
-      let result = remove_upper_bound r in
-      print_endline ("remove_upper_bound ⊥ → " ^ to_string result);
-      RIC.equal result Bottom
-
-    let%test "remove_upper_bound_regular" =
-      let r = ric (2, Int 1, Int 4, ("", 2)) in
-      let result = remove_upper_bound r in
-      print_endline ("remove_upper_bound " ^ to_string r ^ " → " ^ to_string result);
-      RIC.equal result (ric (2, Int 1, Infinity, ("", 2)))
-
-    let%test "equal_neg_infinity_shifted_absolute" =
-      let r1 = ric (3, NegInfinity, Int 3, ("", 10)) in
-      let r2 = ric (3, NegInfinity, Int 5, ("", 4)) in
-      print_endline (to_string r1 ^ " = " ^ to_string r2 ^ " → " ^ string_of_bool (equal r1 r2));
-      equal r1 r2
-
-    let%test "equal_neg_infinity_shifted_relative" =
-      let r1 = ric (3, NegInfinity, Int 3, ("x", 10)) in
-      let r2 = ric (3, NegInfinity, Int 5, ("x", 4)) in
-      print_endline (to_string r1 ^ " = " ^ to_string r2 ^ " → " ^ string_of_bool (equal r1 r2));
-      equal r1 r2
-
-    (* --- Additional widen tests --- *)
-    let%test "widen_top_and_any" =
-      let r = ric (3, Int 0, Int 4, ("", 5)) in
-      let w = widen Top ~relative_to:r in
-      print_endline ("widen ⊤ (" ^ to_string r ^ ") → " ^ to_string w);
-      RIC.equal w Top
-
-    let%test "widen_bottom_and_any" =
-      let r = ric (3, Int 0, Int 4, ("", 5)) in
-      let w = widen Bottom ~relative_to:r in
-      print_endline ("widen ⊥ (" ^ to_string r ^ ") → " ^ to_string w);
-      RIC.equal w r
-
-    let%test "widen_regular_to_infinite_upper" =
-      let r1 = ric (4, Int 0, Int 1, ("", 0)) in
-      let r2 = ric (4, Int 0, Int 2, ("", 0)) in
-      let expected = ric (4, Int 0, Infinity, ("", 0)) in
-      let result = widen r1 ~relative_to:r2 in
-      print_endline ("widen (" ^ to_string r1 ^ ") (" ^ to_string r2 ^ ") → " ^ to_string result);
-      RIC.equal result expected
-
-    let%test "widen_extend_lower_bound" =
-      let r1 = ric (2, Int 1, Int 4, ("", 3)) in
-      let r2 = ric (2, Int 0, Int 4, ("", 3)) in
-      let expected = ric (2, NegInfinity, Int 4, ("", 3)) in
-      let result = widen r1 ~relative_to:r2 in
-      print_endline ("widen (" ^ to_string r1 ^ ") (" ^ to_string r2 ^ ") → " ^ to_string result);
-      RIC.equal result expected
-
-    let%test "widen_shifted_relative_offsets" =
-      let r1 = ric (3, Int 1, Int 3, ("x", 7)) in
-      let r2 = ric (3, Int 1, Int 5, ("x", 7)) in
-      let expected = ric (3, Int 1, Infinity, ("x", 7)) in
-      let result = widen r1 ~relative_to:r2 in
-      print_endline ("widen (" ^ to_string r1 ^ ") (" ^ to_string r2 ^ ") → " ^ to_string result);
-      RIC.equal result expected
-
-    let%test "widen_self" =
-      let r = ric (4, Int 0, Int 3, ("", 5)) in
-      let result = widen r ~relative_to:r in
-      print_endline ("widen (" ^ to_string r ^ ") (" ^ to_string r ^ ") → " ^ to_string result);
-      RIC.equal result r
-
-    let%test "widen_different_offsets" =
-      let r1 = ric (20, Int 0, Int 3, ("", 3)) in
-      let r2 = ric (20, Int 0, Int 3, ("", 7)) in
-      let result = widen r1 ~relative_to:r2 in
-      print_endline ("widen (" ^ to_string r1 ^ ") (" ^ to_string r2 ^ ") → " ^ to_string result);
-      RIC.equal result (ric (4, Int 0, Infinity, ("", 3)))
-
-    (* Additional tests for complement *)
     let%test "complement of Top is [Bottom]" =
       match complement Top with
       | [Bottom] -> true
@@ -1729,7 +1494,6 @@ let%test_module "RIC tests" = (module struct
       match complement Bottom with
       | [Top] -> true
       | _ -> false
-
       
     let%test "complement of finite 2[0,2]+4" =
       let r = ric (2, Int 0, Int 2, ("", 4)) in
@@ -1744,11 +1508,10 @@ let%test_module "RIC tests" = (module struct
     let%test "complement of singleton 0[0,0]+7" =
       let r = ric (0, Int 0, Int 0, ("", 7)) in
       let c = complement r in
-     print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map c ~f:to_string) ^ "  ]");
+      print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map c ~f:to_string) ^ "  ]");
       List.length c = 2 &&
       List.mem ~equal c (ric (1, NegInfinity, Int 0, ("", 6))) &&
       List.mem ~equal c (ric (1, Int 0, Infinity, ("", 8)))
-
       
     let%test "complement of 3[0,1]+2 has 4 parts" =
       let r = ric (3, Int 0, Int 1, ("", 2)) in
@@ -1756,7 +1519,6 @@ let%test_module "RIC tests" = (module struct
       print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map c ~f:to_string) ^ "  ]");
       List.length c = 4
 
-    
     let%test "complement of relative 4[0,1]+(x+1)" =
       let r = ric (4, Int 0, Int 1, ("x", 1)) in
       let c = complement r in
@@ -1770,7 +1532,6 @@ let%test_module "RIC tests" = (module struct
       let r = ric (5, Int 1, Int 3, ("g", 0)) in
       let offsets = List.map ~f:(function RIC {offset = (v, _); _} -> v | _ -> "") (complement r) in
       List.for_all offsets ~f:(String.equal "g")
-
 
     let%test "complement with unbounded upper and stride = 1 gives no superior_RIC" =
       let r = ric (1, Int 0, Infinity, ("", 0)) in
@@ -1790,74 +1551,186 @@ let%test_module "RIC tests" = (module struct
       print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map comp ~f:to_string) ^ "  ]");
       List.exists comp ~f:(fun r' -> match r' with RIC {stride = 2; lower_bound = Int 0; offset = ("", 4); _} -> true | _ -> false)
   
-    (* --- Tests for complement --- *)
     let%test "complement_top" =
       let r = Top in
       let compl = complement r in
-      print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
+      print_endline ("[complement of a RIC]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
       List.equal equal compl [Bottom]
 
     let%test "complement_bottom" =
       let r = Bottom in
       let compl = complement r in
-      print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
+      print_endline ("[complement of a RIC]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
       List.equal equal compl  [Top]
 
     let%test "complement_finite_absolute" =
       let r = ric (2, Int 0, Int 2, ("", 1)) in
       let compl = complement r in
-      print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
+      print_endline ("[complement of a RIC]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
       List.length compl = 3
 
     let%test "complement_finite_relative" =
       let r = ric (3, Int 1, Int 3, ("x", 2)) in
       let compl = complement r in
-      print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
+      print_endline ("[complement of a RIC]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
       List.length compl = 4
 
     let%test "complement_infinite_lower" =
       let r = ric (2, NegInfinity, Int 2, ("", 0)) in
       let compl = complement r in
-      print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
+      print_endline ("[complement of a RIC]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
       List.length compl = 2
 
     let%test "complement_infinite_upper" =
       let r = ric (2, Int 0, Infinity, ("", 0)) in
       let compl = complement r in
-      print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
+      print_endline ("[complement of a RIC]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
       List.length compl = 2
 
     let%test "complement_infinite_both" =
       let r = ric (2, NegInfinity, Infinity, ("", 0)) in
       let compl = complement r in
-      print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
+      print_endline ("[complement of a RIC]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
       List.length compl = 1
 
     let%test "complement_stride_zero" =
       let r = ric (0, Int 0, Int 0, ("", 5)) in
       let compl = complement r in
-      print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
+      print_endline ("[complement of a RIC]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
       List.length compl = 2
 
     let%test "complement_relative_stride_zero" =
       let r = ric (0, Int 0, Int 0, ("x", 3)) in
       let compl = complement r in
-      print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
+      print_endline ("[complement of a RIC]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
       List.length compl = 2
 
     let%test "complement_nontrivial" =
       let r = ric (4, Int 2, Int 5, ("a", 7)) in
       let compl = complement r in
-      print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
+      print_endline ("[complement of a RIC]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
       List.length compl = 5 
 
     let%test "complement of {2,4}" =
       let r = ric (2, Int 0, Int 1, ("", 2)) in
       let compl = complement r in
-      print_endline ("complement of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
+      print_endline ("[complement of a RIC]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
       List.length compl = 3 
 
+    let%test "add_offset_to_top" =
+      let r = Top in
+      let result = add_offset r 5 in
+      print_endline ("[add offset to RIC]     ⊤ ⊞ 5 → " ^ to_string result);
+      RIC.equal result Top
 
+    let%test "add_offset_to_bottom" =
+      let r = Bottom in
+      let result = add_offset r 3 in
+      print_endline ("[add offset to RIC]     ⊥ ⊞ 3 → " ^ to_string result);
+      RIC.equal result Bottom
+
+    let%test "add_offset_to_absolute" =
+      let r = ric (4, Int 0, Int 2, ("", 4)) in
+      let result = add_offset r 12 in
+      print_endline ("[add offset to RIC]     (4[0, 2] + 4) ⊞ 12 → " ^ to_string result);
+      RIC.equal result (ric (4, Int 0, Int 2, ("", 16)))
+
+    let%test "add_offset_to_relative" =
+      let r = ric (3, Int 0, Int 2, ("x", 1)) in
+      let result = add_offset r (-2) in
+      print_endline ("[add offset to RIC]     (3[0, 2] + (x+1)) ⊞ (-2) → " ^ to_string result);
+      RIC.equal result (ric (3, Int 0, Int 2, ("x", -1)))
+
+    let%test "add_offset_to_stride_zero" =
+      let r = ric (0, Int 0, Int 0, ("", 5)) in
+      let result = add_offset r 10 in
+      print_endline ("[add offset to RIC]     (0[0, 0] + 5) ⊞ 10 → " ^ to_string result);
+      RIC.equal result (ric (0, Int 0, Int 0, ("", 15)))
+
+    let%test "remove_lower_bound_top" =
+      let r = Top in
+      let result = remove_lower_bound r in
+      print_endline ("[remove_lower_bound]     ⊤ → " ^ to_string result);
+      RIC.equal result Top
+
+    let%test "remove_lower_bound_bottom" =
+      let r = Bottom in
+      let result = remove_lower_bound r in
+      print_endline ("[remove_lower_bound]     ⊥ → " ^ to_string result);
+      RIC.equal result Bottom
+
+    let%test "remove_lower_bound_regular" =
+      let r = ric (3, Int 2, Int 5, ("x", 4)) in
+      let result = remove_lower_bound r in
+      print_endline ("[remove_lower_bound]     " ^ to_string r ^ " → " ^ to_string result);
+      RIC.equal result (ric (3, NegInfinity, Int 5, ("x", 4)))
+
+    let%test "remove_upper_bound_top" =
+      let r = Top in
+      let result = remove_upper_bound r in
+      print_endline ("[remove_upper_bound]     ⊤ → " ^ to_string result);
+      RIC.equal result Top
+
+    let%test "remove_upper_bound_bottom" =
+      let r = Bottom in
+      let result = remove_upper_bound r in
+      print_endline ("[remove_upper_bound]     ⊥ → " ^ to_string result);
+      RIC.equal result Bottom
+
+    let%test "remove_upper_bound_regular" =
+      let r = ric (2, Int 1, Int 4, ("", 2)) in
+      let result = remove_upper_bound r in
+      print_endline ("[remove_upper_bound]     " ^ to_string r ^ " → " ^ to_string result);
+      RIC.equal result (ric (2, Int 1, Infinity, ("", 2)))
+
+    let%test "widen_top_and_any" =
+      let r = ric (3, Int 0, Int 4, ("", 5)) in
+      let w = widen Top ~relative_to:r in
+      print_endline ("[RIC.widen]     ⊤ (" ^ to_string r ^ ") → " ^ to_string w);
+      RIC.equal w Top
+
+    let%test "widen_bottom_and_any" =
+      let r = ric (3, Int 0, Int 4, ("", 5)) in
+      let w = widen Bottom ~relative_to:r in
+      print_endline ("[RIC.widen]      ⊥ (" ^ to_string r ^ ") → " ^ to_string w);
+      RIC.equal w r
+
+    let%test "widen_regular_to_infinite_upper" =
+      let r1 = ric (4, Int 0, Int 1, ("", 0)) in
+      let r2 = ric (4, Int 0, Int 2, ("", 0)) in
+      let expected = ric (4, Int 0, Infinity, ("", 0)) in
+      let result = widen r1 ~relative_to:r2 in
+      print_endline ("[RIC.widen]      (" ^ to_string r1 ^ ") (" ^ to_string r2 ^ ") → " ^ to_string result);
+      RIC.equal result expected
+
+    let%test "widen_extend_lower_bound" =
+      let r1 = ric (2, Int 1, Int 4, ("", 3)) in
+      let r2 = ric (2, Int 0, Int 4, ("", 3)) in
+      let expected = ric (2, NegInfinity, Int 4, ("", 3)) in
+      let result = widen r1 ~relative_to:r2 in
+      print_endline ("[RIC.widen]      (" ^ to_string r1 ^ ") (" ^ to_string r2 ^ ") → " ^ to_string result);
+      RIC.equal result expected
+
+    let%test "widen_shifted_relative_offsets" =
+      let r1 = ric (3, Int 1, Int 3, ("x", 7)) in
+      let r2 = ric (3, Int 1, Int 5, ("x", 7)) in
+      let expected = ric (3, Int 1, Infinity, ("x", 7)) in
+      let result = widen r1 ~relative_to:r2 in
+      print_endline ("[RIC.widen]      (" ^ to_string r1 ^ ") (" ^ to_string r2 ^ ") → " ^ to_string result);
+      RIC.equal result expected
+
+    let%test "widen_self" =
+      let r = ric (4, Int 0, Int 3, ("", 5)) in
+      let result = widen r ~relative_to:r in
+      print_endline ("[RIC.widen]      (" ^ to_string r ^ ") (" ^ to_string r ^ ") → " ^ to_string result);
+      RIC.equal result r
+
+    let%test "widen_different_offsets" =
+      let r1 = ric (20, Int 0, Int 3, ("", 3)) in
+      let r2 = ric (20, Int 0, Int 3, ("", 7)) in
+      let result = widen r1 ~relative_to:r2 in
+      print_endline ("[RIC.widen]      (" ^ to_string r1 ^ ") (" ^ to_string r2 ^ ") → " ^ to_string result);
+      RIC.equal result (ric (4, Int 0, Infinity, ("", 3)))
 
     let%test "partially_accessed_by_singleton_size_2" =
       let r = ric(0, Int 0, Int 0, ("", 8)) in
@@ -1867,7 +1740,7 @@ let%test_module "RIC tests" = (module struct
                       ric(0, Int 0, Int 0, ("", 7));
                       ric(0, Int 0, Int 0, ("", 8));
                       ric(0, Int 0, Int 0, ("", 9))] in
-      print_endline ("(size 2) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 2) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_singleton_size_4" =
@@ -1879,7 +1752,7 @@ let%test_module "RIC tests" = (module struct
                       ric(0, Int 0, Int 0, ("", 9));
                       ric(0, Int 0, Int 0, ("", 10));
                       ric(0, Int 0, Int 0, ("", 11))] in
-      print_endline ("(size 4) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 4) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size_1" =
@@ -1889,7 +1762,7 @@ let%test_module "RIC tests" = (module struct
                       ric(4, Int 0, Int 1, ("", 6));
                       ric(4, Int 0, Int 1, ("", 7));
                       ric(4, Int 0, Int 1, ("", 8))] in
-      print_endline ("(size 1) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 1) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size_2" =
@@ -1899,7 +1772,7 @@ let%test_module "RIC tests" = (module struct
                       ric(4, Int 0, Int 1, ("", 7));
                       ric(4, Int 0, Int 1, ("", 8));
                       ric(4, Int 0, Int 2, ("", 5))] in
-      print_endline ("(size 2) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 2) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size_3" =
@@ -1909,7 +1782,7 @@ let%test_module "RIC tests" = (module struct
                       ric(4, Int 0, Int 1, ("", 8));
                       ric(4, Int 0, Int 2, ("", 5));
                       ric(4, Int 0, Int 2, ("", 6))] in
-      print_endline ("(size 3) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 3) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size_5" =
@@ -1919,7 +1792,7 @@ let%test_module "RIC tests" = (module struct
                       ric(4, Int 0, Int 2, ("", 6));
                       ric(4, Int 0, Int 2, ("", 7));
                       ric(4, Int 0, Int 2, ("", 8))] in
-      print_endline ("(size 5) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 5) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size_2_stride_5" =
@@ -1930,7 +1803,7 @@ let%test_module "RIC tests" = (module struct
                       ric(5, Int 0, Int 1, ("", 7));
                       ric(5, Int 0, Int 1, ("", 8));
                       ric(5, Int 0, Int 1, ("", 9))] in
-      print_endline ("(size 2 stride 5) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 2 stride 5) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size_2_stride_6" =
@@ -1941,7 +1814,7 @@ let%test_module "RIC tests" = (module struct
                       ric(6, Int 0, Int 1, ("", 7));
                       ric(6, Int 0, Int 1, ("", 8));
                       ric(6, Int 0, Int 1, ("", 9))] in
-      print_endline ("(size 2 stride 6) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 2 stride 6) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size_2_stride_7" =
@@ -1952,7 +1825,7 @@ let%test_module "RIC tests" = (module struct
                       ric(7, Int 0, Int 1, ("", 7));
                       ric(7, Int 0, Int 1, ("", 8));
                       ric(7, Int 0, Int 1, ("", 9))] in
-      print_endline ("(size 2 stride 7) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 2 stride 7) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size_3_stride_2" =
@@ -1960,7 +1833,7 @@ let%test_module "RIC tests" = (module struct
       let p_accessed = partially_accessed ~by:r ~size:3 in
       let expected = [ric(2, Int 0, Int 3, ("", 5));
                       ric(2, Int 0, Int 3, ("", 6))] in
-      print_endline ("(size 3 stride 2) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 3 stride 2) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size_2_stride_2" =
@@ -1968,7 +1841,7 @@ let%test_module "RIC tests" = (module struct
       let p_accessed = partially_accessed ~by:r ~size:2 in
       let expected = [ric(2, Int 0, Int 2, ("", 6));
                       ric(2, Int 0, Int 3, ("", 5))] in
-      print_endline ("(size 2 stride 2) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 2 stride 2) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size_4_stride_2" =
@@ -1976,7 +1849,7 @@ let%test_module "RIC tests" = (module struct
       let p_accessed = partially_accessed ~by:r ~size:4 in
       let expected = [ric(2, Int 0, Int 3, ("", 6));
                       ric(2, Int 0, Int 4, ("", 5))] in
-      print_endline ("(size 4 stride 2) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 4 stride 2) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size_1_stride_2" =
@@ -1984,7 +1857,7 @@ let%test_module "RIC tests" = (module struct
       let p_accessed = partially_accessed ~by:r ~size:1 in
       let expected = [ric(2, Int 0, Int 2, ("", 5));
                       ric(2, Int 0, Int 2, ("", 6))] in
-      print_endline ("(size 1 stride 2) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 1 stride 2) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size4_bigger_than_stride3" =
@@ -1993,7 +1866,7 @@ let%test_module "RIC tests" = (module struct
       let expected = [ric(3, Int 0, Int 2, ("", 6));
                       ric(3, Int 0, Int 2, ("", 7));
                       ric(3, Int 0, Int 3, ("", 5))] in
-      print_endline ("(size 4 stride 3) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 4 stride 3) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size4_bigger_than_stride2" =
@@ -2001,21 +1874,21 @@ let%test_module "RIC tests" = (module struct
       let p_accessed = partially_accessed ~by:r ~size:4 in
       let expected = [ric(2, Int 0, Int 4, ("", 6));
                       ric(2, Int 0, Int 5, ("", 5))] in
-      print_endline ("(size 4 stride 2) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 4 stride 2) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_Top_size_2" =
       let r = Top in
       let p_accessed = partially_accessed ~by:r ~size:2 in
       let expected = [Top] in
-      print_endline ("(size 2) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 2) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_Top_size_4" =
       let r = Top in
       let p_accessed = partially_accessed ~by:r ~size:4 in
       let expected = [] in
-      print_endline ("(size 4) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 4) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size_4_stride_4" =
@@ -2024,7 +1897,7 @@ let%test_module "RIC tests" = (module struct
       let expected = [ric(4, Int 0, Int 2, ("", 5));
                       ric(4, Int 0, Int 2, ("", 6));
                       ric(4, Int 0, Int 2, ("", 7))] in
-      print_endline ("(size 4 stride 4) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 4 stride 4) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_RIC_size_4_stride_5" =
@@ -2034,7 +1907,7 @@ let%test_module "RIC tests" = (module struct
                       ric(5, Int 0, Int 1, ("", 9));
                       ric(5, Int 0, Int 2, ("", 5));
                       ric(5, Int 0, Int 2, ("", 6))] in
-      print_endline ("(size 4 stride 5) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 4 stride 5) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
 
@@ -2044,7 +1917,7 @@ let%test_module "RIC tests" = (module struct
       let expected = [ric(4, Int 0, Infinity, ("a", 7));
                       ric(4, Int 0, Infinity, ("a", 8));
                       ric(4, Int 0, Infinity, ("a", 9))] in
-      print_endline ("(size 4 stride 4 +inf) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 4 stride 4 +inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_4[10,inf[_size_5" =
@@ -2054,7 +1927,7 @@ let%test_module "RIC tests" = (module struct
                       ric(4, Int 0, Infinity, ("a", 8));
                       ric(4, Int 0, Infinity, ("a", 9));
                       ric(4, Int 0, Infinity, ("a", 10))] in
-      print_endline ("(size 5 stride 4 +inf) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 5 stride 4 +inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
 
@@ -2065,7 +1938,7 @@ let%test_module "RIC tests" = (module struct
                       ric(4, Int 0, Infinity, ("a", 8));
                       ric(4, Int 0, Infinity, ("a", 9));
                       ric(4, Int 0, Infinity, ("a", 10))] in
-      print_endline ("(size 3 stride 4 +inf) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 3 stride 4 +inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
 
@@ -2076,7 +1949,7 @@ let%test_module "RIC tests" = (module struct
                       ric(7, Int 0, Infinity, ("a", 8));
                       ric(7, Int 0, Infinity, ("a", 9));
                       ric(7, Int 0, Infinity, ("a", 10))] in
-      print_endline ("(size 1 stride 7  +inf) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 1 stride 7  +inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
 
@@ -2088,7 +1961,7 @@ let%test_module "RIC tests" = (module struct
                       ric(7, Int 0, Infinity, ("a", 9));
                       ric(7, Int 0, Infinity, ("a", 10));
                       ric(7, Int 0, Infinity, ("a", 11))] in
-      print_endline ("(size 2 stride 7  +inf) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 2 stride 7  +inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_4[10,inf[_size_4" =
@@ -2100,7 +1973,7 @@ let%test_module "RIC tests" = (module struct
                       ric(7, Int 0, Infinity, ("a", 11));
                       ric(7, Int 0, Infinity, ("a", 12));
                       ric(7, Int 0, Infinity, ("a", 13))] in
-      print_endline ("(size 4 stride 7  +inf) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 4 stride 7  +inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_4]-inf,0]_size_4" =
@@ -2109,7 +1982,7 @@ let%test_module "RIC tests" = (module struct
       let expected = [ric(4, NegInfinity, Int 0, ("a", 1));
                       ric(4, NegInfinity, Int 0, ("a", 2));
                       ric(4, NegInfinity, Int 0, ("a", 3))] in
-      print_endline ("(size 4 stride 4 -inf) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 4 stride 4 -inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_4]-inf,0]_size_5" =
@@ -2119,7 +1992,7 @@ let%test_module "RIC tests" = (module struct
                       ric(4, NegInfinity, Int 0, ("a", 2));
                       ric(4, NegInfinity, Int 0, ("a", 3));
                       ric(4, NegInfinity, Int 0, ("a", 4))] in
-      print_endline ("(size 5 stride 4 -inf) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 5 stride 4 -inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       (* print_endline (String.concat ~sep:"; " (List.map expected ~f:to_string)); *)
       List.equal RIC.equal p_accessed expected
 
@@ -2130,7 +2003,7 @@ let%test_module "RIC tests" = (module struct
                       ric(4, NegInfinity, Int 0, ("a", 3));
                       ric(4, NegInfinity, Int 0, ("a", 4));
                       ric(4, NegInfinity, Int 0, ("a", 5))] in
-      print_endline ("(size 6 stride 4 -inf) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 6 stride 4 -inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
 
@@ -2141,7 +2014,7 @@ let%test_module "RIC tests" = (module struct
                       ric(4, NegInfinity, Int 0, ("a", 0));
                       ric(4, NegInfinity, Int 0, ("a", 1));
                       ric(4, NegInfinity, Int 0, ("a", 2))] in
-      print_endline ("(size 3 stride 4 -inf) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 3 stride 4 -inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
 
@@ -2152,7 +2025,7 @@ let%test_module "RIC tests" = (module struct
                       ric(7, NegInfinity, Int 0, ("a", -2));
                       ric(7, NegInfinity, Int 0, ("a", -1));
                       ric(7, NegInfinity, Int 0, ("a", 0))] in
-      print_endline ("(size 1 stride 7  -inf) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 1 stride 7  -inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
 
@@ -2164,7 +2037,7 @@ let%test_module "RIC tests" = (module struct
                       ric(7,NegInfinity, Int 0, ("a", -1));
                       ric(7,NegInfinity, Int 0, ("a", 0));
                       ric(7,NegInfinity, Int 0, ("a", 1))] in
-      print_endline ("(size 2 stride 7  -inf) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 2 stride 7  -inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
     let%test "partially_accessed_by_4]-inf,0]_size_4" =
@@ -2176,16 +2049,15 @@ let%test_module "RIC tests" = (module struct
                       ric(7, NegInfinity, Int 0, ("a", 1));
                       ric(7, NegInfinity, Int 0, ("a", 2));
                       ric(7, NegInfinity, Int 0, ("a", 3))] in
-      print_endline ("(size 4 stride 7  -inf) partially_accessed of " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
+      print_endline ("[(size 4 stride 7  -inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
-    (* ----------- Additional RIC.plus tests ----------- *)
     let%test "RIC.plus: absolute + absolute" =
       let r1 = ric (4, Int 0, Int 2, ("", 1)) in
       let r2 = ric (2, Int 1, Int 3, ("", 3)) in
       let result = plus r1 r2 in
       let expected = ric (2, Int 1, Int 7, ("", 4)) in
-      print_endline ("(" ^ to_string r1 ^ ") ⊕ (" ^ to_string r2 ^ ") = " ^ to_string result);
+      print_endline ("[RIC.plus]     (" ^ to_string r1 ^ ") ⊕ (" ^ to_string r2 ^ ") = " ^ to_string result);
       RIC.equal result expected
 
     let%test "RIC.plus: relative + relative same var" =
@@ -2193,7 +2065,7 @@ let%test_module "RIC tests" = (module struct
       let r2 = ric (6, Int 1, Int 3, ("x", 1)) in
       let result = plus r1 r2 in
       let expected = ric (3, Int 0, Int 6, ("x+x", 11)) in
-      print_endline ("(" ^ to_string r1 ^ ") ⊕ (" ^ to_string r2 ^ ") = " ^ to_string result);
+      print_endline ("[RIC.plus]     (" ^ to_string r1 ^ ") ⊕ (" ^ to_string r2 ^ ") = " ^ to_string result);
       RIC.equal result expected
 
     let%test "RIC.plus: absolute + relative" =
@@ -2201,7 +2073,7 @@ let%test_module "RIC tests" = (module struct
       let r2 = ric (2, Int 1, Int 2, ("x", 4)) in
       let result = plus r1 r2 in
       let expected = ric(1, Int 0, Int 8, ("x",7)) in 
-      print_endline ("(" ^ to_string r1 ^ ") ⊕ (" ^ to_string r2 ^ ") = " ^ to_string result);
+      print_endline ("[RIC.plus]     (" ^ to_string r1 ^ ") ⊕ (" ^ to_string r2 ^ ") = " ^ to_string result);
       RIC.equal result expected
 
     let%test "RIC.plus: relative + relative different vars" =
@@ -2209,19 +2081,19 @@ let%test_module "RIC tests" = (module struct
       let r2 = ric (2, Int 1, Int 3, ("y", 2)) in
       let result = plus r1 r2 in
       let expected = ric (1, Int 0, Int 10, ("x+y", 5)) in 
-      print_endline ("(" ^ to_string r1 ^ ") ⊕ (" ^ to_string r2 ^ ") = " ^ to_string result);
+      print_endline ("[RIC.plus]     (" ^ to_string r1 ^ ") ⊕ (" ^ to_string r2 ^ ") = " ^ to_string result);
       RIC.equal result expected
 
     let%test "RIC.plus: Top + anything = Top" =
       let r = ric (3, Int 0, Int 2, ("", 4)) in
       let result = plus Top r in
-      print_endline ("⊤ ⊕ " ^ to_string r ^ " = " ^ to_string result);
+      print_endline ("[RIC.plus]     ⊤ ⊕ " ^ to_string r ^ " = " ^ to_string result);
       RIC.equal result Top
 
     let%test "RIC.plus: Bottom + anything = anything" =
       let r = ric (3, Int 0, Int 2, ("", 4)) in
       let result = plus Bottom r in
-      print_endline ("⊥ ⊕ " ^ to_string r ^ " = " ^ to_string result);
+      print_endline ("[RIC.plus]     ⊥ ⊕ " ^ to_string r ^ " = " ^ to_string result);
       RIC.equal result r
 
     let%test "RIC.plus: singleton + singleton" =
@@ -2229,7 +2101,7 @@ let%test_module "RIC tests" = (module struct
       let r2 = ric (0, Int 0, Int 0, ("", 3)) in
       let result = plus r1 r2 in
       let expected = ric (0, Int 0, Int 0, ("", 10)) in
-      print_endline ("(7) ⊕ (3) = " ^ to_string result);
+      print_endline ("[RIC.plus]     (7) ⊕ (3) = " ^ to_string result);
       RIC.equal result expected
 
     let%test "RIC.plus: stride propagation with normalization" =
@@ -2237,7 +2109,7 @@ let%test_module "RIC tests" = (module struct
       let r2 = ric (2, Int 0, Int 1, ("", 2)) in
       let result = plus r1 r2 in
       let expected = ric (2, Int 0, Int 3, ("", 6)) in
-      print_endline ("(4[1,2]) ⊕ (2[0,1]+2) = " ^ to_string result);
+      print_endline ("[RIC.plus]     (4[1,2]) ⊕ (2[0,1]+2) = " ^ to_string result);
       RIC.equal result expected
 
     let%test "RIC.plus: relative + relative same variable string" =
@@ -2245,17 +2117,17 @@ let%test_module "RIC tests" = (module struct
       let r2 = ric (2, Int 0, Int 1, ("x", 2)) in
       let result = plus r1 r2 in
       let expected = ric (2, Int 0, Int 3, ("x+x", 6)) in
-      print_endline ("(4[1,2]+x) ⊕ (2[0,1]+(x+2)) = " ^ to_string result);
+      print_endline ("[RIC.plus]     (4[1,2]+x) ⊕ (2[0,1]+(x+2)) = " ^ to_string result);
       RIC.equal result expected
 
     let%test "RIC.plus: one Top one Bottom = Top" =
       let result = plus Top Bottom in
-      print_endline ("⊤ ⊕ ⊥ = " ^ to_string result);
+      print_endline ("[RIC.plus]     ⊤ ⊕ ⊥ = " ^ to_string result);
       RIC.equal result Top
 
     let%test "RIC.plus: both Top = Top" =
       let result = plus Top Top in
-      print_endline ("⊤ ⊕ ⊤ = " ^ to_string result);
+      print_endline ("[RIC.plus]     ⊤ ⊕ ⊤ = " ^ to_string result);
       RIC.equal result Top
 
     let%test "RIC.plus: infinite boundary 1" =
@@ -2263,86 +2135,84 @@ let%test_module "RIC tests" = (module struct
       let r2 = ric (6, Int 0, Int 2, ("", 2)) in
       let result = plus r1 r2 in
       let expected = ric (2, Int 0, Infinity, ("", 5)) in
-      print_endline ("(" ^ to_string r1 ^ ") ⊕ (" ^ to_string r2 ^ ") = " ^ to_string result);
+      print_endline ("[RIC.plus]     (" ^ to_string r1 ^ ") ⊕ (" ^ to_string r2 ^ ") = " ^ to_string result);
       RIC.equal result expected
 
-
-    (* Tests for set difference *)
     let%test "remove_top_from_top" =
       let ric1 = Top in
       let ric2 = Top in
       let result = remove ~this:ric1 ~from:ric2 in
-      print_endline ("remove: " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      print_endline ("[RIC.remove]     " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result []
 
     let%test "remove_bottom_from_top" =
       let ric1 = Bottom in
       let ric2 = Top in
       let result = remove ~this:ric1 ~from:ric2 in
-      print_endline ("remove: " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      print_endline ("[RIC.remove]     " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result [Top]
 
     let%test "remove_top_from_bottom" =
       let ric1 = Top in
       let ric2 = Bottom in
       let result = remove ~this:ric1 ~from:ric2 in
-      print_endline ("remove: " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      print_endline ("[RIC.remove]     " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result []
 
     let%test "remove_bottom_from_bottom" =
       let ric1 = Bottom in
       let ric2 = Bottom in
       let result = remove ~this:ric1 ~from:ric2 in
-      print_endline ("remove: " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      print_endline ("[RIC.remove]     " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result []
 
     let%test "remove_singleton_from_itself" =
       let ric1 = ric (0, Int 0, Int 0, ("", 5)) in
       let ric2 = ric1 in
       let result = remove ~this:ric1 ~from:ric2 in
-      print_endline ("remove: " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      print_endline ("[RIC.remove]     " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result []
 
     let%test "remove_singleton_not_in" =
       let ric1 = ric (0, Int 0, Int 0, ("", 9)) in
       let ric2 = ric (2, Int 0, Int 3, ("", 1)) in
       let result = remove ~this:ric1 ~from:ric2 in
-      print_endline ("remove: " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      print_endline ("[RIC.remove]     " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result [ric2]
 
     let%test "remove_partial_overlap" =
       let ric1 = ric (2, Int 0, Int 2, ("", 1)) in
       let ric2 = ric (2, Int 0, Int 4, ("", 1)) in
       let result = remove ~this:ric1 ~from:ric2 in
-      print_endline ("remove: " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      print_endline ("[RIC.remove]     " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result [ric (2, Int 3, Int 4, ("", 1))]
 
     let%test "remove_entire_range" =
       let ric1 = ric (2, Int 0, Int 4, ("", 1)) in
       let ric2 = ric1 in
       let result = remove ~this:ric1 ~from:ric2 in
-      print_endline ("remove: " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      print_endline ("[RIC.remove]     " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result []
 
     let%test "remove_smaller_range" =
       let ric1 = ric (2, Int 0, Int 2, ("", 1)) in
       let ric2 = ric (2, Int 0, Int 4, ("", 1)) in
       let result = remove ~this:ric1 ~from:ric2 in
-      print_endline ("remove: " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      print_endline ("[RIC.remove]     " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result [ric (2, Int 3, Int 4, ("", 1))]
 
     let%test "remove_different_relative_offsets" =
       let ric1 = ric (2, Int 0, Int 2, ("", 2)) in
       let ric2 = ric (2, Int 0, Int 4, ("x", 1)) in
       let result = remove ~this:ric1 ~from:ric2 in
-      print_endline ("remove: " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      print_endline ("[RIC.remove]     " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result []
 
     let%test "remove_with_relative_offsets" =
       let ric1 = ric (3, Int 1, Int 2, ("x", 1)) in
       let ric2 = ric (3, Int 0, Int 4, ("x", 1)) in
       let result = remove ~this:ric1 ~from:ric2 in
-      print_endline ("remove: " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      print_endline ("[RIC.remove]     " ^ to_string ric2 ^ " \\ " ^ to_string ric1 ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result [ric (3, Int 0, Int 0, ("x", 1)); ric (3, Int 3, Int 4, ("x", 1))]
 
     let%test "remove_full_complement_overlap" =
@@ -2350,7 +2220,7 @@ let%test_module "RIC tests" = (module struct
       let from = ric (1, Int 0, Int 6, ("", 1)) in
       let result = remove ~this ~from in
       let expected = [ric (2, Int 0, Int 2, ("", 2)); ric (0, Int 0, Int 0, ("", 7))] in
-      print_endline ("remove: " ^ to_string from ^ " \\ " ^ to_string this ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      print_endline ("[RIC.remove]     " ^ to_string from ^ " \\ " ^ to_string this ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result expected
 
     let%test "remove {2,4} from {0,2,4,6,8}" =
@@ -2358,10 +2228,8 @@ let%test_module "RIC tests" = (module struct
       let from = ric(2, Int 0, Int 4, ("", 0)) in
       let result = remove ~this ~from in
       let expected = [ric(0,Int 0, Int 0, ("", 0)); ric (2, Int 0, Int 1, ("", 6))] in
-      print_endline ("remove: " ^ to_string from ^ " \\ " ^ to_string this ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+      print_endline ("[RIC.remove]     " ^ to_string from ^ " \\ " ^ to_string this ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result expected
-
-
   end)
 end)
 

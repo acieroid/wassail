@@ -29,6 +29,14 @@ module T = struct
     | Var v -> Var.to_string v
     | Mem ric -> "mem[" ^ RIC.to_string ric ^ "]"
 
+  let mem (ric : int * ExtendedInt.t * ExtendedInt.t * (string * int)) : t =
+    Mem (RIC.ric ric)
+
+  let is_linear_memory (v : t) : bool =
+    match v with
+    | Var _ -> false
+    | Mem _ -> true
+
   let list_to_string (vars : t list) : string = String.concat ~sep:", " (List.map vars ~f:to_string)
 
   let is_infinite (v : t) : bool =
@@ -41,14 +49,21 @@ module T = struct
 
   let is_finite (var : t) : bool = not (is_infinite var)
 
+  let is_singleton (var : t) : bool =
+    match var with
+    | Mem RIC {lower_bound = l; upper_bound = u; _} when not (ExtendedInt.equal l u) -> false
+    | _ -> true
+
+
   let rec to_singletons (var : t) : t list =
     assert (is_finite var);
     match var with
     | Var _ -> [var]
     | Mem Bottom -> []
+    | Mem _ when is_singleton var -> [var]
     | Mem RIC {stride = s; lower_bound = Int l; upper_bound = u; offset = (v, o)} ->
-      let new_singleton = Mem (RIC.ric (0, Int 0, Int 0, (v, s * l + o))) in
-      let leftovers = Mem (RIC.ric (s, Int (l + s), u, (v, o))) in
+      let new_singleton = mem (0, Int 0, Int 0, (v, s * l + o)) in
+      let leftovers = mem (s, Int (l + 1), u, (v, o)) in
       new_singleton :: to_singletons leftovers
     | _ -> assert false
 
@@ -140,3 +155,68 @@ end
         T:::::::::T      E::::::::::::::::::::ES:::::::::::::::SS       T:::::::::T      S:::::::::::::::SS 
         TTTTTTTTTTT      EEEEEEEEEEEEEEEEEEEEEE SSSSSSSSSSSSSSS         TTTTTTTTTTT       SSSSSSSSSSSSSSS 
 *)
+
+let%test_module "Variable tests" = (module struct
+  let mem addr lo hi offset =
+    mem (addr, Int lo, Int hi, offset)
+
+  let%test "Tests on variable module" =
+    print_endline "_______ _______________ _______\n        Variable module        \n------- --------------- -------\n";
+    true
+
+  let%test "to_singletons simple" =
+    let v = mem 0 0 0 ("stack", 0) in
+    let result = to_singletons v in
+    print_endline ("[Variable.to_singletons]     " ^ to_string v ^ " -> " ^ String.concat ~sep:", " (List.map ~f:to_string result));
+    List.length result = 1
+
+  let%test "to_singletons multiple" =
+    let v = mem 1 0 4 ("stack", 0) in
+    let result = to_singletons v in
+    print_endline ("[Variable.to_singletons]     " ^ to_string v ^ " -> " ^ String.concat ~sep:", " (List.map ~f:to_string result));
+    List.length result = 5
+
+  let%test "share_addresses yes" =
+    let v1 = mem 1 0 4 ("", 0) in
+    let v2 = mem 1 2 6 ("", 0) in
+    let result = share_addresses v1 v2 in
+    print_endline ("[Variable.share_addresses]     " ^ to_string v1 ^ ", " ^ to_string v2 ^ " -> " ^ Bool.to_string result);
+    result
+
+  let%test "share_addresses no" =
+    let v1 = mem 2 0 4 ("", 0) in
+    let v2 = mem 2 0 4 ("", 1) in
+    let result = share_addresses v1 v2 in
+    print_endline ("[Variable.share_addresses]     " ^ to_string v1 ^ ", " ^ to_string v2 ^ " -> " ^ Bool.to_string result);
+    not result
+
+  let%test "remove full overlap" =
+    let from = mem 1 0 4 ("", 0) in
+    let these = RIC.ric (1, Int (-1), Int 6, ("", 0)) in
+    let result = remove ~these_addresses:these ~from in
+    print_endline ("[Variable.remove]     these:" ^ RIC.to_string these ^ " from:" ^ to_string from ^ " -> [" ^ String.concat ~sep:", " (List.map ~f:to_string result) ^ "]");
+    List.equal equal result []
+
+  let%test "remove no overlap" =
+    let from = mem 1 0 4 ("", 0) in
+    let these = RIC.ric (1, Int 5, Int 8, ("", 0)) in
+    let result = remove ~these_addresses:these ~from in
+    print_endline ("[Variable.remove]     these:" ^ RIC.to_string these ^ " from:" ^ to_string from ^ " -> [" ^ String.concat ~sep:", " (List.map ~f:to_string result) ^ "]");
+    List.length result = 5
+
+  let%test "is_covered fully" =
+    let target = mem 1 0 2 ("", 0) in
+    let cover1 = mem 1 0 1 ("", 0) in
+    let cover2 = mem 1 2 3 ("", 0) in
+    let result = is_covered ~by:[cover1; cover2] target in
+    print_endline ("[Variable.is_covered]     " ^ to_string target ^ " by:[" ^ List.to_string ~f:to_string [cover1; cover2] ^ "] -> " ^ Bool.to_string result);
+    result
+
+  let%test "is_covered partially" =
+    let target = mem 1 0 2 ("", 0) in
+    let cover1 = mem 1 0 0 ("", 0) in
+    let cover2 = mem 1 2 3 ("", 20) in
+    let result = is_covered ~by:[cover1] target in
+    print_endline ("[Variable.is_covered]     " ^ to_string target ^ " by:[" ^ List.to_string ~f:to_string [cover1; cover2] ^ "] -> " ^ Bool.to_string result);
+    not result
+end)
