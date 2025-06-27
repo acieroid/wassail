@@ -37,6 +37,11 @@ module T = struct
     | Var _ -> false
     | Mem _ -> true
 
+  let get_relative_offset (v : t) : string =
+    match v with
+    | Mem RIC {offset = (offset, _); _} -> offset
+    | _ -> ""
+
   let list_to_string (vars : t list) : string = String.concat ~sep:", " (List.map vars ~f:to_string)
 
   let is_infinite (v : t) : bool =
@@ -90,6 +95,10 @@ module T = struct
 
     | _ -> failwith "not implemented yet"
 
+  let comparable_offsets (v1 : t) (v2 : t) : bool =
+    match v1, v2 with
+    | Mem addr1, Mem addr2 -> RIC.comparable_offsets addr1 addr2
+    | _ -> true
 
   (* TODO: Test this function *)
   let is_covered ~(by : t list) (v : t) : bool =

@@ -45,7 +45,6 @@ let bottom (cfg : 'a Cfg.t) (vars : Var.Set.t) : t =
   print_endline ("initial globals: " ^ (List.to_string ~f:Reduced_interval_congruence.RIC.to_string globals)); *)
   (* let globals = List.map cfg.global_types ~f:(fun _ -> Reduced_interval_congruence.RIC.Bottom) in *)
   let globals = List.map (Var.Set.to_list vars) ~f:(fun g -> Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, (Var.to_string g, 0))) in
-  print_endline ("globals: " ^ List.to_string ~f:(Reduced_interval_congruence.RIC.to_string) globals);
   let ret = match cfg.return_types with
       | [] -> None
       | _ :: [] -> Some Reduced_interval_congruence.RIC.Bottom
@@ -90,11 +89,9 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
     { globals; ret; mem = Abstract_store_domain.top }
 
 let initial_summaries (cfgs : 'a Cfg.t Int32Map.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t Int32Map.t =
-  print_endline "initial summaries?";
   List.fold_left module_.imported_funcs
     ~init:(Int32Map.map cfgs ~f:(fun cfg ->
         let globals = Var.Set.of_list (List.init (List.length cfg.global_types) ~f:(fun i -> Var.Global i)) in
-        print_endline "initializing!";
         (match typ with
          | `Bottom -> bottom
          | `Top -> top) cfg globals))

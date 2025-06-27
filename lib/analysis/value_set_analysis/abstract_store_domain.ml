@@ -37,7 +37,7 @@ let get (store : t) ~(var : Variable.t) : Reduced_interval_congruence.RIC.t =
     | None ->
       match var with
       | Var Const I32 n -> Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, ("", Option.value_exn (Int32.to_int n)))
-      | Var Const _ -> Reduced_interval_congruence.RIC.Bottom
+      | Var Const _ -> Reduced_interval_congruence.RIC.Top
       | Var _ -> Reduced_interval_congruence.RIC.relative_ric (Variable.to_string var)
       | Mem _ ->
         let mems = extract_memory_variables store in
@@ -47,8 +47,10 @@ let get (store : t) ~(var : Variable.t) : Reduced_interval_congruence.RIC.t =
             ~f:(fun acc m -> 
               if Variable.share_addresses m var then
                 RIC.join acc (Option.value_exn (Variable.Map.find store m))
+              else if Variable.comparable_offsets m var then
+                acc
               else
-                acc)
+                RIC.Top)
             mems
         else
           RIC.Top
@@ -173,6 +175,13 @@ let to_bottom_RIC (store : t) (var : Variable.t) : t =
 let to_bottom_RICs (store : t) (vars : Variable.Set.t) : t =
   Variable.Set.fold vars ~init:store ~f:to_bottom_RIC
 
+let filter_relative_offsets (store : t) (rel_offset : string) : t =
+  Variable.Map.filteri store
+    ~f:(fun ~key:var ~data:vs ->
+      match var, vs with
+      | Mem RIC {offset = (v, _); _}, _ -> String.equal v rel_offset
+      | _ -> true)
+
 (** [set store ~var ~vs] updates [var] in [store] to [vs]. Fails if [var] overlaps with existing memory vars. *)
 let set (store : t) ~(var : Variable.t) ~(vs : Reduced_interval_congruence.RIC.t) : t =
   let is_valid =
@@ -186,6 +195,11 @@ let set (store : t) ~(var : Variable.t) ~(vs : Reduced_interval_congruence.RIC.t
   if not is_valid then
     failwith "error: trying to update a memory variable that overlaps with other memory variables"
   else
+    let store = if Variable.is_linear_memory var then
+      filter_relative_offsets store (Variable.get_relative_offset var)
+    else
+      store 
+    in
     Variable.Map.set store ~key:var ~data:vs
 
 (** [truncate_memory_var store ~var ~accessed_addresses] removes accessed addresses from [var]'s region. 
@@ -550,4 +564,20 @@ let%test_module "abstract store tests" = (module struct
     print_endline ("\tstore2: " ^ to_string store2);
     print_endline ("\tjoined: " ^ to_string joined);
     RIC.equal RIC.Top (get joined ~var:mem2)
+
+  let%test "set: update Mem[(\"b\" + 0)] in presence of Mem[(\"a\" + 0)]" =
+    let var_a = Variable.mem (0, Int 0, Int 0, ("a", 0)) in
+    let var_b = Variable.mem (0, Int 0, Int 0, ("b", 0)) in
+    let vs_a = RIC.ric (1, Int 0, Int 2, ("a", 0)) in
+    let vs_b = RIC.ric (1, Int 0, Int 2, ("b", 0)) in
+    let store = Variable.Map.singleton var_a vs_a in
+    let updated_store = set store ~var:var_b ~vs:vs_b in
+    print_endline "[set: different symbolic offsets]";
+    print_endline ("\tinitial store: " ^ to_string store);
+    print_endline ("\tupdating value-set of variable " ^ Variable.to_string var_b);
+    print_endline ("\tupdated store: " ^ to_string updated_store);
+    print_endline (RIC.to_string (get updated_store ~var:var_a));
+    Variable.Map.length updated_store = 1 &&
+    RIC.equal (get updated_store ~var:var_a) RIC.Top &&
+    RIC.equal (get updated_store ~var:var_b) vs_b
 end)
