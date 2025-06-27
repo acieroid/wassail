@@ -4,10 +4,11 @@
 
   (func $main (export "main") (param $l0 i32) (result i32) (local $l1 i32)
     i32.const 42
-    local.set $l0
-    local.get $l0
+    local.tee $l0
     global.get $g0
     i32.sub
+    global.get $g0
+    i32.add
     return
   )
 )

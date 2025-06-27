@@ -11,8 +11,10 @@ module Make (*: Transfer.TRANSFER *) = struct
   type state = Abstract_store_domain.t
   [@@deriving sexp, compare, equal]
 
+  (** [value_set_specification] holds the (currently unused) specification for the value-set analysis. *)
   let value_set_specification = ()
 
+  (** [init_state cfg] initializes the abstract state using the function argument and global variables from [cfg]. *)
   let init_state (cfg : 'a Cfg.t) : state =
     Variable.Map.of_alist_exn (
       (List.mapi cfg.arg_types ~f:(fun i _ -> 
@@ -24,16 +26,21 @@ module Make (*: Transfer.TRANSFER *) = struct
         let var_name = Var.to_string variable in
         (Variable.Var variable, RIC.ric (0, Int 0, Int 0, (var_name, 0))))))
 
+  (** [bottom_state cfg] returns the bottom abstract state. *)
   let bottom_state (_cfg : 'a Cfg.t) : state = Abstract_store_domain.bottom
 
+  (** [state_to_string s] converts an abstract state [s] to its string representation. *)
   let state_to_string (s : state) : string = Abstract_store_domain.to_string s
 
+  (** [join_state s1 s2] joins two abstract states [s1] and [s2]. *)
   let join_state (s1 : state) (s2 : state) : state = Abstract_store_domain.join s1 s2
 
+  (** [join_loop_head s1 s2] joins two abstract states at the head of a loop. *)
   let join_loop_head (s1 : state) (s2 : state) : state = Abstract_store_domain.join_loop_head s1 s2
 
+  (** [widen_state s1 s2] performs widening between abstract states [s1] and [s2]. *)
   let widen_state (s1 : state) (s2 : state) : state = 
-    print_endline "\tWIDENING IS NEEDED:";
+    print_endline "\twidening:";
     print_endline ("\t\tstate1: " ^ Abstract_store_domain.to_string s1);
     print_endline ("\t\tstate2: " ^ Abstract_store_domain.to_string s2);
     let widened_state = Abstract_store_domain.widen s1 s2 in
@@ -42,6 +49,7 @@ module Make (*: Transfer.TRANSFER *) = struct
 
   type summary = Value_set_summary.t  (* probably won't be needed *)
 
+  (** [print_all_globals i] prints the first three global variables before instruction [i]. Used for debugging. *)
   let print_all_globals (i : annot_expected Instr.labelled_data) : unit = 
     let g0 = (Variable.Var (get_nth (Spec.get_or_fail i.annotation_before).globals (Int32.of_int_exn 0))) in
     let g1 = (Variable.Var (get_nth (Spec.get_or_fail i.annotation_before).globals (Int32.of_int_exn 1))) in
@@ -50,11 +58,13 @@ module Make (*: Transfer.TRANSFER *) = struct
     print_endline ("g1:" ^ Variable.to_string g1);
     print_endline ("g2:" ^ Variable.to_string g2)
 
+  (** [remove_temporary_variable state var] removes temporary variable [var] from [state] if applicable. *)
   let remove_temporary_variable (state : state) (var : Var.t) : state =
     match var with
     | Var _ | Merge _ -> Variable.Map.remove state (Variable.Var var)
     | _ -> state
 
+  (** [data_instr_transfer m cfg i state] performs the abstract transfer function for a data instruction [i] on [state]. *)
   let data_instr_transfer
       (_module_ : Wasm_module.t)
       (_cfg : annot_expected Cfg.t)
@@ -238,6 +248,7 @@ module Make (*: Transfer.TRANSFER *) = struct
     | Compare _ -> (* TODO: write this case *) state
     | Unary _ | Test _ | Convert _ -> (* TODO: write this case *) state
 
+  (** [control_instr_transfer m summaries cfg i state] performs the abstract transfer function for a control instruction [i]. *)
   let control_instr_transfer
       (_module_ : Wasm_module.t) (* The wasm module (read-only) *)
       (_summaries : summary Int32Map.t) (* Probably won't need this *)
@@ -261,6 +272,7 @@ module Make (*: Transfer.TRANSFER *) = struct
     | _ -> `Simple state
 
 
+  (** [get_predecessors cfg block] returns the list of predecessor blocks for [block] in [cfg]. *)
   let get_predecessors 
       (cfg : annot_expected Cfg.t) 
       (block : annot_expected Basic_block.t) 
@@ -269,6 +281,7 @@ module Make (*: Transfer.TRANSFER *) = struct
     List.filter ~f:(fun blk -> List.mem predecessors blk.idx ~equal:Int.equal) 
                          (Cfg.all_predecessors cfg block)
 
+  (** [get_previous_stacks cfg predecessors] returns the annotated stacks for a list of predecessor blocks. *)
   let get_previous_stacks
       (cfg : annot_expected Cfg.t)
       (predecessors : annot_expected Basic_block.t list)
@@ -286,12 +299,14 @@ module Make (*: Transfer.TRANSFER *) = struct
         | idx, NotBottom x -> idx, x.vstack)
       previous_annotations
 
+  (** [get_nth_state n states] returns the abstract state of block [n] from [states]. *)
   let rec get_nth_state (n : int) (states : (int * state) list) : state =
     match states with
     | [] -> Abstract_store_domain.bottom
     | (i, state) :: _ when i = n -> state
     | _ :: states -> get_nth_state n states
 
+  (** [get_previous_stack_value_sets cfg block states] collects and joins value-sets from the stack across predecessor blocks. *)
   let get_previous_stack_value_sets 
       (cfg : annot_expected Cfg.t) 
       (block : annot_expected Basic_block.t)  
@@ -314,6 +329,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       List.fold ~init:first_stack ~f:(fun acc x -> List.map2_exn ~f:RIC.join acc x) rest 
 
 
+  (** [merge_flows m cfg block states] merges incoming flows into [block], handling stack merging at control points. *)
   let merge_flows 
       (_module_ : Wasm_module.t) 
       (cfg : annot_expected Cfg.t) 
@@ -371,7 +387,7 @@ module Make (*: Transfer.TRANSFER *) = struct
     
 
 
-  (** [summary cfg out_state] computes a taint summary for a function based on its final state and annotations at the function exit. *)
+  (** [summary cfg out_state] computes the value-set summary for a function using its [cfg] and final [out_state]. *)
   let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
     let init_spec = (Spec_inference.init_state cfg) in
     match Cfg.state_after_block cfg cfg.exit_block init_spec with
@@ -388,7 +404,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         (* (List.concat_map (Var.OffsetMap.to_alist exit_spec.memory)
            ~f:(fun ((a, _), b) -> [a; b])) *)
 
-  (** [extract_summary cfg analyzed_cfg] extracts the taint summary from an analyzed control-flow graph. *)
+  (** [extract_summary cfg analyzed_cfg] extracts a value-set summary from the final result of the analysis. *)
   let extract_summary (cfg : annot_expected Cfg.t) (analyzed_cfg : state Cfg.t) : summary =
     let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block (init_state cfg) in
     summary cfg out_state
