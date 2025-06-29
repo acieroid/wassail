@@ -32,6 +32,8 @@ module T = struct
   let mem (ric : int * ExtendedInt.t * ExtendedInt.t * (string * int)) : t =
     Mem (RIC.ric ric)
 
+  let entire_memory = Mem RIC.Top
+
   let is_linear_memory (v : t) : bool =
     match v with
     | Var _ -> false

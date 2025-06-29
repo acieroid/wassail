@@ -24,7 +24,8 @@ module Make (*: Transfer.TRANSFER *) = struct
       (List.mapi cfg.global_types ~f:(fun i _ -> 
         let variable = Var.Global i in
         let var_name = Var.to_string variable in
-        (Variable.Var variable, RIC.ric (0, Int 0, Int 0, (var_name, 0))))))
+        (Variable.Var variable, RIC.ric (0, Int 0, Int 0, (var_name, 0))))) @
+      [(Variable.Mem RIC.Top), RIC.Top])
 
   (** [bottom_state cfg] returns the bottom abstract state. *)
   let bottom_state (_cfg : 'a Cfg.t) : state = Abstract_store_domain.bottom
@@ -36,7 +37,7 @@ module Make (*: Transfer.TRANSFER *) = struct
   let join_state (s1 : state) (s2 : state) : state = Abstract_store_domain.join s1 s2
 
   (** [join_loop_head s1 s2] joins two abstract states at the head of a loop. *)
-  let join_loop_head (s1 : state) (s2 : state) : state = Abstract_store_domain.join_loop_head s1 s2
+  (* let join_loop_head (s1 : state) (s2 : state) : state = Abstract_store_domain.join_loop_head s1 s2 *)
 
   (** [widen_state s1 s2] performs widening between abstract states [s1] and [s2]. *)
   let widen_state (s1 : state) (s2 : state) : state = 
@@ -83,9 +84,10 @@ module Make (*: Transfer.TRANSFER *) = struct
     | LocalGet l -> 
       let local_variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
       print_endline ("local.get " ^ (Int32.to_string l) ^ ":\t" ^ Variable.to_string local_variable);
-      Abstract_store_domain.copy_value_set state 
+      state
+      (* Abstract_store_domain.copy_value_set state 
         ~from:local_variable
-        ~to_:(ret i)
+        ~to_:(ret i) *)
     | LocalSet l ->
       print_endline ("local.set " ^ Int32.to_string l ^ ":");
       let variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
@@ -144,10 +146,11 @@ module Make (*: Transfer.TRANSFER *) = struct
         ~to_:(ret i)
     | GlobalGet g -> 
       let global_variable = Variable.Var (Var.Global (Int32.to_int_exn g)) in
-      print_endline ("Global.get " ^ (Int32.to_string g) ^ ":\t" ^ Variable.to_string global_variable);
-      Abstract_store_domain.copy_value_set state 
+      print_endline ("global.get " ^ (Int32.to_string g) ^ ":\t" ^ Variable.to_string global_variable);
+      state
+      (* Abstract_store_domain.copy_value_set state 
         ~from:global_variable 
-        ~to_:(ret i)
+        ~to_:(ret i) *)
     | GlobalSet g ->
       print_endline ("global.set " ^ Int32.to_string g);
       let variable = Variable.Var (Var.Global (Int32.to_int_exn g)) in
@@ -345,12 +348,12 @@ module Make (*: Transfer.TRANSFER *) = struct
       | Control { instr = Merge; _ } ->
         let states' = List.map ~f:(fun (_, s) -> s) states in
         (* Join all previous states: *)
-        let join_state =
+        (* let join_state =
           if IntSet.mem cfg.loop_heads block.idx then
             join_loop_head
           else
             join_state
-        in
+        in *)
         let new_state_without_merges = List.reduce_exn states' ~f:join_state in 
         let merged_annotation = (Cfg.state_before_block cfg block.idx (Spec_inference.init_state cfg)) in
         let merged_stack =

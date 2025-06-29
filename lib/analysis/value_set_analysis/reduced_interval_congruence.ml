@@ -504,26 +504,29 @@ module RIC = struct
   (** [partially_accessed ~by ~size] returns RICs that may be partially accessed by a memory access of [size] bytes. *)
   let partially_accessed ~(by : t) ~(size : int) : t list =
     let r = reduce by in
-    let rec aux (i : int) (acc : t list) : t list =
-      match i, r with
-      | _, Top -> [Top] 
-      | _, Bottom -> []
-      | i, RIC {stride = s; lower_bound = Int _; _} when i = if s = 0 then size else min size (s - 3) -> acc
-      | i, RIC {stride = s; lower_bound = NegInfinity; _} when i + 3 + size - 1 = max (-4) (size - s - 1)-> acc
-      | i, RIC {stride = s; lower_bound = Int l; upper_bound = Int u; offset = (v, o)} ->
-        aux (i + 1) (ric (s, Int l, (if s <> 0 then Int (l + ((u - l + 1) * s - i + size - 1) / s - 1) else Int 0), (v, o + i)) :: acc)
-      | i, RIC {upper_bound = Infinity; _} ->
-        aux (i + 1) (add_offset r i :: acc)
-      | i, RIC {lower_bound = NegInfinity; _} -> 
-        aux (i - 1) (add_offset r (i + 3 + size - 1) :: acc)
-      | _ -> assert false
-    in
-    let accessed = aux (-3) []
-    in
-    if size <> 4 || (not (is_singleton r)) && (match r with | RIC {stride = s; _} when s < 4 -> true | _ -> false) then
-      List.dedup_and_sort ~compare:compare accessed
+    if equal Top r then 
+      [Top]
     else
-      List.dedup_and_sort ~compare:compare (List.filter ~f:(fun x -> not (equal x r)) accessed)
+      let rec aux (i : int) (acc : t list) : t list =
+        match i, r with
+        | _, Top -> [Top] 
+        | _, Bottom -> []
+        | i, RIC {stride = s; lower_bound = Int _; _} when i = if s = 0 then size else min size (s - 3) -> acc
+        | i, RIC {stride = s; lower_bound = NegInfinity; _} when i + 3 + size - 1 = max (-4) (size - s - 1)-> acc
+        | i, RIC {stride = s; lower_bound = Int l; upper_bound = Int u; offset = (v, o)} ->
+          aux (i + 1) (ric (s, Int l, (if s <> 0 then Int (l + ((u - l + 1) * s - i + size - 1) / s - 1) else Int 0), (v, o + i)) :: acc)
+        | i, RIC {upper_bound = Infinity; _} ->
+          aux (i + 1) (add_offset r i :: acc)
+        | i, RIC {lower_bound = NegInfinity; _} -> 
+          aux (i - 1) (add_offset r (i + 3 + size - 1) :: acc)
+        | _ -> assert false
+      in
+      let accessed = aux (-3) []
+      in
+      if size <> 4 || (not (is_singleton r)) && (match r with | RIC {stride = s; _} when s < 4 -> true | _ -> false) then
+        List.dedup_and_sort ~compare:compare accessed
+      else
+        List.dedup_and_sort ~compare:compare (List.filter ~f:(fun x -> not (equal x r)) accessed)
 
   
   (** The result of a memory access: fully and partially accessed RICs. *)
@@ -1887,7 +1890,7 @@ let%test_module "RIC tests" = (module struct
     let%test "partially_accessed_by_Top_size_4" =
       let r = Top in
       let p_accessed = partially_accessed ~by:r ~size:4 in
-      let expected = [] in
+      let expected = [RIC.Top] in
       print_endline ("[(size 4) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
