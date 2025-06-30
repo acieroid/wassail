@@ -42,16 +42,6 @@ let taint_cfg =
         output_to_file file_out (Cfg.to_dot annotated_cfg ~annot_str:Taint.Domain.only_non_id_to_string))
 
 
-(* let relational_intra =
-  mk_intra "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)" Relational.analyze_intra
-    (fun fid summary ->
-       Printf.printf "function %ld: %s" fid (Relational.Summary.to_string summary))
-
-let reltaint_intra =
-  mk_intra "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)" Reltaint.analyze_intra
-    (fun fid summary ->
-       Printf.printf "function %ld: %s, %s" fid (Relational.Summary.to_string (fst summary)) (Taint.Summary.to_string (snd summary))) *)
-
 let mk_inter (desc : string) (analysis : Wasm_module.t -> Int32.t list list -> 'a Int32Map.t) (print : Int32.t -> 'a -> unit) =
   Command.basic
     ~summary:desc
@@ -66,47 +56,6 @@ let taint_inter =
   mk_inter "Performs inter analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target."
     Taint.analyze_inter
     (fun fid (_, _, summary) -> Printf.printf "function %ld: %s\n" fid (Taint.Summary.to_string summary))
-
-(*
-let taint_flow_from_exported_to_imported =
-  Command.basic
-    ~summary:"Detects unsafe flows from exported functions to imported functions"
-    Command.Let_syntax.(
-      let%map_open filename = anon ("file" %: string) in
-      fun () ->
-        let module_ = Wasm_module.of_file filename in
-        let _ = Taintcall.detect_flows_from_exported_to_imported module_ in
-        ())
-
-let taint_flow_from_sources_to_sinks =
-  Command.basic
-    ~summary:"Detects unsafe flows from a list of sources to a list of defined sinks"
-    Command.Let_syntax.(
-      let%map_open filename = anon ("file" %: string)
-      and source_names = anon ("sources" %: string_comma_separated_list)
-      and sink_names = anon ("sinks" %: string_comma_separated_list) in
-      fun () ->
-        let module_ = Wasm_module.of_file filename in
-        let _ = Taintcall.detect_flows_from_sources_to_sinks module_ (StringSet.of_list source_names) (StringSet.of_list sink_names) in
-        ())
-
-let taintcall_cfg =
-  Command.basic
-    ~summary:"Performs a inter-procedural taintcall analysis and displays the results for the given CFGs"
-    Command.Let_syntax.(
-      let%map_open filename = anon ("file" %: string)
-      and cfgs = anon ("cfgs" %: int32_comma_separated_list) in
-      fun () ->
-        let module_ = Wasm_module.of_file filename in
-        let cg = Call_graph.make module_ in
-        let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
-        let results = Taintcall.analyze_inter module_ schedule in
-        List.iter cfgs ~f:(fun idx ->
-            let (_, cfg, _) = Int32Map.find_exn results idx in
-            let file_out = Printf.sprintf "%ld.dot" idx in
-            Out_channel.with_file file_out
-              ~f:(fun ch ->
-                  Out_channel.output_string ch (Cfg.to_dot cfg ~annot_str:Taintcall.Domain.to_string)))) *)
 
 let find_indirect_calls =
   Command.basic
