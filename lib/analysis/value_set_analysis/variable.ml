@@ -39,6 +39,11 @@ module T = struct
     | Var _ -> false
     | Mem _ -> true
 
+  let get_address (var : t) : RIC.t =
+    match var with
+    | Var _ -> RIC.Bottom
+    | Mem address -> address
+
   let get_relative_offset (v : t) : string =
     match v with
     | Mem RIC {offset = (offset, _); _} -> offset

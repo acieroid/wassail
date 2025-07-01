@@ -12,9 +12,6 @@ open Reduced_interval_congruence
 type t = RIC.t Variable.Map.t
 [@@deriving sexp, compare, equal]
 
-(** [bottom] is the least informative abstract store, mapping no variables. *)
-let bottom : t = Variable.Map.empty
-
 (** [top] is a placeholder for the top store. Currently modeled as an empty map. *)
 let top : t = Variable.Map.empty (* TODO: better definition of TOP *)
 
@@ -32,7 +29,6 @@ let extract_memory_variables (store : t) : Variable.t list =
     - If uncovered, returns [RIC.Top].
 *)
 let get (store : t) ~(var : Variable.t) : Reduced_interval_congruence.RIC.t =
-  if equal store bottom then RIC.Bottom else
   match Variable.Map.find store var with
     | Some vs -> vs
     | None ->
@@ -172,11 +168,33 @@ let filter_relative_offsets (store : t) (rel_offset : string) : t =
       | Mem RIC {offset = (v, _); _}, _ -> String.equal v rel_offset
       | _ -> true)
 
+(** [truncate_memory_var store ~var ~accessed_addresses] removes accessed addresses from [var]'s region. 
+    The untouched portion is preserved in the store. *)
+let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : RIC.accessed) : t =
+  let vs = get store ~var:var in
+  let store = Variable.Map.remove store var in
+  (* if not (Variable.equal var Variable.entire_memory) then *)
+  let accessed = accessed_addresses.fully :: accessed_addresses.partially in
+  let untouched_addresses =
+    match var with
+    | Var _ -> assert false
+    | Mem addr ->
+      (List.fold ~init:[addr]
+                ~f:(fun acc x -> List.concat (List.map ~f:(fun y -> RIC.remove ~this:x ~from:y) acc))
+                accessed)
+  in
+  let untouched_variables = Variable.Set.of_list (List.map ~f:(fun x -> Variable.Mem x) untouched_addresses) in
+  update_all store untouched_variables vs
+  (* else *)
+    (* store *)
+
 (** [set store ~var ~vs] updates [var] in [store] to [vs]. Fails if [var] overlaps with existing memory vars. *)
 let set (store : t) ~(var : Variable.t) ~(vs : Reduced_interval_congruence.RIC.t) : t =
   let store = 
     if Variable.is_linear_memory var then 
-      Variable.Map.remove store Variable.entire_memory 
+        let store = make_compatible ~this_store:store ~relative_to:(Variable.Map.empty |> Variable.Map.set ~key:var ~data:vs) in
+        let store = Variable.Map.filter_keys ~f:(fun v -> not (Variable.share_addresses v var)) store in
+        Variable.Map.filter ~f:(fun value_set -> not (RIC.equal RIC.Top value_set)) store
     else 
       store
   in
@@ -198,6 +216,8 @@ let set (store : t) ~(var : Variable.t) ~(vs : Reduced_interval_congruence.RIC.t
     in
     Variable.Map.set store ~key:var ~data:vs
 
+(** [bottom] is the least informative abstract store, mapping no variables. *)
+let bottom : t = Variable.Map.empty  |> set ~var:Variable.entire_memory ~vs:RIC.Bottom
 
 let remove_pointers_to_top (store : t) : t =
   let store =
@@ -222,26 +242,6 @@ let join (store1 : t) (store2 : t) : t =
         (* match var with
         | Variable.Mem _ -> Some (RIC.join (get store1 ~var) (get store2 ~var)) (* Some RIC.Top*) (* absent values are considered to be TOP *)
         | _ -> Some x) *)
-
-(** [truncate_memory_var store ~var ~accessed_addresses] removes accessed addresses from [var]'s region. 
-    The untouched portion is preserved in the store. *)
-let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : RIC.accessed) : t =
-  let vs = get store ~var:var in
-  let store = Variable.Map.remove store var in
-  if not (Variable.equal var Variable.entire_memory) then
-    let accessed = accessed_addresses.fully :: accessed_addresses.partially in
-    let untouched_addresses =
-      match var with
-      | Var _ -> assert false
-      | Mem addr ->
-        (List.fold ~init:[addr]
-                  ~f:(fun acc x -> List.concat (List.map ~f:(fun y -> RIC.remove ~this:x ~from:y) acc))
-                  accessed)
-    in
-    let untouched_variables = Variable.Set.of_list (List.map ~f:(fun x -> Variable.Mem x) untouched_addresses) in
-    update_all store untouched_variables vs
-  else
-    store
 
 (** [update_accessed_vars store accessed_addresses] applies [truncate_memory_var] to all memory variables. *)
 let update_accessed_vars (store : t) (accessed_addresses : RIC.accessed) : t =
@@ -527,6 +527,15 @@ let%test_module "abstract store tests" = (module struct
     in
     equal expected updated
 
+  let%test "get: get memory var in bottom state" =
+    let var = Variable.mem (1, Int 0, Int 2, ("", 0)) in
+    let store = bottom
+    in
+    let result = get store ~var:var in
+    print_endline ("[get]\n\tinitial store: " ^ to_string store ^ "\n\tvariable to search for: " ^ Variable.to_string var
+      ^ "\n\textracted value-set: " ^ RIC.to_string result);
+    RIC.equal result RIC.Bottom
+
   let%test "get: variable not in store but covered by two others" =
     let var1 = Variable.mem (1, Int 0, Int 2, ("", 0)) in
     let var2 = Variable.mem (1, Int 3, Int 5, ("", 0)) in
@@ -564,8 +573,8 @@ let%test_module "abstract store tests" = (module struct
     let vs1 = RIC.ric (0, Int 0, Int 0, ("", 42)) in
     let m2 = Variable.Mem (RIC.ric (2, Int 0, Int 4, ("", 0))) in
     let vs2 = RIC.ric (0, Int 0, Int 0, ("", 36)) in
-    let store1 = set bottom ~var:m1 ~vs:vs1 in
-    let store2 = set bottom ~var:m2 ~vs:vs2 in
+    let store1 = set top ~var:m1 ~vs:vs1 in
+    let store2 = set top ~var:m2 ~vs:vs2 in
     print_endline "[make_compatible]";
     print_endline ("\tstore1: " ^ to_string store1);
     print_endline ("\tstore2: " ^ to_string store2);
@@ -603,8 +612,23 @@ let%test_module "abstract store tests" = (module struct
     print_endline ("\tinitial store: " ^ to_string store);
     print_endline ("\tupdating value-set of variable " ^ Variable.to_string var_b);
     print_endline ("\tupdated store: " ^ to_string updated_store);
-    print_endline (RIC.to_string (get updated_store ~var:var_a));
     Variable.Map.length updated_store = 1 &&
     RIC.equal (get updated_store ~var:var_a) RIC.Top &&
     RIC.equal (get updated_store ~var:var_b) vs_b
+
+  let%test "set: set memory variable in bottom state" =
+    let var = Variable.mem (1, Int 0, Int 2, ("", 0)) in
+    let vs = RIC.ric (1, Int 0, Int 2, ("", 0)) in
+    let store = bottom |> set ~var:var ~vs:vs in
+    print_endline ("[set: bottom state]\n\tInitial state: " ^ to_string bottom ^ "\n\tstore after setting a value in bottom store: " ^ to_string store ^ "\n\tvariable to set: " ^ Variable.to_string var
+      ^ "\n\tvalue-set to set it to: " ^ RIC.to_string vs);
+    true
+
+  let%test "set: set memory variable in bottom state (relative address)" =
+    let var = Variable.mem (1, Int 0, Int 2, ("a", 0)) in
+    let vs = RIC.ric (1, Int 0, Int 2, ("", 0)) in
+    let store = bottom |> set ~var:var ~vs:vs in
+    print_endline ("[set: bottom state (relative address)]\n\tInitial state: " ^ to_string bottom ^ "\n\tstore after setting a value in bottom store: " ^ to_string store ^ "\n\tvariable to set: " ^ Variable.to_string var
+      ^ "\n\tvalue-set to set it to: " ^ RIC.to_string vs);
+    true
 end)

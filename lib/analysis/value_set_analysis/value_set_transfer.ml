@@ -116,34 +116,31 @@ module Make (*: Transfer.TRANSFER *) = struct
         end
       in
       remove_temporary_variable new_state top_of_stack
-    | LocalTee l ->
+    | LocalTee l -> (* TODO: Refactor a common function for LocalSet and LocalTee *)
       print_endline ("local.tee " ^ Int32.to_string l ^ ":");
       let variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
-      Abstract_store_domain.copy_value_set
-        (let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in
-          begin match top_of_stack with
-        | Var.Const (Prim_value.I32 n) ->
-          print_endline ("\tadding constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
-          Abstract_store_domain.assign_constant_value state
-          ~const:n
+      let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in
+      begin match top_of_stack with
+      | Var.Const (Prim_value.I32 n) ->
+        print_endline ("\tadding constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
+        Abstract_store_domain.assign_constant_value state
+        ~const:n
+        ~to_:variable
+      | Var.Const (Prim_value.F32 n) ->
+        print_endline ("\t" ^ Variable.to_string variable ^ " = (Float32)" ^ Wasm.F32.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+        Abstract_store_domain.to_top_RIC state variable
+      | Var.Const (Prim_value.I64 n) ->
+        print_endline ("\t" ^ Variable.to_string variable ^ " = (Int64)" ^ Int64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+        Abstract_store_domain.to_top_RIC state variable
+      | Var.Const (Prim_value.F64 n) ->
+        print_endline ("\t" ^ Variable.to_string variable ^ " = (Float64)" ^ Wasm.F64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+        Abstract_store_domain.to_top_RIC state variable
+      | _ ->
+        print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to local variable " ^ Variable.to_string variable);
+        Abstract_store_domain.copy_value_set state 
+          ~from:(Variable.Var top_of_stack)
           ~to_:variable
-        | Var.Const (Prim_value.F32 n) ->
-          print_endline ("\t" ^ Variable.to_string variable ^ " = (Float32)" ^ Wasm.F32.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
-          Abstract_store_domain.to_top_RIC state variable
-        | Var.Const (Prim_value.I64 n) ->
-          print_endline ("\t" ^ Variable.to_string variable ^ " = (Int64)" ^ Int64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
-          Abstract_store_domain.to_top_RIC state variable
-        | Var.Const (Prim_value.F64 n) ->
-          print_endline ("\t" ^ Variable.to_string variable ^ " = (Float64)" ^ Wasm.F64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
-          Abstract_store_domain.to_top_RIC state variable
-        | _ ->
-          print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to local variable " ^ Variable.to_string variable);
-          Abstract_store_domain.copy_value_set state 
-            ~from:(Variable.Var top_of_stack)
-            ~to_:variable
-        end)
-        ~from:variable
-        ~to_:(ret i)
+      end
     | GlobalGet g -> 
       let global_variable = Variable.Var (Var.Global (Int32.to_int_exn g)) in
       print_endline ("global.get " ^ (Int32.to_string g) ^ ":\t" ^ Variable.to_string global_variable);
