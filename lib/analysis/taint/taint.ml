@@ -5,6 +5,7 @@ module Options = Taint_options
 module Domain = Taint_domain
 module Transfer = Taint_transfer.Make
 module Summary = Taint_summary
+module ClassicalInter = Intra.MakeClassicalInter(Transfer)
 module Intra = Intra.MakeSummaryBased(Transfer)
 module Inter = Inter.MakeSummaryBased(Transfer)(Intra)
 

@@ -1,11 +1,11 @@
 open Core
 open Helpers
 
-module Spec_inference
+module Spec_inference(Cfg : Cfg_base.CFG_LIKE)
   (* : Transfer.INTRA_ONLY_TRANSFER with module State = Spec and type annot_expected = unit *)
   = struct
 
-  module Cfg = Cfg.Cfg
+  module Cfg = Cfg
 
   module State = Spec
 
@@ -16,14 +16,18 @@ module Spec_inference
 
   let propagate_globals : bool ref = ref true
 
-  let init (cfg : 'a Cfg.t) : State.t = Spec.NotBottom {
+  let init (module_ : Wasm_module.t) (funcinst : Func_inst.t) : State.t =
+    let (arg_types, _) = funcinst.typ in
+    let global_types = Wasm_module.get_global_types module_ in
+    let local_types = funcinst.code.locals in
+    Spec.NotBottom {
     vstack = []; (* the vstack is initially empty *)
     locals =
       if !use_const then
-        (List.mapi (Cfg.arg_types cfg) ~f:(fun i _ -> Var.Local i)) @ (List.map (Cfg.local_types cfg) ~f:(fun _ -> Var.Const (Prim_value.I32 0l)))
+        (List.mapi arg_types ~f:(fun i _ -> Var.Local i)) @ (List.map local_types ~f:(fun _ -> Var.Const (Prim_value.I32 0l)))
       else
-        List.mapi ((Cfg.arg_types cfg) @ (Cfg.local_types cfg)) ~f:(fun i _ -> Var.Local i);
-    globals = List.mapi (Cfg.global_types cfg) ~f:(fun i _ -> Var.Global i);
+        List.mapi (arg_types @ local_types) ~f:(fun i _ -> Var.Local i);
+    globals = List.mapi global_types ~f:(fun i _ -> Var.Global i);
     memory = Var.OffsetMap.empty;
     stack_size_at_entry = Instr.Label.Map.empty;
   }
@@ -291,7 +295,7 @@ module Spec_inference
 
 end
 
-module Intra = Intra.MakeIntraOnly(Spec_inference)
+module Intra = Intra.MakeIntraOnly(Spec_inference(Cfg.Cfg))
 include Spec_inference
 
 (** Extract vars that have been redefined in a merge block *)

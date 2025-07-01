@@ -54,14 +54,14 @@ module Result (Transfer : Transfer.TRANSFER_BASE) = struct
   [@@deriving compare]
 
   (** The results of an intra analysis are a mapping from instruction labels to their in and out values *)
-  type intra_results = (t * t) Instr.Label.Map.t
+  type intra_results = (Transfer.State.t * t) Instr.Label.Map.t
 
   (** Converts a result to a state. May require joining output states in case of branching *)
-  let to_state (cfg : Transfer.annot_expected Cfg.t) (r : t) : Transfer.State.t = match r with
-    | Uninitialized -> Transfer.bottom cfg
+  let to_state (r : t) : Transfer.State.t = match r with
+    | Uninitialized -> Transfer.bottom
     | Simple s -> s
     | Branch (s1, s2) -> Transfer.State.join s1 s2
-    | Multiple states -> List.fold_left states ~init:(Transfer.bottom cfg) ~f:Transfer.State.join
+    | Multiple states -> List.fold_left states ~init:Transfer.bottom ~f:Transfer.State.join
 
   let to_string (r : t) : string = match r with
     | Uninitialized -> "uninit"
@@ -121,22 +121,22 @@ module Make
       | Data instrs ->
         Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
             let poststate = Transfer.data module_ cfg instr prestate in
-            instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple prestate, Simple poststate);
+            instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(prestate, Simple poststate);
             poststate))
       | Call instr ->
         let poststate = match CallAdapter.analyze_call module_ cfg instr state extra with
           | `Simple s -> Result.Simple s
           | `Multiple states -> Result.Multiple states in
-        instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple state, poststate);
+        instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(state, poststate);
         poststate
-      | Return _ -> failwith "Should not have a return in an intra analysis"
+      | Entry _ | Return _ -> failwith "Should not have a entry/return in an intra analysis"
       | Control instr ->
         let poststate = match Transfer.control module_ cfg instr state with
           | `Simple s -> Result.Simple s
           | `Branch (s1, s2) -> Result.Branch (s1, s2)
           | `Multiple states -> Result.Multiple states
         in
-        instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple state, poststate);
+        instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(state, poststate);
         poststate in
 
     (* Analyzes one block, returning the state after this block *)
@@ -155,7 +155,7 @@ module Make
                                           (Cfg.BlockIdx.to_string block_idx)
                                           (Cfg.BlockIdx.to_string idx))
           | Multiple states, _ -> (idx, Transfer.merge_flows module_ cfg block (List.map ~f:(fun s -> (idx, s)) states))
-          | Uninitialized, _ -> (idx, Transfer.bottom cfg))) in
+          | Uninitialized, _ -> (idx, Transfer.bottom))) in
       let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
       transfer block in_state
@@ -207,11 +207,11 @@ module Make
       (extra : CallAdapter.extra)
     : Transfer.State.t Cfg.t =
     let to_state (results_pair : Result.t * Result.t) : (Transfer.State.t * Transfer.State.t) =
-      (Result.to_state cfg (fst results_pair), Result.to_state cfg (snd results_pair)) in
+      (Result.to_state (fst results_pair), Result.to_state (snd results_pair)) in
     let instr_data = analyze_ module_ cfg extra in
     let analyzed_cfg = Cfg.map_annotations cfg
         ~f:(fun i -> to_state (match Instr.Label.Map.find instr_data (Instr.label i) with
-            | Some v -> v
+            | Some (before, after) -> (Simple before, after)
             | None -> (Uninitialized, Uninitialized))) in
     analyzed_cfg
 
@@ -260,22 +260,22 @@ module MakeSumm
       | Data instrs ->
         Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
             let poststate = Transfer.data module_ cfg instr prestate in
-            instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple prestate, Simple poststate);
+            instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(prestate, Simple poststate);
             poststate))
       | Call instr ->
         let poststate = match CallAdapter.analyze_call module_ cfg instr state extra with
           | `Simple s -> Result.Simple s
           | `Multiple states -> Result.Multiple states in
-        instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple state, poststate);
+        instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(state, poststate);
         poststate
-      | Return _ -> failwith "Should not have a return in an intra analysis"
+      | Entry _ | Return _ -> failwith "Should not have a return in an intra analysis"
       | Control instr ->
         let poststate = match Transfer.control module_ cfg instr state with
           | `Simple s -> Result.Simple s
           | `Branch (s1, s2) -> Result.Branch (s1, s2)
           | `Multiple states -> Result.Multiple states
         in
-        instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple state, poststate);
+        instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(state, poststate);
         poststate in
 
     (* Analyzes one block, returning the state after this block *)
@@ -294,7 +294,7 @@ module MakeSumm
                                           (Cfg.BlockIdx.to_string block_idx)
                                           (Cfg.BlockIdx.to_string idx))
           | Multiple states, _ -> (idx, Transfer.merge_flows module_ cfg block (List.map ~f:(fun s -> (idx, s)) states))
-          | Uninitialized, _ -> (idx, Transfer.bottom cfg))) in
+          | Uninitialized, _ -> (idx, Transfer.bottom))) in
       let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
       transfer block in_state
@@ -347,11 +347,11 @@ module MakeSumm
       (extra : CallAdapter.extra)
     : Transfer.State.t Cfg.t =
     let to_state (results_pair : Result.t * Result.t) : (Transfer.State.t * Transfer.State.t) =
-      (Result.to_state cfg (fst results_pair), Result.to_state cfg (snd results_pair)) in
+      (Result.to_state (fst results_pair), Result.to_state (snd results_pair)) in
     let instr_data = analyze_ module_ cfg extra in
     let analyzed_cfg = Cfg.map_annotations cfg
         ~f:(fun i -> to_state (match Instr.Label.Map.find instr_data (Instr.label i) with
-            | Some v -> v
+            | Some (before, after) -> (Simple before, after)
             | None -> (Uninitialized, Uninitialized))) in
     analyzed_cfg
 end
@@ -388,16 +388,26 @@ module SummaryCallAdapter (Transfer : Transfer.SUMMARY_TRANSFER)
         ~f:(fun acc idx -> Transfer.State.join (apply_summary idx arity state) acc))
 end
 
-module MakeClassicalInter
-    (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struct
-    (** TODO:
-        for call, we need to create a new local state, bind locals to the x top values in the stack, then return that state.
-        We also need a "return" node, and in this one, adapt the result to restore the previous stack and push the return value.
-        The trick is: how do we know how to adapt it? We can find the enclosing function, but then what?
-        We probably need to match call/return when building the ICFG. With this information, we can recover the state after the previous call instruction, and restore it + put the arguments. This needs to be handled by the intra analysis. *)
+module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struct
   module Transfer = Transfer
   module Result = Result(Transfer)
   module Cfg = Transfer.Cfg
+
+  module ResultKey = struct
+    module T = struct
+      type kind = Entry | Return | None
+      [@@deriving sexp, compare]
+
+      type t = {
+        label: Instr.Label.t;
+        kind: kind;
+      }
+      [@@deriving sexp, compare]
+    end
+    include T
+    module Map = Map.Make(T)
+  end
+  type results = (Transfer.State.t * Result.t) ResultKey.Map.t
 
   (** Analyzes a CFG. Returns the final state after computing the transfer of the entire function. That final state is a pair where the first element are the results per block, and the second element are the results per instructions.
       @param module_ is the overall WebAssembly module, needed to access type information, tables, etc.
@@ -410,24 +420,27 @@ module MakeClassicalInter
       | Some r -> r
       | None -> bottom in
     (* Data of the analysis, per instruction *)
-    let instr_data : Result.intra_results ref = ref Instr.Label.Map.empty in
+    let instr_data : results ref = ref ResultKey.Map.empty in
     (* Applies the transfer function to an entire block *)
     let transfer (b : 'a Basic_block.t) (state : Transfer.State.t) : Result.t =
       match b.content with
       | Data instrs ->
         Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
             let poststate = Transfer.data module_ cfg instr prestate in
-            instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple prestate, Simple poststate);
+            instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = None } ~data:(prestate, Simple poststate);
             poststate))
       | Call instr ->
-        let poststate = match Transfer.call module_ cfg instr state with
-          | `Simple s -> Result.Simple s
-          | `Multiple states -> Result.Multiple states in
-        instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple state, poststate);
-        poststate
+        let poststate = Transfer.call module_ cfg instr state in
+        instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = None } ~data:(state, Simple poststate);
+        Simple poststate
+      | Entry instr ->
+        let poststate = Transfer.entry module_ 0l (* TODO *) cfg instr state in
+        instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = Entry } ~data:(state, Simple poststate);
+        Simple poststate
       | Return instr ->
-        let poststate = Transfer.return module_ cfg instr state in
-        instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple state, Simple poststate);
+        let state_before_call = fst (Map.find_exn !instr_data { label = instr.label; kind = Entry }) in
+        let poststate = Transfer.return module_ 0l (* TODO *)cfg instr state_before_call state in
+        instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = Return } ~data:(state, Simple poststate);
         Simple poststate
       | Control instr ->
         let poststate = match Transfer.control module_ cfg instr state with
@@ -435,7 +448,7 @@ module MakeClassicalInter
           | `Branch (s1, s2) -> Result.Branch (s1, s2)
           | `Multiple states -> Result.Multiple states
         in
-        instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(Simple state, poststate);
+        instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = None } ~data:(state, poststate);
         poststate in
 
     (* Analyzes one block, returning the state after this block *)
@@ -454,7 +467,7 @@ module MakeClassicalInter
                                           (Cfg.BlockIdx.to_string block_idx)
                                           (Cfg.BlockIdx.to_string idx))
           | Multiple states, _ -> (idx, Transfer.merge_flows module_ cfg block (List.map ~f:(fun s -> (idx, s)) states))
-          | Uninitialized, _ -> (idx, Transfer.bottom cfg))) in
+          | Uninitialized, _ -> (idx, Transfer.bottom))) in
       let in_state = Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
       transfer block in_state
@@ -500,17 +513,20 @@ module MakeClassicalInter
     fixpoint (Cfg.BlockIdx.Set.singleton (Cfg.entry_block cfg)) 1;
     (* _narrow (IntMap.keys cfg.basic_blocks); *)
     !instr_data
+    |> Map.to_alist
+    |> List.map ~f:(fun (k, v) -> (k.label, v))
+    |> Instr.Label.Map.of_alist_exn
 
   let analyze
       (module_ : Wasm_module.t)
       (cfg : Transfer.annot_expected Cfg.t)
     : Transfer.State.t Cfg.t =
     let to_state (results_pair : Result.t * Result.t) : (Transfer.State.t * Transfer.State.t) =
-      (Result.to_state cfg (fst results_pair), Result.to_state cfg (snd results_pair)) in
+      (Result.to_state (fst results_pair), Result.to_state (snd results_pair)) in
     let instr_data = analyze_ module_ cfg in
     let analyzed_cfg = Cfg.map_annotations cfg
         ~f:(fun i -> to_state (match Instr.Label.Map.find instr_data (Instr.label i) with
-            | Some v -> v
+            | Some (before, after) -> (Simple before, after)
             | None -> (Uninitialized, Uninitialized))) in
     analyzed_cfg
 end

@@ -157,7 +157,6 @@ let subsumes (t1 : t) (t2 : t) : bool =
       else
         false)
 
-
 (** Converts a taint map to its string representation, using only the non-identity taints (e.g., if l0 is tainted by exactly l0, it is not printed *)
 let only_non_id_to_string (s : t) : string =
   let restricted = Var.Map.filteri s ~f:(fun ~key:k ~data:d ->

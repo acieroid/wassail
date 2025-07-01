@@ -6,6 +6,7 @@ module T = struct
     | Control of 'a Instr.labelled_control
     | Data of 'a Instr.labelled_data list
     | Call of 'a Instr.labelled_call
+    | Entry  of 'a Instr.labelled_call (* no-op, annotated with the corresponding call *)
     | Return of 'a Instr.labelled_call (* no-op, annotated with the corresponding call *)
   [@@deriving sexp, compare, equal]
 
@@ -23,6 +24,7 @@ let to_string ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : s
   Printf.sprintf "block %d, %s" b.idx (match b.content with
     | Control instr -> Printf.sprintf "control block: %s" (Instr.control_to_string instr.instr ~annot_str)
     | Call instr -> Printf.sprintf "call block: %s" (Instr.call_to_string instr.instr)
+    | Entry _ -> Printf.sprintf "return block"
     | Return _ -> Printf.sprintf "return block"
     | Data instrs -> Printf.sprintf "data block: %s" (String.concat ~sep:"\\l"
          (List.map instrs
@@ -71,7 +73,7 @@ let to_dot ?prefix:(prefix : string = "") ?color:(color : string = "") ?annot_st
       (match annot_str instr.annotation_after with
        | "" -> ""
        | s -> Printf.sprintf "|{%s}" s)
-  | Return _ -> "" (* not represented *)
+  | Entry _ | Return _ -> "" (* not represented *)
   | Control instr ->
     Printf.sprintf "block%s%d [shape=Mrecord, color=%s, label=\"{Control block %s%d|%s<instr%s>%s:%s%s}\"];"
       prefix b.idx
@@ -92,7 +94,7 @@ let all_direct_instruction_labels (b : 'a t) : Instr.Label.Set.t =
   match b.content with
   | Control { label; _ } | Call { label; _ } -> Instr.Label.Set.singleton label
   | Data d -> Instr.Label.Set.of_list (List.map d ~f:(fun i -> i.label))
-  | Return _ -> Instr.Label.Set.empty
+  | Entry _ | Return _ -> Instr.Label.Set.empty
 
 (** Return all annotations *)
 let all_annots (b : 'a t) : 'a list =
@@ -100,7 +102,7 @@ let all_annots (b : 'a t) : 'a list =
   | Control { annotation_before; annotation_after; _ }
   | Call { annotation_before; annotation_after; _} -> [annotation_before; annotation_after]
   | Data d -> List.fold_left d ~init:[] ~f:(fun acc i -> [i.annotation_before; i.annotation_after] @ acc)
-  | Return _ -> []
+  | Entry _ | Return _ -> []
 
 (** Map a function over annotations of the block *)
 let map_annotations (b : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
@@ -109,6 +111,7 @@ let map_annotations (b : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
         | Call c -> Call (Instr.map_annotation_call c ~f)
         | Data instrs -> Data (List.map instrs ~f:(Instr.map_annotation_data ~f))
         | Return c -> Return (Instr.map_annotation_call c ~f)
+        | Entry c -> Entry (Instr.map_annotation_call c ~f)
       end }
 
 (** Clear the annotation of the block *)

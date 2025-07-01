@@ -26,9 +26,9 @@ module type TRANSFER_BASE = sig
   module State : STATE
 
   (** The bottom state *)
-  val bottom : annot_expected Cfg.t -> State.t
-  (** The initial state *)
-  val init : annot_expected Cfg.t -> State.t
+  val bottom : State.t
+  (** The initial state for a function *)
+  val init : Func_inst.t -> State.t
 
   (** Transfer function for data instructions *)
   val data
@@ -91,20 +91,30 @@ end
 module type CLASSICAL_INTER_TRANSFER = sig
   include TRANSFER_BASE with module Cfg = Icfg
 
-  (** Transfer function for call instructions *)
+  (** Transfer function for call instructions. Most likely a no-op in all cases.*)
   val call
     : Wasm_module.t (* the wasm module *)
-    -> annot_expected Cfg.t (* the CFG of the function to analyze *)
+    -> annot_expected Cfg.t (* the CFG of the function *)
     -> annot_expected Instr.labelled_call (* the call instruction to analyze *)
     -> State.t (* the state before this instruction *)
-    (* the resulting state after applying the transfer function *)
-    -> [ `Simple of State.t (* This is the state for the only successor *)
-       | `Multiple of State.t list ] (* In other branching cases (br_table, call_indirect), there can be an unbounded number of successors *)
+    -> State.t (* the resulting state after applying the transfer function *)
 
+  (** Transfer function for function entry. This is where we usually adapt the stack etc. *)
+  val entry
+    : Wasm_module.t (* the wasm module *)
+    -> Int32.t (* the function index of the callee *)
+    -> annot_expected Cfg.t (* the CFG of the function *)
+    -> annot_expected Instr.labelled_call (* the call instruction that resulted in jumping in this function *)
+    -> State.t (* the state after the call instruction, before going into the function *)
+    -> State.t (* the resulting state after applying the transfer function *)
+
+  (** Transfer function for function exit. This is where we restore the stack etc. *)
   val return
-    : Wasm_module.t
-    -> annot_expected Cfg.t
-    -> annot_expected Instr.labelled_call
-    -> State.t
-    -> State.t
+    : Wasm_module.t (* the wasm module *)
+    -> Int32.t (* the function index of the caller *)
+    -> annot_expected Cfg.t (* the CFG of the function *)
+    -> annot_expected Instr.labelled_call (* the corresponding call instruction that brought us in this function *)
+    -> State.t (* The state before the call. Often useful to have *)
+    -> State.t (* The state after the call, before the return to restore the stack *)
+    -> State.t (* the resulting state after applying the transfer function *)
 end

@@ -30,4 +30,3 @@ jobs:
       - name: Compile web version
         run: |
           make js
-          cp ./

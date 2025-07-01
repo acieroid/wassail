@@ -19,8 +19,7 @@ let make (cfg : 'a Cfg.t) : t =
              (match block.content with
              | Call { instr = CallDirect _; label; _ } -> Instr.Label.Set.singleton label
              | Call { instr = CallIndirect _; label; _ } -> Instr.Label.Set.singleton label
-             | Control _ -> Instr.Label.Set.empty
-             | Return _ -> Instr.Label.Set.empty
+             | Control _ | Entry _ | Return _ -> Instr.Label.Set.empty
              | Data instrs ->
                Instr.Label.Set.of_list (List.filter_map instrs ~f:(function
                    | { instr = Store _; label; _ } -> Some label
