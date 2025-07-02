@@ -42,7 +42,7 @@ module Test = struct
     i32.store       ;; Instr 2
     memory.size     ;; Instr 3
     i32.load)       ;; Instr 4
-  )" in
+  (memory (;0;) 2))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let deps = make cfg in
     let actual = deps_for deps (lab 4) in
@@ -51,16 +51,16 @@ module Test = struct
   let%test "mem-dep with call" =
     let open Instr.Label.Test in
     let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
+  (type (;0;) (func (param i32) (result i32 i32 i32)))
   (type (;1;) (func))
-  (func (;test;) (type 0) (param i32) (result i32)
+  (func (;test;) (type 0) (param i32) (result i32 i32 i32)
     memory.size     ;; Instr 0
     memory.size     ;; Instr 1
     call 1       ;; Instr 2
     memory.size     ;; Instr 3
     i32.load)       ;; Instr 4
   (func (;1;) (type 1))
-  )" in
+  (memory (;0;) 2))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let deps = make cfg in
     let actual = deps_for deps (lab 4) in

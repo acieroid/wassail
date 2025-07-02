@@ -200,7 +200,6 @@ let annotate_exact (cfg : Spec.t Cfg.t) : string =
                  (Printf.sprintf "block%d -> block%d [color=green]" a b) :: acc)))
 
 let%test "control dependencies computation" =
-  (* TODO: this one fails because br_if clears the stack as the block has no result, but there was one value on the stack before *)
   let open Instr.Label.Test in
   let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
@@ -220,7 +219,7 @@ let%test "control dependencies computation" =
       drop
     end
     memory.size)
-  )" in
+  (memory (;0;) 2))" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let actual = Var.Map.map (make cfg) ~f:(fun p -> Var.Set.of_list (List.map (Pred.Set.to_list p) ~f:fst)) in
   let var n = Var.Var n in
@@ -240,6 +239,7 @@ let%test "control deps with br_if" =
       drop        ;; Instr 4
     end
     local.get 0)   ;; Instr 5
+  (memory (;0;) 2)
   )" in
   let cfg = Spec_analysis.analyze_intra1 module_ 0l in
   let actual = make cfg in

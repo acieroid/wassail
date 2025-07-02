@@ -50,11 +50,11 @@ module Test = struct
   (type (;0;) (func))
   (import \"env\" \"DYNAMICTOP_PTR\" (global (;0;) i32))
   (func (;test;) (type 0)
-    global.get 1
-    global.set 0)
+    global.get 0
+    global.set 1)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))"
+  (global (;1;) (mut i32) (i32.const 66560)))"
 
   let%test_unit "spec analysis succeeds with blocks" =
     does_not_fail "(module
@@ -139,7 +139,7 @@ module Test = struct
     else
       i32.const -10420289 ;; [_]
     end)
-)"
+  (memory (;0;) 2))"
 
 
 end

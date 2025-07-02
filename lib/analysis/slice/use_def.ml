@@ -182,7 +182,7 @@ module Test = struct
     i32.add     ;; Instr 2 [i2] defines i2, uses i0 and i1
                 ;; return block: defines ret, uses i2
     )
-  )" in
+   (memory (;0;) 2))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let _, _, actual = make cfg in
     let expected = Use.Map.of_alist_exn [(Use.make (lab 2) (Var.Var (lab 0)), Def.Instruction (lab 0, (Var.Var (lab 0))));
@@ -222,8 +222,8 @@ module Test = struct
     ;; At this point we have a merge block, merging i2 and i3 into m4_1
     memory.size     ;; Instr 4
     i32.add)        ;; Instr 5
-    ;; Final merge block: i5 -> ret
-  )" in
+    ;; Final merge block: i5 -> ret
+   (memory (;0;) 2))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let _, _, actual = make cfg in
     let expected = Use.Map.of_alist_exn [(Use.make (lab 1) (Var.Var (lab 0)), Def.Instruction (lab 0, Var.Var (lab 0)));
@@ -237,15 +237,15 @@ module Test = struct
   let%test "use-def with memory" =
     let open Instr.Label.Test in
     let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;test;) (type 0) (param i32) (result i32)
+  (type (;0;) (func (param i32)))
+  (func (;test;) (type 0) (param i32)
     memory.size     ;; Instr 0, Var 0
     memory.size     ;; Instr 1, Var 1
     i32.store       ;; Instr 2, i0+0 mapped to i1 (no new var!)
     memory.size     ;; Instr 3, Var 3
     memory.size     ;; Instr 4, Var 4
     i32.store)       ;; Instr 5, i3+0 mapped to i4 (no new var!)
-  )" in
+   (memory (;0;) 2))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let _, _, actual = make cfg in
     let expected = Use.Map.of_alist_exn [(Use.make (lab 2) (Var.Var (lab 0)), Def.Instruction (lab 0, Var.Var (lab 0)));
@@ -263,7 +263,7 @@ module Test = struct
     memory.grow ;; Instr 1, Var 1, uses var 0
     drop        ;; Instr 2, uses var 1
    )
-  )" in
+   (memory (;0;) 2))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let _, _, actual = make cfg in
     let expected = Use.Map.of_alist_exn [(Use.make (lab 1) (Var.Var (lab 0)), Def.Instruction (lab 0, Var.Var (lab 0)));
