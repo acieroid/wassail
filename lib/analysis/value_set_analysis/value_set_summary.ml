@@ -3,8 +3,8 @@ open Helpers
 
 (** A value-set summary *)
 type t = {
-  ret : Reduced_interval_congruence.RIC.t option; (** the value-set of the (optional) return value *)
-  globals : Reduced_interval_congruence.RIC.t list; (** the value-sets of the globals after applying the function *)
+  ret : Abstract_store_domain.Value.t option; (** the value-set of the (optional) return value *)
+  globals : Abstract_store_domain.Value.t list; (** the value-sets of the globals after applying the function *)
   mem : Abstract_store_domain.t; (** the value-sets of all pointer variables on the memory *)
 }
 [@@deriving sexp, compare, equal]
@@ -13,14 +13,14 @@ type t = {
 let subsumes (s1 : t) (s2 : t) : bool =
   if List.length s1.globals = List.length s2.globals then (* Why do they need to be of same length ?*)
     let ret_subsumes = match s1.ret, s2.ret with
-      | Some v1, Some v2 -> Reduced_interval_congruence.RIC.subsumes v1 v2
+      | Some _v1, Some _v2 -> true (* TODO: rethink this function Reduced_interval_congruence.RIC.subsumes v1 v2*)
       | None, None -> true
       | _ -> false in
     let globals_subsumes = 
       ret_subsumes && 
       (List.fold2_exn s1.globals s2.globals 
         ~init:true 
-        ~f:(fun acc ric1 ric2 -> acc && Reduced_interval_congruence.RIC.subsumes ric1 ric2)) in
+        ~f:(fun acc _ric1 _ric2 -> acc (* TODO: Rethink this function && Reduced_interval_congruence.RIC.subsumes ric1 ric2)) in *) )) in
     let mem_subsumes = 
       globals_subsumes && 
       (Abstract_store_domain.subsumes s1.mem s2.mem) in
@@ -33,9 +33,9 @@ type state = Abstract_store_domain.t
 let to_string (s : t) : string =
   Printf.sprintf "stack: [%s]\nglobals:[%s]\nmem: %s"
     (String.concat ~sep:";"
-      (List.map ~f:Reduced_interval_congruence.RIC.to_string (Option.to_list s.ret)))
+      (List.map ~f:Abstract_store_domain.Value.to_string (Option.to_list s.ret)))
     (String.concat ~sep:";"
-      (List.map ~f:Reduced_interval_congruence.RIC.to_string s.globals))
+      (List.map ~f:Abstract_store_domain.Value.to_string s.globals))
     (Abstract_store_domain.to_string s.mem)
 
 (* TODO: of_string, if necessary *)
@@ -44,19 +44,19 @@ let bottom (cfg : 'a Cfg.t) (vars : Var.Set.t) : t =
   (* let globals = List.map (Var.Set.to_list vars) ~f:(fun v -> Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, (Var.to_string v, 0))) in
   print_endline ("initial globals: " ^ (List.to_string ~f:Reduced_interval_congruence.RIC.to_string globals)); *)
   (* let globals = List.map cfg.global_types ~f:(fun _ -> Reduced_interval_congruence.RIC.Bottom) in *)
-  let globals = List.map (Var.Set.to_list vars) ~f:(fun g -> Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, (Var.to_string g, 0))) in
+  let globals = List.map (Var.Set.to_list vars) ~f:(fun g -> Abstract_store_domain.Value.ValueSet (Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, (Var.to_string g, 0)))) in
   let ret = match cfg.return_types with
       | [] -> None
-      | _ :: [] -> Some Reduced_interval_congruence.RIC.Bottom
+      | _ :: [] -> Some (Abstract_store_domain.Value.ValueSet Reduced_interval_congruence.RIC.Bottom)
       | _ -> failwith "more than one return value" in
   let mem = Abstract_store_domain.bottom in
   { ret; globals; mem }
 
 let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
-  let globals = List.map cfg.global_types ~f:(fun _ -> Reduced_interval_congruence.RIC.Top) in
+  let globals = List.map cfg.global_types ~f:(fun _ -> Abstract_store_domain.Value.ValueSet Reduced_interval_congruence.RIC.Top) in
   let ret = match cfg.return_types with
       | [] -> None
-      | _ :: [] -> Some Reduced_interval_congruence.RIC.Top
+      | _ :: [] -> Some (Abstract_store_domain.Value.ValueSet Reduced_interval_congruence.RIC.Top)
       | _ -> failwith "more than one return value" in
   let mem = Abstract_store_domain.top in
   { ret; globals; mem }
@@ -68,11 +68,11 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
     (* Globals are unchanged *)
     let globals = 
       List.init (Int32.to_int_exn nglobals) 
-        ~f:(fun i -> Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, (Var.to_string (Var.Global i), 0))) in
+        ~f:(fun i -> Abstract_store_domain.Value.ValueSet (Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, (Var.to_string (Var.Global i), 0)))) in
     (* Ret points to nowhere *)
     let ret = match ret with
       | [] -> None
-      | _ :: [] -> Some Reduced_interval_congruence.RIC.Bottom (* Is that right ??? *)
+      | _ :: [] -> Some (Abstract_store_domain.Value.ValueSet Reduced_interval_congruence.RIC.Bottom) (* Is that right ??? *)
       | _ -> failwith "more than one return value" in
     { globals; ret; mem = Abstract_store_domain.top } 
   | _ ->
@@ -80,11 +80,11 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
     Log.warn (Printf.sprintf "Imported function is not modelled: %s" name);
     let globals = 
       List.init (Int32.to_int_exn nglobals) 
-        ~f:(fun i -> Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, (Var.to_string (Var.Global i), 0))) in
+        ~f:(fun i -> Abstract_store_domain.Value.ValueSet (Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, (Var.to_string (Var.Global i), 0)))) in
     (* Ret can point anywhere *)
     let ret = match ret with
       | [] -> None
-      | _ :: [] -> Some Reduced_interval_congruence.RIC.Top
+      | _ :: [] -> Some (Abstract_store_domain.Value.ValueSet Reduced_interval_congruence.RIC.Top)
       | _ -> failwith "more than one return value" in
     { globals; ret; mem = Abstract_store_domain.top }
 
@@ -107,7 +107,7 @@ let make (_cfg : 'a Cfg.t) (state : Abstract_store_domain.t)
   let ret = Option.map ret ~f:(fun r -> Abstract_store_domain.get state ~var:r) in
   let mem = List.fold mem_post 
     ~init:Abstract_store_domain.bottom
-    ~f:(fun store (x, r) -> Abstract_store_domain.set store ~var:x ~vs:r) in
+    ~f:(fun store (x, r) -> Abstract_store_domain.set store ~var:x ~vs:(Abstract_store_domain.Value.ValueSet r)) in
   { globals; ret; mem }
 
 (** Apply a summary to a given state, where args are the arguments to apply the summary, globals are the globals after the summary, and ret is the optional return value.

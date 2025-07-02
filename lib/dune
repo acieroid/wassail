@@ -21,6 +21,7 @@
    Maths
    Variable
    Value_set 
+   Boolean
    Abstract_store_domain Reduced_interval_congruence Value_set_transfer Value_set_summary
    )
  (libraries core_kernel wasm sexplib)

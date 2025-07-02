@@ -84,13 +84,13 @@ module T = struct
     | Mem ric1, Mem ric2 -> not (RIC.equal RIC.Bottom (RIC.meet ric1 ric2))
     | _ -> false
 
-  let remove ~(these_addresses : RIC.t) ~(from : t) : t list =
+  (* let remove ~(these_addresses : RIC.t) ~(from : t) : t list =
     match these_addresses, from with
     | _, Var _ -> [from]
     | Top, _ -> []
     | Bottom, _ -> [from] 
     | ric1, Mem ric2 when RIC.is_subset ric2 ~of_:(RIC.meet ric1 ric2) -> []
-    | ric1, Mem ric2 when not (RIC.comparable_offsets ric1 ric2) -> [from]
+    | ric1, Mem ric2 when not (RIC.comparable_offsets ric1 ric2) -> []
     | _, Mem _ when is_finite from -> 
       let singletons = to_singletons from in
       List.filter ~f:(
@@ -100,7 +100,17 @@ module T = struct
           | _ -> false
         ) singletons
 
-    | _ -> failwith "not implemented yet"
+    | _ -> failwith "not implemented yet" *)
+
+  let remove ~(these_addresses : RIC.t) ~(from : t) : t list =
+    let address = get_address from in
+    let truncated_addresses = RIC.remove ~this:these_addresses ~from:address in
+    List.map truncated_addresses ~f:(fun addr -> Mem addr)
+
+  let remove_all ~(these_addresses_list : RIC.t list) ~(from : t) : t list =
+    List.fold these_addresses_list ~init:[from] ~f:(fun acc ric ->
+      List.concat_map acc ~f:(fun var -> remove ~these_addresses:ric ~from:var)
+    )
 
   let comparable_offsets (v1 : t) (v2 : t) : bool =
     match v1, v2 with
@@ -119,16 +129,8 @@ module T = struct
                                 by in
     let not_covered = List.filter ~f:(fun x -> not (RIC.equal RIC.Bottom x)) not_covered in
     List.is_empty not_covered
-    
 end
 include T
-
-module Map = struct
-  include Map
-  include Map.Make(T)
-  let to_string (m : 'a t) (f : 'a -> string) : string =
-    String.concat ~sep:", " (List.map (Map.to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s ↦ %s" (to_string k) (f v)))
-end
 
 module Set = struct
   include Set
@@ -149,6 +151,52 @@ module Set = struct
     | Some v -> singleton v
     | None -> empty
 end
+
+module Map = struct
+  include Map
+  include Map.Make(T)
+  let to_string (m : 'a t) (f : 'a -> string) : string =
+    String.concat ~sep:", " (List.map (Map.to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s ↦ %s" (to_string k) (f v)))
+
+  (** [extract_memory_variables store] returns all memory-related variables in [store]. *)
+  let extract_memory_variables (store : 'a t) : T.t list =
+    let all_vars = keys store in
+    List.filter ~f:T.is_linear_memory all_vars
+
+  (** [update_all store vars ric] sets [ric] for each variable in [vars] within [store]. *)
+  let update_all (store : 'a t) (vars : Set.t) (new_value : 'a) : 'a t =
+    Set.fold vars ~init:store ~f:(fun acc v -> set acc ~key:v ~data:new_value)
+
+  let make_compatible ~(this : 'a t) ~(relative_to : 'a t) ~(get : 'a t -> var:T.t -> 'a) : 'a t =
+    let store1 = this in
+    let store2 = relative_to in
+    let mems1 = extract_memory_variables store1 in
+    let mems2 = extract_memory_variables store2 in
+    List.fold
+      ~init:store1
+      ~f:(fun store m2 ->
+        match m2 with
+        | T.Mem addr_m2 -> 
+          List.fold
+            ~init:store
+            ~f:(fun store m1 ->
+              match m1 with
+              | T.Mem addr_m1 ->
+                let met_addrs = RIC.meet addr_m2 addr_m1 in
+                if RIC.equal RIC.Bottom met_addrs then
+                  store
+                else
+                  let new_addresses = met_addrs :: (RIC.remove ~this:met_addrs ~from:addr_m1) in
+                  let new_mem_vars = List.map ~f:(fun addr -> T.Mem addr) new_addresses in
+                  let vs = get store ~var:m1 in
+                  let store = remove store m1 in
+                  update_all store (Set.of_list new_mem_vars) vs
+              | _ -> store )
+            mems1
+        | _ -> store)
+      mems2
+end
+
 
 
 
@@ -213,12 +261,33 @@ let%test_module "Variable tests" = (module struct
     print_endline ("[Variable.remove]     these:" ^ RIC.to_string these ^ " from:" ^ to_string from ^ " -> [" ^ String.concat ~sep:", " (List.map ~f:to_string result) ^ "]");
     List.equal equal result []
 
+  let%test "remove some overlap" =
+    let from = mem 1 0 4 ("", 0) in
+    let these = RIC.ric (2, Int (0), Int 1, ("", 0)) in
+    let result = remove ~these_addresses:these ~from in
+    print_endline ("[Variable.remove]     these:" ^ RIC.to_string these ^ " from:" ^ to_string from ^ " -> [" ^ String.concat ~sep:", " (List.map ~f:to_string result) ^ "]");
+    List.equal equal result [mem 2 0 1 ("", 1); mem 0 0 0 ("", 4)]
+
   let%test "remove no overlap" =
     let from = mem 1 0 4 ("", 0) in
     let these = RIC.ric (1, Int 5, Int 8, ("", 0)) in
     let result = remove ~these_addresses:these ~from in
     print_endline ("[Variable.remove]     these:" ^ RIC.to_string these ^ " from:" ^ to_string from ^ " -> [" ^ String.concat ~sep:", " (List.map ~f:to_string result) ^ "]");
-    List.length result = 5
+     List.equal equal result [from]
+
+  let%test "remove list of addresses" =
+    let from = mem 1 0 4 ("", 0) in
+    let these = [RIC.ric (2, Int (0), Int 1, ("", 0)); RIC.ric (0, Int 0, Int 0, ("", 3)); RIC.ric (1, Int 0, Int 3, ("", 37))] in
+    let result = remove_all ~these_addresses_list:these ~from in
+    print_endline ("[Variable.remove_all]     these: [" ^ String.concat ~sep:"; " (List.map ~f:RIC.to_string these) ^ "] from:" ^ to_string from ^ " -> [" ^ String.concat ~sep:", " (List.map ~f:to_string result) ^ "]");
+    List.equal equal result [mem 0 0 0 ("", 1); mem 0 0 0 ("", 4)]
+
+  let%test "remove list of incompatible addresses" =
+    let from = mem 1 0 4 ("", 0) in
+    let these = [RIC.ric (2, Int (0), Int 1, ("a", 0)); RIC.ric (0, Int 0, Int 0, ("", 3)); RIC.ric (1, Int 0, Int 3, ("a", 37))] in
+    let result = remove_all ~these_addresses_list:these ~from in
+    print_endline ("[Variable.remove_all]     these: [" ^ String.concat ~sep:"; " (List.map ~f:RIC.to_string these) ^ "] from:" ^ to_string from ^ " -> [" ^ String.concat ~sep:", " (List.map ~f:to_string result) ^ "]");
+    List.equal equal result []
 
   let%test "is_covered fully" =
     let target = mem 1 0 2 ("", 0) in

@@ -20,12 +20,12 @@ module Make (*: Transfer.TRANSFER *) = struct
       (List.mapi cfg.arg_types ~f:(fun i _ -> 
         let variable = Var.Local i in
         let var_name = Var.to_string variable in
-        (Variable.Var variable, RIC.ric (0, Int 0, Int 0, (var_name, 0))))) @
+        (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0, Int 0, Int 0, (var_name, 0)))))) @
       (List.mapi cfg.global_types ~f:(fun i _ -> 
         let variable = Var.Global i in
         let var_name = Var.to_string variable in
-        (Variable.Var variable, RIC.ric (0, Int 0, Int 0, (var_name, 0))))) @
-      [(Variable.Mem RIC.Top), RIC.Top])
+        (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0, Int 0, Int 0, (var_name, 0)))))) @
+      [(Variable.Mem RIC.Top), Abstract_store_domain.Value.ValueSet RIC.Top])
 
   (** [bottom_state cfg] returns the bottom abstract state. *)
   let bottom_state (_cfg : 'a Cfg.t) : state = Abstract_store_domain.bottom
@@ -208,40 +208,56 @@ module Make (*: Transfer.TRANSFER *) = struct
       | { typ = I32; offset = offset; _ } ->
         print_endline ("i32.load offset=" ^ string_of_int offset);
         let vs = Abstract_store_domain.get state ~var:(Variable.Var address) in
-        let vs_plus_offset = RIC.add_offset vs offset in
-        print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into stack variable " ^ Variable.to_string (ret i));
-        let memory_variable = Variable.Mem vs_plus_offset in
-        print_endline ("\ttarget memory variable: " ^ Variable.to_string memory_variable);
-        let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
-        print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars));
-        Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:memory_variable)
+        match vs with
+        | Abstract_store_domain.Value.ValueSet vs ->
+          let vs_plus_offset = RIC.add_offset vs offset in
+          print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into stack variable " ^ Variable.to_string (ret i));
+          let memory_variable = Variable.Mem vs_plus_offset in
+          print_endline ("\ttarget memory variable: " ^ Variable.to_string memory_variable);
+          let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
+          print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars));
+          Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:memory_variable)
+        | Abstract_store_domain.Value.Boolean _ -> 
+          (Log.warn "Using a boolean value as an address: loaded value is undefined";
+          Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:Variable.entire_memory))
       end
     | Store store ->
       let value, address = pop2 (Spec.get_or_fail i.annotation_before).vstack in
       let vs_address = Abstract_store_domain.get state ~var:(Variable.Var address) in
       let vs_value = Abstract_store_domain.get state ~var:(Variable.Var value) in
       let new_state =
-        begin match store with
-        | { typ = I32; offset = offset; _ } ->
-          print_endline ("i32.store offset=" ^ string_of_int offset);
-          print_endline ("\tstoring value-set " ^ RIC.to_string vs_value ^ " into memory variable " ^ Variable.to_string (Variable.Mem (RIC.add_offset vs_address offset)));
-          let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size:4 in
-          print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
-          print_endline ("\tpartially accessed memory: " ^ List.to_string ~f:RIC.to_string accessed.partially);
-          let new_state = Abstract_store_domain.update_accessed_vars state accessed in
-          if RIC.is_singleton (accessed.fully) then
-            (print_endline "\tperforming STRONG update!";
-            Abstract_store_domain.set new_state ~var:(Variable.Mem accessed.fully) ~vs:vs_value) (* STRONG update *)
-          else
-            (print_endline "\tperforming weak update :(";
-            Abstract_store_domain.weak_update new_state ~previous_state:state ~var:(Variable.Mem accessed.fully) ~vs:vs_value)
-        | { typ = F32; offset = offset; _ } ->
-          let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size:4 in
-          Abstract_store_domain.update_accessed_vars state accessed
-        | { typ = I64; offset = offset; _ }
-        | { typ = F64; offset = offset; _ } -> 
-          let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size:8 in
-          Abstract_store_domain.update_accessed_vars state accessed
+        begin match vs_address with
+        | Abstract_store_domain.Value.ValueSet vs_address ->
+          begin match store with
+          | { typ = I32; offset = offset; _ } ->
+            print_endline ("i32.store offset=" ^ string_of_int offset);
+            print_endline ("\tstoring value-set " ^ Abstract_store_domain.Value.to_string vs_value ^ " into memory variable " ^ Variable.to_string (Variable.Mem (RIC.add_offset vs_address offset)));
+            let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size:4 in
+            print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
+            print_endline ("\tpartially accessed memory: " ^ List.to_string ~f:RIC.to_string accessed.partially);
+            let new_state = Abstract_store_domain.update_accessed_vars state accessed in
+            if RIC.is_singleton (accessed.fully) then
+              (print_endline "\tperforming STRONG update!";
+              Abstract_store_domain.set new_state ~var:(Variable.Mem accessed.fully) ~vs:vs_value) (* STRONG update *)
+            else
+              (print_endline "\tperforming weak update :(";
+              (match vs_value with
+              | Abstract_store_domain.Value.ValueSet vs_value ->
+                Abstract_store_domain.weak_update new_state ~previous_state:state ~var:(Variable.Mem accessed.fully) ~vs:vs_value
+              | _ ->
+                Abstract_store_domain.weak_update new_state ~previous_state:state ~var:(Variable.Mem accessed.fully) ~vs:RIC.Top))
+          | { typ = F32; offset = offset; _ } ->
+            let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size:4 in
+            Abstract_store_domain.update_accessed_vars state accessed
+          | { typ = I64; offset = offset; _ }
+          | { typ = F64; offset = offset; _ } -> 
+            let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size:8 in
+            Abstract_store_domain.update_accessed_vars state accessed
+          end
+        | Abstract_store_domain.Value.Boolean _ ->
+          (Log.warn "Using a boolean value as an address: linear memory is now compromized";
+          let accessed = RIC.accessed ~value_set:RIC.Top ~size:8 in
+          Abstract_store_domain.update_accessed_vars state accessed)
         end
       in
       remove_temporary_variable (remove_temporary_variable new_state value) address
@@ -265,7 +281,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in
       print_endline "return";
       let vs = Abstract_store_domain.get state ~var:(Variable.Var top_of_stack) in
-      print_endline ("\treturned value-set: " ^ RIC.to_string vs);
+      print_endline ("\treturned value-set: " ^ Abstract_store_domain.Value.to_string vs);
       let new_state = Abstract_store_domain.set state ~var:(Variable.Var Var.Return) ~vs:vs in
       `Simple (remove_temporary_variable new_state top_of_stack)
     | Unreachable -> `Simple  Abstract_store_domain.bottom
@@ -311,7 +327,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       (cfg : annot_expected Cfg.t) 
       (block : annot_expected Basic_block.t)  
       (states : (int * state) list)
-    : RIC.t list =
+    : Abstract_store_domain.Value.t list =
     let predecessors = get_predecessors cfg block in
     let previous_stacks = get_previous_stacks cfg predecessors in
     let previous_value_sets = 
@@ -326,7 +342,7 @@ module Make (*: Transfer.TRANSFER *) = struct
     match previous_value_sets with
     | [] -> []
     | first_stack :: rest ->
-      List.fold ~init:first_stack ~f:(fun acc x -> List.map2_exn ~f:RIC.join acc x) rest 
+      List.fold ~init:first_stack ~f:(fun acc x -> List.map2_exn ~f:Abstract_store_domain.Value.join acc x) rest 
 
 
   (** [merge_flows m cfg block states] merges incoming flows into [block], handling stack merging at control points. *)
@@ -361,7 +377,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         print_endline ("======================================================= " ^ (if IntSet.mem cfg.loop_heads block.idx then "LOOP HEAD" else "MERGE") ^ ": Control block #" ^ string_of_int block.idx);
         print_endline ("\tmerged stack: " ^ List.to_string ~f:Var.to_string merged_stack);
         let previous_value_sets = get_previous_stack_value_sets cfg block states in
-        print_endline ("\tprevious stack value-sets (joined from all branches): " ^ List.to_string ~f:RIC.to_string previous_value_sets);
+        print_endline ("\tprevious stack value-sets (joined from all branches): " ^ List.to_string ~f:Abstract_store_domain.Value.to_string previous_value_sets);
         assert (List.length merged_stack = List.length previous_value_sets);
         List.fold2_exn 
           ~init:new_state_without_merges
@@ -394,7 +410,7 @@ module Make (*: Transfer.TRANSFER *) = struct
     | Bottom ->
       (* The function exit is likely unreachable, so we use a bottom summary *)
       { ret = None;
-        globals = List.init (List.length cfg.global_types) ~f:(fun _ -> RIC.Bottom);
+        globals = List.init (List.length cfg.global_types) ~f:(fun _ -> Abstract_store_domain.Value.ValueSet RIC.Bottom);
         mem = Abstract_store_domain.bottom; }
     | NotBottom exit_spec ->
       Value_set_summary.make cfg out_state
