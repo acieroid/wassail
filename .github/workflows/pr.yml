@@ -29,5 +29,5 @@ jobs:
         run: make
       - name: Compile web version
         run: |
+          opam install js_of_ocaml js_of_ocaml-ppx
           make js
-          cp ./
