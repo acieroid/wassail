@@ -5,12 +5,14 @@
     (local i32)
     local.get 0
     if
-      block
+      block (result i32)
         local.get 0
       end
-      block
+      block (result i32)
         local.get 0
       end
+      drop
+      drop
     end
     local.get 0)
   ;; every wasm program has to have one table

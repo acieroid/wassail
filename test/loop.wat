@@ -2,7 +2,7 @@
   ;; i32 -> i32 type
   (type (;0;) (func (param i32) (result i32)))
   (func (;0;) (type 0) (param i32) (result i32)
-    (local i32)
+    (local i32 i32 i32)
       loop  ;; label = @2
         local.get 2
         local.get 1

@@ -138,8 +138,9 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
 
     let block_type = function
       (* TODO: VarBlockType x -> vs33 x.it *)
-      | None -> vs7 (-0x40)
-      | Some t -> value_type t
+      | [], [] -> vs7 (-0x40)
+      | [], [t] -> value_type t
+      | _ -> failwith "unsupported: sizes with other block type"
 
     let rec instr (e : unit Instr.t) = match e with
       | Data i -> begin match i.instr with

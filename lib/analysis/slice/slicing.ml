@@ -232,9 +232,8 @@ let type_of_control
   | (Block (bt, _, _), _)
   | (Loop (bt, _, _), _) ->
     (* Blocks and loops are not reified in the CFG, so we don't want to check their reachability *)
-    ([], match bt with
-      | Some t -> [T t]
-      | None -> [])
+    (List.map ~f:(fun t -> T t) (fst bt),
+     List.map ~f:(fun t -> T t) (snd bt))
   | (_, None) ->
     Log.warn (Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
     (* instruction is unreachable, treating it as having no effect *)
@@ -247,9 +246,8 @@ let type_of_control
       ((List.map in_type ~f:(fun t -> T t)) @ [T Type.I32], (List.map out_type ~f:(fun t -> T t)))
     | If (bt, _, _, _) ->
       (* the net effect of the head, which drops the first element of the stack *)
-      ([T Type.I32], match bt with
-        | Some t -> [T t]
-        | None -> [])
+      ((T Type.I32) :: (List.map ~f:(fun t -> T t) (fst bt)),
+       List.map ~f:(fun t -> T t) (snd bt))
     | Br _ ->
       (* The code after a br is not reachable, so we can assume that br drops everything from the stack *)
       let vstack = vstack_before in
@@ -417,7 +415,7 @@ module Test = struct
     memory.size ;; Instr 4
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6
-  )" in
+   (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
     let actual, _ = instructions_to_keep cfg all_instrs (preanalysis cfg all_instrs) (Instr.Label.Set.singleton (lab 2)) in
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2] in
@@ -437,7 +435,7 @@ module Test = struct
     local.get 0 ;; Instr 4
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6 -- slicing criterion
-  )" in
+  (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
     let actual, _ = instructions_to_keep cfg all_instrs (preanalysis cfg all_instrs) (Instr.Label.Set.singleton (lab 6)) in
     let expected = Instr.Label.Set.of_list [lab 4; lab 5; lab 6] in
@@ -457,7 +455,7 @@ module Test = struct
       drop        ;; Instr 4
     end
     local.get 0)  ;; Instr 5
-  )" in
+  (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
     let actual, _ = instructions_to_keep cfg all_instrs (preanalysis cfg all_instrs) (Instr.Label.Set.singleton (lab 3)) in
     let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3] in
@@ -477,7 +475,7 @@ module Test = struct
       drop        ;; Instr 4 -- slicing criterion, has a data dep on instr 3
     end
     local.get 0)  ;; Instr 5
-  )" in
+  (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
     let actual, _ = instructions_to_keep cfg all_instrs (preanalysis cfg all_instrs) (Instr.Label.Set.singleton (lab 4)) in
     let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3; lab 4] in
@@ -505,7 +503,7 @@ module Test = struct
     ;; ---- this previous part should not be part of the slice
     memory.size     ;; Instr 8
     i32.add)        ;; Instr 9 -- slicing criterion
-  )" in
+  (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
     let actual, _ = instructions_to_keep cfg all_instrs (preanalysis cfg all_instrs) (Instr.Label.Set.singleton (lab 9)) in
     (* Merge blocks do not need to be in the slice *)
@@ -519,20 +517,19 @@ module Test = struct
      let _, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
-    block           ;; Instr 0
-      local.get 0   ;; Instr 1 [i0]
-      local.get 0   ;; Instr 2 [i1, i0]
-      if            ;; Instr 3 [i0]
-        drop        ;; Instr 4 []
-        i32.const 0 ;; Instr 5 [i4]
+    block (result i32)            ;; Instr 0
+      local.get 0                 ;; Instr 1 [i0]
+      local.get 0                 ;; Instr 2 [i1, i0]
+      if (param i32) (result i32) ;; Instr 3 [i0]
+        drop                      ;; Instr 4 []
+        i32.const 0               ;; Instr 5 [i4]
       else
-        nop         ;; Instr 6 [i0]
+        nop                       ;; Instr 6 [i0]
       end
-                    ;; [i0] and [i4] merged into [m1]
-      i32.const 32  ;; Instr 7 ;; [i6, m1]
-      i32.add       ;; Instr 8 ;; [i7]
-    end)
-   )" in
+                                  ;; [i0] and [i4] merged into [m1]
+      i32.const 32                ;; Instr 7 ;; [i6, m1]
+      i32.add                     ;; Instr 8 ;; [i7]
+    end))" in
      let _funcinst = slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 8)) in
      ()
 
@@ -543,20 +540,19 @@ module Test = struct
      let _, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
-    block           ;; Instr 0
-      local.get 0   ;; Instr 1
-      local.get 0   ;; Instr 2
-      if            ;; Instr 3
-        drop        ;; Instr 4
-        i32.const 0 ;; Instr 5
+    block (result i32)            ;; Instr 0
+      local.get 0                 ;; Instr 1
+      local.get 0                 ;; Instr 2
+      if (param i32) (result i32) ;; Instr 3
+        drop                      ;; Instr 4
+        i32.const 0               ;; Instr 5
       else
-        i32.const 1 ;; Instr 6
-        drop        ;; Instr 7
+        i32.const 1               ;; Instr 6
+        drop                      ;; Instr 7
       end
-      i32.const 32  ;; Instr 8
-      i32.add       ;; Instr 9
-    end)
-   )" in
+      i32.const 32                ;; Instr 8
+      i32.add                     ;; Instr 9
+    end))" in
      let _funcinst = slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
      ()
 
@@ -567,18 +563,18 @@ module Test = struct
      let _, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
-    block           ;; Instr 0
-      local.get 0   ;; Instr 1
-      local.get 0   ;; Instr 2
-      if            ;; Instr 3
-        drop        ;; Instr 4
-        i32.const 0 ;; Instr 5
+    block (result i32)            ;; Instr 0
+      local.get 0                 ;; Instr 1
+      local.get 0                 ;; Instr 2
+      if (param i32) (result i32) ;; Instr 3
+        drop                      ;; Instr 4
+        i32.const 0               ;; Instr 5
       else
-        i32.const 1 ;; Instr 6
-        drop        ;; Instr 7
+        i32.const 1               ;; Instr 6
+        drop                      ;; Instr 7
       end
-      i32.const 32  ;; Instr 8
-      i32.add       ;; Instr 9
+      i32.const 32                ;; Instr 8
+      i32.add                     ;; Instr 9
     end)
    )" in
      let _funcinst = slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
@@ -636,9 +632,9 @@ module Test = struct
 
    let%test "slicing should replace type-varying instructions correctly" =
      let original = "(module
-   (type (;0;) (func (param i32) (result i32)))
+   (type (;0;) (func (param i32) (result)))
    (type (;1;) (func (param i32 i32) (result i32)))
-   (func (;test;) (type 0) (param i32) (result i32)
+   (func (;test;) (type 0) (param i32) (result)
     i32.const 1024  ;; instr 0
     local.get 0     ;; instr 1
     call 1          ;; instr 2, slicing criterion
@@ -664,9 +660,9 @@ module Test = struct
    (memory (;0;) 2)
    (global (;0;) (mut i32) (i32.const 66560)))" in
      let sliced = "(module
-  (type (;0;) (func (param i32) (result i32)))
+  (type (;0;) (func (param i32) (result)))
   (type (;1;) (func (param i32 i32) (result i32)))
-  (func (;0;) (type 0) (param i32) (result i32)
+  (func (;0;) (type 0) (param i32) (result)
     i32.const 1024
     local.get 0
     call 1
@@ -685,8 +681,8 @@ module Test = struct
 
    let%test "slicing with memory does not fail" =
      let original =  "(module
-   (type (;0;) (func (param i32) (result i32)))
-   (func (;test;) (type 0) (param i32) (result i32)
+   (type (;0;) (func (param i32) (result)))
+   (func (;test;) (type 0) (param i32) (result)
     memory.size     ;; Instr 0
     memory.size     ;; Instr 1
     i32.store       ;; Instr 2
@@ -698,8 +694,8 @@ module Test = struct
    (memory (;0;) 2)
    (global (;0;) (mut i32) (i32.const 66560)))" in
      let sliced = "(module
-   (type (;0;) (func (param i32) (result i32)))
-   (func (;test;) (type 0) (param i32) (result i32)
+   (type (;0;) (func (param i32) (result)))
+   (func (;test;) (type 0) (param i32) (result)
     memory.size     ;; Instr 3
     memory.size     ;; Instr 4
     i32.store       ;; Instr 5
@@ -718,7 +714,7 @@ module Test = struct
     i32.store       ;; Instr 2
     memory.size     ;; Instr 3
     i32.load)       ;; Instr 4
-  )" in
+  (memory (;0;) 2))" in
      check_slice original original (* all instructions are kept *) 0l 4
 
    let%test "slice with merge block should not contain irrelevant instructions" =
@@ -811,9 +807,9 @@ module Test = struct
      let original = "(module
 (type (;0;) (func (param i32) (result i32)))
 (func (;0;) (type 0)
-  block
+  block (result i32)
     local.get 0
-    block
+    block (param i32)
       if
         br 0
       else
@@ -826,12 +822,10 @@ module Test = struct
      let sliced = "(module
 (type (;0;) (func (param i32) (result i32)))
 (func (;0;) (type 0)
-  block
-    i32.const 0
+  block (result i32)
     local.get 0
   end
-)
-)" in
+))" in
      check_slice original sliced 0l 6
 
    let%test "slice on a simple infinite loop example" =
