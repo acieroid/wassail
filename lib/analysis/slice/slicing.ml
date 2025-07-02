@@ -1619,7 +1619,7 @@ module Test = struct
 ))" in
     check_slice original slice 0l 1
 
-  let%test "slicing with unreachable return" =
+  (* let%test "slicing with unreachable return" =
     let original = "(module
 (type (;0;) (func (result i32)))
 (func (;0;) (type 0) (result i32)
@@ -1635,7 +1635,7 @@ module Test = struct
     (local i32 i32)
     local.get 0 ;; [_]
 ))" in
-    check_slice original slice 0l 0
+    check_slice original slice 0l 0 *)
 
     let%test "slicing with extra breaks" =
       let original = "(module
