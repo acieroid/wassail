@@ -48,8 +48,7 @@ module type TRANSFER_BASE = sig
     -> State.t (* the state before this instruction *)
     (* the resulting state after applying the transfer function *)
     -> [ `Simple of State.t (* This is the state for the only successor *)
-       | `Branch of State.t * State.t (* In case of br_if, there is one "true" and one "false" successor *)
-       | `Multiple of State.t list ] (* In other branching cases (br_table), there can be an unbounded number of successors *)
+       | `Branch of State.t * State.t ] (* In case of br_if, there is one "true" and one "false" successor *)
 end
 
 module type INTRA_ONLY_TRANSFER = sig
@@ -60,7 +59,7 @@ module type INTRA_ONLY_TRANSFER = sig
     -> annot_expected Cfg.t
     -> annot_expected Instr.labelled_call
     -> State.t
-    -> [ `Simple of State.t | `Multiple of State.t list ]
+    -> State.t
 end
 
 (** The expected interface for a transfer function of a summary-based analysis *)
@@ -86,7 +85,7 @@ module type CLASSICAL_INTER_TRANSFER = sig
   include TRANSFER_BASE
 
   (** Transfer function for call instructions. Most likely a no-op in all cases.*)
-  val call
+  val call_inter
     : Wasm_module.t (* the wasm module *)
     -> annot_expected Cfg.t (* the CFG of the function *)
     -> annot_expected Instr.labelled_call (* the call instruction to analyze *)

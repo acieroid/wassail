@@ -139,7 +139,7 @@ module Make = struct
       (_cfg : annot_expected Cfg.t) (* The CFG analyzed *)
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : State.t) (* The pre state *)
-    : [`Simple of State.t | `Branch of State.t * State.t | `Multiple of State.t list ] =
+    : [ `Simple of State.t | `Branch of State.t * State.t ] =
     match i.instr with
     | Br _ -> `Simple state
     | BrIf _ | If _ -> `Branch (state, state)
@@ -231,7 +231,7 @@ module Make = struct
     let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block (init module_ (Wasm_module.get_funcinst module_ cfg.idx)) in
     Taint_summary.summary_of module_ cfg out_state
 
-  let call
+  let call_inter
       (_module : Wasm_module.t)
       (_cfg : annot_expected Cfg.t)
       (_instr : annot_expected Instr.labelled_call)

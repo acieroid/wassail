@@ -11,8 +11,11 @@ let analyze_intra1 (module_ : Wasm_module.t) (idx : Int32.t) : Spec.t Cfg.t =
   | Some res -> res
   | None -> failwith "Spec_analysis.analyze_intra did not actually analyze"
 
+let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Spec.t Icfg.t =
+  Analysis_helpers.mk_inter_classical module_ entry
 
-module Test = struct
+
+module TestIntra = struct
   let does_not_fail (module_str : string) (fidx : int32) : unit =
     let module_ = Wasm_module.of_string module_str in
     let _ : Spec.t Cfg.t = analyze_intra1 module_ fidx in
@@ -255,5 +258,40 @@ module Test = struct
     let cfg = Cfg_builder.build module_ 1l in
     let _ = Spec_inference.Intra.analyze module_ cfg () in
     ()
+
+end
+
+module TestInter = struct
+  let does_not_fail (module_str : string) (fidx : int32) : unit =
+    let module_ = Wasm_module.of_string module_str in
+    let _ = analyze_inter_classical module_ fidx in
+    ()
+
+  let%test_unit "interprocedural spec analysis does not fail on trivial code" =
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    i32.const 256
+    i32.const 512
+    i32.const 0
+    select)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" 0l
+
+  let%test_unit "interprocedural spec analysis does not fail with function call" =
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    ;; locals: [p0], globals: []
+    local.get 0 ;; [l0]
+    call 1 ;; [i2]
+  )
+  (func (;1;) (type 0) (param i32) (result i32)
+    ;; []
+    local.get 0 ;; [p0]
+    i32.const 0 ;; [i1_1, p0]
+    i32.add) ;; [i1_2]
+  )" 0l
 
 end

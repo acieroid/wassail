@@ -35,4 +35,6 @@ let mk_inter
           ~f:(fun ~key:idx ~data:sum acc ->
               Int32Map.set acc ~key:idx ~data:sum))
 
-
+let mk_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : 'a Icfg.t =
+  let icfg = Icfg.make module_ entry in
+  Spec_inference.Inter.analyze module_ icfg

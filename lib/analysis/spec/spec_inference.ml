@@ -5,8 +5,6 @@ module Spec_inference
   (* : Transfer.INTRA_ONLY_TRANSFER with module State = Spec and type annot_expected = unit *)
   = struct
 
-  module Cfg = Cfg
-
   module State = Spec
 
   (** Allows the use of variables encoding constants *)
@@ -128,7 +126,7 @@ module Spec_inference
       (_module_ : Wasm_module.t)
       (cfg : 'a Cfg.t)
       (i : annot_expected Instr.labelled_control)
-    : State.t -> [ `Simple of State.t | `Branch of State.t * State.t | `Multiple of State.t list ] =
+    : State.t -> [ `Simple of State.t | `Branch of State.t * State.t ] =
     Spec.wrap ~default:(`Simple bottom) (function state ->
       let state = compute_stack_size_at_entry cfg i.label state in
       let get_block_return_stack_size n =
@@ -174,16 +172,16 @@ module Spec_inference
       (_module : Wasm_module.t)
       (cfg : annot_expected Cfg.t)
       (i : annot_expected Instr.labelled_call)
-      : State.t -> [ `Simple of State.t | `Multiple of State.t list ] =
-    Spec.wrap ~default:(`Simple bottom) (function state ->
+      : State.t -> State.t =
+    Spec.wrap ~default:bottom (function state ->
       let state = compute_stack_size_at_entry cfg i.label state in
       let ret = Var.Var i.label in
       match i.instr with
       | CallDirect ((arity_in, arity_out), _, _) ->
-        `Simple (Spec.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) })
+        Spec.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) }
       | CallIndirect (_, (arity_in, arity_out), _, _) ->
         (* Like call, but reads the function index from the vstack *)
-        `Simple (Spec.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) }))
+        Spec.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) })
 
   let merge
       (module_ : Wasm_module.t)
@@ -217,7 +215,7 @@ module Spec_inference
           (* multiple predecessors *)
           begin match List.filter states ~f:(fun s -> not (State.equal s bottom)) with
             | [] ->
-              (* No predecessors have been analyzed. Return bottom. In practice, this should only happen if one of the predecessors is the empty entry block. TODO: it should be cleaned so that this does not arise and we can throw an exception here *)
+              (* No predecessors have been analyzed. Return bottom. In practice, this should only happen if one of the predecessors is the empty entry block. *)
               init module_ (Wasm_module.get_funcinst module_ block.fidx)
             | s :: [] -> (* only one non-bottom predecessor *) s
             | state :: states ->
@@ -292,8 +290,18 @@ module Spec_inference
     end;
     merge module_ cfg block (List.map ~f:snd states)
 
+  let call_inter (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state : State.t) : State.t =
+    failwith "TODO"
+
+  let entry (_module_ : Wasm_module.t) (_callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state : State.t) : State.t =
+    failwith "TODO"
+
+  let return (_module_ : Wasm_module.t) (_caller_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before : State.t) (_state_after : State.t) : State.t =
+    failwith "TODO"
+
 end
 
+module Inter = Intra.MakeClassicalInter(Spec_inference)
 module Intra = Intra.MakeIntraOnly(Spec_inference)
 include Spec_inference
 

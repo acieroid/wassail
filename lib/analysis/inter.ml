@@ -2,7 +2,6 @@ open Core
 open Helpers
 
 module type SUMMARY_BASED_INTER = sig
-  module Cfg : Cfg_base.CFG_LIKE
   module Transfer : Transfer.SUMMARY_TRANSFER
 
   val analyze
@@ -16,10 +15,8 @@ end
    from the leafs of the call graph, it computes summaries for each function,
    using these summaries in the callers. *)
 module MakeSummaryBased (Transfer : Transfer.SUMMARY_TRANSFER)(Intra : Intra.INTRA_FOR_SUMMARY with module Transfer = Transfer) : SUMMARY_BASED_INTER
-  with module Cfg = Cfg.Cfg
-   and module Transfer = Transfer
+  with module Transfer = Transfer
 = struct
-  module Cfg = Cfg.Cfg
   module Transfer = Intra.Transfer
 
   (** Analyze multiple CFGs, returns a map of the analyzed CFG and their summary. Relies on summaries produced for the depended-upon functions. *)
