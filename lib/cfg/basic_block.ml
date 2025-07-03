@@ -13,6 +13,7 @@ module T = struct
   (** A basic block *)
   type 'a t = {
     idx: int; (** Its index *)
+    fidx: Int32.t; (** The function index containing this block *)
     content: 'a block_content; (** Its content *)
   }
   [@@deriving sexp, compare, equal]

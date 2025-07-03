@@ -1,7 +1,3 @@
-(* TODO: there would be 3 cases of transfer functions:
-   1. fully intra-procedural: no summary, no `Multiple
-   2. summary-based interprocedural: summary type and "apply_summary" function for call instruction
-   3. classic interprocedural: call and return functions *)
 module type STATE = sig
   type t
   (** Checks equality between two states *)
@@ -17,8 +13,6 @@ module type STATE = sig
 end
 
 module type TRANSFER_BASE = sig
-  module Cfg : Cfg_base.CFG_LIKE
-
   (** The annotations expected by the analysis *)
   type annot_expected
 
@@ -27,8 +21,8 @@ module type TRANSFER_BASE = sig
 
   (** The bottom state *)
   val bottom : State.t
-  (** The initial state for a function *)
-  val init : Func_inst.t -> State.t
+  (** The initial state for a function. TODO most likely for intra only/summary, not for inter? *)
+  val init : Wasm_module.t -> Func_inst.t -> State.t
 
   (** Transfer function for data instructions *)
   val data
@@ -59,7 +53,7 @@ module type TRANSFER_BASE = sig
 end
 
 module type INTRA_ONLY_TRANSFER = sig
-  include TRANSFER_BASE with module Cfg = Cfg.Cfg
+  include TRANSFER_BASE
 
   val call
     : Wasm_module.t
@@ -72,7 +66,7 @@ end
 (** The expected interface for a transfer function of a summary-based analysis *)
 module type SUMMARY_TRANSFER = sig
   (** It relies on regular (intraprocedural) CFGs *)
-  include TRANSFER_BASE with module Cfg = Cfg.Cfg
+  include TRANSFER_BASE
 
   (** The type of summaries used by the analysis (can be unit) *)
   type summary
@@ -84,12 +78,12 @@ module type SUMMARY_TRANSFER = sig
   val apply_summary : Wasm_module.t -> Int32.t -> (int * int) -> annot_expected Instr.labelled_call -> State.t -> summary -> State.t
 
   (** Extract a fully-analyzed CFG into a summary *)
-  val extract_summary : annot_expected Cfg.t -> State.t Cfg.t -> summary
+  val extract_summary : Wasm_module.t -> annot_expected Cfg.t -> State.t Cfg.t -> summary
 
 end
 
 module type CLASSICAL_INTER_TRANSFER = sig
-  include TRANSFER_BASE with module Cfg = Icfg
+  include TRANSFER_BASE
 
   (** Transfer function for call instructions. Most likely a no-op in all cases.*)
   val call

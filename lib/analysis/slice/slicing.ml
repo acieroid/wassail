@@ -45,11 +45,11 @@ type preanalysis_results = {
 }
 
 (** Performs the pre-analysis phase in order to slice a function, according to any slicing criterion *)
-let preanalysis (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) : preanalysis_results =
+let preanalysis (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) : preanalysis_results =
   let t0 = Time_float.now () in
   let control_dependencies = Control_deps.control_deps_exact_instrs cfg in
   let t1 = Time_float.now () in
-  let (_, _, data_dependencies) = Use_def.make cfg in
+  let (_, _, data_dependencies) = Use_def.make module_ cfg in
   let t2 = Time_float.now () in
   let mem_dependencies = Memory_deps.make cfg in
   let t3 = Time_float.now () in
@@ -72,7 +72,7 @@ let preanalysis (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.La
     slicing criterion `criterion`, encoded as an instruction index. Returns the
     set of instructions that are part of the slice, as a set of instruction
     labels. *)
-let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (preanalysis : preanalysis_results) (criteria : Instr.Label.Set.t) : (Instr.Label.Set.t * (Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t)) =
+let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (preanalysis : preanalysis_results) (criteria : Instr.Label.Set.t) : (Instr.Label.Set.t * (Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t)) =
   Log.info (Printf.sprintf "Slicing with criteria %s" (Instr.Label.Set.to_string criteria));
   let t0 = Time_float.now () in
   let rec loop (worklist : InSlice.Set.t) (slice : Instr.Label.Set.t) (visited : InSlice.Set.t) : Instr.Label.Set.t =
@@ -102,7 +102,7 @@ let instructions_to_keep (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t
       let uses =
         match Cfg.find_instr cfg_instructions slicepart.label with
         | None -> failwith "Unsupported in slicing: cannot find an instruction. It probably is part of unreachable code."
-        | Some instr -> Spec_inference.instr_use cfg ?var:slicepart.reason instr in
+        | Some instr -> Spec_inference.instr_use module_ cfg ?var:slicepart.reason instr in
       (* For use in instr_uses(instr) *)
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
@@ -252,9 +252,8 @@ let type_of_control
   | (Block (bt, _, _), _)
   | (Loop (bt, _, _), _) ->
     (* Blocks and loops are not reified in the CFG, so we don't want to check their reachability *)
-    ([], match bt with
-      | Some t -> [T t]
-      | None -> [])
+    (List.map ~f:(fun t -> T t) (fst bt),
+     List.map ~f:(fun t -> T t) (snd bt))
   | (_, None) ->
     Log.warn (Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
     (* instruction is unreachable, treating it as having no effect *)
@@ -264,9 +263,8 @@ let type_of_control
     match i.instr with
     | If (bt, _, _, _) ->
       (* the net effect of the head, which drops the first element of the stack *)
-      ([T Type.I32], match bt with
-        | Some t -> [T t]
-        | None -> [])
+      ((T Type.I32) :: (List.map ~f:(fun t -> T t) (fst bt)),
+       List.map ~f:(fun t -> T t) (snd bt))
     | Br _ ->
       (* The code after a br is not reachable, so we can assume that br drops everything from the stack *)
       let vstack = vstack_before in
@@ -391,12 +389,12 @@ let rec slice (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Ma
       loop rest (instr :: to_remove_rev) in
   loop original_instructions []
 
-let slice_to_funcinst (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) (slicing_criteria : Instr.Label.Set.t) : Func_inst.t =
+let slice_to_funcinst (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) (slicing_criteria : Instr.Label.Set.t) : Func_inst.t =
   let instructions_in_slice = match instructions_in_slice with
     | Some instrs -> instrs
     | None ->
       Log.info "Computing instructions part of the slice";
-      let instrs, _ = instructions_to_keep cfg cfg_instructions (preanalysis cfg cfg_instructions) slicing_criteria in
+      let instrs, _ = instructions_to_keep module_ cfg cfg_instructions (preanalysis module_ cfg cfg_instructions) slicing_criteria in
       instrs in
   Log.info "Clearing annotations";
   let unit_cfg = Cfg.clear_annotations cfg in
@@ -425,7 +423,7 @@ module Test = struct
     Spec_inference.propagate_globals := false;
     Spec_inference.propagate_locals := false;
     Spec_inference.use_const := false;
-    let _, cfg = build_cfg "(module
+    let module_, cfg = build_cfg "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     memory.size ;; Instr 0
@@ -435,9 +433,9 @@ module Test = struct
     memory.size ;; Instr 4
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6
-  )" in
+   (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
-    let actual, _ = instructions_to_keep cfg all_instrs (preanalysis cfg all_instrs) (Instr.Label.Set.singleton (lab 2)) in
+    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs) (Instr.Label.Set.singleton (lab 2)) in
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -445,7 +443,7 @@ module Test = struct
     Spec_inference.propagate_globals := false;
     Spec_inference.propagate_locals := false;
     Spec_inference.use_const := false;
-    let _, cfg = build_cfg "(module
+    let module_, cfg = build_cfg "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     memory.size ;; Instr 0
@@ -455,9 +453,9 @@ module Test = struct
     local.get 0 ;; Instr 4
     memory.size ;; Instr 5
     i32.add)    ;; Instr 6 -- slicing criterion
-  )" in
+  (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
-    let actual, _ = instructions_to_keep cfg all_instrs (preanalysis cfg all_instrs) (Instr.Label.Set.singleton (lab 6)) in
+    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs) (Instr.Label.Set.singleton (lab 6)) in
     let expected = Instr.Label.Set.of_list [lab 4; lab 5; lab 6] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -465,7 +463,7 @@ module Test = struct
     Spec_inference.propagate_globals := false;
     Spec_inference.propagate_locals := false;
     Spec_inference.use_const := false;
-    let _, cfg = build_cfg "(module
+    let module_, cfg = build_cfg "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     block         ;; Instr 0
@@ -475,9 +473,9 @@ module Test = struct
       drop        ;; Instr 4
     end
     local.get 0)  ;; Instr 5
-  )" in
+  (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
-    let actual, _ = instructions_to_keep cfg all_instrs (preanalysis cfg all_instrs) (Instr.Label.Set.singleton (lab 3)) in
+    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs) (Instr.Label.Set.singleton (lab 3)) in
     let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -485,7 +483,7 @@ module Test = struct
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-    let _, cfg = build_cfg "(module
+     let module_, cfg = build_cfg "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     block         ;; Instr 0
@@ -495,9 +493,9 @@ module Test = struct
       drop        ;; Instr 4 -- slicing criterion, has a data dep on instr 3
     end
     local.get 0)  ;; Instr 5
-  )" in
+  (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
-    let actual, _ = instructions_to_keep cfg all_instrs (preanalysis cfg all_instrs) (Instr.Label.Set.singleton (lab 4)) in
+    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs) (Instr.Label.Set.singleton (lab 4)) in
     let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3; lab 4] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -505,7 +503,7 @@ module Test = struct
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-    let _, cfg = build_cfg "(module
+    let module_, cfg = build_cfg "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     memory.size     ;; Instr 0
@@ -523,9 +521,9 @@ module Test = struct
     ;; ---- this previous part should not be part of the slice
     memory.size     ;; Instr 8
     i32.add)        ;; Instr 9 -- slicing criterion
-  )" in
+  (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
-    let actual, _ = instructions_to_keep cfg all_instrs (preanalysis cfg all_instrs) (Instr.Label.Set.singleton (lab 9)) in
+    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs) (Instr.Label.Set.singleton (lab 9)) in
     (* Merge blocks do not need to be in the slice *)
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2; lab 3; lab 8; lab 9] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
@@ -534,80 +532,78 @@ module Test = struct
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-     let _, cfg = build_cfg "(module
+     let module_, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
-    block           ;; Instr 0
-      local.get 0   ;; Instr 1 [i0]
-      local.get 0   ;; Instr 2 [i1, i0]
-      if            ;; Instr 3 [i0]
-        drop        ;; Instr 4 []
-        i32.const 0 ;; Instr 5 [i4]
+    block (result i32)            ;; Instr 0
+      local.get 0                 ;; Instr 1 [i0]
+      local.get 0                 ;; Instr 2 [i1, i0]
+      if (param i32) (result i32) ;; Instr 3 [i0]
+        drop                      ;; Instr 4 []
+        i32.const 0               ;; Instr 5 [i4]
       else
-        nop         ;; Instr 6 [i0]
+        nop                       ;; Instr 6 [i0]
       end
-                    ;; [i0] and [i4] merged into [m1]
-      i32.const 32  ;; Instr 7 ;; [i6, m1]
-      i32.add       ;; Instr 8 ;; [i7]
-    end)
-   )" in
-     let _funcinst = slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 8)) in
+                                  ;; [i0] and [i4] merged into [m1]
+      i32.const 32                ;; Instr 7 ;; [i6, m1]
+      i32.add                     ;; Instr 8 ;; [i7]
+    end))" in
+     let _funcinst = slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 8)) in
      ()
 
    let%test_unit "slicing intra-block block containing a single drop - variant" =
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-     let _, cfg = build_cfg "(module
+     let module_, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
-    block           ;; Instr 0
-      local.get 0   ;; Instr 1
-      local.get 0   ;; Instr 2
-      if            ;; Instr 3
-        drop        ;; Instr 4
-        i32.const 0 ;; Instr 5
+    block (result i32)            ;; Instr 0
+      local.get 0                 ;; Instr 1
+      local.get 0                 ;; Instr 2
+      if (param i32) (result i32) ;; Instr 3
+        drop                      ;; Instr 4
+        i32.const 0               ;; Instr 5
       else
-        i32.const 1 ;; Instr 6
-        drop        ;; Instr 7
+        i32.const 1               ;; Instr 6
+        drop                      ;; Instr 7
       end
-      i32.const 32  ;; Instr 8
-      i32.add       ;; Instr 9
-    end)
-   )" in
-     let _funcinst = slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
+      i32.const 32                ;; Instr 8
+      i32.add                     ;; Instr 9
+    end))" in
+     let _funcinst = slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
      ()
 
    let%test_unit "slicing with a block containing a single drop - variant" =
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-     let _, cfg = build_cfg "(module
+     let module_, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
-    block           ;; Instr 0
-      local.get 0   ;; Instr 1
-      local.get 0   ;; Instr 2
-      if            ;; Instr 3
-        drop        ;; Instr 4
-        i32.const 0 ;; Instr 5
+    block (result i32)            ;; Instr 0
+      local.get 0                 ;; Instr 1
+      local.get 0                 ;; Instr 2
+      if (param i32) (result i32) ;; Instr 3
+        drop                      ;; Instr 4
+        i32.const 0               ;; Instr 5
       else
-        i32.const 1 ;; Instr 6
-        drop        ;; Instr 7
+        i32.const 1               ;; Instr 6
+        drop                      ;; Instr 7
       end
-      i32.const 32  ;; Instr 8
-      i32.add       ;; Instr 9
+      i32.const 32                ;; Instr 8
+      i32.add                     ;; Instr 9
     end)
    )" in
-     let _funcinst = slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
+     let _funcinst = slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab 9)) in
      ()
 
    let check_slice original sliced fidx criterion =
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-     let _, cfg = build_cfg ~fidx original in
-     let actual = (slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab ~fidx criterion))).code.body in
+     let module_, cfg = build_cfg ~fidx original in
+     let actual = (slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab ~fidx criterion))).code.body in
      let _, expected_cfg = build_cfg ~fidx sliced in
      let expected = Cfg.body expected_cfg in
      if List.length expected <> List.length actual then begin
@@ -654,9 +650,9 @@ module Test = struct
 
    let%test "slicing should replace type-varying instructions correctly" =
      let original = "(module
-   (type (;0;) (func (param i32) (result i32)))
+   (type (;0;) (func (param i32) (result)))
    (type (;1;) (func (param i32 i32) (result i32)))
-   (func (;test;) (type 0) (param i32) (result i32)
+   (func (;test;) (type 0) (param i32) (result)
     i32.const 1024  ;; instr 0
     local.get 0     ;; instr 1
     call 1          ;; instr 2, slicing criterion
@@ -682,9 +678,9 @@ module Test = struct
    (memory (;0;) 2)
    (global (;0;) (mut i32) (i32.const 66560)))" in
      let sliced = "(module
-  (type (;0;) (func (param i32) (result i32)))
+  (type (;0;) (func (param i32) (result)))
   (type (;1;) (func (param i32 i32) (result i32)))
-  (func (;0;) (type 0) (param i32) (result i32)
+  (func (;0;) (type 0) (param i32) (result)
     i32.const 1024
     local.get 0
     call 1
@@ -703,8 +699,8 @@ module Test = struct
 
    let%test "slicing with memory does not fail" =
      let original =  "(module
-   (type (;0;) (func (param i32) (result i32)))
-   (func (;test;) (type 0) (param i32) (result i32)
+   (type (;0;) (func (param i32) (result)))
+   (func (;test;) (type 0) (param i32) (result)
     memory.size     ;; Instr 0
     memory.size     ;; Instr 1
     i32.store       ;; Instr 2
@@ -716,8 +712,8 @@ module Test = struct
    (memory (;0;) 2)
    (global (;0;) (mut i32) (i32.const 66560)))" in
      let sliced = "(module
-   (type (;0;) (func (param i32) (result i32)))
-   (func (;test;) (type 0) (param i32) (result i32)
+   (type (;0;) (func (param i32) (result)))
+   (func (;test;) (type 0) (param i32) (result)
     memory.size     ;; Instr 3
     memory.size     ;; Instr 4
     i32.store       ;; Instr 5
@@ -736,7 +732,7 @@ module Test = struct
     i32.store       ;; Instr 2
     memory.size     ;; Instr 3
     i32.load)       ;; Instr 4
-  )" in
+  (memory (;0;) 2))" in
      check_slice original original (* all instructions are kept *) 0l 4
 
    let%test "slice with merge block should not contain irrelevant instructions" =
@@ -829,9 +825,9 @@ module Test = struct
      let original = "(module
 (type (;0;) (func (param i32) (result i32)))
 (func (;0;) (type 0)
-  block
+  block (result i32)
     local.get 0
-    block
+    block (param i32)
       if
         br 0
       else
@@ -844,12 +840,10 @@ module Test = struct
      let sliced = "(module
 (type (;0;) (func (param i32) (result i32)))
 (func (;0;) (type 0)
-  block
-    i32.const 0
+  block (result i32)
     local.get 0
   end
-)
-)" in
+))" in
      check_slice original sliced 0l 6
 
    let%test "slice on a simple infinite loop example" =
@@ -1128,7 +1122,7 @@ module Test = struct
         Spec_inference.propagate_locals := false;
         Spec_inference.propagate_globals := false;
         Spec_inference.use_const := false;
-        let funcinst = slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) in
+        let funcinst = slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) in
         let module_ = Wasm_module.replace_func module_ 14l funcinst in
         (* We should be able to re-annotate the graph *)
         let _new_cfg = Spec_analysis.analyze_intra1 module_ 14l in
@@ -1145,7 +1139,7 @@ module Test = struct
          Spec_inference.propagate_locals := false;
          Spec_inference.propagate_globals := false;
          Spec_inference.use_const := false;
-         let funcinst = slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) in
+         let funcinst = slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) in
          let module_ = Wasm_module.replace_func module_ 22l funcinst in
          (* We should be able to re-annotate the graph *)
          Spec_inference.propagate_locals := true;

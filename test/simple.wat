@@ -368,16 +368,16 @@
   (func (;entry-point;) (type 1) (param i32) (result i32) ;; 36
     local.get 0
     call 27)
-  (func (;taint-global-local;) (type 1) (param i32) (result i32) ;; 37
+  (func (;taint-global-local;) (type 0) (param i32) ;; 37
     (local i32)
     global.get 0
     local.tee 1
     global.set 0
     i32.const -1
     local.set 1)
-  (func (;test-loop;) (type 1) (param i32) (result i32) ;; 38
+  (func (;test-loop;) (type 0) (param i32) ;; 38
     ;; loop(pointer, size)
-    (local i32 i32)
+    (local i32 i32 i32)
     local.get 0
     local.set 2 ;; l2 = ptr
     local.get 1

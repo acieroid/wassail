@@ -15,7 +15,7 @@ let dependencies =
         Spec_inference.use_const := false;
         let module_ = Wasm_module.of_file filename in
         let cfg = Spec_analysis.analyze_intra1 module_ funidx in
-        let use_def_annot = (Use_def.annotate cfg) in
+        let use_def_annot = (Use_def.annotate module_ cfg) in
         let control_annot = (Control_deps.annotate_exact (Cfg.without_empty_nodes_with_no_predecessors cfg)) in
         Out_channel.with_file dot_filename
           ~f:(fun ch ->
@@ -82,7 +82,7 @@ let slice =
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
         Log.info "Slicing";
         Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
-        let funcinst = Slicing.slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) in
+        let funcinst = Slicing.slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) in
         Log.info "done";
         (* let sliced_labels = all_labels funcinst.code.body in *)
         let module_ = Wasm_module.replace_func module_ funidx funcinst in
@@ -111,7 +111,7 @@ let slice_line_number =
         let slicing_criterion = Instr.label instr in
         Log.info "Slicing";
         Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
-        let funcinst = Slicing.slice_to_funcinst cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) in
+        let funcinst = Slicing.slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) in
         Log.info "done";
         (* let sliced_labels = all_labels funcinst.code.body in *)
         let module_ = Wasm_module.replace_func module_ funidx funcinst in

@@ -11,17 +11,17 @@ module Inter = Inter.MakeSummaryBased(Transfer)(Intra)
 
 let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t option) Int32Map.t =
   Analysis_helpers.mk_intra
-    (fun cfgs wasm_mod ->
-       (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs wasm_mod `Bottom)))
-    (fun data wasm_mod cfg ->
+    (fun cfgs module_ ->
+       (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs module_ `Bottom)))
+    (fun data module_ cfg ->
        Log.info
          (Printf.sprintf "---------- Taint analysis of function %s ----------" (Int32.to_string cfg.idx));
        (* Run the taint analysis *)
        (* Options.use_relational := false; *)
        let annotated_cfg = (* Relational.Transfer.dummy_annotate  *) cfg in
        let summaries = Int32Map.map data ~f:fst in
-       let result_cfg = Intra.analyze wasm_mod annotated_cfg summaries in
-       let taint_summary = Transfer.extract_summary annotated_cfg result_cfg in
+       let result_cfg = Intra.analyze module_ annotated_cfg summaries in
+       let taint_summary = Transfer.extract_summary module_ annotated_cfg result_cfg in
        (taint_summary, Some result_cfg))
 
 let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec.t Cfg.t) : Domain.t Cfg.t =

@@ -82,8 +82,8 @@ module T = struct
   type arity = int * int
   [@@deriving sexp, compare, equal]
 
-  (** The optional type of a block *)
-  type block_type = Type.t option
+  (** The type of a block *)
+  type block_type = Type.t list * Type.t list
   [@@deriving sexp, compare, equal]
 
   (** Data instructions *)
@@ -204,10 +204,13 @@ let call_to_string (instr : call) : string =
   | CallDirect (_, _, v) -> Printf.sprintf "call %s" (Int32.to_string v)
   | CallIndirect (_, _, _, v) -> Printf.sprintf "call_indirect (type %ld)" v
 
-let block_type_to_string (bt : block_type) : string = match bt with
-  | None -> ""
-  | Some t ->
-    Printf.sprintf " (result %s)" (Type.to_string t)
+let block_type_to_string (bt : block_type) : string =
+  let to_str (ts : Type.t list) : string = String.concat ~sep:" " (List.map ~f:Type.to_string ts) in
+  match bt with
+  | [], [] -> ""
+  | i, [] -> Printf.sprintf " (param %s)" (to_str i)
+  | [], o -> Printf.sprintf " (result %s)" (to_str o)
+  | i, o -> Printf.sprintf " (param %s) (result %s)" (to_str i) (to_str o)
 
 (** Converts a control instruction to its string representation *)
 let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot_to_string : 'a -> string = fun _ -> "") (instr : 'a control)  : string =
@@ -332,8 +335,6 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
   | Block (st, instrs) ->
     let block_type = Wasm_helpers.type_of_block m st in
     let (arity_in, arity_out) = Wasm_helpers.arity_of_block m st in
-    assert (arity_in = 0); (* what does it mean to have arity_in > 0? *)
-    assert (arity_out <= 1);
     let label = new_label () in
     let body = seq_of_wasm m new_label instrs in
     control_labelled ~label:label (Block (block_type, (arity_in, arity_out), body))

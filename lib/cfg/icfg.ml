@@ -303,11 +303,13 @@ module Test = struct
 
   let%test "ICFG for module with two functions and one direct call" =
     expect "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;0;) (type 0) (param i32) (result i32)
+  (type (;0;) (func))
+  (type (;1;) (func (param i32) (result i32)))
+  (func (;0;) (type 0)
     i32.const 0
-    call 1)
-  (func (;1;) (type 0) (param i32) (result i32)
+    call 1
+    drop)
+  (func (;1;) (type 1) (param i32) (result i32)
      local.get 0)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)

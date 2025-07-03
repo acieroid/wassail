@@ -50,7 +50,7 @@ let compute_enclosing_block_id (basic_blocks : unit Basic_block.t list) : int In
   |> Instr.Label.Map.of_alist_exn
 
 (** Constructs a CFG for function `fid` in a module. *)
-let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
+let build (module_ : Wasm_module.t) (fidx : Int32.t) : unit Cfg.t =
   (* TODO: this implementation is really not ideal and should be cleaned *)
   let rec check_no_rest (rest : 'a Instr.t list) : unit = match rest with
     | [] -> ()
@@ -58,28 +58,28 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     | _ -> Log.info (Printf.sprintf "Ignoring unreachable instructions after jump: %s" (Instr.list_to_string rest (fun _ -> "")))
   in
   let simplify = true in
-  let funcinst = Wasm_module.get_funcinst module_ fid in
+  let funcinst = Wasm_module.get_funcinst module_ fidx in
   let cur_idx : int ref = ref 0 in
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
   let mk_data_block (reverse_instrs : (Instr.data, unit) Instr.labelled list) : unit Basic_block.t =
     let instrs = List.rev reverse_instrs in
-    Basic_block.{ idx = new_idx (); content = Data instrs; } in
+    Basic_block.{ idx = new_idx (); content = Data instrs; fidx; } in
   let mk_control_block (instr : (unit Instr.control, unit) Instr.labelled) : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Control instr } in
+    Basic_block.{ idx = new_idx () ; content = Control instr; fidx } in
   let mk_call_block (instr : (Instr.call, unit) Instr.labelled) : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Call instr } in
+    Basic_block.{ idx = new_idx () ; content = Call instr; fidx } in
   let mk_merge_block () =
     let idx = new_idx () in
-    Basic_block.{ idx ; content = Control {
+    Basic_block.{ idx ; fidx; content = Control {
         instr = Merge;
-        label = { section = MergeInFunction fid; id = idx };
+        label = { section = MergeInFunction fidx; id = idx };
         line_number = -1;
         annotation_before = ();
         annotation_after = ();
       };
     } in
   let mk_empty_block () : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Data []; } in
+    Basic_block.{ idx = new_idx () ; content = Data []; fidx; } in
   let loop_heads = ref IntSet.empty in
   let rec helper (instrs : (Instr.data, unit) Instr.labelled list) (remaining : 'a Instr.t list) : (
     (* The blocks created *)
@@ -271,7 +271,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
   let breaks_to_exit, remaining_breaks = List.partition_tf breaks ~f:(fun (_, lvl, _) -> Int32.(lvl = 0l)) in
   begin if not (List.is_empty remaining_breaks) then
       (* there shouldn't be any breaks outside the function *)
-      Log.warn (Printf.sprintf "There are %d breaks outside of function %ld" (List.length breaks) fid)
+      Log.warn (Printf.sprintf "There are %d breaks outside of function %ld" (List.length breaks) fidx)
   end;
   (* Connect the return block and the remaining breaks to it, and remove all edges that start from a return block (as they are unreachable) *)
   let edges' = (exit_idx, return_block.idx, None) ::
@@ -335,7 +335,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     (* The name itself *)
     name = Option.value funcinst.name ~default:"<unexported>";
     (* The index of this block is the integer that represent the address of this function *)
-    idx = fid;
+    idx = fidx;
     (* The type index of this function *)
     type_idx = funcinst.type_idx;
     (* Global types *)

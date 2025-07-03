@@ -1,7 +1,7 @@
 open Core
 open Helpers
 
-module Spec_inference(Cfg : Cfg_base.CFG_LIKE)
+module Spec_inference
   (* : Transfer.INTRA_ONLY_TRANSFER with module State = Spec and type annot_expected = unit *)
   = struct
 
@@ -32,7 +32,7 @@ module Spec_inference(Cfg : Cfg_base.CFG_LIKE)
     stack_size_at_entry = Instr.Label.Map.empty;
   }
 
-  let bottom _ : State.t = Spec.Bottom
+  let bottom : State.t = Spec.Bottom
 
   (*---- Types ----*)
   (** Spec inference does not require any annotation *)
@@ -129,7 +129,7 @@ module Spec_inference(Cfg : Cfg_base.CFG_LIKE)
       (cfg : 'a Cfg.t)
       (i : annot_expected Instr.labelled_control)
     : State.t -> [ `Simple of State.t | `Branch of State.t * State.t | `Multiple of State.t list ] =
-    Spec.wrap ~default:(`Simple (bottom cfg)) (function state ->
+    Spec.wrap ~default:(`Simple bottom) (function state ->
       let state = compute_stack_size_at_entry cfg i.label state in
       let get_block_return_stack_size n =
         let stack_size_at_entry = match Cfg.find_enclosing_block cfg i.label with
@@ -166,7 +166,7 @@ module Spec_inference(Cfg : Cfg_base.CFG_LIKE)
       | Return -> `Simple (Spec.NotBottom ({ state with vstack = take state.vstack (List.length (Cfg.return_types cfg)) }))
       | Unreachable ->
         (* failwith (Printf.sprintf "unsupported: unreachable") (*  in function %ld cfg.idx *) *)
-        `Simple (bottom cfg)
+        `Simple bottom
       | Merge -> `Simple (Spec.NotBottom state)
       | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr)))
 
@@ -175,7 +175,7 @@ module Spec_inference(Cfg : Cfg_base.CFG_LIKE)
       (cfg : annot_expected Cfg.t)
       (i : annot_expected Instr.labelled_call)
       : State.t -> [ `Simple of State.t | `Multiple of State.t list ] =
-    Spec.wrap ~default:(`Simple (bottom cfg)) (function state ->
+    Spec.wrap ~default:(`Simple bottom) (function state ->
       let state = compute_stack_size_at_entry cfg i.label state in
       let ret = Var.Var i.label in
       match i.instr with
@@ -186,7 +186,7 @@ module Spec_inference(Cfg : Cfg_base.CFG_LIKE)
         `Simple (Spec.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) }))
 
   let merge
-      (_module_ : Wasm_module.t)
+      (module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t)
       (block : annot_expected Basic_block.t)
       (states : State.t list) : State.t =
@@ -209,17 +209,16 @@ module Spec_inference(Cfg : Cfg_base.CFG_LIKE)
       (Spec.lift rename_exit) (begin match states with
         | [] ->
           (* entry node *)
-          init cfg
+          init module_ (Wasm_module.get_funcinst module_ block.fidx)
         | s :: [] ->
           (* single predecessor node?! *)
           s
         | _ ->
           (* multiple predecessors *)
-          let bot = bottom cfg in
-          begin match List.filter states ~f:(fun s -> not (State.equal s bot)) with
+          begin match List.filter states ~f:(fun s -> not (State.equal s bottom)) with
             | [] ->
               (* No predecessors have been analyzed. Return bottom. In practice, this should only happen if one of the predecessors is the empty entry block. TODO: it should be cleaned so that this does not arise and we can throw an exception here *)
-              init cfg
+              init module_ (Wasm_module.get_funcinst module_ block.fidx)
             | s :: [] -> (* only one non-bottom predecessor *) s
             | state :: states ->
               (* multiple predecessors to merge *)
@@ -272,7 +271,7 @@ module Spec_inference(Cfg : Cfg_base.CFG_LIKE)
     | _ ->
       (* not a control-flow merge, should only be one predecessor (or none if it is the entry point) *)
       begin match states with
-        | [] -> init cfg
+        | [] -> init module_ (Wasm_module.get_funcinst module_ block.fidx)
         | s :: [] -> s
         | _ ->  failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
       end
@@ -295,25 +294,24 @@ module Spec_inference(Cfg : Cfg_base.CFG_LIKE)
 
 end
 
-module Intra = Intra.MakeIntraOnly(Spec_inference(Cfg.Cfg))
+module Intra = Intra.MakeIntraOnly(Spec_inference)
 include Spec_inference
 
 (** Extract vars that have been redefined in a merge block *)
-let new_merge_variables (cfg : Spec.t Cfg.t) (merge_block : Spec.t Basic_block.t) : (Var.t * Var.t) list =
+let new_merge_variables (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (merge_block : Spec.t Basic_block.t) : (Var.t * Var.t) list =
   (* The predecessors of merge_block *)
-  let cfg_no_annot = Cfg.clear_annotations cfg in
   let preds = Cfg.predecessors cfg merge_block.idx in
-  let state_after = Cfg.state_after_block cfg merge_block.idx (Spec_inference.init cfg_no_annot) in
+  let state_after = Cfg.state_after_block cfg merge_block.idx (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx)) in
   List.fold_left preds ~init:[] ~f:(fun acc (pred_idx, _) ->
-      let state_before = Cfg.state_after_block cfg pred_idx (Spec_inference.init cfg_no_annot) in
-      if Spec.equal state_before (Spec_inference.bottom cfg_no_annot) then
+      let state_before = Cfg.state_after_block cfg pred_idx (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx)) in
+      if Spec.equal state_before Spec_inference.bottom then
         (* Ignore bottom state *)
         acc
       else
         (Spec.extract_different_vars state_before state_after) @ acc)
 
 (** Return the list of variables defined by an instruction *)
-let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
+let instr_def (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
   let defs = match instr with
     | Instr.Data i ->
       let state_after = match i.annotation_after with
@@ -365,7 +363,7 @@ let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
         | Merge ->
           (* Merge instruction defines new variables *)
           let block = Cfg.find_enclosing_block_exn cfg (Instr.label instr) in
-          let vars = List.map (new_merge_variables cfg block) ~f:snd in
+          let vars = List.map (new_merge_variables module_ cfg block) ~f:snd in
           (* There might be duplicates. For example, i3 becomes m0 from one branch, and i4 becomes m0 from another branch.
              If that is the case, we have two definitions of m0.
              Hence we eliminate duplicates *)
@@ -382,7 +380,7 @@ let instr_def (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
 (** Return the list of variables used by an instruction.
     If var is provided, only the use related the computation of this specific var will be return (This is only relevant for mere blocks)
  *)
-let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Instr.t) : Var.t list =
+let instr_use (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Instr.t) : Var.t list =
   match instr with
   | Instr.Data i ->
     let top_n n = match i.annotation_before with
@@ -436,9 +434,9 @@ let instr_use (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Ins
         let block = Cfg.find_enclosing_block_exn cfg (Instr.label instr) in
         begin match var with
           | None ->
-            List.map (new_merge_variables cfg block) ~f:fst
+            List.map (new_merge_variables module_ cfg block) ~f:fst
           | Some v ->
-            List.filter_map (new_merge_variables cfg block) ~f:(fun (old, new_) ->
+            List.filter_map (new_merge_variables module_ cfg block) ~f:(fun (old, new_) ->
                 if Var.equal new_ v then
                   Some old
                 else

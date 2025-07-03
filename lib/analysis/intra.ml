@@ -11,9 +11,9 @@ module type INTRA_ONLY = sig
   (** Analyze a function (represented by its CFG) from the module *)
   val analyze
     : Wasm_module.t
-    -> Transfer.annot_expected Transfer.Cfg.t
+    -> Transfer.annot_expected Cfg.t
     -> extra
-    -> Transfer.State.t Transfer.Cfg.t
+    -> Transfer.State.t Cfg.t
 
 end
 
@@ -23,9 +23,9 @@ module type INTRA_FOR_SUMMARY = sig
 
   val analyze
     : Wasm_module.t
-    -> Transfer.annot_expected Transfer.Cfg.t
+    -> Transfer.annot_expected Cfg.t
     -> extra
-    -> Transfer.State.t Transfer.Cfg.t
+    -> Transfer.State.t Cfg.t
 end
 
 module type CALL_ADAPTER = sig
@@ -35,7 +35,7 @@ module type CALL_ADAPTER = sig
 
   val analyze_call
     : Wasm_module.t
-    -> Transfer.annot_expected Transfer.Cfg.t
+    -> Transfer.annot_expected Cfg.t
     -> Transfer.annot_expected Instr.labelled_call
     -> Transfer.State.t
     -> extra
@@ -43,7 +43,6 @@ module type CALL_ADAPTER = sig
 end
 
 module Result (Transfer : Transfer.TRANSFER_BASE) = struct
-  module Cfg = Transfer.Cfg
 
   (** The result of applying the transfer function. *)
   type t =
@@ -99,7 +98,6 @@ module Make
     (CallAdapter : CALL_ADAPTER with module Transfer = Transfer) = struct
   (* Include transfer to get a definition for state, equal_state, and annot_expected *)
   module Transfer = Transfer
-  module Cfg = Transfer.Cfg
   module Result = Result(Transfer)
   type extra = CallAdapter.extra
 
@@ -239,7 +237,6 @@ module MakeSumm
   (* Include transfer to get a definition for state, equal_state, and annot_expected *)
   module Transfer = Transfer
   module Result = Result(Transfer)
-  module Cfg = Transfer.Cfg
   type extra = CallAdapter.extra
 
   (** Analyzes a CFG. Returns the final state after computing the transfer of the entire function. That final state is a pair where the first element are the results per block, and the second element are the results per instructions.
@@ -391,7 +388,6 @@ end
 module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struct
   module Transfer = Transfer
   module Result = Result(Transfer)
-  module Cfg = Transfer.Cfg
 
   module ResultKey = struct
     module T = struct

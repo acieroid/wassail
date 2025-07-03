@@ -30,8 +30,8 @@ module Test = struct
 
   let%test "codegen for trivial module should generate all the code" =
     output_exactly_matches_input "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;0;) (type 0) (param i32) (result i32)
+  (type (;0;) (func (param i32)))
+  (func (;0;) (type 0) (param i32)
     memory.size
     memory.size
     i32.store
@@ -47,7 +47,7 @@ module Test = struct
     output_exactly_matches_input "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;0;) (type 0) (param i32) (result i32)
-    block
+    block (result i32)
       i32.const 0
       drop
       block
@@ -71,7 +71,7 @@ module Test = struct
     i32.const -1
     i32.store offset=12
     i32.const 1812
-    i32.const -1
+    i64.const -1
     i64.store offset=8 align=4
     i32.const 1812
     i32.const -1
@@ -85,8 +85,8 @@ module Test = struct
 
   let%test "codegen for consecutive blocks should produce the same result" =
     output_exactly_matches_input "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;0;) (type 0) (param i32) (result i32)
+  (type (;0;) (func (param i32)))
+  (func (;0;) (type 0) (param i32)
     block
       loop
         i32.const 0
@@ -156,10 +156,11 @@ module Test = struct
   let%test "codegen should support if branches that jump to different places" =
     output_exactly_matches_input "(module
   (type (;0;) (func (param i32) (result i32)))
+  (type (;1;) (func (param i32)))
   (func (;0;) (type 0) (param i32) (result i32)
-    block
+    block (result i32)
       local.get 0
-      block
+      block (param i32)
         if
           br 0
         else

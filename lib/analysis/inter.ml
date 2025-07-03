@@ -64,7 +64,7 @@ module MakeSummaryBased (Transfer : Transfer.SUMMARY_TRANSFER)(Intra : Intra.INT
             (Printf.sprintf "Analyzing cfg %s (name: %s)\n" (Int32.to_string cfg_idx) (Cfg.name cfg));
           (* Perform intra-procedural analysis *)
           let analyzed_cfg = Intra.analyze module_ cfg summaries in
-          let summary = Transfer.extract_summary cfg analyzed_cfg in
+          let summary = Transfer.extract_summary module_ cfg analyzed_cfg in
           (* Check difference with previous state, if there was any *)
           let previous_results = Int32Map.find annotated_cfgs cfg_idx in
           match previous_results with

@@ -87,7 +87,7 @@ end
     1. A map from variables to their definitions
     2. A map from variables to their uses
     3. A map of use-def chains *)
-let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefChains.t) =
+let make (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefChains.t) =
   (* To construct the use-def map, we walk over each instruction, and collect uses and defines.
      There is exactly one define per variable.
      e.g., [] i32.const 0 [x] defines x
@@ -110,7 +110,7 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
   let uses: Use.Set.t Var.Map.t = Var.Map.empty in
   (* Add definitions for all locals, globals, and memory variables *)
   let defs =
-    let entry_spec = Cfg.state_before_block cfg cfg.entry_block (Spec_inference.init cfg) in
+    let entry_spec = Cfg.state_before_block cfg cfg.entry_block (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx)) in
     let vars = Spec.vars_of entry_spec in
     Var.Set.fold vars ~init:defs ~f:(fun defs var ->
         match Var.Map.add defs ~key:var ~data:(Def.Entry var) with
@@ -137,14 +137,14 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
       ~init:(defs, uses)
       ~f:(fun (defs, uses) instr ->
           (* Add definitions introduced by this instruction *)
-          let defs = List.fold_left (Spec_inference.instr_def cfg instr) ~init:defs ~f:(fun defs var ->
+          let defs = List.fold_left (Spec_inference.instr_def module_ cfg instr) ~init:defs ~f:(fun defs var ->
               match Var.Map.add defs ~key:var ~data:(Def.Instruction (Instr.label instr, var)) with
               | `Duplicate -> failwith (Printf.sprintf "use_def: duplicate define of %s in instruction %s, was already defined at %s"
                                           (Var.to_string var) (Instr.to_string instr ~annot_str:Spec.to_string)
                                           (Def.to_string (Var.Map.find_exn defs var)))
               | `Ok r -> r) in
           (* Add uses introduced by this instruction *)
-          let uses = List.fold_left (Spec_inference.instr_use cfg instr) ~init:uses ~f:(fun uses var ->
+          let uses = List.fold_left (Spec_inference.instr_use module_ cfg instr) ~init:uses ~f:(fun uses var ->
               (* Log.debug (Printf.sprintf "instruction %s uses %s" (Instr.to_string instr ~annot_str:Spec.to_string) (Var.to_string var)); *)
               Var.Map.update uses var ~f:(function
                   | Some v -> Use.Set.add v { label = Instr.label instr; var }
@@ -160,8 +160,8 @@ let make (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefC
   (defs, uses, udchains)
 
 (** Return the edges that can be used to annotate a CFG with data dependencies *)
-let annotate (cfg : Spec.t Cfg.t) : string =
-  let (_, _, chains) = make cfg in
+let annotate (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) : string =
+  let (_, _, chains) = make module_ cfg in
   String.concat ~sep:"\n"
     (List.map (Use.Map.keys chains)
        ~f:(fun use ->
@@ -182,9 +182,9 @@ module Test = struct
     i32.add     ;; Instr 2 [i2] defines i2, uses i0 and i1
                 ;; return block: defines ret, uses i2
     )
-  )" in
+   (memory (;0;) 2))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-    let _, _, actual = make cfg in
+    let _, _, actual = make module_ cfg in
     let expected = Use.Map.of_alist_exn [(Use.make (lab 2) (Var.Var (lab 0)), Def.Instruction (lab 0, (Var.Var (lab 0))));
                                          (Use.make (lab 2) (Var.Var (lab 1)), Def.Instruction (lab 1, Var.Var (lab 1)));
                                          (Use.make (merge 1) (Var.Var (lab 2)), Def.Instruction (lab 2, Var.Var (lab 2)))] in
@@ -200,7 +200,7 @@ module Test = struct
     i32.add)    ;; Instr 2
   )" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-    let _, _, actual = make cfg in
+    let _, _, actual = make module_ cfg in
     let expected = Use.Map.of_alist_exn [(Use.make (lab 0) (Var.Local 0), Def.Entry (Var.Local 0));
                                          (Use.make (lab 1) (Var.Local 1), Def.Entry (Var.Local 1));
                                          (Use.make (lab 2) (Var.Local 0), Def.Entry (Var.Local 0));
@@ -222,10 +222,10 @@ module Test = struct
     ;; At this point we have a merge block, merging i2 and i3 into m4_1
     memory.size     ;; Instr 4
     i32.add)        ;; Instr 5
-    ;; Final merge block: i5 -> ret
-  )" in
+    ;; Final merge block: i5 -> ret
+   (memory (;0;) 2))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-    let _, _, actual = make cfg in
+    let _, _, actual = make module_ cfg in
     let expected = Use.Map.of_alist_exn [(Use.make (lab 1) (Var.Var (lab 0)), Def.Instruction (lab 0, Var.Var (lab 0)));
                                          (Use.make (lab 5) (Var.Var (lab 4)), Def.Instruction (lab 4, Var.Var (lab 4)));
                                          (Use.make (lab 5) (Var.Merge (4, 1)), Def.Instruction (merge 4, Var.Merge (4, 1)));
@@ -237,17 +237,17 @@ module Test = struct
   let%test "use-def with memory" =
     let open Instr.Label.Test in
     let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;test;) (type 0) (param i32) (result i32)
+  (type (;0;) (func (param i32)))
+  (func (;test;) (type 0) (param i32)
     memory.size     ;; Instr 0, Var 0
     memory.size     ;; Instr 1, Var 1
     i32.store       ;; Instr 2, i0+0 mapped to i1 (no new var!)
     memory.size     ;; Instr 3, Var 3
     memory.size     ;; Instr 4, Var 4
     i32.store)       ;; Instr 5, i3+0 mapped to i4 (no new var!)
-  )" in
+   (memory (;0;) 2))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-    let _, _, actual = make cfg in
+    let _, _, actual = make module_ cfg in
     let expected = Use.Map.of_alist_exn [(Use.make (lab 2) (Var.Var (lab 0)), Def.Instruction (lab 0, Var.Var (lab 0)));
                                          (Use.make (lab 2) (Var.Var (lab 1)), Def.Instruction (lab 1, Var.Var (lab 1)));
                                          (Use.make (lab 5) (Var.Var (lab 3)), Def.Instruction (lab 3, Var.Var (lab 3)));
@@ -263,9 +263,9 @@ module Test = struct
     memory.grow ;; Instr 1, Var 1, uses var 0
     drop        ;; Instr 2, uses var 1
    )
-  )" in
+   (memory (;0;) 2))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
-    let _, _, actual = make cfg in
+    let _, _, actual = make module_ cfg in
     let expected = Use.Map.of_alist_exn [(Use.make (lab 1) (Var.Var (lab 0)), Def.Instruction (lab 0, Var.Var (lab 0)));
                                          (Use.make (lab 2) (Var.Var (lab 1)), Def.Instruction (lab 1, Var.Var (lab 1)))] in
     UseDefChains.check_equality ~actual:actual ~expected:expected

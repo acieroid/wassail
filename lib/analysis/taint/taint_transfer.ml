@@ -1,8 +1,7 @@
 open Core
 open Helpers
 
-module Make(Cfg : Cfg_base.CFG_LIKE) = struct
-  module Cfg = Cfg
+module Make = struct
   module State = Taint_domain
 
   (** We need the variable names as annotations *)
@@ -199,10 +198,10 @@ module Make(Cfg : Cfg_base.CFG_LIKE) = struct
     | None ->
       taint_after_call
 
-  let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * State.t) list) : state =
-    let init_spec = (Spec_inference.init cfg (* , Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i)))*) )  in
+  let merge_flows (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * State.t) list) : State.t =
+    let init_spec = (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx) (* , Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i)))*) )  in
     match states with
-    | [] -> init cfg
+    | [] -> init module_ (Wasm_module.get_funcinst module_ cfg.idx)
     | _ ->
       (* one or multiple states *)
         begin match block.content with
@@ -228,9 +227,9 @@ module Make(Cfg : Cfg_base.CFG_LIKE) = struct
             end
         end
 
-  let extract_summary (cfg : annot_expected Cfg.t) (analyzed_cfg : state Cfg.t) : summary =
-    let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block (init cfg) in
-    Taint_summary.summary_of cfg out_state
+  let extract_summary (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (analyzed_cfg : State.t Cfg.t) : summary =
+    let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block (init module_ (Wasm_module.get_funcinst module_ cfg.idx)) in
+    Taint_summary.summary_of module_ cfg out_state
 
   let call
       (_module : Wasm_module.t)
@@ -257,7 +256,7 @@ module Make(Cfg : Cfg_base.CFG_LIKE) = struct
 
 
 
-  let return (_module : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (_state_after_call : State.t) : State.t =
+  let return (_module : Wasm_module.t) (_caller_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (_state_after_call : State.t) : State.t =
     (* Upon a return, do this to state_before call: *)
     (* - remove args -> not needed, done by spec *)
     (* - push return from state_after_call -> not needed, done by spec? but maybe make them equal*)

@@ -96,7 +96,6 @@ let pop3 (vstack : 'a list) : ('a * 'a * 'a) =
     | x :: y :: z :: _ -> (x, y, z)
     | _ -> failwith "Invalid vstack when popping 3 values"
 
-
 let error at category msg =
   failwith (Printf.sprintf "Error: %s" (Wasm.Source.string_of_region at ^ ": " ^ category ^ ": " ^ msg))
 
@@ -118,7 +117,9 @@ let input_from get_script run =
 let parse_from_lexbuf_textual name lexbuf run =
   let extract (l : (Wasm.Script.var option * Wasm.Script.definition) list) =
     match l with
-    | (_, { it = Wasm.Script.Textual m; _ }) :: _ -> run m
+    | (_, { it = Wasm.Script.Textual m; _ }) :: _ ->
+      Wasm.Valid.check_module m;
+      run m
     | _ -> failwith "unsupported format" in
     input_from (fun _ ->
         let var_opt, def = Wasm.Parse.parse name lexbuf Wasm.Parse.Module in
