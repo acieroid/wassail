@@ -97,9 +97,9 @@ module ICFG (* : Cfg_base.CFG_LIKE *)= struct
             ~f:collect_calls);
     !calls
 
-  let make (wasm_mod : Wasm_module.t) : 'a t =
+  (** Creates an ICFG given a module and a specific entry point. The entry point can be the start function of the module if there is one (wasm_mod.start), or any other function *)
+  let make (wasm_mod : Wasm_module.t) (entry : Int32.t) : 'a t =
     let cfgs = Cfg_builder.build_all wasm_mod in
-    let entry = Option.value_exn ~message:"ICFG.make expects a program with an entry point" wasm_mod.start in
     let calls = make_calls wasm_mod in
     let reverse_calls = Map.to_alist calls
                         |> List.concat_map ~f:(fun (source, edges) ->
@@ -293,9 +293,9 @@ let to_dot
   Printf.sprintf "digraph ICFG {\n%s\n%s\n%s\n}\n" (String.concat ~sep:"\n" clusters) inter_edges extra_data
 
 module Test = struct
-  let expect (module_str : string) (calls : Edge.Set.t Instr.Label.Map.t) : bool =
+  let expect (module_str : string) (entry : Int32.t) (calls : Edge.Set.t Instr.Label.Map.t) : bool =
     let module_ = Wasm_module.of_string module_str in
-    let icfg = make module_ in
+    let icfg = make module_ entry in
     (* Printf.printf "------\n%s------\n" (to_dot icfg); *)
     (* Printf.printf "%s\n" (String.concat ~sep:"," (List.map ~f:Instr.Label.to_string (Instr.Label.Map.keys calls)));
        Printf.printf "%s\n" (String.concat ~sep:"," (List.map ~f:Instr.Label.to_string (Instr.Label.Map.keys icfg.calls))); *)
@@ -313,8 +313,8 @@ module Test = struct
      local.get 0)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560))
-  (start 0))"
+  (global (;0;) (mut i32) (i32.const 66560)))"
+      0l
       (Instr.Label.Map.of_alist_exn [
           (Instr.Label.{ section = Function 0l; id = 1; },
            (Edge.Set.of_list [{ target = 1l; direct = true }]))])
@@ -323,7 +323,6 @@ module Test = struct
     expect "(module
   (type (;0;) (func))
   (type (;1;) (func (result i32)))
-  (start 1)
   (func (;0;) (type 1) ;; char getchar()
     i32.const 0)
   (func (;1;) (type 0) ;; void main()
@@ -391,6 +390,7 @@ module Test = struct
     drop
     local.get 4 ;; inword
     drop))"
+      1l
       (Instr.Label.Map.of_alist_exn [
           (Instr.Label.{ section = Function 1l; id = 0; }, Edge.Set.of_list [{ target = 0l; direct = true }]);
           (Instr.Label.{ section = Function 1l; id = 32; }, Edge.Set.of_list [{ target = 0l; direct = true }])])
