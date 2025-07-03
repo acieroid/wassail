@@ -19,6 +19,7 @@ module Tree = Tree
 module Dominance = Dominance
 module Cfg = Cfg
 module Cfg_builder = Cfg_builder
+module ICFG = Icfg
 module Codegen = Codegen
 
 module Call_graph = Call_graph
@@ -31,7 +32,6 @@ module Spec_analysis = Spec_analysis
 module Spec = Spec
 
 module Taint = Taint
-module Taintcall = Taintcall
 
 module Slicing = Slicing
 module Use_def = Use_def

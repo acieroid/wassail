@@ -34,6 +34,13 @@ let get_funcinst (m : t) (fidx : Int32.t) : Func_inst.t =
   | Some v -> v
   | None -> failwith "get_funcinst nth exception"
 
+let get_n_locals (m : t) (fidx : Int32.t) : int =
+  let inst = get_funcinst m fidx in
+  List.length inst.code.locals
+
+let get_global_types (m : t) : Type.t list =
+  m.imported_global_types @ m.global_types
+
 (** Get the name of a function, if it has one *)
 let get_funcname (m : t) (fidx : Int32.t) : string option =
   let funcinst = get_funcinst m fidx in

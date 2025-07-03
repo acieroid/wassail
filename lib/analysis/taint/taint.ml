@@ -5,26 +5,28 @@ module Options = Taint_options
 module Domain = Taint_domain
 module Transfer = Taint_transfer.Make
 module Summary = Taint_summary
-module Intra = Intra.Make(Transfer)
-module Inter = Inter.Make(Intra)
+module ClassicalInter = Intra.MakeClassicalInter(Transfer)
+module Intra = Intra.MakeSummaryBased(Transfer)
+module Inter = Inter.MakeSummaryBased(Transfer)(Intra)
 
 let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t option) Int32Map.t =
   Analysis_helpers.mk_intra
-    (fun cfgs wasm_mod ->
-       (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs wasm_mod `Bottom)))
-    (fun data wasm_mod cfg ->
+    (fun cfgs module_ ->
+       (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs module_ `Bottom)))
+    (fun data module_ cfg ->
        Log.info
          (Printf.sprintf "---------- Taint analysis of function %s ----------" (Int32.to_string cfg.idx));
        (* Run the taint analysis *)
        (* Options.use_relational := false; *)
        let annotated_cfg = (* Relational.Transfer.dummy_annotate  *) cfg in
        let summaries = Int32Map.map data ~f:fst in
-       let (result_cfg, taint_summary) = Intra.analyze wasm_mod annotated_cfg summaries in
+       let result_cfg = Intra.analyze module_ annotated_cfg summaries in
+       let taint_summary = Transfer.extract_summary module_ annotated_cfg result_cfg in
        (taint_summary, Some result_cfg))
 
 let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec.t Cfg.t) : Domain.t Cfg.t =
   let rel_cfg = (* Relational.Transfer.dummy_annotate *) spec_cfg in
-  fst (Intra.analyze wasm_mod rel_cfg summaries)
+  Intra.analyze wasm_mod rel_cfg summaries
 
 let check (expected : Summary.t) (actual : Summary.t) : bool =
   if Summary.subsumes actual expected then
@@ -42,7 +44,7 @@ let check (expected : Summary.t) (actual : Summary.t) : bool =
 let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Taint_domain.t Cfg.t * Summary.t) Int32Map.t =
   Analysis_helpers.mk_inter
     (fun _cfgs _wasm_mod -> Int32Map.empty)
-    (fun wasm_mod scc cfgs_and_summaries ->
+    (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
        Log.info
          (Printf.sprintf "---------- Taint analysis of SCC {%s} ----------"
             (String.concat ~sep:"," (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
@@ -54,7 +56,7 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Taint_
            ~init:summaries
            ~f:(fun summaries (idx, name, (args, ret)) ->
                Int32Map.set summaries ~key:idx ~data:(Summary.of_import name wasm_mod.nglobals args ret)) in
-       let results = Inter.analyze wasm_mod annotated_scc summaries' in
+       let results = Inter.analyze wasm_mod ~cfgs:annotated_scc ~summaries:summaries' in
        Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
            let spec_cfg = Int32Map.find_exn scc idx in
            (spec_cfg, taint_cfg, summary)))

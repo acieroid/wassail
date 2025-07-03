@@ -36,10 +36,10 @@ let make (instrs : unit Instr.t list) : t =
     Tree.t list * unit Instr.t IntMap.t * int Instr.Label.Map.t =
     match instrs with
     | [] -> roots, indices, entries
-    | Data instr :: rest ->
+    | (Data _ as i) :: rest | (Call _ as i) :: rest ->
       let idx = next_idx () in
       let roots' = [add_parent roots idx] in
-      let indices' = IntMap.add_exn indices ~key:idx ~data:(Data instr) in
+      let indices' = IntMap.add_exn indices ~key:idx ~data:i in
       helper rest roots' indices' entries
     | Control instr :: rest ->
       let idx = next_idx () in

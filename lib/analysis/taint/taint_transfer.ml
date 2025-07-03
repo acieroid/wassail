@@ -1,13 +1,11 @@
 open Core
 open Helpers
 
-module Make (* : Transfer.TRANSFER *) = struct
+module Make = struct
+  module State = Taint_domain
+
   (** We need the variable names as annotations *)
   type annot_expected = Spec.t
-
-  (** The state *)
-  type state = Taint_domain.t
-  [@@deriving sexp, compare, equal]
 
   (* This is a map from function index to:
      - the taint of its return value
@@ -21,30 +19,26 @@ module Make (* : Transfer.TRANSFER *) = struct
                    [Taint_domain.Taint.Taints (Var.Set.singleton (Var.Other "fgets")); bottom; bottom]))
       ])
 
-  (** In the initial state, we only set the taint for for parameters and the globals. *)
-  let init_state (cfg : 'a Cfg.t) : state =
+  (** In the initial state, we only set the taint for parameters and the globals. *)
+  let init (module_ : Wasm_module.t) (funcinst : Func_inst.t) : State.t =
+    let arg_types, _ = funcinst.typ in
+    let global_types = Wasm_module.get_global_types module_ in
     Var.Map.of_alist_exn
-      ((List.mapi cfg.arg_types ~f:(fun i _ -> (Var.Local i,
+      ((List.mapi arg_types ~f:(fun i _ -> (Var.Local i,
                                                 Taint_domain.Taint.taint (Var.Local i)))) @
-       (List.mapi cfg.global_types ~f:(fun i _ -> (Var.Global i,
+       (List.mapi global_types ~f:(fun i _ -> (Var.Global i,
                                                  Taint_domain.Taint.taint (Var.Global i)))))
 
-  let bottom_state (_cfg : 'a Cfg.t) : state = Taint_domain.bottom
-
-  let state_to_string (s : state) : string = Taint_domain.to_string s
-
-  let join_state (s1 : state) (s2 : state) : state = Taint_domain.join s1 s2
-
-  let widen_state (_s1 : state) (s2 : state) : state = s2 (* no widening *)
+  let bottom : State.t = Taint_domain.bottom
 
   type summary = Taint_summary.t
 
-  let data_instr_transfer
+  let data
       (_module_ : Wasm_module.t)
       (_cfg : annot_expected Cfg.t)
       (i : annot_expected Instr.labelled_data)
-      (state : state)
-    : state =
+      (state : State.t)
+    : State.t =
     let ret (i : annot_expected Instr.labelled_data) : Var.t = match List.hd (Spec.get_or_fail i.annotation_after).vstack with
       | Some r -> r
       | None -> failwith "Taint: no return value" in
@@ -140,73 +134,74 @@ module Make (* : Transfer.TRANSFER *) = struct
           Taint_domain.add_taint_v (Taint_domain.add_taint_v s k vval)
             (Var.OffsetMap.find_exn mem (k, offset)) vval)
 
-  let control_instr_transfer
-      (module_ : Wasm_module.t) (* The wasm module (read-only) *)
-      (summaries : summary Int32Map.t) (* The summaries *)
+  let control
+      (_module_ : Wasm_module.t) (* The wasm module (read-only) *)
       (_cfg : annot_expected Cfg.t) (* The CFG analyzed *)
       (i : annot_expected Instr.labelled_control) (* The instruction *)
-      (state : state) (* The pre state *)
-    : [`Simple of state | `Branch of state * state ] =
-    let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
-      Log.info (Printf.sprintf "applying summary of function %ld" f);
-      match Int32Map.find summaries f with
-      | None ->
-        if Int32.(f < module_.nfuncimports) then begin
-          Log.warn (Printf.sprintf "No summary found for function %ld (imported function): assuming taint is preserved" f);
-          state
-        end else
-          (* This function depend on another function that has not been analyzed yet, so it is part of some recursive loop. It will eventually stabilize *)
-          state
-      | Some summary ->
-        let args = List.take (Spec.get_or_fail i.annotation_before).vstack (fst arity) in
-        let ret = if snd arity = 1 then List.hd (Spec.get_or_fail i.annotation_after).vstack else None in
-        let taint_after_call = Taint_summary.apply
-            summary
-            state
-            args
-            (Spec.get_or_fail i.annotation_before).globals
-            (Spec.get_or_fail i.annotation_after).globals
-            (List.concat_map (Var.OffsetMap.to_alist (Spec.get_or_fail i.annotation_after).memory)
-               ~f:(fun ((a, _offset), b) ->
-                   (* Log.warn (Printf.sprintf "TODO: ignoring offset\n"); *)
-                   [a; b])) ret in
-        let export = List.find module_.exported_funcs ~f:(fun (id, _, _) -> Int32.(id = f)) in
-        match export with
-        | Some (_, fname, _) ->
-           Log.info (Printf.sprintf "function is named %s" fname);
-           begin match ret, StringMap.find !taint_specifications fname with
-           | Some ret_var, Some (ret_taint, args_taint) ->
-              (* This function returns a specific taint that we have to add to ret.
-               Moreover, it might taint its argument, so we propagate this taint too. *)
-              Printf.printf "I found it\n";
-              List.fold_left (List.zip_exn (List.rev args) args_taint)
-                 ~init:(Taint_domain.add_taint taint_after_call ret_var ret_taint)
-                 ~f:(fun state (var, taint) ->
-                   Printf.printf "adding taint %s to var %s\n" (Taint_domain.Taint.to_string taint) (Var.to_string var);
-                   Taint_domain.add_taint state var taint)
-           | _ -> taint_after_call
-           end
-        | None ->
-           taint_after_call
-    in
+      (state : State.t) (* The pre state *)
+    : [`Simple of State.t | `Branch of State.t * State.t | `Multiple of State.t list ] =
     match i.instr with
-    | Call (arity, _, f) -> `Simple (apply_summary f arity state)
-    | CallIndirect (_, arity, _, typ) ->
-      let targets = Call_graph.indirect_call_targets module_ typ in
-      (* Apply the summaries *)
-      `Simple (List.fold_left targets
-        ~init:state
-        ~f:(fun acc idx -> Taint_domain.join (apply_summary idx arity state) acc))
     | Br _ -> `Simple state
     | BrIf _ | If _ -> `Branch (state, state)
     | Return -> `Simple state
     | Unreachable -> `Simple Taint_domain.bottom
     | _ -> `Simple state
 
-  let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * state) list) : state =
-    let init_spec = (Spec_inference.init_state cfg (* , Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i)))*) )  in
+  let apply_imported
+      (_module : Wasm_module.t)
+      (f : Int32.t)
+      (_arity : int * int)
+      (_i : annot_expected Instr.labelled_call)
+      (state : State.t)
+    : State.t =
+    Log.warn (Printf.sprintf "No summary found for function %ld (imported function): assuming taint is preserved" f);
+    state
+
+  let apply_summary
+      (module_ : Wasm_module.t)
+      (f : Int32.t)
+      (arity : int * int)
+      (i : annot_expected Instr.labelled_call)
+      (state : State.t)
+      (summary : summary)
+    : State.t =
+    Log.info (Printf.sprintf "applying summary of function %ld" f);
+    let spec_before = Spec.get_or_fail i.annotation_before in
+    let spec_after = Spec.get_or_fail i.annotation_after in
+    let args = List.take spec_before.vstack (fst arity) in
+    let ret = if snd arity = 1 then List.hd spec_after.vstack else None in
+    let taint_after_call = Taint_summary.apply
+        summary
+        state
+        args
+        spec_before.globals
+        spec_after.globals
+        (List.concat_map (Var.OffsetMap.to_alist spec_after.memory)
+           ~f:(fun ((a, _offset), b) ->
+               (* Log.warn (Printf.sprintf "TODO: ignoring offset\n"); *)
+               [a; b])) ret in
+    let export = List.find module_.exported_funcs ~f:(fun (id, _, _) -> Int32.(id = f)) in
+    match export with
+    | Some (_, fname, _) ->
+      begin match ret, StringMap.find !taint_specifications fname with
+        | Some ret_var, Some (ret_taint, args_taint) ->
+          (* This function returns a specific taint that we have to add to ret.
+             Moreover, it might taint its argument, so we propagate this taint
+             too. *)
+          List.fold_left (List.zip_exn (List.rev args) args_taint)
+            ~init:(Taint_domain.add_taint taint_after_call ret_var ret_taint)
+            ~f:(fun state (var, taint) ->
+                Printf.printf "adding taint %s to var %s\n" (Taint_domain.Taint.to_string taint) (Var.to_string var);
+                Taint_domain.add_taint state var taint)
+        | _ -> taint_after_call
+      end
+    | None ->
+      taint_after_call
+
+  let merge_flows (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * State.t) list) : State.t =
+    let init_spec = (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx) (* , Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i)))*) )  in
     match states with
-    | [] -> init_state cfg
+    | [] -> init module_ (Wasm_module.get_funcinst module_ cfg.idx)
     | _ ->
       (* one or multiple states *)
         begin match block.content with
@@ -217,13 +212,13 @@ module Make (* : Transfer.TRANSFER *) = struct
                 (* get the spec after that state *)
                 let spec' = Cfg.state_after_block cfg idx init_spec in
                 (* equate all different variables in the post-state with the ones in the pre-state *)
-                List.fold_left (Spec_inference.extract_different_vars spec spec')
+                List.fold_left (Spec.extract_different_vars spec spec')
                   ~init:s
                   ~f:(fun s (x, y) ->
                       (* TODO: should it be x y or y x? *)
                       Taint_domain.add_taint_v s x y)) in
             (* And finally joins all the states *)
-            List.reduce_exn states' ~f:join_state
+            List.reduce_exn states' ~f:State.join
           | _ ->
             (* Not a control-flow merge, there should be a single predecessor *)
             begin match states with
@@ -232,24 +227,40 @@ module Make (* : Transfer.TRANSFER *) = struct
             end
         end
 
-  let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
-    let init_spec = (Spec_inference.init_state cfg (*, Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i))) *)) in
-    match Cfg.state_after_block cfg cfg.exit_block init_spec with
-    | Bottom ->
-      (* The function exit is likely unreachable, so we use a bottom summary *)
-      { ret = None;
-        globals = List.init (List.length cfg.global_types) ~f:(fun _ -> Taint_domain.Taint.bottom);
-        mem = Taint_domain.Taint.bottom; }
-    | NotBottom exit_spec ->
-      Taint_summary.make cfg out_state
-        (if List.length cfg.return_types = 1 then List.hd exit_spec.vstack else None)
-        exit_spec.globals
-        (List.concat_map (Var.OffsetMap.to_alist exit_spec.memory)
-           ~f:(fun ((a, _), b) ->
-               (* Log.warn (Printf.sprintf "ignoring offset"); *)
-               [a; b]))
+  let extract_summary (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (analyzed_cfg : State.t Cfg.t) : summary =
+    let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block (init module_ (Wasm_module.get_funcinst module_ cfg.idx)) in
+    Taint_summary.summary_of module_ cfg out_state
 
-  let extract_summary (cfg : annot_expected Cfg.t) (analyzed_cfg : state Cfg.t) : summary =
-    let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block (init_state cfg) in
-    summary cfg out_state
+  let call
+      (_module : Wasm_module.t)
+      (_cfg : annot_expected Cfg.t)
+      (_instr : annot_expected Instr.labelled_call)
+      (state : State.t)
+    : State.t =
+    (* This is a no-op, the important stuff happens in entry, because we need to
+       know the number of locals of the function. This is something we know here
+       for direct calls, but not for indirect calls. *)
+    state
+
+  let entry (module_ : Wasm_module.t) (callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state : State.t) : State.t =
+    (* Upon a call: *)
+    (* - extract number of args to the called function, and store the arguments from the stack to locals. -> make their taint equal *)
+    (* - globals stay the same *)
+    (* - locals: not relevant anymore since we know their values? the extra ones (beyond args) are initialized with no taint -> TODO *)
+    (* - memory: stays the same *)
+    let (_nargs, _) = Wasm_module.get_func_type module_ callee_idx  in
+    let _nlocals = Wasm_module.get_n_locals module_ callee_idx in
+    (* TODO: actually, most of it should be done by spec inference?! *)
+
+    failwith "TODO"
+
+
+
+  let return (_module : Wasm_module.t) (_caller_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (_state_after_call : State.t) : State.t =
+    (* Upon a return, do this to state_before call: *)
+    (* - remove args -> not needed, done by spec *)
+    (* - push return from state_after_call -> not needed, done by spec? but maybe make them equal*)
+    (* - replace globals/mem by state_after_call *)
+    failwith "TODO"
+
 end

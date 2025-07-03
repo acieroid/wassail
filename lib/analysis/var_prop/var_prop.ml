@@ -65,8 +65,8 @@ let eqs_data_instr (instr : (Instr.data, Spec.t) Instr.labelled) : VarEq.Set.t =
   | RefIsNull | RefNull _ | RefFunc _ -> VarEq.Set.empty
 
 (** Perform variable propagation *)
-let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
-  let init_spec = Spec_inference.init_state cfg in
+let var_prop (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
+  let init_spec = Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx) in
   (* Go over each instruction and basic block, record all equality constraints that can be derived *)
   let equalities : VarEq.Set.t = List.fold_left (Cfg.all_blocks cfg)
       ~init:VarEq.Set.empty
@@ -80,7 +80,7 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
             let spec = Cfg.state_after_block cfg block.idx init_spec in
             List.fold_left (Cfg.predecessors cfg block.idx)
               ~init:eqs
-              ~f:(fun eqs pred ->
+              ~f:(fun eqs (pred, _) ->
                   let pred_spec = Spec.get_or_fail (Cfg.state_after_block cfg pred init_spec) in
                   let spec = Spec.get_or_fail spec in
                   assert (List.length pred_spec.vstack = List.length spec.vstack);
@@ -91,7 +91,7 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
                        ((List.map2_exn ~f:VarEq.of_vars pred_spec.vstack spec.vstack) @
                         (List.map2_exn ~f:VarEq.of_vars pred_spec.locals spec.locals) @
                         (List.map2_exn ~f:VarEq.of_vars pred_spec.globals spec.globals))))
-          | Control _ -> eqs (* No equality arises from other control blocks *)
+          | _ -> eqs (* No equality arises from other blocks *)
         )
   in
   (* Filter out tautologies *)
@@ -182,7 +182,7 @@ module Test = struct
     Spec_inference.propagate_globals := true;
     Spec_inference.propagate_locals := true;
     Spec_inference.use_const := true;
-    let result = var_prop cfg in
+    let result = var_prop module_ cfg in
     let actual = all_vars result in
     let expected = Var.Set.of_list [Var.Return; Var.Local 0; Var.Global 0; Var.Const (Prim_value.of_int 0)] in
     Var.Set.check_equality ~actual ~expected
@@ -193,6 +193,6 @@ module Test = struct
     Spec_inference.propagate_locals := false;
     Spec_inference.use_const := false;
     let cfg = Spec_analysis.analyze_intra1 module_ 14l in
-    let actual = var_prop cfg in
+    let actual = var_prop module_ cfg in
     count_vars actual < count_vars cfg
 end

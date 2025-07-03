@@ -140,24 +140,24 @@ let graph_of_cfg (cfg : 'a Cfg.t) : int Graph.t =
     List.map edges ~f:fst
   in
   let preds (node : int) : int list =
-    let back_edges = Cfg.incoming_edges cfg node in
+    let back_edges = Cfg.predecessors cfg node in
     List.map back_edges ~f:fst in
   { entry; exit; nodes; succs; preds; }
 
 (** Extract the final branch condition of a block, if there is any *)
-let branch_condition (cfg : Spec.t Cfg.t) (block : Spec.t Basic_block.t) : Var.t option =
+let branch_condition (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (block : Spec.t Basic_block.t) : Var.t option =
   match block.content with
   | Control c -> begin match c.instr with
       | BrIf _ | BrTable _ | If _ ->
         (* These are the only conditionals in the language, and they all depend
            on the top stack variable before their execution *)
-        begin match (Cfg.state_before_block cfg block.idx (Spec_inference.init_state cfg)) with
+        begin match (Cfg.state_before_block cfg block.idx (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx))) with
         | Spec.Bottom -> None
         | Spec.NotBottom s -> List.hd s.vstack
         end
       | _ -> None
     end
-  | Data _ -> None
+  | _ -> None
 
 (** Computes the dominator tree of a CFG . *)
 let cfg_dominator (cfg : Spec.t Cfg.t) : Tree.t =
