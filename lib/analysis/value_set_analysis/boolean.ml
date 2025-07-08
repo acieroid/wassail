@@ -9,7 +9,7 @@ type true_or_false = {
 [@@deriving sexp, compare, equal]
 
 let true_or_false_to_string (tf : true_or_false) : string =
-  "true -> " ^ RIC.to_string tf.true_ ^ ", false -> " ^ RIC.to_string tf.false_
+  "true(" ^ RIC.to_string tf.true_ ^ "), false(" ^ RIC.to_string tf.false_ ^ ")"
 
 type t = true_or_false Variable.Map.t
 [@@deriving sexp, compare, equal]
@@ -81,7 +81,13 @@ let not_ (boolean : t) : t =
     ~f:(fun ~key ~data:{true_ = t; false_ = f} acc -> Variable.Map.set acc ~key ~data:{true_ = f; false_ = t}) 
     boolean
 
-let join = or_
+let join (boolean1 : t) (boolean2 : t) : t = 
+  let boolean1 = Variable.Map.make_compatible ~this:boolean1 ~relative_to:boolean2 ~get in
+  let boolean2 = Variable.Map.make_compatible ~this:boolean2 ~relative_to:boolean1 ~get in
+  Variable.Map.merge boolean1 boolean2 ~f:(fun ~key:k v ->
+      match k, v with
+      | _, `Both (x, y) -> Some {true_ = RIC.join x.true_ y.true_; false_ = RIC.join x.false_ y.false_}
+      | _, `Right _ | _, `Left _ -> None) (* Nothing can be inferred from this condition *)
 
 let meet (boolean1 : t) (boolean2 : t) : t = Log.warn "I'm not sure about the meet of two boolean conditions"; and_ boolean1 boolean2
 

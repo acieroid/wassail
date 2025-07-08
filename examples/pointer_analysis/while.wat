@@ -1,18 +1,18 @@
 (module
   (func $main (local $i i32)
     ;; initialize i = 0
-    i32.const 0
+    i32.const 3
     local.set $i
 
     ;; while loop
     block $exit          ;; outer block (break target)
       loop $loop         ;; loop label
-        ;; condition: if (i < 10)
+        ;; condition: if (i <= 10)
         local.get $i
         i32.const 10
-        i32.lt_s
-        i32.eqz          ;; if !(i < 10) => break
-        br_if $exit
+        i32.gt_u
+        ;; i32.eqz       
+        br_if $exit      ;; if i > 10 => break
 
         ;; body: i = i + 1
         local.get $i

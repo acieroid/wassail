@@ -44,6 +44,9 @@ let top : t = Variable.Map.empty (* TODO: better definition of TOP *)
 let extract_memory_variables (store : t) : Variable.t list =
   Variable.Map.extract_memory_variables store
 
+let extract_locals_and_globals (store : t) : Variable.t list =
+  Variable.Map.extract_locals_and_globals store
+
 (** [get store ~var] returns the abstract value (RIC) associated with [var] in [store].
 
     - If [var] is found, returns its value.
@@ -60,7 +63,9 @@ let get (store : t) ~(var : Variable.t) : Value.t =
         (match var with
         | Var Const I32 n -> Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, ("", Option.value_exn (Int32.to_int n)))
         | Var Const _ -> Reduced_interval_congruence.RIC.Top
-        | Var _ -> Reduced_interval_congruence.RIC.relative_ric (Variable.to_string var)
+        (* | Var Merge _ -> RIC.Bottom *)
+        | Var _ -> RIC.Bottom
+        (* | Var _ -> RIC.relative_ric (Variable.to_string var) *)
         | Mem _ ->
           let mems = extract_memory_variables store in
           if Variable.is_covered ~by:mems var then
@@ -196,8 +201,8 @@ let set (store : t) ~(var : Variable.t) ~(vs : Value.t) : t =
   let store = 
     if Variable.is_linear_memory var then 
         let store = make_compatible ~this_store:store ~relative_to:(Variable.Map.empty |> Variable.Map.set ~key:var ~data:vs) in
-        let store = Variable.Map.filter_keys ~f:(fun v -> not (Variable.share_addresses v var)) store in
-        Variable.Map.filter ~f:(fun value_set -> not (Value.equal (ValueSet RIC.Top) value_set)) store
+        Variable.Map.filter_keys ~f:(fun v -> not (Variable.share_addresses v var)) store
+        (* Variable.Map.filter ~f:(fun value_set -> not (Value.equal (ValueSet RIC.Top) value_set)) store *)
     else 
       store
   in
@@ -224,7 +229,8 @@ let bottom : t = Variable.Map.empty  |> set ~var:Variable.entire_memory ~vs:(Val
 
 let remove_pointers_to_top (store : t) : t =
   let store =
-    Variable.Map.filteri store ~f:(fun ~key ~data -> not ((Variable.is_linear_memory key) && (Value.equal (ValueSet RIC.Top) data))) in
+    Variable.Map.filteri store ~f:(fun ~key ~data -> 
+      (not (Variable.is_linear_memory key)) || (not (Value.equal (ValueSet RIC.Top) data))) in
   if List.is_empty (extract_memory_variables store) then
     set store ~var:Variable.entire_memory ~vs:(ValueSet RIC.Top)
   else
@@ -233,8 +239,12 @@ let remove_pointers_to_top (store : t) : t =
 (** [join store1 store2] computes the least upper bound of two stores. 
     Missing memory variables are treated as [RIC.Top]. *)
 let join (store1 : t) (store2 : t) : t =
+  if equal store1 bottom then store2
+  else if equal store2 bottom then store1
+  else
   let store1 = make_compatible ~this_store:store1 ~relative_to:store2 in
   let store2 = make_compatible ~this_store:store2 ~relative_to:store1 in
+  (* print_endline ("joining these two states: " ^ to_string store1 ^ "  and  " ^ to_string store2); *)
   let store =
     Variable.Map.merge store1 store2 ~f:(fun ~key:var v -> 
         match v with
@@ -247,7 +257,9 @@ let join (store1 : t) (store2 : t) : t =
             | ValueSet a, ValueSet b -> ValueSet (RIC.join a b)
             | _ -> assert false))
   in
-  remove_pointers_to_top store
+  (* print_endline ("result: " ^ to_string store); *)
+  let store = remove_pointers_to_top store in
+  store
 
 (** [update_accessed_vars store accessed_addresses] applies [truncate_memory_var] to all memory variables. *)
 let update_accessed_vars (store : t) (accessed_addresses : RIC.accessed) : t =
@@ -473,6 +485,49 @@ let%test_module "abstract store tests" = (module struct
       |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (2, Int 0, Int 4, ("", 0))))
       |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet (RIC.ric (3, Int 1, Int 5, ("", 0))))
       |> set ~var:Variable.entire_memory ~vs:(Value.ValueSet (RIC.Top))
+    in
+    print_endline ("[JOIN]\n\t"  ^ to_string store1 ^ "\n\t" ^ to_string store2 ^ "\n\t\t" ^ to_string joined);
+    equal joined expected
+
+  let%test "join abstract stores 2" =
+    let var1 = Variable.Var (Var.Local 0) in
+    let var2 = Variable.entire_memory in
+    let store1 =
+      Variable.Map.empty
+      |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (0, Int 0, Int 0, ("", 3))))
+      |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet RIC.Top)
+    in
+    let store2 =
+      Variable.Map.empty
+      |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet RIC.Bottom)
+    in
+    let joined = join store1 store2 in
+    let expected =
+      Variable.Map.empty
+      |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (0, Int 0, Int 0, ("", 3))))
+      |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet RIC.Top)
+    in
+    print_endline ("[JOIN]\n\t"  ^ to_string store1 ^ "\n\t" ^ to_string store2 ^ "\n\t\t" ^ to_string joined);
+    equal joined expected
+
+  let%test "join abstract stores 3" =
+    let var1 = Variable.Var (Var.Local 0) in
+    let var2 = Variable.Var (Var.Local 3) in
+    let store1 =
+      Variable.Map.empty
+      |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (0, Int 0, Int 0, ("", 3))))
+      |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet (RIC.ric (0, Int 0, Int 0, ("", 6))))
+    in
+    let store2 =
+      Variable.Map.empty
+      |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet RIC.Bottom)
+    in
+    let joined = join store1 store2 in
+    let expected =
+      Variable.Map.empty
+      |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (0, Int 0, Int 0, ("", 3))))
+      |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet (RIC.ric (0, Int 0, Int 0, ("", 6))))
+      |> Variable.Map.set ~key:Variable.entire_memory ~data:(Value.ValueSet RIC.Top)
     in
     print_endline ("[JOIN]\n\t"  ^ to_string store1 ^ "\n\t" ^ to_string store2 ^ "\n\t\t" ^ to_string joined);
     equal joined expected

@@ -163,6 +163,10 @@ module Map = struct
     let all_vars = keys store in
     List.filter ~f:T.is_linear_memory all_vars
 
+  let extract_locals_and_globals (store : 'a t) : T.t list =
+    let all_vars = keys store in
+    List.filter ~f:(fun v -> match v with | Var Var.Local _ | Var Var.Global _ -> true | _ -> false) all_vars
+
   (** [update_all store vars ric] sets [ric] for each variable in [vars] within [store]. *)
   let update_all (store : 'a t) (vars : Set.t) (new_value : 'a) : 'a t =
     Set.fold vars ~init:store ~f:(fun acc v -> set acc ~key:v ~data:new_value)

@@ -415,11 +415,14 @@ module RIC = struct
 
   (** [join r1 r2] returns the union (over-approximation) of [r1] and [r2]. *)
   let join (ric1 : t) (ric2 : t) : t =
-    let (c1, i1) = to_congruence_and_interval ric1 in
-    let (c2, i2) = to_congruence_and_interval ric2 in
-    let c = Congruence.join c1 c2 in
-    let i = Interval.join i1 i2 in 
-    of_congruence_and_interval c i
+    if comparable_offsets ric1 ric2 then
+      let (c1, i1) = to_congruence_and_interval ric1 in
+      let (c2, i2) = to_congruence_and_interval ric2 in
+      let c = Congruence.join c1 c2 in
+      let i = Interval.join i1 i2 in 
+      of_congruence_and_interval c i
+    else
+      Top
 
   (** [is_subset r1 ~of_:r2] returns [true] if [r1] is a subset of [r2]. *)
   let is_subset (ric1 : t) ~(of_ : t) : bool =
@@ -472,12 +475,11 @@ module RIC = struct
     | Top -> Top 
     | Bottom -> Bottom 
     | RIC {stride = s; lower_bound = _; upper_bound = u; offset = o} -> 
-      reduce (
-        if s = 0 then 
+      ric (1, NegInfinity, ExtendedInt.times (Int s) u, o)
+        (* if s = 0 then 
           ric (1, NegInfinity, u, o) 
         else
-          ric (s, NegInfinity, u, o)
-      )
+          ric (s, NegInfinity, u, o) *)
 
   (** [remove_upper_bound r] returns [r] with its upper bound removed (set to ∞). *)
   let remove_upper_bound (r : t) : t =
@@ -486,12 +488,13 @@ module RIC = struct
     | Top -> Top 
     | Bottom -> Bottom 
     | RIC {stride = s; lower_bound = l; upper_bound = _; offset = o} -> 
-      reduce (
+      ric (1, ExtendedInt.times (Int s) l, Infinity, o)
+      (* reduce (
         if s = 0 then
           ric (1, l, Infinity, o)
         else
           ric (s, l, Infinity, o)
-      )
+      ) *)
 
   (** [widen r ~relative_to] returns the widening of [r] with respect to [relative_to]. *)
   let widen (ric1 : t) ~(relative_to : t) : t =
@@ -1404,6 +1407,13 @@ let%test_module "RIC tests" = (module struct
       let j = join r1 r2 in
       print_endline ("[JOIN of RICs]     " ^ to_string r1 ^ " ⊔ " ^ to_string r2 ^ " → " ^ to_string j);
       RIC.equal j (ric (2, Int 0, Int 4, ("", 1)))
+    
+    let%test "join_different_offsets" =
+      let r1 = ric (2, Int 0, Int 2, ("", 1)) in
+      let r2 = ric (0, Int 0, Int 0, ("a", 0)) in
+      let j = join r1 r2 in
+      print_endline ("[JOIN of RICs]     " ^ to_string r1 ^ " ⊔ " ^ to_string r2 ^ " → " ^ to_string j);
+      RIC.equal j RIC.Top
 
     let%test "subset_of_top" =
       let a = ric (2, Int 0, Int 3, ("", 1)) in
@@ -1666,7 +1676,7 @@ let%test_module "RIC tests" = (module struct
       let r = ric (3, Int 2, Int 5, ("x", 4)) in
       let result = remove_lower_bound r in
       print_endline ("[remove_lower_bound]     " ^ to_string r ^ " → " ^ to_string result);
-      RIC.equal result (ric (3, NegInfinity, Int 5, ("x", 4)))
+      RIC.equal result (ric (1, NegInfinity, Int 15, ("x", 4)))
 
     let%test "remove_upper_bound_top" =
       let r = Top in
@@ -1684,7 +1694,7 @@ let%test_module "RIC tests" = (module struct
       let r = ric (2, Int 1, Int 4, ("", 2)) in
       let result = remove_upper_bound r in
       print_endline ("[remove_upper_bound]     " ^ to_string r ^ " → " ^ to_string result);
-      RIC.equal result (ric (2, Int 1, Infinity, ("", 2)))
+      RIC.equal result (ric (1, Int 2, Infinity, ("", 2)))
 
     let%test "widen_top_and_any" =
       let r = ric (3, Int 0, Int 4, ("", 5)) in
