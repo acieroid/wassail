@@ -290,10 +290,10 @@ module Spec_inference
     end;
     merge module_ cfg block (List.map ~f:snd states)
 
-  let call_inter (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state : State.t) : State.t =
-    failwith "TODO: call"
+  let call_inter (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (state : State.t) : State.t =
+    state
 
-  let entry (_module_ : Wasm_module.t) (_callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state : State.t) : State.t =
+  let entry (_module_ : Wasm_module.t) (_callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_state : State.t) : State.t =
     failwith "TODO: entry"
 
   let return (_module_ : Wasm_module.t) (_caller_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before : State.t) (_state_after : State.t) : State.t =

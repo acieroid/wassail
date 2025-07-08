@@ -118,7 +118,7 @@ module Cfg = struct
                 |> List.map ~f:(fun (idx, block) ->
                     let (t, content) = match block.content with
                       | Call instr -> ("c", Instr.call_to_string instr.instr)
-                      | Entry instr -> ("e", Instr.call_to_string instr.instr)
+                      | Entry -> ("e", "")
                       | Return instr -> ("r", Instr.call_to_string instr.instr)
                       | Control instr -> ("c", Instr.control_to_short_string instr.instr)
                       | Data instrs -> ("d", List.map instrs ~f:(fun i -> Instr.data_to_string i.instr) |> String.concat ~sep:":" )
@@ -220,7 +220,7 @@ module Cfg = struct
         match block.content with
         | Control i -> Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Control i)
         | Call i -> Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Call i)
-        | Entry _ | Return _ -> acc
+        | Entry | Return _ -> acc
         | Data d -> List.fold_left d ~init:acc ~f:(fun acc i ->
             Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Data i)))
 
@@ -275,7 +275,7 @@ module Cfg = struct
     | Control i -> Instr.annotation_before (Control i)
     | Call i -> Instr.annotation_before (Call i)
     | Data (i :: _) -> Instr.annotation_before (Data i)
-    | Data [] | Entry _ | Return _ -> begin match non_empty_predecessors cfg block_idx with
+    | Data [] | Entry | Return _ -> begin match non_empty_predecessors cfg block_idx with
         | [] ->
           begin match predecessors cfg block_idx with
             | [] ->
@@ -296,7 +296,7 @@ module Cfg = struct
     match block.content with
     | Control i -> Instr.annotation_after (Control i)
     | Call i -> Instr.annotation_after (Call i)
-    | Data [] | Entry _ | Return _ -> begin match non_empty_predecessors cfg block_idx with
+    | Data [] | Entry | Return _ -> begin match non_empty_predecessors cfg block_idx with
         | [] -> begin match predecessors cfg block_idx with
             | [] ->
               if block_idx <> cfg.entry_block then

@@ -97,7 +97,6 @@ module type CLASSICAL_INTER_TRANSFER = sig
     : Wasm_module.t (* the wasm module *)
     -> Int32.t (* the function index of the callee *)
     -> annot_expected Cfg.t (* the CFG of the function *)
-    -> annot_expected Instr.labelled_call (* the call instruction that resulted in jumping in this function *)
     -> State.t (* the state after the call instruction, before going into the function *)
     -> State.t (* the resulting state after applying the transfer function *)
 

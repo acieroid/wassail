@@ -122,7 +122,7 @@ module Make
         let poststate = Result.Simple (CallAdapter.analyze_call module_ cfg instr state extra) in
         instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(state, poststate);
         poststate
-      | Entry _ | Return _ -> failwith "Should not have a entry/return in an intra analysis"
+      | Entry | Return _ -> failwith "Should not have a entry/return in an intra analysis"
       | Control instr ->
         let poststate = match Transfer.control module_ cfg instr state with
           | `Simple s -> Result.Simple s
@@ -256,7 +256,7 @@ module MakeSumm
         let poststate = Result.Simple (CallAdapter.analyze_call module_ cfg instr state extra) in
         instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(state, poststate);
         poststate
-      | Entry _ | Return _ -> failwith "Should not have a return in an intra analysis"
+      | Entry | Return _ -> failwith "Should not have a return in an intra analysis"
       | Control instr ->
         let poststate = match Transfer.control module_ cfg instr state with
           | `Simple s -> Result.Simple s
@@ -419,9 +419,9 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
         let poststate = Transfer.call_inter module_ cfg instr state in
         instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = None } ~data:(state, Simple poststate);
         Simple poststate
-      | Entry instr ->
-        let poststate = Transfer.entry module_ 0l (* TODO *) cfg instr state in
-        instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = Entry } ~data:(state, Simple poststate);
+      | Entry ->
+        let poststate = Transfer.entry module_ 0l (* TODO *) cfg state in
+        (* instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = Entry } ~data:(state, Simple poststate); *)
         Simple poststate
       | Return instr ->
         let state_before_call = fst (Map.find_exn !instr_data { label = instr.label; kind = Entry }) in

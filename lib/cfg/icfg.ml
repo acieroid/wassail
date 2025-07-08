@@ -37,6 +37,7 @@ module ICFG (* : Cfg_base.CFG_LIKE *)= struct
         kind: block_kind;
       }
       [@@deriving sexp, compare, equal]
+
       let to_string (block_idx : t) : string =
         Printf.sprintf "%ld_%s%s" block_idx.fidx (Cfg.BlockIdx.to_string block_idx.block_idx)
           (match block_idx.kind with
@@ -123,13 +124,10 @@ module ICFG (* : Cfg_base.CFG_LIKE *)= struct
     let block = Cfg.find_block_exn cfg block_idx.block_idx in
     match block_idx.kind with
     | Regular -> block
-    | Entry -> begin match block.content with
-        | Call instr -> { block with content = Entry instr }
-        | _ -> failwith "Unexpected: got a entry block for a non-call"
-      end
+    | Entry -> { block with content = Entry }
     | Return -> begin match block.content with
         | Call instr -> { block with content = Return instr }
-        | _ -> failwith "Unexpected got a return block for a non call"
+        | _ -> failwith "Unexpected: got a return block for a non-call"
       end
 
   let is_loop_head (icfg : 'a t) (block_idx : BlockIdx.t) : bool =
@@ -177,12 +175,12 @@ module ICFG (* : Cfg_base.CFG_LIKE *)= struct
           (* The predecessor must be a regular node. An Entry node must be preceded by a Call node *)
           make_block_idx caller caller_block Regular, None)
     | Regular ->
-      (* If it is the first node of a CFG, then the predecessor is the artificial entry node (unless we are at the entry? Not sure it's the best place to do it, TODO: investigate)  *)
       if cfg.entry_block = block_idx.block_idx then
+        (* If it is the first node of a CFG, then the predecessor is the artificial entry node, unless we are et the entry of the icfg (in which case, no predecessor)  *)
         if Int32.(block_idx.fidx = icfg.entry) then
-          []
+          [] (* TODO: maybe we should still have an entry node here, for the transfer function to be happy *)
         else
-          [({ block_idx with kind = Entry }, None)]
+          [({ block_idx with kind = Entry   }, None)]
       else
         (* Otherwise, it is the same as for a regular CFG. (Unless the pred is a call) *)
         Cfg.predecessors cfg block_idx.block_idx

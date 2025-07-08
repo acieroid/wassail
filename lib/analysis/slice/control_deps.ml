@@ -88,7 +88,7 @@ let control_dep (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (is_immediate_pos
     let defined = match block.content with
       | Control instr -> Spec_inference.instr_def module_ cfg (Instr.Control instr)
       | Call instr -> Spec_inference.instr_def module_ cfg (Instr.Call instr)
-      | Entry _ | Return _ -> []
+      | Entry | Return _ -> []
       | Data instrs -> List.fold_left instrs ~init:[] ~f:(fun acc instr ->
           (Spec_inference.instr_def module_ cfg (Instr.Data instr)) @ acc) in
     List.map defined ~f:(fun d -> (d, pred)) in

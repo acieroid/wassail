@@ -242,7 +242,7 @@ module Make = struct
        for direct calls, but not for indirect calls. *)
     state
 
-  let entry (module_ : Wasm_module.t) (callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state : State.t) : State.t =
+  let entry (module_ : Wasm_module.t) (callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_state : State.t) : State.t =
     (* Upon a call: *)
     (* - extract number of args to the called function, and store the arguments from the stack to locals. -> make their taint equal *)
     (* - globals stay the same *)
