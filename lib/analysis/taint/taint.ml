@@ -101,7 +101,6 @@ module TestIntra = struct
     check expected actual
 end
 
-
 let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Domain.t Icfg.t =
   ClassicalInter.analyze module_ (Analysis_helpers.mk_inter_classical module_ entry)
 

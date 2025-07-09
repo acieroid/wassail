@@ -182,7 +182,7 @@ module type ABSTRACT_DOMAIN = sig
 end
 
 module Product_domain = struct
-  module Make (Domain1 : ABSTRACT_DOMAIN) (Domain2 : ABSTRACT_DOMAIN) : ABSTRACT_DOMAIN = struct
+  module Make (Domain1 : ABSTRACT_DOMAIN) (Domain2 : ABSTRACT_DOMAIN) = struct
     type t = Domain1.t * Domain2.t
     [@@deriving sexp, compare, equal]
     let bottom : t = (Domain1.bottom, Domain2.bottom)

@@ -243,7 +243,7 @@ module Make = struct
     state
 
   let entry (_module_ : Wasm_module.t) (_callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) (state : State.t) : State.t =
-    state (* TODO: is this correct? Most of the hard work is done by the spec analysis, nothing specific changes in terms of taint during function calls *)
+    state (* Everything is actually already done by spec analysis! We can just propagete the state *)
 
   let return (_module : Wasm_module.t) (_caller_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (state_after_call : State.t) : State.t =
     state_after_call

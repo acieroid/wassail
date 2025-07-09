@@ -35,6 +35,9 @@ let mk_inter
           ~f:(fun ~key:idx ~data:sum acc ->
               Int32Map.set acc ~key:idx ~data:sum))
 
+(** This will run a "classical" interprocedural spec analysis. You can then run
+    another analysis by doing SomeInter.analyze module_ (mk_classical_inter
+    module_ icfg) *)
 let mk_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : 'a Icfg.t =
   let icfg = Icfg.make module_ entry in
   Spec_inference.Inter.analyze module_ icfg
