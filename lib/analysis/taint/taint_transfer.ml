@@ -242,25 +242,10 @@ module Make = struct
        for direct calls, but not for indirect calls. *)
     state
 
-  let entry (module_ : Wasm_module.t) (callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_state : State.t) : State.t =
-    (* Upon a call: *)
-    (* - extract number of args to the called function, and store the arguments from the stack to locals. -> make their taint equal *)
-    (* - globals stay the same *)
-    (* - locals: not relevant anymore since we know their values? the extra ones (beyond args) are initialized with no taint -> TODO *)
-    (* - memory: stays the same *)
-    let (_nargs, _) = Wasm_module.get_func_type module_ callee_idx  in
-    let _nlocals = Wasm_module.get_n_locals module_ callee_idx in
-    (* TODO: actually, most of it should be done by spec inference?! *)
+  let entry (_module_ : Wasm_module.t) (_callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) (state : State.t) : State.t =
+    state (* TODO: is this correct? Most of the hard work is done by the spec analysis, nothing specific changes in terms of taint during function calls *)
 
-    failwith "TODO"
-
-
-
-  let return (_module : Wasm_module.t) (_caller_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (_state_after_call : State.t) : State.t =
-    (* Upon a return, do this to state_before call: *)
-    (* - remove args -> not needed, done by spec *)
-    (* - push return from state_after_call -> not needed, done by spec? but maybe make them equal*)
-    (* - replace globals/mem by state_after_call *)
-    failwith "TODO"
+  let return (_module : Wasm_module.t) (_caller_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (state_after_call : State.t) : State.t =
+    state_after_call
 
 end

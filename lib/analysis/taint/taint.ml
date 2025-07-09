@@ -69,7 +69,7 @@ let find_sinks_from_names (module_ : Wasm_module.t) (names : StringSet.t) : Int3
       | _ -> None) in
   Int32Set.of_list funs
 
-module Test = struct
+module TestIntra = struct
   let%test "simple function has no taint" =
     let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
@@ -99,4 +99,32 @@ module Test = struct
     let actual = fst (Int32Map.find_exn (analyze_intra module_ [0l]) 0l) in
     let expected = Summary.{ ret = Some (Domain.Taint.taint (Var.Local 0)); mem = Domain.Taint.taint (Var.Local 0); globals = [Domain.Taint.taint (Var.Global 0)] } in
     check expected actual
+end
+
+
+let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Domain.t Icfg.t =
+  ClassicalInter.analyze module_ (Analysis_helpers.mk_inter_classical module_ entry)
+
+module TestInter = struct
+  let does_not_fail (module_str : string) (fidx : int32) : unit =
+    let module_ = Wasm_module.of_string module_str in
+    let icfg = analyze_inter_classical module_ fidx in
+    Printf.printf "---\n%s\n---\n" (Icfg.to_dot ~annot_str:Domain.to_string icfg);
+    ()
+
+  let%test_unit "interprocedural taint does not fail with function call" =
+    (* TODO: don't only check that it doesn't fail *)
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    local.get 0
+    i32.const 3
+    i32.mul
+    call 1)
+  (func (;1;) (type 0) (param i32) (result i32)
+    ;; []
+    local.get 0
+    i32.const 0
+    i32.add)
+  )" 0l
 end

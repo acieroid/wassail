@@ -222,9 +222,9 @@ module Test = struct
     let l0l1 =  Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
                                       (Var.Local 1, Taint.taint (Var.Local 1));
                                       (Var.Var (lab 0), Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))] in
-    String.equal (to_string bot) "[i0: _, l0: l0, l1: l1]" &&
-    String.equal (to_string l0) "[i0: l0, l0: l0, l1: l1]" &&
-    String.equal (to_string l0l1) "[i0: l0,l1, l0: l0, l1: l1]"
+    String.equal (to_string bot) "[i0_0: _, l0: l0, l1: l1]" &&
+    String.equal (to_string l0) "[i0_0: l0, l0: l0, l1: l1]" &&
+    String.equal (to_string l0l1) "[i0_0: l0,l1, l0: l0, l1: l1]"
 
   let%test "join produces the expected taint maps" =
     let open Instr.Label.Test in

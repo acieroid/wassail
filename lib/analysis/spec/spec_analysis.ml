@@ -265,7 +265,8 @@ module TestInter = struct
   let does_not_fail (module_str : string) (fidx : int32) : unit =
     let module_ = Wasm_module.of_string module_str in
     let icfg = analyze_inter_classical module_ fidx in
-    Printf.printf "---\n%s\n---\n" (Icfg.to_dot ~annot_str:Spec.to_string icfg);
+    ignore icfg;
+    (* Printf.printf "---\n%s\n---\n" (Icfg.to_dot ~annot_str:Spec.to_string icfg); *)
     ()
 
   let%test_unit "interprocedural spec analysis does not fail on trivial code" =
@@ -281,7 +282,7 @@ module TestInter = struct
   (global (;0;) (mut i32) (i32.const 66560)))" 0l
 
   let%test_unit "interprocedural spec analysis does not fail with function call" =
-    (* TODO: also restore stack *)
+    (* TODO: don't only check that it doesn't fail *)
     does_not_fail "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;0;) (type 0) (param i32) (result i32)
