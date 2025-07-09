@@ -197,7 +197,7 @@ module Spec_inference
     let rename_exit (s : Spec.SpecWithoutBottom.t) =
       (* If this is the exit block, rename the top of the stack to a new variable *)
       if Cfg.exit_block cfg = block.idx then
-        { s with vstack = List.mapi s.vstack ~f:(fun i v -> if i = 0 then Var.Return else v) }
+        { s with vstack = List.mapi s.vstack ~f:(fun i v -> if i = 0 then Var.Return cfg.idx else v) }
       else
         s
     in
@@ -300,16 +300,17 @@ module Spec_inference
     Spec.wrap ~default:bottom (fun state ->
         let args = List.take state.vstack nargs in
         let zeroes = List.map locals ~f:(fun t -> Var.Const (Prim_value.zero_of_t t)) in
-        let vstack = args @ (List.drop zeroes nargs) in
-        Spec.NotBottom { state with vstack })
+        let vstack = [] in
+        let locals = args @ (List.drop zeroes nargs) in
+        Spec.NotBottom { state with vstack; locals })
 
   let return (_module_ : Wasm_module.t) (_caller_idx : Int32.t) (_cfg : annot_expected Cfg.t) (instr : annot_expected Instr.labelled_call) (state_before : State.t) (state_after : State.t) : State.t =
     match state_before, state_after with
     | Bottom, _ | _, Bottom -> Bottom
-    | NotBottom { vstack = stack_before; _ }, NotBottom ({ vstack = stack_after; _ } as after) ->
+    | NotBottom { vstack = stack_before; locals; _ }, NotBottom ({ vstack = stack_after; _ } as after) ->
       let args, returns = Instr.call_types instr in
       let vstack = (List.take stack_after (List.length returns)) @ (List.drop stack_before (List.length args)) in
-      Spec.NotBottom { after with vstack }
+      Spec.NotBottom { after with vstack; locals }
 
 end
 

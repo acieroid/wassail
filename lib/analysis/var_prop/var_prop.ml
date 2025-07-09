@@ -2,7 +2,7 @@ open Core
 
 (** Check if a variable is considered as being defined at the entry point *)
 let entry_var (v : Var.t) : bool = match v with
-  | Local _ | Global _ | Return | Const _ -> true
+  | Local _ | Global _ | Return _ | Const _ -> true
   | Var _ | Merge (_, _) | Hole | Other _ -> false
 
 
@@ -184,7 +184,7 @@ module Test = struct
     Spec_inference.use_const := true;
     let result = var_prop module_ cfg in
     let actual = all_vars result in
-    let expected = Var.Set.of_list [Var.Return; Var.Local 0; Var.Global 0; Var.Const (Prim_value.of_int 0)] in
+    let expected = Var.Set.of_list [Var.Return 0l; Var.Local 0; Var.Global 0; Var.Const (Prim_value.of_int 0)] in
     Var.Set.check_equality ~actual ~expected
 
   let%test "var prop - big program" =

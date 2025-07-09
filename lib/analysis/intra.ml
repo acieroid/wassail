@@ -424,8 +424,8 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
         (* instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = Entry } ~data:(state, Simple poststate); *)
         Simple poststate
       | Return instr ->
-        let state_before_call = fst (Map.find_exn !instr_data { label = instr.label; kind = Entry }) in
-        let poststate = Transfer.return module_ 0l (* TODO *)cfg instr state_before_call state in
+        let state_before_entry = fst (Map.find_exn !instr_data { label = instr.label; kind = None }) in
+        let poststate = Transfer.return module_ 0l (* TODO *)cfg instr state_before_entry state in
         instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = Return } ~data:(state, Simple poststate);
         Simple poststate
       | Control instr ->
@@ -499,7 +499,9 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
     (* _narrow (IntMap.keys cfg.basic_blocks); *)
     !instr_data
     |> Map.to_alist
-    |> List.map ~f:(fun (k, v) -> (k.label, v))
+    |> List.filter_map ~f:(fun (k, v) -> match k.kind with
+        | None -> Some (k.label, v)
+        | _ -> None)
     |> Instr.Label.Map.of_alist_exn
 
   let analyze

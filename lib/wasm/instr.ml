@@ -25,9 +25,8 @@ module Label = struct
     }
     [@@deriving sexp, compare, equal]
 
-    let to_string (l : t) : string = match l.section with
-      | Function _ -> Printf.sprintf "%d" l.id (* Printed differently to have a cleaner output *)
-      | _ -> Printf.sprintf "%s_%d" (section_to_string l.section) l.id
+    let to_string (l : t) : string =
+      Printf.sprintf "%s_%d" (section_to_string l.section) l.id
 
   end
   include T
