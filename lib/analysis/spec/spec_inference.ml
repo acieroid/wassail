@@ -293,11 +293,23 @@ module Spec_inference
   let call_inter (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (state : State.t) : State.t =
     state
 
-  let entry (_module_ : Wasm_module.t) (_callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_state : State.t) : State.t =
-    failwith "TODO: entry"
+  let entry (module_ : Wasm_module.t) (callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) : State.t -> State.t =
+    let funcinst = Wasm_module.get_funcinst module_ callee_idx in
+    let nargs = List.length (fst funcinst.typ) in
+    let locals = funcinst.code.locals in
+    Spec.wrap ~default:bottom (fun state ->
+        let args = List.take state.vstack nargs in
+        let zeroes = List.map locals ~f:(fun t -> Var.Const (Prim_value.zero_of_t t)) in
+        let vstack = args @ (List.drop zeroes nargs) in
+        Spec.NotBottom { state with vstack })
 
-  let return (_module_ : Wasm_module.t) (_caller_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before : State.t) (_state_after : State.t) : State.t =
-    failwith "TODO: return"
+  let return (_module_ : Wasm_module.t) (_caller_idx : Int32.t) (_cfg : annot_expected Cfg.t) (instr : annot_expected Instr.labelled_call) (state_before : State.t) (state_after : State.t) : State.t =
+    match state_before, state_after with
+    | Bottom, _ | _, Bottom -> Bottom
+    | NotBottom { vstack = stack_before; _ }, NotBottom ({ vstack = stack_after; _ } as after) ->
+      let args, returns = Instr.call_types instr in
+      let vstack = (List.take stack_after (List.length returns)) @ (List.drop stack_before (List.length args)) in
+      Spec.NotBottom { after with vstack }
 
 end
 

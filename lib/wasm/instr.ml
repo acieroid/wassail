@@ -147,6 +147,10 @@ end
 
 include T
 
+let call_types (instr : 'a labelled_call) : Type.t list * Type.t list = match instr.instr with
+  | CallDirect (_, ts, _) -> ts
+  | CallIndirect (_, _, ts, _) -> ts
+
 let is_block (instr : 'a t) : bool = match instr with
   | Control { instr = Block _; _ } -> true
   | Control { instr = Loop _; _ } -> true
