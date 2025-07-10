@@ -32,7 +32,7 @@ include T
 let get_funcinst (m : t) (fidx : Int32.t) : Func_inst.t =
   match List32.nth m.funcs Int32.(fidx-(Int32.of_int_exn (List.length m.imported_funcs))) with
   | Some v -> v
-  | None -> failwith "get_funcinst nth exception"
+  | None -> failwith (Printf.sprintf "get_funcinst: no funcinst for function %ld" fidx)
 
 let get_n_locals (m : t) (fidx : Int32.t) : int =
   let inst = get_funcinst m fidx in

@@ -16,6 +16,8 @@ Parts of Wassail can be run in your web browser [here](https://acieroid.github.i
 
 2. Run `opam install .`
 
+Then you should be able to run the `wassail` command. You can also simply run `dune exec -- wassail` if you don't want to install it.
+
 # Usage
 Wassail can perform a number of tasks on WebAssembly modules, both in their textual representation (`.wat` files) or in their binary representation (`.wasm`)
 ## Listing imports

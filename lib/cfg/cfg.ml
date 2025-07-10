@@ -1,6 +1,48 @@
 open Core
 open Helpers
-open Cfg_base
+
+module Edge = struct
+  module T = struct
+    (* An edge has an id and can be annotated with a boolean (to indicate a then/else) *)
+    type t = int * bool option
+    [@@deriving sexp, compare, equal]
+  end
+  include T
+  let to_string (e : t) : string = string_of_int (fst e)
+  module Set = struct
+    include Set
+    include Set.Make(T)
+  end
+end
+
+module Edges = struct
+  module T = struct
+    type t = Edge.Set.t IntMap.t
+    [@@deriving sexp, compare, equal]
+  end
+  include T
+  let from (edges : t) (idx : int) : Edge.t list =
+    match IntMap.find edges idx with
+    | Some es -> Edge.Set.to_list es
+    | None -> []
+
+  let find_exn (edges : t) (src : int) (dst : int) : Edge.t =
+    List.find_exn (from edges src) ~f:(fun (idx, _) -> idx = dst)
+
+  let add (edges : t) (from : int) (edge : Edge.t) : t =
+    IntMap.update edges from ~f:(function
+        | None -> Edge.Set.singleton edge
+        | Some es -> Edge.Set.add es edge)
+
+  let remove (edges : t) (from : int) (to_ : int) : t =
+    IntMap.update edges from ~f:(function
+        | None -> Edge.Set.empty
+        | Some es -> Edge.Set.filter es ~f:(fun (dst, _) -> not (dst = to_)))
+
+  let remove_from (edges : t) (from : int) : t =
+    IntMap.remove edges from
+
+end
 
 module Cfg = struct
 

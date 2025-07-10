@@ -1,8 +1,7 @@
 open Core
 open Helpers
 
-
-module ICFG (* : Cfg_base.CFG_LIKE *)= struct
+module ICFG = struct
 
   module Edge = Call_graph.Edge
   (** A reverse call-graph edge. *)
@@ -139,9 +138,11 @@ module ICFG (* : Cfg_base.CFG_LIKE *)= struct
     | { content = Call i; _ } -> begin match Instr.Label.Map.find icfg.calls i.label with
         | None -> failwith "No call?!"
         | Some edges ->
-          List.map (Edge.Set.to_list edges) ~f:(fun edge ->
-              let cfg = Int32Map.find_exn icfg.cfgs edge.target in
-              (edge.target, cfg.entry_block, cfg.exit_block))
+          List.filter_map (Edge.Set.to_list edges) ~f:(fun edge ->
+              match Map.find icfg.cfgs edge.target with
+              | None -> None (* failwith (Printf.sprintf "No target: %ld" edge.target) (* TODO: call to improted function, what to do? *) *)
+              | Some cfg -> Some (edge.target, cfg.entry_block, cfg.exit_block))
+
       end
     | _ -> failwith "not a call?"
 

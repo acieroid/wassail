@@ -25,7 +25,7 @@ let to_string ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : s
   Printf.sprintf "block %d, %s" b.idx (match b.content with
     | Control instr -> Printf.sprintf "control block: %s" (Instr.control_to_string instr.instr ~annot_str)
     | Call instr -> Printf.sprintf "call block: %s" (Instr.call_to_string instr.instr)
-    | Entry -> Printf.sprintf "return block"
+    | Entry -> Printf.sprintf "entry block"
     | Return _ -> Printf.sprintf "return block"
     | Data instrs -> Printf.sprintf "data block: %s" (String.concat ~sep:"\\l"
          (List.map instrs

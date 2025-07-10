@@ -26,6 +26,7 @@ let () =
        ; "cfg", Cfg.cfg
        ; "cfg-adjlist", Cfg.cfg_adjlist
        ; "cfgs", Cfg.cfgs
+       ; "icfg", Cfg.icfg
 
        ; "dependencies", Slicing.dependencies
        ; "postdom", Slicing.postdom
@@ -40,11 +41,17 @@ let () =
        ; "generate", Generation.generate
        ; "dump", Generation.dump
 
-       (* Other *)
+       (* Stack specification analysis *)
        ; "spec-inference", Analysis.spec_inference
+       ; "spec-inference-inter", Analysis.spec_inference_inter
+
+       (* Taint analysis *)
        ; "taint-cfg", Analysis.taint_cfg
        ; "taint-intra", Analysis.taint_intra
        ; "taint-inter", Analysis.taint_inter
+       ; "taint-from-exported-to-imported", Analysis.taint_flow_from_exported_to_imported
+       ; "taint-from-sources-to-sinks", Analysis.taint_flow_from_sources_to_sinks
+       ; "taintcall-cfg", Analysis.taintcall_cfg
        ; "find-indirect-calls", Analysis.find_indirect_calls
 
        (* Slicing *)
