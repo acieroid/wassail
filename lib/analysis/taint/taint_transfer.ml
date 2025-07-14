@@ -5,7 +5,7 @@ module Make = struct
   module State = Taint_domain
 
   (** We need the variable names as annotations *)
-  type annot_expected = Spec.t
+  type annot_expected = Spec_domain.t
 
   (* This is a map from function index to:
      - the taint of its return value
@@ -39,7 +39,7 @@ module Make = struct
       (i : annot_expected Instr.labelled_data)
       (state : State.t)
     : State.t =
-    let ret (i : annot_expected Instr.labelled_data) : Var.t = match List.hd (Spec.get_or_fail i.annotation_after).vstack with
+    let ret (i : annot_expected Instr.labelled_data) : Var.t = match List.hd (Spec_domain.get_or_fail i.annotation_after).vstack with
       | Some r -> r
       | None -> failwith "Taint: no return value" in
     match i.instr with
@@ -48,34 +48,34 @@ module Make = struct
     | RefIsNull | RefNull _ | RefFunc _ -> state
     | Select _ ->
       let ret = ret i in
-      let (_c, v2, v1) = pop3 (Spec.get_or_fail i.annotation_before).vstack in
+      let (_c, v2, v1) = pop3 (Spec_domain.get_or_fail i.annotation_before).vstack in
       (* TODO: could improve precision by checking the constraints on c: if it is precisely zero/not-zero, we can only include v1 or v2 *)
       Taint_domain.add_taint_v (Taint_domain.add_taint_v state ret v1) ret v2
     | LocalGet l ->
-      Taint_domain.add_taint_v state (ret i) (get_nth (Spec.get_or_fail i.annotation_before).locals l)
+      Taint_domain.add_taint_v state (ret i) (get_nth (Spec_domain.get_or_fail i.annotation_before).locals l)
     | LocalSet l ->
-      Taint_domain.add_taint_v state (get_nth (Spec.get_or_fail i.annotation_before).locals l) (pop (Spec.get_or_fail i.annotation_before).vstack)
+      Taint_domain.add_taint_v state (get_nth (Spec_domain.get_or_fail i.annotation_before).locals l) (pop (Spec_domain.get_or_fail i.annotation_before).vstack)
     | LocalTee l ->
       Taint_domain.add_taint_v
-        (Taint_domain.add_taint_v state (get_nth (Spec.get_or_fail i.annotation_before).locals l) (pop (Spec.get_or_fail i.annotation_before).vstack))
-        (ret i) (get_nth (Spec.get_or_fail i.annotation_before).locals l)
+        (Taint_domain.add_taint_v state (get_nth (Spec_domain.get_or_fail i.annotation_before).locals l) (pop (Spec_domain.get_or_fail i.annotation_before).vstack))
+        (ret i) (get_nth (Spec_domain.get_or_fail i.annotation_before).locals l)
     | GlobalGet g ->
-      Taint_domain.add_taint_v state (ret i) (get_nth (Spec.get_or_fail i.annotation_before).globals g)
+      Taint_domain.add_taint_v state (ret i) (get_nth (Spec_domain.get_or_fail i.annotation_before).globals g)
     | GlobalSet g ->
-      Taint_domain.add_taint_v state (get_nth (Spec.get_or_fail i.annotation_before).globals g) (pop (Spec.get_or_fail i.annotation_before).vstack)
+      Taint_domain.add_taint_v state (get_nth (Spec_domain.get_or_fail i.annotation_before).globals g) (pop (Spec_domain.get_or_fail i.annotation_before).vstack)
     | Const _ -> state
     | Binary _ | Compare _ ->
-      let v1, v2 = pop2 (Spec.get_or_fail i.annotation_before).vstack in
+      let v1, v2 = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
       Taint_domain.add_taint_v
         (Taint_domain.add_taint_v state (ret i) v1)
         (ret i) v2
     | Unary _ | Test _ | Convert _ ->
-      Taint_domain.add_taint_v state (ret i) (pop (Spec.get_or_fail i.annotation_before).vstack)
+      Taint_domain.add_taint_v state (ret i) (pop (Spec_domain.get_or_fail i.annotation_before).vstack)
     | Load { offset = _offset; _ } ->
       (* Simplest case: get the taint of the entire memory.
          Refined case: get the taint of the memory cells that can pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-      let _addr = pop (Spec.get_or_fail i.annotation_before).vstack in
-      let mem = (Spec.get_or_fail i.annotation_before).memory in
+      let _addr = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
+      let mem = (Spec_domain.get_or_fail i.annotation_before).memory in
       let all_locs = Var.OffsetMap.keys mem in
       (* Filter the memory location using results from the relational analysis if possible *)
       let locs = (* if !Taint_options.use_relational then
@@ -110,8 +110,8 @@ module Make = struct
     | Store { offset = _offset; _ } ->
       (* Simplest case: set the taint for the entire memory
          Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-      let vval, _vaddr = pop2 (Spec.get_or_fail i.annotation_before).vstack in
-      let mem = (Spec.get_or_fail i.annotation_after).memory in
+      let vval, _vaddr = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
+      let mem = (Spec_domain.get_or_fail i.annotation_after).memory in
       let all_locs = Var.OffsetMap.keys mem in
       (* Refine memory locations using relational innformation, if available *)
       let locs = (* if !Taint_options.use_relational then
@@ -166,8 +166,8 @@ module Make = struct
       (summary : summary)
     : State.t =
     Log.info (Printf.sprintf "applying summary of function %ld" f);
-    let spec_before = Spec.get_or_fail i.annotation_before in
-    let spec_after = Spec.get_or_fail i.annotation_after in
+    let spec_before = Spec_domain.get_or_fail i.annotation_before in
+    let spec_after = Spec_domain.get_or_fail i.annotation_after in
     let args = List.take spec_before.vstack (fst arity) in
     let ret = if snd arity = 1 then List.hd spec_after.vstack else None in
     let taint_after_call = Taint_summary.apply
@@ -212,7 +212,7 @@ module Make = struct
                 (* get the spec after that state *)
                 let spec' = Cfg.state_after_block cfg idx init_spec in
                 (* equate all different variables in the post-state with the ones in the pre-state *)
-                List.fold_left (Spec.extract_different_vars spec spec')
+                List.fold_left (Spec_domain.extract_different_vars spec spec')
                   ~init:s
                   ~f:(fun s (x, y) ->
                       (* TODO: should it be x y or y x? *)
@@ -242,10 +242,10 @@ module Make = struct
        for direct calls, but not for indirect calls. *)
     state
 
-  let entry (_module_ : Wasm_module.t) (_callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) (state : State.t) : State.t =
+  let entry (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (state : State.t) : State.t =
     state (* Everything is actually already done by spec analysis! We can just propagete the state *)
 
-  let return (_module : Wasm_module.t) (_caller_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (state_after_call : State.t) : State.t =
+  let return (_module : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (state_after_call : State.t) : State.t =
     state_after_call
 
 end

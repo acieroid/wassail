@@ -3,7 +3,7 @@ open Helpers
 
 let mk_intra
     (init_data : unit Cfg.t Int32Map.t -> Wasm_module.t -> 'a Int32Map.t)
-    (analysis : 'a Int32Map.t -> Wasm_module.t -> Spec.t Cfg.t -> 'a)
+    (analysis : 'a Int32Map.t -> Wasm_module.t -> Spec_domain.t Cfg.t -> 'a)
   : Wasm_module.t -> Int32.t list -> 'a Int32Map.t = fun wasm_mod funs ->
   let cfgs = Cfg_builder.build_all wasm_mod in
   List.fold_left funs
@@ -21,7 +21,7 @@ let mk_intra
 
 let mk_inter
     (init_data : unit Cfg.t Int32Map.t -> Wasm_module.t -> 'a Int32Map.t)
-    (analysis : Wasm_module.t -> cfgs:Spec.t Cfg.t Int32Map.t -> summaries:'a Int32Map.t -> 'a Int32Map.t)
+    (analysis : Wasm_module.t -> cfgs:Spec_domain.t Cfg.t Int32Map.t -> summaries:'a Int32Map.t -> 'a Int32Map.t)
   : Wasm_module.t -> Int32.t list list -> 'a Int32Map.t = fun wasm_mod sccs ->
   let cfgs = Cfg_builder.build_all wasm_mod in
   let annotated_cfgs = Int32Map.map cfgs ~f:(fun cfg -> Spec_inference.Intra.analyze wasm_mod cfg ()) in

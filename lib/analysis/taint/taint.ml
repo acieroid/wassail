@@ -24,7 +24,7 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
        let taint_summary = Transfer.extract_summary module_ annotated_cfg result_cfg in
        (taint_summary, Some result_cfg))
 
-let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec.t Cfg.t) : Domain.t Cfg.t =
+let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec_domain.t Cfg.t) : Domain.t Cfg.t =
   let rel_cfg = (* Relational.Transfer.dummy_annotate *) spec_cfg in
   Intra.analyze wasm_mod rel_cfg summaries
 
@@ -41,7 +41,7 @@ let check (expected : Summary.t) (actual : Summary.t) : bool =
     false
   end
 
-let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Taint_domain.t Cfg.t * Summary.t) Int32Map.t =
+let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t * Taint_domain.t Cfg.t * Summary.t) Int32Map.t =
   Analysis_helpers.mk_inter
     (fun _cfgs _wasm_mod -> Int32Map.empty)
     (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
@@ -108,7 +108,8 @@ module TestInter = struct
   let does_not_fail (module_str : string) (fidx : int32) : unit =
     let module_ = Wasm_module.of_string module_str in
     let icfg = analyze_inter_classical module_ fidx in
-    Printf.printf "---\n%s\n---\n" (Icfg.to_dot ~annot_str:Domain.to_string icfg);
+    ignore icfg;
+    (* Printf.printf "---\n%s\n---\n" (Icfg.to_dot ~annot_str:Domain.to_dot_string icfg); *)
     ()
 
   let%test_unit "interprocedural taint does not fail with function call" =

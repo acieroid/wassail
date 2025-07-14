@@ -5,7 +5,7 @@ module Spec_inference
   (* : Transfer.INTRA_ONLY_TRANSFER with module State = Spec and type annot_expected = unit *)
   = struct
 
-  module State = Spec
+  module State = Spec_domain
 
   (** Allows the use of variables encoding constants *)
   let use_const : bool ref = ref true
@@ -18,7 +18,7 @@ module Spec_inference
     let (arg_types, _) = funcinst.typ in
     let global_types = Wasm_module.get_global_types module_ in
     let local_types = funcinst.code.locals in
-    Spec.NotBottom {
+    State.NotBottom {
     vstack = []; (* the vstack is initially empty *)
     locals =
       if !use_const then
@@ -30,7 +30,7 @@ module Spec_inference
     stack_size_at_entry = Instr.Label.Map.empty;
   }
 
-  let bottom : State.t = Spec.Bottom
+  let bottom : State.t = State.Bottom
 
   (*---- Types ----*)
   (** Spec inference does not require any annotation *)
@@ -62,11 +62,11 @@ module Spec_inference
   let get (n : Int32.t) (l : Var.t list) =
     match List.nth l (Int32.to_int_exn n) with
     | Some v -> v
-    | _ -> failwith "Spec_inference.get: nth exception"
+    | _ -> failwith (Printf.sprintf "Spec_inference.get: nth exception when accessing %ldth element of a list of length %d" n (List.length l))
 
   let set (n : Int32.t) (l : Var.t list) (v : Var.t) = List.mapi l ~f:(fun i v' -> if i = (Int32.to_int_exn n) then v else v')
 
-  let rec compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : Spec.SpecWithoutBottom.t) : Spec.SpecWithoutBottom.t =
+  let rec compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : State.SpecWithoutBottom.t) : State.SpecWithoutBottom.t =
     match Cfg.find_enclosing_block cfg label with
     | None -> (* no enclosing block, the stack is initially empty at the beginning of the function, we ignore that *)
       state
@@ -90,7 +90,7 @@ module Spec_inference
       (_module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t)
       (i : annot_expected Instr.labelled_data)
-    : State.t -> State.t = Spec.lift (function state ->
+    : State.t -> State.t = State.lift (function state ->
       let ret = Var.Var i.label in
       let state = compute_stack_size_at_entry cfg i.label state in
       match i.instr with
@@ -102,7 +102,9 @@ module Spec_inference
       | MemoryInit _ -> { state with vstack = ret :: drop 3 state.vstack }
       | Drop -> { state with vstack = drop 1 state.vstack }
       | Select _ -> { state with vstack = ret :: (drop 3 state.vstack) }
-      | LocalGet l -> { state with vstack = (if !propagate_locals then get l state.locals else ret) :: state.vstack }
+      | LocalGet l ->
+        Printf.printf "instruction local.get %ld @%s, state %s" l (Instr.Label.to_string i.label) (State.SpecWithoutBottom.to_string state);
+        { state with vstack = (if !propagate_locals then get l state.locals else ret) :: state.vstack }
       | LocalSet l -> { state with vstack = drop 1 state.vstack; locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
       | LocalTee l -> { state with locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
       | GlobalGet g -> { state with vstack = (if !propagate_globals then get g state.globals else ret) :: state.vstack }
@@ -127,7 +129,7 @@ module Spec_inference
       (cfg : 'a Cfg.t)
       (i : annot_expected Instr.labelled_control)
     : State.t -> [ `Simple of State.t | `Branch of State.t * State.t ] =
-    Spec.wrap ~default:(`Simple bottom) (function state ->
+    State.wrap ~default:(`Simple bottom) (function state ->
       let state = compute_stack_size_at_entry cfg i.label state in
       let get_block_return_stack_size n =
         let stack_size_at_entry = match Cfg.find_enclosing_block cfg i.label with
@@ -148,24 +150,24 @@ module Spec_inference
         stack_size_at_entry + out_arity in
       match i.instr with
       | Br n ->
-        `Simple (Spec.NotBottom ({ state with vstack = take state.vstack (get_block_return_stack_size n) }))
+        `Simple (State.NotBottom ({ state with vstack = take state.vstack (get_block_return_stack_size n) }))
       | BrIf n ->
-        let state' = Spec.NotBottom ({ state with vstack = take (drop 1 state.vstack) (get_block_return_stack_size n) }) in
+        let state' = State.NotBottom ({ state with vstack = take (drop 1 state.vstack) (get_block_return_stack_size n) }) in
         `Branch (state', state')
       | If _ ->
-        let state' = Spec.NotBottom ({ state with vstack = drop 1 state.vstack }) in
+        let state' = State.NotBottom ({ state with vstack = drop 1 state.vstack }) in
         `Branch (state', state')
       | BrTable (ns, n) ->
         let arities = List.map (n :: ns) ~f:get_block_return_stack_size in
          (* LIMITATION: we assume all block arities are equal. Not sure this is always the case, but this is a limitation we have *)
         assert (IntSet.length (IntSet.of_list arities) = 1);
         let arity = List.hd_exn arities in
-        `Simple (Spec.NotBottom { state with vstack = take (drop 1 state.vstack) arity })
-      | Return -> `Simple (Spec.NotBottom ({ state with vstack = take state.vstack (List.length (Cfg.return_types cfg)) }))
+        `Simple (State.NotBottom { state with vstack = take (drop 1 state.vstack) arity })
+      | Return -> `Simple (State.NotBottom ({ state with vstack = take state.vstack (List.length (Cfg.return_types cfg)) }))
       | Unreachable ->
         (* failwith (Printf.sprintf "unsupported: unreachable") (*  in function %ld cfg.idx *) *)
         `Simple bottom
-      | Merge -> `Simple (Spec.NotBottom state)
+      | Merge -> `Simple (State.NotBottom state)
       | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr)))
 
   let call
@@ -173,15 +175,15 @@ module Spec_inference
       (cfg : annot_expected Cfg.t)
       (i : annot_expected Instr.labelled_call)
       : State.t -> State.t =
-    Spec.wrap ~default:bottom (function state ->
+    State.wrap ~default:bottom (function state ->
       let state = compute_stack_size_at_entry cfg i.label state in
       let ret = Var.Var i.label in
       match i.instr with
       | CallDirect ((arity_in, arity_out), _, _) ->
-        Spec.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) }
+        State.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) }
       | CallIndirect (_, (arity_in, arity_out), _, _) ->
         (* Like call, but reads the function index from the vstack *)
-        Spec.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) })
+        State.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) })
 
   let merge
       (module_ : Wasm_module.t)
@@ -194,25 +196,23 @@ module Spec_inference
       counter := !counter + 1;
       res in
     let _ : Var.t = new_var() in
-    let rename_exit (s : Spec.SpecWithoutBottom.t) =
+    let rename_exit (s : State.SpecWithoutBottom.t) =
       (* If this is the exit block, rename the top of the stack to a new variable *)
       if Cfg.exit_block cfg = block.idx then
         { s with vstack = List.mapi s.vstack ~f:(fun i v -> if i = 0 then Var.Return cfg.idx else v) }
       else
         s
     in
-    match block.content with
-    | Control { instr = Merge; _ } ->
       (* Multiple cases: either we have no predecessor, we have unanalyzed predecessors, or we have only analyzed predecessors *)
-      (Spec.lift rename_exit) (begin match states with
+      (State.lift rename_exit) (begin match states with
         | [] ->
           (* entry node *)
           init module_ (Wasm_module.get_funcinst module_ block.fidx)
         | s :: [] ->
-          (* single predecessor node?! *)
+          (* single predecessor node, just keep the same state *)
           s
         | _ ->
-          (* multiple predecessors *)
+          (* multiple predecessors. Usually the case of a merge node, or an entry/return node in case of interprocedural analysis *)
           begin match List.filter states ~f:(fun s -> not (State.equal s bottom)) with
             | [] ->
               (* No predecessors have been analyzed. Return bottom. In practice, this should only happen if one of the predecessors is the empty entry block. *)
@@ -258,7 +258,7 @@ module Spec_inference
               let plug_holes = (function
                   | Var.Hole -> (* add a merge variable *) new_var ()
                   | v -> (* no hole, keep the variable *) v) in
-              Spec.lift (fun s -> { vstack = List.map s.vstack ~f:plug_holes;
+              State.lift (fun s -> { vstack = List.map s.vstack ~f:plug_holes;
                                     locals = List.map s.locals ~f:plug_holes;
                                     globals = List.map s.globals ~f:plug_holes;
                                     memory = Var.OffsetMap.map s.memory ~f:plug_holes;
@@ -266,13 +266,6 @@ module Spec_inference
                 }) with_holes
           end
       end)
-    | _ ->
-      (* not a control-flow merge, should only be one predecessor (or none if it is the entry point) *)
-      begin match states with
-        | [] -> init module_ (Wasm_module.get_funcinst module_ block.fidx)
-        | s :: [] -> s
-        | _ ->  failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
-      end
 
   let merge_flows
       (module_ : Wasm_module.t)
@@ -280,11 +273,12 @@ module Spec_inference
       (block : annot_expected Basic_block.t)
       (states : (int * State.t) list)
     : State.t =
-    (* Checks the validity of the merge and dispatches to `merge` *)
+    (* Checks the validity of the merge and dispatches to `merge` We expect to have to merge only merge nodes, or entry nodes in the case of interprocedural analysis *)
     begin match states with
       | _ :: _ :: _ -> begin match block.content with
           | Control { instr = Merge; _ } -> ()
-          | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
+          | Entry -> ()
+          | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d in %ld, %s" block.idx cfg.idx (Basic_block.to_string block))
         end
       | _ -> ()
     end;
@@ -293,24 +287,25 @@ module Spec_inference
   let call_inter (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (state : State.t) : State.t =
     state
 
-  let entry (module_ : Wasm_module.t) (callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) : State.t -> State.t =
-    let funcinst = Wasm_module.get_funcinst module_ callee_idx in
+  let entry (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : State.t -> State.t =
+    let funcinst = Wasm_module.get_funcinst module_ cfg.idx in
     let nargs = List.length (fst funcinst.typ) in
     let locals = funcinst.code.locals in
-    Spec.wrap ~default:bottom (fun state ->
+    State.wrap ~default:bottom (fun state ->
         let args = List.take state.vstack nargs in
+        Printf.printf "function %ld" cfg.idx;
         let zeroes = List.map locals ~f:(fun t -> Var.Const (Prim_value.zero_of_t t)) in
         let vstack = [] in
-        let locals = args @ (List.drop zeroes nargs) in
-        Spec.NotBottom { state with vstack; locals })
+        let locals = args @ zeroes in
+        State.NotBottom { state with vstack; locals })
 
-  let return (_module_ : Wasm_module.t) (_caller_idx : Int32.t) (_cfg : annot_expected Cfg.t) (instr : annot_expected Instr.labelled_call) (state_before : State.t) (state_after : State.t) : State.t =
+  let return (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (instr : annot_expected Instr.labelled_call) (state_before : State.t) (state_after : State.t) : State.t =
     match state_before, state_after with
     | Bottom, _ | _, Bottom -> Bottom
     | NotBottom { vstack = stack_before; locals; _ }, NotBottom ({ vstack = stack_after; _ } as after) ->
       let args, returns = Instr.call_types instr in
       let vstack = (List.take stack_after (List.length returns)) @ (List.drop stack_before (List.length args)) in
-      Spec.NotBottom { after with vstack; locals }
+      State.NotBottom { after with vstack; locals }
 
 end
 
@@ -319,20 +314,20 @@ module Intra = Intra.MakeIntraOnly(Spec_inference)
 include Spec_inference
 
 (** Extract vars that have been redefined in a merge block *)
-let new_merge_variables (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (merge_block : Spec.t Basic_block.t) : (Var.t * Var.t) list =
+let new_merge_variables (module_ : Wasm_module.t) (cfg : State.t Cfg.t) (merge_block : State.t Basic_block.t) : (Var.t * Var.t) list =
   (* The predecessors of merge_block *)
   let preds = Cfg.predecessors cfg merge_block.idx in
   let state_after = Cfg.state_after_block cfg merge_block.idx (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx)) in
   List.fold_left preds ~init:[] ~f:(fun acc (pred_idx, _) ->
       let state_before = Cfg.state_after_block cfg pred_idx (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx)) in
-      if Spec.equal state_before Spec_inference.bottom then
+      if State.equal state_before Spec_inference.bottom then
         (* Ignore bottom state *)
         acc
       else
-        (Spec.extract_different_vars state_before state_after) @ acc)
+        (State.extract_different_vars state_before state_after) @ acc)
 
 (** Return the list of variables defined by an instruction *)
-let instr_def (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (instr : Spec.t Instr.t) : Var.t list =
+let instr_def (module_ : Wasm_module.t) (cfg : State.t Cfg.t) (instr : State.t Instr.t) : Var.t list =
   let defs = match instr with
     | Instr.Data i ->
       let state_after = match i.annotation_after with
@@ -401,7 +396,7 @@ let instr_def (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (instr : Spec.t Ins
 (** Return the list of variables used by an instruction.
     If var is provided, only the use related the computation of this specific var will be return (This is only relevant for mere blocks)
  *)
-let instr_use (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) ?var:(var : Var.t option) (instr : Spec.t Instr.t) : Var.t list =
+let instr_use (module_ : Wasm_module.t) (cfg : State.t Cfg.t) ?var:(var : Var.t option) (instr : State.t Instr.t) : Var.t list =
   match instr with
   | Instr.Data i ->
     let top_n n = match i.annotation_before with

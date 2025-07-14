@@ -1,24 +1,24 @@
 open Helpers
 
-let analyze_intra : Wasm_module.t -> Int32.t list -> Spec.t Cfg.t Int32Map.t =
+let analyze_intra : Wasm_module.t -> Int32.t list -> Spec_domain.t Cfg.t Int32Map.t =
   Analysis_helpers.mk_intra
     (fun _cfgs _wasm_mod -> Int32Map.empty)
     (fun _summaries _wasm_mod cfg -> cfg)
 
-let analyze_intra1 (module_ : Wasm_module.t) (idx : Int32.t) : Spec.t Cfg.t =
+let analyze_intra1 (module_ : Wasm_module.t) (idx : Int32.t) : Spec_domain.t Cfg.t =
   let results = analyze_intra module_ [idx] in
   match Int32Map.find results idx with
   | Some res -> res
   | None -> failwith "Spec_analysis.analyze_intra did not actually analyze"
 
-let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Spec.t Icfg.t =
+let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Spec_domain.t Icfg.t =
   Analysis_helpers.mk_inter_classical module_ entry
 
 
 module TestIntra = struct
   let does_not_fail (module_str : string) (fidx : int32) : unit =
     let module_ = Wasm_module.of_string module_str in
-    let _ : Spec.t Cfg.t = analyze_intra1 module_ fidx in
+    let _ : Spec_domain.t Cfg.t = analyze_intra1 module_ fidx in
     ()
 
   let%test_unit "spec analysis does not error on trivial code" =
@@ -266,7 +266,12 @@ module TestInter = struct
     let module_ = Wasm_module.of_string module_str in
     let icfg = analyze_inter_classical module_ fidx in
     ignore icfg;
-    (* Printf.printf "---\n%s\n---\n" (Icfg.to_dot ~annot_str:Spec.to_string icfg); *)
+    Printf.printf "---\n%s\n---\n" (Icfg.to_dot ~annot_str:Spec_domain.to_dot_string icfg);
+    ()
+
+  let does_not_fail_on_file (path : string) (start : Int32.t) : unit =
+    let module_ = Wasm_module.of_file path in
+    let _ = analyze_inter_classical module_ start in
     ()
 
   let%test_unit "interprocedural spec analysis does not fail on trivial code" =
@@ -299,5 +304,38 @@ module TestInter = struct
     i32.const 0 ;; [i1_1, p0]
     i32.add) ;; [i1_2]
   )" 0l
+
+  let%test_unit "interprocedural spec analysis does not fail with function call and a mix of locals and params" =
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    ;; locals: [p0], globals: []
+    local.get 0 ;; [l0]
+    i32.const 2 ;; [2, l0]
+    i32.mul    ;; [iX]
+
+    call 1 ;; [i2]
+  )
+  (func (;1;) (type 0) (param i32) (result i32)
+    (local i32 i32)
+    ;; []
+    local.get 0 ;; [p0]
+    local.get 2 ;; [i1_1, p0]
+    i32.add) ;; [i1_2]
+  )" 0l
+
+
+  let%test_unit "interprocedural spec analysis works even with imported functions" =
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (import \"foo\" \"somefun\" (func (;0;) (type 0)))
+  (func (;1;) (type 0) (param i32) (result i32)
+    (local i32)
+    local.get 1 ;; [l1]
+    call 0 ;; [i2]
+  ))" 1l
+
+  let%test_unit "interprocedural works on spectral-norm" =
+    does_not_fail_on_file "../../../benchmarks/benchmarksgame/spectral-norm.wat" 1l
 
 end

@@ -29,7 +29,7 @@ module Intra = Intra
 
 module Spec_inference = Spec_inference
 module Spec_analysis = Spec_analysis
-module Spec = Spec
+module Spec_domain = Spec_domain
 
 module Taint = Taint
 module Taintcall = Taintcall

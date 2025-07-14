@@ -92,18 +92,18 @@ module type CLASSICAL_INTER_TRANSFER = sig
     -> State.t (* the state before this instruction *)
     -> State.t (* the resulting state after applying the transfer function *)
 
-  (** Transfer function for function entry. This is where we usually adapt the stack etc. *)
+  (** Transfer function for function entry. This is where we usually adapt the
+      stack etc. The CFG given is the one of the callee *)
   val entry
     : Wasm_module.t (* the wasm module *)
-    -> Int32.t (* the function index of the callee *)
     -> annot_expected Cfg.t (* the CFG of the function *)
     -> State.t (* the state after the call instruction, before going into the function *)
     -> State.t (* the resulting state after applying the transfer function *)
 
-  (** Transfer function for function exit. This is where we restore the stack etc. *)
+  (** Transfer function for function exit. This is where we restore the stack
+      etc. The CFG given is the one of the caller.*)
   val return
     : Wasm_module.t (* the wasm module *)
-    -> Int32.t (* the function index of the caller *)
     -> annot_expected Cfg.t (* the CFG of the function *)
     -> annot_expected Instr.labelled_call (* the corresponding call instruction that brought us in this function *)
     -> State.t (* The state before the call. Often useful to have *)

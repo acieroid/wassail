@@ -45,7 +45,7 @@ type preanalysis_results = {
 }
 
 (** Performs the pre-analysis phase in order to slice a function, according to any slicing criterion *)
-let preanalysis (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) : preanalysis_results =
+let preanalysis (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) : preanalysis_results =
   let t0 = Time_float.now () in
   let control_dependencies = Control_deps.control_deps_exact_instrs cfg in
   let t1 = Time_float.now () in
@@ -72,7 +72,7 @@ let preanalysis (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (cfg_instructions
     slicing criterion `criterion`, encoded as an instruction index. Returns the
     set of instructions that are part of the slice, as a set of instruction
     labels. *)
-let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (preanalysis : preanalysis_results) (criteria : Instr.Label.Set.t) : (Instr.Label.Set.t * (Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t)) =
+let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) (preanalysis : preanalysis_results) (criteria : Instr.Label.Set.t) : (Instr.Label.Set.t * (Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t)) =
   Log.info (Printf.sprintf "Slicing with criteria %s" (Instr.Label.Set.to_string criteria));
   let t0 = Time_float.now () in
   let rec loop (worklist : InSlice.Set.t) (slice : Instr.Label.Set.t) (visited : InSlice.Set.t) : Instr.Label.Set.t =
@@ -180,7 +180,7 @@ let instr_type_element_to_string t = match t with
 let type_of_data
     (i : (Instr.data, 'a) Instr.labelled)
     (cfg : 'a Cfg.t)
-    (instructions_map : Spec.t Instr.t Instr.Label.Map.t)
+    (instructions_map : Spec_domain.t Instr.t Instr.Label.Map.t)
   : instr_type_element list * instr_type_element list =
   match Cfg.find_instr instructions_map i.label with
   | None ->
@@ -220,7 +220,7 @@ let type_of_data
 let type_of_call
     (i : (Instr.call, 'a) Instr.labelled)
     (_cfg : unit Cfg.t)
-    (instructions_map : Spec.t Instr.t Instr.Label.Map.t)
+    (instructions_map : Spec_domain.t Instr.t Instr.Label.Map.t)
   : instr_type_element list * instr_type_element list =
   let vstack_before = match Cfg.find_instr instructions_map i.label with
     | None -> None
@@ -240,7 +240,7 @@ let type_of_call
 let type_of_control
     (i : ('a Instr.control, 'a) Instr.labelled)
     (_cfg : unit Cfg.t)
-    (instructions_map : Spec.t Instr.t Instr.Label.Map.t)
+    (instructions_map : Spec_domain.t Instr.t Instr.Label.Map.t)
   : instr_type_element list * instr_type_element list =
   let vstack_before = match Cfg.find_instr instructions_map i.label with
     | None -> None
@@ -308,13 +308,13 @@ let dummy_instrs (t : instr_type_element list * instr_type_element list) (next_l
   input @ output
 
 (** The type of an instruction on the stack: positive if it expects value on the stack, negative otherwise *)
-let type_of (i : 'a Instr.t) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : (instr_type_element list * instr_type_element list) =
+let type_of (i : 'a Instr.t) (cfg : 'a Cfg.t) (instructions_map : Spec_domain.t Instr.t Instr.Label.Map.t) : (instr_type_element list * instr_type_element list) =
   match i with
   | Data d -> type_of_data d cfg instructions_map
   | Control c -> type_of_control c cfg instructions_map
   | Call c -> type_of_call c cfg instructions_map
 
-let instrs_type (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : (instr_type_element list * instr_type_element list) =
+let instrs_type (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map : Spec_domain.t Instr.t Instr.Label.Map.t) : (instr_type_element list * instr_type_element list) =
   let input, output = List.fold_left instrs ~init:([], []) ~f:(fun (initial_stack, current_stack) instr ->
       let (i, o) = type_of instr cfg instructions_map in
       let (initial_stack, current_stack) =
@@ -336,7 +336,7 @@ let next_label : unit -> int =
       counter := v+1;
       v
 
-let replace_with_equivalent_instructions (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map : Spec.t Instr.t Instr.Label.Map.t) : unit Instr.t list =
+let replace_with_equivalent_instructions (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map : Spec_domain.t Instr.t Instr.Label.Map.t) : unit Instr.t list =
   if List.is_empty instrs then instrs else
     let t = instrs_type instrs cfg instructions_map in
     let replaced = List.map (dummy_instrs t next_label) ~f:(fun i -> Instr.Data i) in
@@ -352,7 +352,7 @@ let body_can_be_removed (body : unit Instr.t list) : bool =
   (* A safer alternative is simply: List.is_empty body *)
   List.for_all body ~f:(fun instr -> Instr.Label.equal_section (Instr.label instr).section Instr.Label.Dummy)
 
-let rec slice (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) (original_instructions : unit Instr.t list) (instructions_to_keep : Instr.Label.Set.t): unit Instr.t list =
+let rec slice (cfg : 'a Cfg.t) (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) (original_instructions : unit Instr.t list) (instructions_to_keep : Instr.Label.Set.t): unit Instr.t list =
   let rec loop (instrs : unit Instr.t list) (to_remove_rev : unit Instr.t list) : unit Instr.t list =
     match instrs with
     | [] -> replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions
@@ -389,7 +389,7 @@ let rec slice (cfg : 'a Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Ma
       loop rest (instr :: to_remove_rev) in
   loop original_instructions []
 
-let slice_to_funcinst (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (cfg_instructions : Spec.t Instr.t Instr.Label.Map.t) ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) (slicing_criteria : Instr.Label.Set.t) : Func_inst.t =
+let slice_to_funcinst (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) (slicing_criteria : Instr.Label.Set.t) : Func_inst.t =
   let instructions_in_slice = match instructions_in_slice with
     | Some instrs -> instrs
     | None ->
@@ -407,14 +407,14 @@ let slice_to_funcinst (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (cfg_instru
     code = { locals = cfg.local_types; body = instructions } }
 
 (** Return the indices of each call_indirect instructions *)
-let find_call_indirect_instructions (cfg : Spec.t Cfg.t) : Instr.Label.t list =
+let find_call_indirect_instructions (cfg : Spec_domain.t Cfg.t) : Instr.Label.t list =
   List.filter_map (Cfg.all_instructions_list cfg) ~f:(fun instr -> match instr with
       | Call {label; instr = CallIndirect _; _} -> Some label
       | _ -> None)
 
 module Test = struct
   open Instr.Label.Test
-  let build_cfg ?fidx:(fidx : int32 = 0l) (program : string) : Wasm_module.t * Spec.t Cfg.t =
+  let build_cfg ?fidx:(fidx : int32 = 0l) (program : string) : Wasm_module.t * Spec_domain.t Cfg.t =
     let module_ = Wasm_module.of_string program in
     let cfg = Spec_analysis.analyze_intra1 module_ fidx in
     (module_, Cfg.without_empty_nodes_with_no_predecessors cfg)

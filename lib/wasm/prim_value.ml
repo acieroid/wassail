@@ -122,7 +122,8 @@ let is (v : t) (n : int) : bool = match v with
 let zero_of_t (t : Type.t) : t = match t with
   | I32 -> I32 0l
   | I64 -> I64 0L
-  | _ -> failwith "unsupported type"
+  | F32 -> F32 Wasm.F32.zero
+  | F64 -> F64 Wasm.F64.zero
 
 (** Returns zero in the same type as v *)
 let zero_of_same_t (v : t) : t = match v with

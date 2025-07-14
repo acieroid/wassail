@@ -145,26 +145,26 @@ let graph_of_cfg (cfg : 'a Cfg.t) : int Graph.t =
   { entry; exit; nodes; succs; preds; }
 
 (** Extract the final branch condition of a block, if there is any *)
-let branch_condition (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (block : Spec.t Basic_block.t) : Var.t option =
+let branch_condition (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (block : Spec_domain.t Basic_block.t) : Var.t option =
   match block.content with
   | Control c -> begin match c.instr with
       | BrIf _ | BrTable _ | If _ ->
         (* These are the only conditionals in the language, and they all depend
            on the top stack variable before their execution *)
         begin match (Cfg.state_before_block cfg block.idx (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx))) with
-        | Spec.Bottom -> None
-        | Spec.NotBottom s -> List.hd s.vstack
+        | Spec_domain.Bottom -> None
+        | Spec_domain.NotBottom s -> List.hd s.vstack
         end
       | _ -> None
     end
   | _ -> None
 
 (** Computes the dominator tree of a CFG . *)
-let cfg_dominator (cfg : Spec.t Cfg.t) : Tree.t =
+let cfg_dominator (cfg : Spec_domain.t Cfg.t) : Tree.t =
   Graph.dominator_tree (graph_of_cfg (Cfg.without_empty_nodes_with_no_predecessors cfg))
 
 (** Computes the post-dominator tree of a CFG *)
-let cfg_post_dominator (cfg : Spec.t Cfg.t) : Tree.t =
+let cfg_post_dominator (cfg : Spec_domain.t Cfg.t) : Tree.t =
   (* Note that we invert succs and preds here, and start from exit, in order to have the post-dominator tree *)
   Graph.dominator_tree (Graph.reverse (graph_of_cfg (Cfg.without_empty_nodes_with_no_predecessors cfg)))
 

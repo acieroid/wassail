@@ -20,7 +20,7 @@ let dependencies =
         Out_channel.with_file dot_filename
           ~f:(fun ch ->
               Out_channel.output_string ch (Cfg.to_dot cfg
-                                              ~annot_str:Spec.to_dot_string
+                                              ~annot_str:Spec_domain.to_dot_string
                                               ~extra_data:(use_def_annot ^ control_annot))))
 
 let cdg =

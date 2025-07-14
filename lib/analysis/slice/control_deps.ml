@@ -22,7 +22,7 @@ end
    Ferrante et al.  This returns control dependencies at the level of blocks: a
    mapping a -> {b} means that block with index a is control-dependent on the
    block with index b.*)
-let control_deps_exact_block (cfg : Spec.t Cfg.t) : IntSet.t IntMap.t =
+let control_deps_exact_block (cfg : Spec_domain.t Cfg.t) : IntSet.t IntMap.t =
   (* We need to remove any empty block that has no predecessor in the CFG *)
   let cfg = Cfg.without_empty_nodes_with_no_predecessors cfg in
   let pdom = Dominance.cfg_post_dominator cfg in
@@ -47,7 +47,7 @@ let control_deps_exact_block (cfg : Spec.t Cfg.t) : IntSet.t IntMap.t =
                 | Some a' -> IntSet.add a' a)))
 
 (** Returns exact control dependencies on the level of instructions: a mapping a -> {b} means that instruction a is control-dependent on instruction b *)
-let control_deps_exact_instrs (cfg : Spec.t Cfg.t) : Instr.Label.Set.t Instr.Label.Map.t =
+let control_deps_exact_instrs (cfg : Spec_domain.t Cfg.t) : Instr.Label.Set.t Instr.Label.Map.t =
   List.fold_left (IntMap.to_alist (control_deps_exact_block cfg))
     ~init:Instr.Label.Map.empty
     ~f:(fun acc (a, bs) ->
@@ -71,10 +71,10 @@ let control_deps_exact_instrs (cfg : Spec.t Cfg.t) : Instr.Label.Set.t Instr.Lab
 
 (** Algorithm for control dependencies, adapted from https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/ProgramSlicing.pdf *)
 (* TODO: the results of this algorithm do not seem correct. The implementation may contain a mistake *)
-let control_dep (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (is_immediate_post_dom : int -> Var.t -> bool) : (Var.t * Pred.t) list =
+let control_dep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (is_immediate_post_dom : int -> Var.t -> bool) : (Var.t * Pred.t) list =
   Log.warn "using incorrect control_dep algorithm";
   let tree : Tree.t = Dominance.cfg_dominator cfg in
-  let push (block : Spec.t Basic_block.t) (preds : Pred.t list) : Pred.t list =
+  let push (block : Spec_domain.t Basic_block.t) (preds : Pred.t list) : Pred.t list =
     match Dominance.branch_condition module_ cfg block with
     | Some pred -> (* It is a branch *)
       begin match block.content with
@@ -84,7 +84,7 @@ let control_dep (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (is_immediate_pos
     | None -> preds
   in
   (* Creates the edges from a given block, where each edge links a defined variable to a control variable it depends on *)
-  let link (block : Spec.t Basic_block.t) (pred : Pred.t) : (Var.t * Pred.t) list =
+  let link (block : Spec_domain.t Basic_block.t) (pred : Pred.t) : (Var.t * Pred.t) list =
     let defined = match block.content with
       | Control instr -> Spec_inference.instr_def module_ cfg (Instr.Control instr)
       | Call instr -> Spec_inference.instr_def module_ cfg (Instr.Call instr)
@@ -111,7 +111,7 @@ let control_dep (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) (is_immediate_pos
   vnode tree.entry []
 
 (** Construct a map from predicates at the end of a block (according to `branch_condition`), to the corresponding block index *)
-let extract_preds (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) : int Var.Map.t =
+let extract_preds (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : int Var.Map.t =
   IntMap.fold cfg.basic_blocks ~init:Var.Map.empty ~f:(fun ~key:idx ~data:block acc ->
       match Dominance.branch_condition module_ cfg block with
       | Some pred ->
@@ -155,7 +155,7 @@ let%test "extract_preds when there are predicates should return the correspondin
   Var.Map.equal (Int.(=)) actual expected
 
 (** Computes the control dependencies of a CFG (as a map from variables to the control variables they depend upon) *)
-let make (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) : Pred.Set.t Var.Map.t =
+let make (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : Pred.Set.t Var.Map.t =
   let pdom = Dominance.cfg_post_dominator cfg in
   let preds : int Var.Map.t = extract_preds module_ cfg in
   let deps = control_dep module_ cfg (fun block_idx pred ->
@@ -171,7 +171,7 @@ let find (cdeps : Pred.Set.t Var.Map.t) (var : Var.t) : Pred.Set.t =
   | Some preds -> preds
   | None -> Pred.Set.empty
 
-let annotate (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) : string =
+let annotate (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : string =
   let deps = make module_ cfg in
   (* the "to" of the arrow is easy: it is the instruction of which the label is in Pred.
      the "from" is more difficult: we identify variables only here... so we need to go over the CFG and see each var used by each instruction *)
@@ -190,7 +190,7 @@ let annotate (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) : string =
                        (Cfg.find_enclosing_block_exn cfg label').idx
                        (Instr.Label.to_string label')))))
 
-let annotate_exact (cfg : Spec.t Cfg.t) : string =
+let annotate_exact (cfg : Spec_domain.t Cfg.t) : string =
   let deps = control_deps_exact_block cfg in
   String.concat ~sep:"\n"
     (IntMap.fold deps

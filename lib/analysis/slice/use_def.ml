@@ -87,7 +87,7 @@ end
     1. A map from variables to their definitions
     2. A map from variables to their uses
     3. A map of use-def chains *)
-let make (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefChains.t) =
+let make (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : (Def.t Var.Map.t * Use.Set.t Var.Map.t * UseDefChains.t) =
   (* To construct the use-def map, we walk over each instruction, and collect uses and defines.
      There is exactly one define per variable.
      e.g., [] i32.const 0 [x] defines x
@@ -111,7 +111,7 @@ let make (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use
   (* Add definitions for all locals, globals, and memory variables *)
   let defs =
     let entry_spec = Cfg.state_before_block cfg cfg.entry_block (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx)) in
-    let vars = Spec.vars_of entry_spec in
+    let vars = Spec_domain.vars_of entry_spec in
     Var.Set.fold vars ~init:defs ~f:(fun defs var ->
         match Var.Map.add defs ~key:var ~data:(Def.Entry var) with
         | `Duplicate -> failwith "use_def: more than one entry definition for a variable"
@@ -123,8 +123,8 @@ let make (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use
         ~init:Var.Set.empty
         ~f:(fun acc instr -> Var.Set.union acc
                (Var.Set.union
-                  (Spec.vars_of (Instr.annotation_before instr))
-                  (Spec.vars_of (Instr.annotation_after instr)))) in
+                  (Spec_domain.vars_of (Instr.annotation_before instr))
+                  (Spec_domain.vars_of (Instr.annotation_after instr)))) in
     Var.Set.fold all_vars ~init:defs ~f:(fun defs var ->
         match var with
         | Var.Const n -> begin match Var.Map.add defs ~key:var ~data:(Def.Constant n)  with
@@ -140,12 +140,12 @@ let make (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use
           let defs = List.fold_left (Spec_inference.instr_def module_ cfg instr) ~init:defs ~f:(fun defs var ->
               match Var.Map.add defs ~key:var ~data:(Def.Instruction (Instr.label instr, var)) with
               | `Duplicate -> failwith (Printf.sprintf "use_def: duplicate define of %s in instruction %s, was already defined at %s"
-                                          (Var.to_string var) (Instr.to_string instr ~annot_str:Spec.to_string)
+                                          (Var.to_string var) (Instr.to_string instr ~annot_str:Spec_domain.to_string)
                                           (Def.to_string (Var.Map.find_exn defs var)))
               | `Ok r -> r) in
           (* Add uses introduced by this instruction *)
           let uses = List.fold_left (Spec_inference.instr_use module_ cfg instr) ~init:uses ~f:(fun uses var ->
-              (* Log.debug (Printf.sprintf "instruction %s uses %s" (Instr.to_string instr ~annot_str:Spec.to_string) (Var.to_string var)); *)
+              (* Log.debug (Printf.sprintf "instruction %s uses %s" (Instr.to_string instr ~annot_str:Spec_domain.to_string) (Var.to_string var)); *)
               Var.Map.update uses var ~f:(function
                   | Some v -> Use.Set.add v { label = Instr.label instr; var }
                   | None -> Use.Set.singleton { label = Instr.label instr; var })) in
@@ -160,7 +160,7 @@ let make (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) : (Def.t Var.Map.t * Use
   (defs, uses, udchains)
 
 (** Return the edges that can be used to annotate a CFG with data dependencies *)
-let annotate (module_ : Wasm_module.t) (cfg : Spec.t Cfg.t) : string =
+let annotate (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : string =
   let (_, _, chains) = make module_ cfg in
   String.concat ~sep:"\n"
     (List.map (Use.Map.keys chains)

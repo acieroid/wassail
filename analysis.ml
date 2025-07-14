@@ -40,7 +40,7 @@ let spec_inference =
        let file_out = Printf.sprintf "%ld.dot" fid in
        Out_channel.with_file file_out
          ~f:(fun ch ->
-             Out_channel.output_string ch (Cfg.to_dot annotated_cfg ~annot_str:Spec.to_dot_string)))
+             Out_channel.output_string ch (Cfg.to_dot annotated_cfg ~annot_str:Spec_domain.to_dot_string)))
 
 let spec_inference_inter =
   mk_classical_inter "Annotate the ICFG with the inferred variables"
@@ -49,7 +49,7 @@ let spec_inference_inter =
     (fun file_out icfg ->
        Out_channel.with_file file_out
          ~f:(fun ch ->
-             Out_channel.output_string ch (ICFG.to_dot icfg ~annot_str:Spec.to_dot_string)))
+             Out_channel.output_string ch (ICFG.to_dot icfg ~annot_str:Spec_domain.to_dot_string)))
 
 let taint_intra =
   mk_intra "Just like `intra`, but only performs the taint analysis" Taint.analyze_intra

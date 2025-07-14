@@ -420,12 +420,11 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
         instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = None } ~data:(state, Simple poststate);
         Simple poststate
       | Entry ->
-        let poststate = Transfer.entry module_ 0l (* TODO *) cfg state in
-        (* instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = Entry } ~data:(state, Simple poststate); *)
+        let poststate = Transfer.entry module_ cfg state in
         Simple poststate
       | Return instr ->
         let state_before_entry = fst (Map.find_exn !instr_data { label = instr.label; kind = None }) in
-        let poststate = Transfer.return module_ 0l (* TODO *)cfg instr state_before_entry state in
+        let poststate = Transfer.return module_ cfg instr state_before_entry state in
         instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = Return } ~data:(state, Simple poststate);
         Simple poststate
       | Control instr ->

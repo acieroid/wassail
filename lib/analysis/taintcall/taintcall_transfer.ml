@@ -73,14 +73,14 @@ let apply_summary
     Taintcall_domain.Call.join substituted_summary (fst state)
   in
   let add_call (to_state : Taintcall_domain.Call.t) (f : Int32.t) (arity : int * int) : Taintcall_domain.Call.t =
-    let args = List.take (Spec.get_or_fail i.annotation_before).vstack (fst arity) in
+    let args = List.take (Spec_domain.get_or_fail i.annotation_before).vstack (fst arity) in
     let argsv = List.map args ~f:(Taint_domain.get_taint (snd state)) in
     Int32Map.update to_state f ~f:(function
          | None -> argsv
          | Some old -> List.map2_exn old argsv ~f:Taint_domain.Taint.join)
   in
   let sndstate' = TaintTransfer.apply_summary module_ f arity i (snd state) (snd summary) in
-  let args = List.take (Spec.get_or_fail i.annotation_before).vstack (fst arity) in
+  let args = List.take (Spec_domain.get_or_fail i.annotation_before).vstack (fst arity) in
   add_call (apply_summary (List.map args ~f:(Taint_domain.get_taint (snd state)))) f arity, sndstate'
 
 let extract_summary (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (analyzed_cfg : State.t Cfg.t) : summary =
@@ -101,8 +101,8 @@ let call_inter
   : State.t =
   state
 
-let entry (_module_ : Wasm_module.t) (_callee_idx : Int32.t) (_cfg : annot_expected Cfg.t) (state : State.t) : State.t =
+let entry (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (state : State.t) : State.t =
   state
 
-let return (_module : Wasm_module.t) (_caller_idx : Int32.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (state_after_call : State.t) : State.t =
+let return (_module : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (state_after_call : State.t) : State.t =
   state_after_call

@@ -12,7 +12,7 @@
    Transfer
    Intra Inter
    Prim_value
-   Spec Spec_inference Spec_analysis
+   Spec_domain Spec_inference Spec_analysis
    Var_prop
    Taint Taint_options Taint_domain Taint_transfer Taint_summary
    Taintcall Taintcall_domain Taintcall_transfer

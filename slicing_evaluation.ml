@@ -207,7 +207,7 @@ let generate_slice (filename : string) (output_file : string) =
       let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ func.idx) in
       match List.filter_map (Cfg.all_instructions_list cfg) ~f:(function
           | Instr.Call ({instr = CallDirect (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
-            begin match (Spec.get_or_fail annotation_before).vstack with
+            begin match (Spec_domain.get_or_fail annotation_before).vstack with
               | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 address)) -> Some label
               | _ -> None
             end
@@ -227,7 +227,7 @@ let generate_slice (filename : string) (output_file : string) =
                 let (_, _, use_def) = Use_def.make module_ cfg in
                 match List.filter_map (Cfg.all_instructions_list cfg) ~f:(function
                           | Instr.Call ({instr = CallDirect (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
-                             begin match (Spec.get_or_fail annotation_before).vstack with
+                             begin match (Spec_domain.get_or_fail annotation_before).vstack with
                              | second_arg :: _ when List.mem slicing_criteria label ~equal:Instr.Label.equal ->
                                 Printf.printf "second arg is: %s\n" (Var.to_string second_arg);
                                 begin match Use_def.UseDefChains.get use_def (Use_def.Use.make label second_arg) with
@@ -327,7 +327,7 @@ let count_instructions_in_slice (filename : string) (output_file : string) =
        let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ func.idx) in
        List.find_map (Cfg.all_instructions_list cfg) ~f:(function
            | Instr.Call ({instr = CallDirect (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
-             begin match (Spec.get_or_fail annotation_before).vstack with
+             begin match (Spec_domain.get_or_fail annotation_before).vstack with
                | _ :: first_arg :: _ when Var.equal first_arg (Var.Const (Prim_value.I32 str_pos)) -> Some (func.idx, label)
                | _ -> None
              end
