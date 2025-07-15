@@ -303,7 +303,7 @@ let to_string (m : t) : string =
 module Test = struct
   let%test_unit "construct Wasm_module from .wat files without erroring" =
     List.iter [
-      (*    "../../../benchmarks/benchmarksgame/binarytrees.wat"; *)
+      "../../../benchmarks/benchmarksgame/binarytrees.wat";
       "../../../benchmarks/benchmarksgame/fankuchredux.wat";
       "../../../benchmarks/benchmarksgame/fasta.wat";
       "../../../benchmarks/benchmarksgame/k-nucleotide.wat";

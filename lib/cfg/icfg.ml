@@ -296,6 +296,54 @@ let to_dot
   Printf.sprintf "digraph ICFG {\n%s\n%s\n%s\n}\n" (String.concat ~sep:"\n" clusters) inter_edges extra_data
 
 module Test = struct
+
+  let%test_unit "icfg should be built for all benchmarks" =
+    List.iter [
+      ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l);
+      ("../../../benchmarks/benchmarksgame/fankuchredux.wat", 1l);
+      ("../../../benchmarks/benchmarksgame/fasta.wat", 5l);
+      ("../../../benchmarks/benchmarksgame/k-nucleotide.wat", 4l);
+      ("../../../benchmarks/benchmarksgame/mandelbrot.wat", 1l);
+      ("../../../benchmarks/benchmarksgame/nbody.wat", 1l);
+      ("../../../benchmarks/benchmarksgame/reverse-complement.wat", 6l);
+      ("../../../benchmarks/benchmarksgame/spectral-norm.wat", 1l);
+      ("../../../benchmarks/polybench-clang/2mm.wat", 5l);
+      ("../../../benchmarks/polybench-clang/3mm.wat", 5l);
+      ("../../../benchmarks/polybench-clang/adi.wat", 5l);
+      ("../../../benchmarks/polybench-clang/atax.wat", 5l);
+      ("../../../benchmarks/polybench-clang/bicg.wat", 5l);
+      ("../../../benchmarks/polybench-clang/cholesky.wat", 5l);
+      ("../../../benchmarks/polybench-clang/correlation.wat", 5l);
+      ("../../../benchmarks/polybench-clang/covariance.wat", 5l);
+      ("../../../benchmarks/polybench-clang/deriche.wat", 5l);
+      ("../../../benchmarks/polybench-clang/doitgen.wat", 5l);
+      ("../../../benchmarks/polybench-clang/durbin.wat", 5l);
+      ("../../../benchmarks/polybench-clang/fdtd-2d.wat", 5l);
+      ("../../../benchmarks/polybench-clang/floyd-warshall.wat", 5l);
+      ("../../../benchmarks/polybench-clang/gemm.wat", 5l);
+      ("../../../benchmarks/polybench-clang/gemver.wat", 5l);
+      ("../../../benchmarks/polybench-clang/gesummv.wat", 5l);
+      ("../../../benchmarks/polybench-clang/gramschmidt.wat", 5l);
+      ("../../../benchmarks/polybench-clang/heat-3d.wat", 5l);
+      ("../../../benchmarks/polybench-clang/jacobi-1d.wat", 5l);
+      ("../../../benchmarks/polybench-clang/jacobi-2d.wat", 5l);
+      ("../../../benchmarks/polybench-clang/ludcmp.wat", 5l);
+      ("../../../benchmarks/polybench-clang/lu.wat", 5l);
+      ("../../../benchmarks/polybench-clang/mvt.wat", 5l);
+      ("../../../benchmarks/polybench-clang/nussinov.wat", 5l);
+      ("../../../benchmarks/polybench-clang/seidel-2d.wat", 5l);
+      ("../../../benchmarks/polybench-clang/symm.wat", 5l);
+      ("../../../benchmarks/polybench-clang/syr2k.wat", 5l);
+      ("../../../benchmarks/polybench-clang/syrk.wat", 5l);
+      ("../../../benchmarks/polybench-clang/trisolv.wat", 5l);
+      ("../../../benchmarks/polybench-clang/trmm.wat", 5l);
+      ("../../../test/element-section-func.wat", 5l);
+    ] ~f:(fun (program, entry) ->
+        try
+          let _icfg = make (Wasm_module.of_file program) entry in
+          ()
+        with e -> failwith (Printf.sprintf "Inter spec failed on %s: %s" program (Exn.to_string e)))
+
   let expect (module_str : string) (entry : Int32.t) (calls : Edge.Set.t Instr.Label.Map.t) : bool =
     let module_ = Wasm_module.of_string module_str in
     let icfg = make module_ entry in

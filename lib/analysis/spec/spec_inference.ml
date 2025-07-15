@@ -102,9 +102,7 @@ module Spec_inference
       | MemoryInit _ -> { state with vstack = ret :: drop 3 state.vstack }
       | Drop -> { state with vstack = drop 1 state.vstack }
       | Select _ -> { state with vstack = ret :: (drop 3 state.vstack) }
-      | LocalGet l ->
-        Printf.printf "instruction local.get %ld @%s, state %s" l (Instr.Label.to_string i.label) (State.SpecWithoutBottom.to_string state);
-        { state with vstack = (if !propagate_locals then get l state.locals else ret) :: state.vstack }
+      | LocalGet l -> { state with vstack = (if !propagate_locals then get l state.locals else ret) :: state.vstack }
       | LocalSet l -> { state with vstack = drop 1 state.vstack; locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
       | LocalTee l -> { state with locals = set l state.locals (if !propagate_locals then top state.vstack else ret) }
       | GlobalGet g -> { state with vstack = (if !propagate_globals then get g state.globals else ret) :: state.vstack }
@@ -201,10 +199,12 @@ module Spec_inference
       if Cfg.exit_block cfg = block.idx then
         { s with vstack = List.mapi s.vstack ~f:(fun i v -> if i = 0 then Var.Return cfg.idx else v) }
       else
-        s
-    in
-      (* Multiple cases: either we have no predecessor, we have unanalyzed predecessors, or we have only analyzed predecessors *)
-      (State.lift rename_exit) (begin match states with
+        s in
+    let is_entry = match block.content with
+      | Entry -> true
+      | _ -> false in
+    (* Multiple cases: either we have no predecessor, we have unanalyzed predecessors, or we have only analyzed predecessors *)
+    (State.lift rename_exit) (begin match states with
         | [] ->
           (* entry node *)
           init module_ (Wasm_module.get_funcinst module_ block.fidx)
@@ -232,12 +232,22 @@ module Spec_inference
                           | v' when Var.equal v v' -> v'
                           | _ -> Var.Hole (* this is a hole *)
                         in
+                        let merge_locals locals1 locals2 =
+                          let locals1, locals2 =
+                            if is_entry then
+                              (* Function [entry] will deal with correctly adding the locals. We only care about preserving the arguments here *)
+                              let funcinst = Wasm_module.get_funcinst module_ block.fidx in
+                              let nargs = List.length (fst funcinst.typ) in
+                              List.take locals1 nargs, List.take locals2 nargs
+                            else
+                              locals1, locals2 in
+                          List.map2_exn locals1 locals2 ~f:f in
                         if (List.length acc.vstack <> List.length s.vstack) then
                           failwith "unsupported in spec_inference: incompatible stack lengths (probably due to mismatches in br_table branches)";
-                        assert (List.length acc.locals = List.length s.locals);
+                        assert (is_entry || (List.length acc.locals = List.length s.locals));
                         assert (List.length acc.globals = List.length s.globals);
                         NotBottom ({ vstack = List.map2_exn acc.vstack s.vstack ~f:f;
-                                     locals = List.map2_exn acc.locals s.locals ~f:f;
+                                     locals = merge_locals acc.locals s.locals;
                                      globals = List.map2_exn acc.globals s.globals ~f:f;
                                      memory = Var.OffsetMap.merge acc.memory s.memory ~f:(fun ~key:_ v -> match v with
                                          | `Both (v1, v2) -> Some (f v1 v2)
@@ -293,7 +303,6 @@ module Spec_inference
     let locals = funcinst.code.locals in
     State.wrap ~default:bottom (fun state ->
         let args = List.take state.vstack nargs in
-        Printf.printf "function %ld" cfg.idx;
         let zeroes = List.map locals ~f:(fun t -> Var.Const (Prim_value.zero_of_t t)) in
         let vstack = [] in
         let locals = args @ zeroes in

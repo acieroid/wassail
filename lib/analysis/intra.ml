@@ -409,31 +409,36 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
     (* Applies the transfer function to an entire block *)
     let transfer (b : 'a Basic_block.t) (state : Transfer.State.t) : Result.t =
       let cfg = Map.find_exn icfg.cfgs b.fidx in
-      match b.content with
-      | Data instrs ->
-        Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
-            let poststate = Transfer.data module_ cfg instr prestate in
-            instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = None } ~data:(prestate, Simple poststate);
-            poststate))
-      | Call instr ->
-        let poststate = Transfer.call_inter module_ cfg instr state in
-        instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = None } ~data:(state, Simple poststate);
-        Simple poststate
-      | Entry ->
-        let poststate = Transfer.entry module_ cfg state in
-        Simple poststate
-      | Return instr ->
-        let state_before_entry = fst (Map.find_exn !instr_data { label = instr.label; kind = None }) in
-        let poststate = Transfer.return module_ cfg instr state_before_entry state in
-        instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = Return } ~data:(state, Simple poststate);
-        Simple poststate
-      | Control instr ->
-        let poststate = match Transfer.control module_ cfg instr state with
-          | `Simple s -> Result.Simple s
-          | `Branch (s1, s2) -> Result.Branch (s1, s2)
-        in
-        instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = None } ~data:(state, poststate);
-        poststate in
+      let result = match b.content with
+        | Data instrs ->
+          Result.Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
+              let poststate = Transfer.data module_ cfg instr prestate in
+              instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = None } ~data:(prestate, Simple poststate);
+              poststate))
+        | Call instr ->
+          let poststate = Transfer.call_inter module_ cfg instr state in
+          instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = None } ~data:(state, Simple poststate);
+          Simple poststate
+        | Entry ->
+          let poststate = Transfer.entry module_ cfg state in
+          Simple poststate
+        | Return instr ->
+          let state_before_entry = match Map.find !instr_data { label = instr.label; kind = None } with
+            | None -> Transfer.bottom
+            | Some (state, _) -> state in
+          let poststate = Transfer.return module_ cfg instr state_before_entry state in
+          instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = Return } ~data:(state, Simple poststate);
+          Simple poststate
+        | Control instr ->
+          let poststate = match Transfer.control module_ cfg instr state with
+            | `Simple s -> Result.Simple s
+            | `Branch (s1, s2) -> Result.Branch (s1, s2)
+          in
+          instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = None } ~data:(state, poststate);
+          poststate in
+      Printf.printf "Analysis of block %ld.%s from state %s results in %s"
+        b.fidx (Basic_block.to_string b) (Transfer.State.to_string state) (Result.to_string result);
+      result in
 
     (* Analyzes one block, returning the state after this block *)
     let analyze_block (block_idx : Icfg.BlockIdx.t) : Result.t =

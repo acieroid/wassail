@@ -1,3 +1,4 @@
+open Core
 open Helpers
 
 let analyze_intra : Wasm_module.t -> Int32.t list -> Spec_domain.t Cfg.t Int32Map.t =
@@ -13,7 +14,6 @@ let analyze_intra1 (module_ : Wasm_module.t) (idx : Int32.t) : Spec_domain.t Cfg
 
 let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Spec_domain.t Icfg.t =
   Analysis_helpers.mk_inter_classical module_ entry
-
 
 module TestIntra = struct
   let does_not_fail (module_str : string) (fidx : int32) : unit =
@@ -323,7 +323,6 @@ module TestInter = struct
     i32.add) ;; [i1_2]
   )" 0l
 
-
   let%test_unit "interprocedural spec analysis works even with imported functions" =
     does_not_fail "(module
   (type (;0;) (func (param i32) (result i32)))
@@ -334,7 +333,71 @@ module TestInter = struct
     call 0 ;; [i2]
   ))" 1l
 
+  let%test_unit "interprocedural spec analysis works with multiple calls to the same function with different locals" =
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    local.get 0)
+  (func (;1;) (type 0) (param i32) (result i32)
+    (local i32)
+    local.get 1
+    call 0)
+  (func (;2;) (type 0) (param i32) (result i32)
+    (local i32 i32)
+    local.get 2
+    call 0)
+  (func (;3;) (type 0) (param i32) (result i32)
+    i32.const 1
+    call 1
+    call 2))" 3l
+
   let%test_unit "interprocedural works on spectral-norm" =
     does_not_fail_on_file "../../../benchmarks/benchmarksgame/spectral-norm.wat" 1l
+
+  let%test_unit "interprocedural spec works on all benchmarks" =
+    List.iter [
+      (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *)
+      ("../../../benchmarks/benchmarksgame/fankuchredux.wat", 1l);
+      ("../../../benchmarks/benchmarksgame/fasta.wat", 5l);
+      (* ("../../../benchmarks/benchmarksgame/k-nucleotide.wat", 4l); *)
+      ("../../../benchmarks/benchmarksgame/mandelbrot.wat", 1l);
+      ("../../../benchmarks/benchmarksgame/nbody.wat", 1l);
+      (* ("../../../benchmarks/benchmarksgame/reverse-complement.wat", 6l); *)
+      ("../../../benchmarks/benchmarksgame/spectral-norm.wat", 1l);
+      (* ("../../../benchmarks/polybench-clang/2mm.wat", 5l);
+      ("../../../benchmarks/polybench-clang/3mm.wat", 5l);
+      ("../../../benchmarks/polybench-clang/adi.wat", 5l);
+      ("../../../benchmarks/polybench-clang/atax.wat", 5l);
+      ("../../../benchmarks/polybench-clang/bicg.wat", 5l);
+      ("../../../benchmarks/polybench-clang/cholesky.wat", 5l);
+      ("../../../benchmarks/polybench-clang/correlation.wat", 5l);
+      ("../../../benchmarks/polybench-clang/covariance.wat", 5l);
+      ("../../../benchmarks/polybench-clang/deriche.wat", 5l);
+      ("../../../benchmarks/polybench-clang/doitgen.wat", 5l);
+      ("../../../benchmarks/polybench-clang/durbin.wat", 5l);
+      ("../../../benchmarks/polybench-clang/fdtd-2d.wat", 5l);
+      ("../../../benchmarks/polybench-clang/floyd-warshall.wat", 5l);
+      ("../../../benchmarks/polybench-clang/gemm.wat", 5l);
+      ("../../../benchmarks/polybench-clang/gemver.wat", 5l);
+      ("../../../benchmarks/polybench-clang/gesummv.wat", 5l);
+      ("../../../benchmarks/polybench-clang/gramschmidt.wat", 5l);
+      ("../../../benchmarks/polybench-clang/heat-3d.wat", 5l);
+      ("../../../benchmarks/polybench-clang/jacobi-1d.wat", 5l);
+      ("../../../benchmarks/polybench-clang/jacobi-2d.wat", 5l);
+      ("../../../benchmarks/polybench-clang/ludcmp.wat", 5l);
+      ("../../../benchmarks/polybench-clang/lu.wat", 5l);
+      ("../../../benchmarks/polybench-clang/mvt.wat", 5l);
+      ("../../../benchmarks/polybench-clang/nussinov.wat", 5l);
+      ("../../../benchmarks/polybench-clang/seidel-2d.wat", 5l);
+      ("../../../benchmarks/polybench-clang/symm.wat", 5l);
+      ("../../../benchmarks/polybench-clang/syr2k.wat", 5l);
+      ("../../../benchmarks/polybench-clang/syrk.wat", 5l);
+      ("../../../benchmarks/polybench-clang/trisolv.wat", 5l);
+      ("../../../benchmarks/polybench-clang/trmm.wat", 5l);
+      ("../../../test/element-section-func.wat", 5l); *)
+    ] ~f:(fun (program, entry) ->
+        try
+          does_not_fail_on_file program entry
+        with e -> failwith (Printf.sprintf "Inter spec failed on %s: %s" program (Exn.to_string e)))
 
 end
