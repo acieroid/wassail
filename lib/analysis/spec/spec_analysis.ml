@@ -287,7 +287,6 @@ module TestInter = struct
   (global (;0;) (mut i32) (i32.const 66560)))" 0l
 
   let%test_unit "interprocedural spec analysis does not fail with function call" =
-    (* TODO: don't only check that it doesn't fail *)
     does_not_fail "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;0;) (type 0) (param i32) (result i32)

@@ -169,7 +169,7 @@ module Make
           (* Update the out state in the analysis results.
              We join with the previous results *)
           let new_out_state =
-            (* TODO: Join may not be necessary here, as long as out_state is greater than previous_out_state *)
+            (* XXX: Join may not be necessary here, as long as out_state is greater than previous_out_state *)
             if Cfg.is_loop_head cfg block_idx then
               Result.widen previous_out_state (Result.join previous_out_state out_state)
             else
@@ -304,7 +304,7 @@ module MakeSumm
           (* Update the out state in the analysis results.
              We join with the previous results *)
           let new_out_state =
-            (* TODO: Join may not be necessary here, as long as out_state is greater than previous_out_state *)
+            (* XXX: Join may not be necessary here, as long as out_state is greater than previous_out_state *)
             if Cfg.is_loop_head cfg block_idx then
               Result.widen previous_out_state (Result.join previous_out_state out_state)
             else
@@ -475,7 +475,7 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
           (* Update the out state in the analysis results.
              We join with the previous results *)
           let new_out_state =
-            (* TODO: Join may not be necessary here, as long as out_state is greater than previous_out_state *)
+            (* XXX: Join may not be necessary here, as long as out_state is greater than previous_out_state *)
             if Icfg.is_loop_head icfg block_idx then
               Result.widen previous_out_state (Result.join previous_out_state out_state)
             else

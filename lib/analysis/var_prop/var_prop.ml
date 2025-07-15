@@ -60,8 +60,8 @@ let eqs_data_instr (instr : (Instr.data, Spec_domain.t) Instr.labelled) : VarEq.
     VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top (Spec_domain.get_or_fail instr.annotation_after).vstack) (Spec_inference.get g (Spec_domain.get_or_fail instr.annotation_before).globals))
   | GlobalSet g ->
     VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get g (Spec_domain.get_or_fail instr.annotation_after).globals) (Spec_inference.top (Spec_domain.get_or_fail instr.annotation_before).vstack))
-  | Load _ -> VarEq.Set.empty (* TODO (it is sound to ignore them, but shouldn't be too complicated to deal with this) *)
-  | Store _ -> VarEq.Set.empty (* TODO: same *)
+  | Load _ -> VarEq.Set.empty (* XXX (it is sound to ignore them, but shouldn't be too complicated to deal with this) *)
+  | Store _ -> VarEq.Set.empty (* XXX: same *)
   | RefIsNull | RefNull _ | RefFunc _ -> VarEq.Set.empty
 
 (** Perform variable propagation *)

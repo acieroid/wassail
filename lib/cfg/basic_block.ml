@@ -34,7 +34,7 @@ let to_string ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : s
 
 (** Convert a basic block to its dot representation *)
 let to_dot ?prefix:(prefix : string = "") ?color:(color : string = "") ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : string =
-  (* TODO: also add block annotations *)
+  (* XXX: also add block annotations *)
   match b.content with
   | Data instrs ->
     let first_annot = match List.hd instrs with

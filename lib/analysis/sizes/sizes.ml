@@ -137,7 +137,6 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
     let var (x : Int32.t) = vu32 x
 
     let block_type = function
-      (* TODO: VarBlockType x -> vs33 x.it *)
       | [], [] -> vs7 (-0x40)
       | [], [t] -> value_type t
       | _ -> failwith "unsupported: sizes with other block type"

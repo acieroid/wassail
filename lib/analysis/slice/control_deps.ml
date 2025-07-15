@@ -70,7 +70,7 @@ let control_deps_exact_instrs (cfg : Spec_domain.t Cfg.t) : Instr.Label.Set.t In
                         | Some b' -> Instr.Label.Set.add b' b))))
 
 (** Algorithm for control dependencies, adapted from https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/ProgramSlicing.pdf *)
-(* TODO: the results of this algorithm do not seem correct. The implementation may contain a mistake *)
+(* XXX: the results of this algorithm do not seem correct. The implementation may contain a mistake. (Since writing this comment, I lost the example of an incorrect result unfortunately) *)
 let control_dep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (is_immediate_post_dom : int -> Var.t -> bool) : (Var.t * Pred.t) list =
   Log.warn "using incorrect control_dep algorithm";
   let tree : Tree.t = Dominance.cfg_dominator cfg in

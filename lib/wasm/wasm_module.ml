@@ -269,14 +269,13 @@ let to_string (m : t) : string =
   let elem (elem : Elem_segment.t) =
     put (Printf.sprintf "(elem (;%ld;) " elem.idx);
     put (Printf.sprintf "(%s)" (Instr.list_to_string (Segment_mode.offset elem.emode) (fun () -> "")));
-    (* TODO: this is not the general case, check that this is enough *)
     put (Printf.sprintf " func %s)\n" (String.concat ~sep:" " (List.map ~f:(fun l -> Instr.list_to_string l (fun () -> "")) elem.einit))) in
   let elems () = List.iter m.elems ~f:elem in
   let data (data : Data_segment.t) =
     put (Printf.sprintf "  (data (;%ld;) " data.idx);
     put (Printf.sprintf "(offset %s)" (Instr.list_to_string (Segment_mode.offset data.dmode) (fun () -> "")));
     put "\"";
-    put (string_to_wasm_string data.dinit); (* TODO: make sure to escape what is needed *)
+    put (string_to_wasm_string data.dinit); (* XXX: make sure to escape what is needed *)
     put "\")\n" in
   let datas () = List.iter m.datas ~f:data in
   let global (i : int) (g : Global.t) =

@@ -194,7 +194,6 @@ module Cfg = struct
     Instr.Label.Map.find cfg.label_to_enclosing_block label
 
   let find_enclosing_block_exn (cfg : 'a t) (label : Instr.Label.t) : 'a Basic_block.t  =
-    (* TODO: return a label instead? *)
     match List.find (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, block) ->
         let labels = Basic_block.all_direct_instruction_labels block in
         Instr.Label.Set.mem labels label) with

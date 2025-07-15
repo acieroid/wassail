@@ -51,7 +51,7 @@ let compute_enclosing_block_id (basic_blocks : unit Basic_block.t list) : int In
 
 (** Constructs a CFG for function `fid` in a module. *)
 let build (module_ : Wasm_module.t) (fidx : Int32.t) : unit Cfg.t =
-  (* TODO: this implementation is really not ideal and should be cleaned *)
+  (* XXX: this implementation is really not ideal and should be cleaned *)
   let rec check_no_rest (rest : 'a Instr.t list) : unit = match rest with
     | [] -> ()
     | Control { instr = Unreachable; _ } :: rest -> check_no_rest rest

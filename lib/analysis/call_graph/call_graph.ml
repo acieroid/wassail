@@ -46,7 +46,7 @@ let indirect_call_targets (wasm_mod : Wasm_module.t) (typ : Int32.t) : Int32.t l
   let ftype = Wasm_module.get_type wasm_mod typ in
   match List.hd wasm_mod.table_insts with
   | Some table ->
-    (* TODO: this may be unsound, as the table may be modified at runtime by the host environment.
+    (* XXX: this may be unsound, as the table may be modified at runtime by the host environment.
        If this is the case, we should only rely on the second case below *)
     let funs = List.map (Table_inst.indices table) ~f:(fun idx -> Table_inst.get table idx) in
     let funs_with_matching_type = List.filter_map funs ~f:(function

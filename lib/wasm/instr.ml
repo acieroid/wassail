@@ -379,7 +379,7 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
   | Loop (st, instrs) ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_block m st in
     assert (arity_in = 0); (* what does it mean to have arity_in > 0 for a loop? *)
-    assert (arity_out <= 1); (* TODO: support any arity out? *)
+    assert (arity_out <= 1); (* XXX: support any arity out? *)
     let label = new_label () in
     let body = seq_of_wasm m new_label instrs in
     control_labelled ~label:label (Loop (Wasm_helpers.type_of_block m st, (arity_in, arity_out), body))

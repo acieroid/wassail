@@ -10,7 +10,7 @@ module Make = struct
   (* This is a map from function index to:
      - the taint of its return value
      - the taint of its arguments
-     TODO: fill it from the names of the imports/exports
+     XXX: fill it from the names of the imports/exports
    *)
   let taint_specifications : (Taint_domain.Taint.t * (Taint_domain.Taint.t list)) StringMap.t ref =
     let bottom = Taint_domain.Taint.Taints Var.Set.empty in
@@ -49,7 +49,7 @@ module Make = struct
     | Select _ ->
       let ret = ret i in
       let (_c, v2, v1) = pop3 (Spec_domain.get_or_fail i.annotation_before).vstack in
-      (* TODO: could improve precision by checking the constraints on c: if it is precisely zero/not-zero, we can only include v1 or v2 *)
+      (* XXX: could improve precision by checking the constraints on c: if it is precisely zero/not-zero, we can only include v1 or v2 *)
       Taint_domain.add_taint_v (Taint_domain.add_taint_v state ret v1) ret v2
     | LocalGet l ->
       Taint_domain.add_taint_v state (ret i) (get_nth (Spec_domain.get_or_fail i.annotation_before).locals l)
@@ -100,7 +100,7 @@ module Make = struct
       *)
       let taints = List.map locs ~f:(fun (k, offset) ->
           (* Log.warn
-            (Printf.sprintf "TODO: currently ignoring offsets in taints!!!\n--------------------\n--------------\n"); (* maybe only the values should be tainted, not the keys *) *)
+            (Printf.sprintf "XXX: currently ignoring offsets in taints!!!\n--------------------\n--------------\n"); (* maybe only the values should be tainted, not the keys *) *)
           Taint_domain.Taint.join (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Var.OffsetMap.find_exn mem (k, offset)))) in
       Taint_domain.add_taint
         state
@@ -130,7 +130,7 @@ module Make = struct
           all_locs in
       (* Set the taint of memory locations and the value to the taint of vval *)
       List.fold_left locs ~init:state ~f:(fun s (k, offset) ->
-          (* Log.warn (Printf.sprintf "TODO: ignoring offsets!"); *)
+          (* Log.warn (Printf.sprintf "XXX: ignoring offsets!"); *)
           Taint_domain.add_taint_v (Taint_domain.add_taint_v s k vval)
             (Var.OffsetMap.find_exn mem (k, offset)) vval)
 
@@ -178,7 +178,7 @@ module Make = struct
         spec_after.globals
         (List.concat_map (Var.OffsetMap.to_alist spec_after.memory)
            ~f:(fun ((a, _offset), b) ->
-               (* Log.warn (Printf.sprintf "TODO: ignoring offset\n"); *)
+               (* Log.warn (Printf.sprintf "XXX: ignoring offset\n"); *)
                [a; b])) ret in
     let export = List.find module_.exported_funcs ~f:(fun (id, _, _) -> Int32.(id = f)) in
     match export with
@@ -215,7 +215,7 @@ module Make = struct
                 List.fold_left (Spec_domain.extract_different_vars spec spec')
                   ~init:s
                   ~f:(fun s (x, y) ->
-                      (* TODO: should it be x y or y x? *)
+                      (* XXX: should it be x y or y x? *)
                       Taint_domain.add_taint_v s x y)) in
             (* And finally joins all the states *)
             List.reduce_exn states' ~f:State.join

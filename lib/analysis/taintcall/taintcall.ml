@@ -100,7 +100,7 @@ let detect_flows_from_sources_to_sinks (module_ : Wasm_module.t) (sources : Stri
         Log.warn (Printf.sprintf "sink does not exist in binary (this could be perfectly fine): %s" sink_name);
         None (* This sink does not exist in the binary, so we ignore it *)
     )) in
-  Log.warn "TODO: source specification";
+  Log.warn "source specification has been disabled";
   (* Taintcall_transfer.TaintTransfer.return_taint_specifications := sources_specifications; *)
   let results = analyze_inter module_ schedule in
   let found = ref TaintFlowSet.empty in

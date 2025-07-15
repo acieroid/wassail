@@ -64,8 +64,7 @@ module ICFG = struct
   [@@deriving equal]
 
   (* Inspired by Call_graph's constructor. Some differences:
-     - The nodes are either call instructions, or function entries
-     - TODO: what about calls to external function? Have a stub node? *)
+     - The nodes are either call instructions, or function entries *)
   let make_calls (wasm_mod : Wasm_module.t) : Edge.Set.t Instr.Label.Map.t =
     let find_targets = Call_graph.indirect_call_targets in
     let calls : Edge.Set.t Instr.Label.Map.t ref = ref Instr.Label.Map.empty in
@@ -163,7 +162,7 @@ module ICFG = struct
         |> List.map ~f:(fun { target = callee; _ } ->
             let callee_cfg = Map.find_exn icfg.cfgs callee in
             (* The predecessor must be a regular node (a Return cannot be preceded by another Return or an Entry, there must be an instruction *)
-            (* TODO: what if there's an empty function? Not sure this is possible, as a function need to have a regular entry block *)
+            (* XXX: what if there's an empty function? Not sure this is possible, as a function need to have a regular entry block *)
             make_block_idx callee_cfg.idx callee_cfg.exit_block Regular, None)
       | _ -> failwith (Printf.sprintf "not a proper return: %s" (BlockIdx.to_string block_idx))
       end
@@ -179,7 +178,7 @@ module ICFG = struct
       if cfg.entry_block = block_idx.block_idx then
         (* If it is the first node of a CFG, then the predecessor is the artificial entry node, unless we are et the entry of the icfg (in which case, no predecessor)  *)
         if Int32.(block_idx.fidx = icfg.entry) then
-          [] (* TODO: maybe we should still have an entry node here, for the transfer function to be happy *)
+          []
         else
           [({ block_idx with kind = Entry   }, None)]
       else

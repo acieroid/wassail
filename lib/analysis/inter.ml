@@ -65,7 +65,7 @@ module MakeSummaryBased (Transfer : Transfer.SUMMARY_TRANSFER)(Intra : Intra.INT
           (* Check difference with previous state, if there was any *)
           let previous_results = Int32Map.find annotated_cfgs cfg_idx in
           match previous_results with
-          | Some res when Cfg.equal Transfer.State.equal analyzed_cfg res -> (* TODO: CFG equality might be slow *)
+          | Some res when Cfg.equal Transfer.State.equal analyzed_cfg res -> (* XXX: CFG equality might be slow *)
             (* Same results as before, we can just recurse without having do anything *)
             fixpoint (Int32Set.remove worklist cfg_idx) annotated_cfgs summaries
           | _ ->

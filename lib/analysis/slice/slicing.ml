@@ -203,7 +203,7 @@ let type_of_data
     | Compare op -> ([T op.typ; T op.typ], [T Type.I32])
     | Test I32Eqz -> ([T Type.I32], [T Type.I32])
     | Test I64Eqz -> ([T Type.I64], [T Type.I32])
-    | Convert op -> ([Any "a"], [T op.typ]) (* TODO: it should really be a specific type rather than any *)
+    | Convert op -> ([Any "a"], [T op.typ]) (* XXX: it should really be a specific type rather than any *)
     | LocalGet l -> ([], [T (Cfg.local_type cfg l)])
     | LocalSet l -> ([T (Cfg.local_type cfg l)], [])
     | LocalTee l ->
@@ -359,7 +359,7 @@ let rec slice (cfg : 'a Cfg.t) (cfg_instructions : Spec_domain.t Instr.t Instr.L
     | (Control ({ instr = Block (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
       (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: block with arity greater than 0"; *)
       let sliced_body = slice cfg cfg_instructions body instructions_to_keep in
-      (* TODO: we could also drop the block if it is not empty but only contains instructions that are not part of the slice (basically, only dummy instructions) *)
+      (* XXX: we could also drop the block if it is not empty but only contains instructions that are not part of the slice (basically, only dummy instructions) *)
       if body_can_be_removed sliced_body then
         (* Block body is empty, drop the block entirely *)
         loop rest (entire_instr :: to_remove_rev)
@@ -1637,7 +1637,7 @@ module Test = struct
 ))" in
     check_slice original slice 0l 1
 
-  (* TODO: fix this one eventually *)
+  (* XXX: fix this one eventually *)
   (*
   let%test "slicing with unreachable return" =
     Log.warn "STARTING TEST\n----------\n--------\n%!";

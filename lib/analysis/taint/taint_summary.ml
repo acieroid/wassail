@@ -5,8 +5,7 @@ open Helpers
 type t = {
   ret : Taint_domain.Taint.t option; (** The taint of the (optional) return value *)
   globals : Taint_domain.Taint.t list; (** The taint of the globals after applying the function *)
-  mem: Taint_domain.Taint.t;
-  (* TODO: mem is now a single taint, should be one per var maybe *)
+  mem: Taint_domain.Taint.t; (* XXX: mem is now a single taint, should be one per var maybe *)
 }
 [@@deriving sexp, compare, equal]
 
