@@ -30,6 +30,11 @@ module Value = struct
     | ValueSet vs1, ValueSet vs2 -> ValueSet (RIC.meet vs1 vs2)
     | Boolean b1, Boolean b2 -> Boolean (Boolean.meet b1 b2)
     | _ -> assert false
+
+  let update_relative_offset (v : t) (actual_values : RIC.t String.Map.t) : t =
+    match v with
+    | Boolean _ -> v
+    | ValueSet vs -> ValueSet (RIC.update_relative_offset ~ric_:vs ~actual_values)
 end
 
 (** Type [t] is the abstract store: a map from variables to their abstract values. *)
@@ -61,6 +66,7 @@ let get (store : t) ~(var : Variable.t) : Value.t =
     | None ->
       ValueSet 
         (match var with
+        | Affected -> RIC.Bottom
         | Var Const I32 n -> Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, ("", Option.value_exn (Int32.to_int n)))
         | Var Const _ -> Reduced_interval_congruence.RIC.Top
         (* | Var Merge _ -> RIC.Bottom *)
@@ -84,6 +90,39 @@ let get (store : t) ~(var : Variable.t) : Value.t =
           else
             RIC.Top)
 
+let extract_global_values (store : t) : RIC.t String.Map.t =
+  let globals = 
+    List.filter 
+      (Variable.Map.extract_locals_and_globals store)
+      ~f:(fun var -> 
+        match var with
+        | Variable.Var Var.Global _ -> true
+        | _ -> false) in
+  let global_values =
+    List.map globals ~f:(fun var -> 
+      Variable.to_string var,
+      match get store ~var with
+      | Value.ValueSet vs -> vs
+      | Value.Boolean _ -> RIC.Top) in (* TODO: if not i32, shouldn't it be Top? *)
+  List.fold
+    global_values
+    ~init:String.Map.empty
+    ~f:(fun acc (key, data) -> Map.set acc ~key ~data)
+
+let extract_argument_values (store : t) ~(args : Var.t list) : RIC.t String.Map.t =
+  let values = 
+    List.map 
+      args 
+      ~f:(fun var -> 
+        match get store ~var:(Variable.Var var) with
+        | Value.ValueSet vs -> vs
+        | Value.Boolean _ -> RIC.Top) in
+  List.fold2_exn
+    (List.init (List.length args) ~f:(fun i -> Var.to_string (Var.Local i)))
+    values
+    ~init:String.Map.empty
+    ~f:(fun acc key data -> Map.set acc ~key ~data)
+
 (** [subsumes t1 t2] returns true if [t1] over-approximates [t2] for every variable. TODO: rethink this function! *)
 let subsumes (t1 : t) (t2 : t) : bool =
   (* For each variable in t2, its RIC must be subsumed by its RIC in t1 *)
@@ -94,7 +133,7 @@ let subsumes (t1 : t) (t2 : t) : bool =
       else 
         match Variable.Map.find t1 k, v2 with
         | Some ValueSet v1, ValueSet v2 -> RIC.subsumes v1 v2 
-        | _ -> false 
+        | _ -> false (* true?? *)
     else 
       false)
 
@@ -185,7 +224,7 @@ let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : R
   let accessed = accessed_addresses.fully :: accessed_addresses.partially in
   let untouched_addresses =
     match var with
-    | Var _ -> assert false
+    | Var _ | Affected -> assert false
     | Mem addr ->
       (List.fold ~init:[addr]
                 ~f:(fun acc x -> List.concat (List.map ~f:(fun y -> RIC.remove ~this:x ~from:y) acc))
@@ -210,7 +249,7 @@ let set (store : t) ~(var : Variable.t) ~(vs : Value.t) : t =
     Variable.Map.fold store ~init:true ~f:(fun ~key:k ~data:_ acc ->
       acc && 
       match k, var with
-      | Var _, _ | _, Var _ -> true
+      | Var _, _ | _, Var _  | Affected, _ | _, Affected -> true
       | Mem _, Mem _ ->
         Variable.equal k var ||
         not (Variable.share_addresses k var)) in
@@ -279,7 +318,7 @@ let update_accessed_vars (store : t) (accessed_addresses : RIC.accessed) : t =
 let weak_update (store : t) ~(previous_state : t) ~(var : Variable.t) ~(vs : RIC.t) : t =
   let address = 
     match var with
-    | Variable.Var _ -> assert false
+    | Variable.Var _ | Affected -> assert false
     | Variable.Mem address -> address
   in
   let memory_variables = extract_memory_variables previous_state in
@@ -287,29 +326,10 @@ let weak_update (store : t) ~(previous_state : t) ~(var : Variable.t) ~(vs : RIC
     List.filter ~f:(fun (v, _) -> not (Variable.equal v (Mem RIC.Bottom)))
       (List.map ~f:(fun v -> 
           match v with 
-          | Variable.Var _ -> assert false
+          | Variable.Var _ | Affected -> assert false
           | Variable.Mem addr -> (Variable.Mem (RIC.meet addr address)), (get previous_state ~var:v))
         memory_variables)
   in
-  (* let leftover_addresses = 
-    List.fold 
-      ~init:[address]
-      ~f:(fun acc var ->
-          match var with
-          | Var _-> assert false
-          | Mem addr ->
-            List.concat (List.map ~f:(fun x -> RIC.remove ~this:addr ~from:x) acc)
-        )
-      memory_variables
-  in
-  let leftover_variables =
-    Variable.Set.of_list (List.map ~f:(fun vs -> Variable.Mem vs) leftover_addresses) in
-  (* print_endline ("all leftover vars: " ^ List.to_string ~f:Variable.to_string (Variable.Set.to_list leftover_variables)); *)
-  let store = 
-    if Variable.Set.is_empty leftover_variables then
-      store
-    else
-      update_all store leftover_variables RIC.Top in *)
   let store = List.fold ~init:store
             ~f:(fun store (v, prev_vs) -> 
               let vs = 
@@ -411,7 +431,16 @@ let v1_equals_v2_plus_c (store : t) ~(v1 : Variable.t) ~(v2 : Variable.t) ~(c : 
   set store ~var:v1 ~vs:vs1
 
 
-
+let affect_memory (store : t) ~(addresses : Value.t) : t =
+  (match addresses with
+  | Value.Boolean _ -> assert false
+  | _ -> ());
+  let previously_affected = get store ~var:(Variable.Affected) in
+  (match previously_affected with
+  | Value.Boolean _ -> assert false
+  | _ -> ());
+  let new_affected_memory = Value.join previously_affected (addresses) in
+  Variable.Map.set store ~key:(Variable.Affected) ~data:new_affected_memory
 
 
 

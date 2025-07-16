@@ -47,9 +47,11 @@ module Make (*: Transfer.TRANSFER *) = struct
     print_endline ("\t\tstate2: " ^ Abstract_store_domain.to_string s2);
     let widened_state = Abstract_store_domain.widen s1 s2 in
     print_endline ("\t\twidened state: " ^ Abstract_store_domain.to_string widened_state);
-    (* widened_state *) Abstract_store_domain.join s1 s2 (* TODO: Refine widening function to make it less agressive *)
+    widened_state
+    (* Abstract_store_domain.join s1 s2 *)
+    (* TODO: Refine widening function to make it less agressive *)
 
-  type summary = Value_set_summary.t  (* TODO: Define a useful summary *)
+  type summary = Value_set_summary.t
 
   (** [print_all_globals i] prints the first three global variables before instruction [i]. Used for debugging. *)
   let print_all_globals (i : annot_expected Instr.labelled_data) : unit = 
@@ -249,7 +251,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       let value, address = pop2 (Spec.get_or_fail i.annotation_before).vstack in
       let vs_address = Abstract_store_domain.get state ~var:(Variable.Var address) in
       let vs_value = Abstract_store_domain.get state ~var:(Variable.Var value) in
-      (* let new_state = *)
+      let new_state =
         begin match vs_address with
         | Abstract_store_domain.Value.ValueSet vs_address ->
           begin match store with
@@ -257,8 +259,12 @@ module Make (*: Transfer.TRANSFER *) = struct
             print_endline ("i32.store offset=" ^ string_of_int offset);
             print_endline ("\tstoring value-set " ^ Abstract_store_domain.Value.to_string vs_value ^ " into memory variable " ^ Variable.to_string (Variable.Mem (RIC.add_offset vs_address offset)));
             let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size:4 in
+            let affected = List.fold (accessed.fully :: accessed.partially) ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) in
+            let previously_affected = Abstract_store_domain.get state ~var:Variable.Affected in
+            let state = Abstract_store_domain.set state ~var:Variable.Affected ~vs:(Abstract_store_domain.Value.join previously_affected (Abstract_store_domain.Value.ValueSet affected)) in
             print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
             print_endline ("\tpartially accessed memory: " ^ List.to_string ~f:RIC.to_string accessed.partially);
+            print_endline ("\taffected memory: " ^ RIC.to_string affected);
             let new_state = Abstract_store_domain.update_accessed_vars state accessed in
             if RIC.is_singleton (accessed.fully) then
               (print_endline "\tperforming STRONG update!";
@@ -272,19 +278,28 @@ module Make (*: Transfer.TRANSFER *) = struct
                 Abstract_store_domain.weak_update new_state ~previous_state:state ~var:(Variable.Mem accessed.fully) ~vs:RIC.Top))
           | { typ = F32; offset = offset; _ } ->
             let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size:4 in
+            let affected = List.fold (accessed.fully :: accessed.partially) ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) in
+            let previously_affected = Abstract_store_domain.get state ~var:Variable.Affected in
+            let state = Abstract_store_domain.set state ~var:Variable.Affected ~vs:(Abstract_store_domain.Value.join previously_affected (Abstract_store_domain.Value.ValueSet affected)) in
             Abstract_store_domain.update_accessed_vars state accessed
           | { typ = I64; offset = offset; _ }
           | { typ = F64; offset = offset; _ } -> 
             let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size:8 in
+            let affected = List.fold (accessed.fully :: accessed.partially) ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) in
+            let previously_affected = Abstract_store_domain.get state ~var:Variable.Affected in
+            let state = Abstract_store_domain.set state ~var:Variable.Affected ~vs:(Abstract_store_domain.Value.join previously_affected (Abstract_store_domain.Value.ValueSet affected)) in
             Abstract_store_domain.update_accessed_vars state accessed
           end
         | Abstract_store_domain.Value.Boolean _ ->
           (Log.warn "Using a boolean value as an address: linear memory is now compromized";
           let accessed = RIC.accessed ~value_set:RIC.Top ~size:8 in
+          let affected = List.fold (accessed.fully :: accessed.partially) ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) in
+          let previously_affected = Abstract_store_domain.get state ~var:Variable.Affected in
+            let state = Abstract_store_domain.set state ~var:Variable.Affected ~vs:(Abstract_store_domain.Value.join previously_affected (Abstract_store_domain.Value.ValueSet affected)) in
           Abstract_store_domain.update_accessed_vars state accessed)
         end
-      (* in
-      remove_temporary_variable (remove_temporary_variable new_state value) address *)
+      in
+      Abstract_store_domain.remove_pointers_to_top new_state
     | Compare comp ->
       let var2, var1 = pop2 (Spec.get_or_fail i.annotation_before).vstack in
       let vs1 = 
@@ -428,14 +443,46 @@ module Make (*: Transfer.TRANSFER *) = struct
 
   (** [control_instr_transfer m summaries cfg i state] performs the abstract transfer function for a control instruction [i]. *)
   let control_instr_transfer
-      (_module_ : Wasm_module.t) (* The wasm module (read-only) *)
-      (_summaries : summary Int32Map.t) (* Probably won't need this *)
+      (module_ : Wasm_module.t) (* The wasm module (read-only) *)
+      (summaries : summary Int32Map.t)
       (_cfg : annot_expected Cfg.t) (* The CFG analized *)
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : state) (* the pre-state *)
     : [`Simple of state | `Branch of state * state] =
+    let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
+      Log.info (Printf.sprintf "applying summary of function %ld" f);
+      print_endline ("\tState before the call: " ^ Abstract_store_domain.to_string state);
+      match Int32Map.find summaries f with
+      | None ->
+        if Int32.(f < module_.nfuncimports) then begin
+          Log.warn (Printf.sprintf "No summary found for function %ld (imported function): assuming value-sets are preserved" f);
+          state
+        end else
+          (Log.warn "This function depends on another function that has not been analyzed yet, so it is part of some recursive loop. It will eventually stabilize";
+          state)
+      | Some summary ->
+        print_endline ("\tSummary of function " ^ Int32.to_string f ^ ": " ^ Value_set_summary.to_string summary);
+        let args = List.take (Spec.get_or_fail i.annotation_before).vstack (fst arity) in
+        let return_variable = if snd arity = 1 then List.hd (Spec.get_or_fail i.annotation_after).vstack else None in
+        let value_set_after_call = Value_set_summary.apply
+          ~summary
+          ~state
+          ~args
+          ~return_variable in
+        let export = List.find module_.exported_funcs ~f:(fun (id, _, _) -> Int32.(id = f)) in
+        match export with
+        | Some (_, fname, _) ->
+          Log.info (Printf.sprintf "function is named %s" fname);
+          Log.warn "Exports have not been implemented yet!";
+          value_set_after_call
+        | None -> value_set_after_call
+    in
     match i.instr with
-    | Call _ -> Log.warn "function calls not yet implemented"; `Simple state
+    | Call (arity, _, f) -> 
+      print_endline ("call " ^ Int32.to_string f ^ ":\t(nb of arguments: " ^ string_of_int (fst arity) ^ ", nb of return values: " ^ string_of_int (snd arity) ^ ")");
+      let new_store = apply_summary f arity state in
+      let new_store = Abstract_store_domain.remove_pointers_to_top new_store in
+      `Simple new_store
     | CallIndirect _ -> Log.warn "indirect calls not yet implemented"; `Simple state
     | Br _ -> `Simple state
     | BrIf _ | If _ -> 
@@ -453,8 +500,6 @@ module Make (*: Transfer.TRANSFER *) = struct
       let vs = Abstract_store_domain.get state ~var:(Variable.Var top_of_stack) in
       print_endline ("\treturned value-set: " ^ Abstract_store_domain.Value.to_string vs);
       `Simple (Abstract_store_domain.set state ~var:(Variable.Var Var.Return) ~vs:vs)
-      (* let new_state = Abstract_store_domain.set state ~var:(Variable.Var Var.Return) ~vs:vs in
-      `Simple (remove_temporary_variable new_state top_of_stack) *)
     | Unreachable -> `Simple  Abstract_store_domain.bottom
     | _ -> `Simple state
 
@@ -605,20 +650,19 @@ module Make (*: Transfer.TRANSFER *) = struct
 
   (** [summary cfg out_state] computes the value-set summary for a function using its [cfg] and final [out_state]. *)
   let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
+    print_endline "======================================================= SUMMARY";
+    print_endline ("END STATE:\t" ^ Abstract_store_domain.to_string out_state);
     let init_spec = (Spec_inference.init_state cfg) in
-    match Cfg.state_after_block cfg cfg.exit_block init_spec with
-    | Bottom ->
-      (* The function exit is likely unreachable, so we use a bottom summary *)
-      { ret = None;
-        globals = List.init (List.length cfg.global_types) ~f:(fun _ -> Abstract_store_domain.Value.ValueSet RIC.Bottom);
-        mem = Abstract_store_domain.bottom; }
-    | NotBottom exit_spec ->
-      Value_set_summary.make cfg out_state
-        (if List.length cfg.return_types = 1 then match (List.hd exit_spec.vstack) with | Some r -> Some (Variable.Var r) | None -> None else None)
-        (List.map ~f:(fun v -> Variable.Var v) exit_spec.globals)
-        [] (* TODO: complete this section *)
-        (* (List.concat_map (Var.OffsetMap.to_alist exit_spec.memory)
-           ~f:(fun ((a, _), b) -> [a; b])) *)
+    let function_summary =
+      match Cfg.state_after_block cfg cfg.exit_block init_spec with
+      | Bottom ->
+        (* The function exit is likely unreachable, so we use a bottom summary *)
+        Value_set_summary.bottom cfg Var.Set.empty
+      | NotBottom _ ->
+        Value_set_summary.make out_state
+    in
+    print_endline ("SUMMARY:\t" ^ Value_set_summary.to_string function_summary);
+    function_summary
 
   (** [extract_summary cfg analyzed_cfg] extracts a value-set summary from the final result of the analysis. *)
   let extract_summary (cfg : annot_expected Cfg.t) (analyzed_cfg : state Cfg.t) : summary =

@@ -27,7 +27,7 @@ let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec
   let rel_cfg = (* Relational.Transfer.dummy_annotate *) spec_cfg in
   fst (Intra.analyze wasm_mod rel_cfg summaries)
 
-let check (expected : Summary.t) (actual : Summary.t) : bool =
+(* let check (expected : Summary.t) (actual : Summary.t) : bool =
   if Summary.subsumes actual expected then
     if Summary.equal actual expected then
       true
@@ -38,7 +38,44 @@ let check (expected : Summary.t) (actual : Summary.t) : bool =
   else begin
     Printf.printf "\nsummaries does not subsume:\nexpected: %s\nactual: %s\n" (Summary.to_string expected) (Summary.to_string actual);
     false
-  end
+  end *)
+
+module Test = struct
+  let%test "add.wat" =
+    let module_ = Wasm_module.of_string
+      "(module
+        (memory (export \"mem\") 1)
+        (global $g0 (mut i32) (i32.const 1024))
+
+        (func $main (export \"main\") (param $l0 i32) (result i32) (local $l1 i32)
+          i32.const 42
+          local.set $l0
+          local.get $l0
+          global.get $g0
+          i32.add
+          return
+        )
+      )" in
+      let actual = (Int32Map.find_exn (analyze_intra module_ [0l]) 0l) in
+      match actual with
+      | _, Some cfg ->
+        let instruction_labels = Cfg.all_instruction_labels cfg in
+        let instructions = Cfg.all_instructions cfg in
+        List.fold 
+        ~init:() 
+        ~f:(fun _ label -> 
+          print_endline ("instruction " ^ Instr.Label.to_string label
+          ^ ": " ^ Instr.to_string (Option.value_exn (Instr.Label.Map.find instructions label))))
+        (Set.to_list instruction_labels);
+        let value_sets = Cfg.all_annots cfg in
+        List.fold
+        ~init:()
+        ~f:(fun _ store -> 
+          print_endline (Abstract_store_domain.to_string store))
+        value_sets;
+        true
+      | _ -> false
+end
 
 
 (* module Test = struct

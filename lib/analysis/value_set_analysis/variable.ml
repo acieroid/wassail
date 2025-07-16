@@ -19,8 +19,8 @@ module T = struct
       - [Mem ric]: a memory block as defined by the [ric] module *)
   type t = 
     | Var of Var.t
-    (* | Mem of Memory_block.t *)
-    | Mem of Reduced_interval_congruence.RIC.t
+    | Mem of RIC.t
+    | Affected (* used to store all the addresses that have been affected by a function *)
   [@@deriving sexp, compare, equal]
 
   (** Converts a variable to a human-readable string representation. Memory blocks are printed as ranges. *)
@@ -28,6 +28,7 @@ module T = struct
     match var with 
     | Var v -> Var.to_string v
     | Mem ric -> "mem[" ^ RIC.to_string ric ^ "]"
+    | Affected -> "Affected_memory"
 
   let mem (ric : int * ExtendedInt.t * ExtendedInt.t * (string * int)) : t =
     Mem (RIC.ric ric)
@@ -36,13 +37,18 @@ module T = struct
 
   let is_linear_memory (v : t) : bool =
     match v with
-    | Var _ -> false
     | Mem _ -> true
+    | _ -> false
+
+  let is_global (v : t) : bool =
+    match v with
+    | Var Var.Global _ -> true
+    | _ -> false
 
   let get_address (var : t) : RIC.t =
     match var with
-    | Var _ -> RIC.Bottom
     | Mem address -> address
+    | _ -> RIC.Bottom
 
   let get_relative_offset (v : t) : string =
     match v with
@@ -123,12 +129,19 @@ module T = struct
     let not_covered = List.fold ~init:[v_addr]
                                 ~f:(fun acc x ->
                                   match x with
-                                  | Var _ -> acc
+                                  | Var _ | Affected -> acc
                                   | Mem addr -> 
                                     List.concat (List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y) acc))
                                 by in
     let not_covered = List.filter ~f:(fun x -> not (RIC.equal RIC.Bottom x)) not_covered in
     List.is_empty not_covered
+
+  let update_relative_offset ~(var : t) ~(actual_values : RIC.t String.Map.t) : t =
+    match var with
+    | Var _ | Affected -> var
+    | Mem address ->
+      let new_address = RIC.update_relative_offset ~ric_:address ~actual_values in
+      Mem new_address
 end
 include T
 
@@ -308,4 +321,22 @@ let%test_module "Variable tests" = (module struct
     let result = is_covered ~by:[cover1] target in
     print_endline ("[Variable.is_covered]     " ^ to_string target ^ " by:[" ^ List.to_string ~f:to_string [cover1; cover2] ^ "] -> " ^ Bool.to_string result);
     not result
+
+  let%test "update_relative_offset" =
+    let original = mem 1 0 2 ("rel", 1) in
+    let values = String.Map.of_alist_exn [("rel", RIC.ric (1, Int 10, Int 10, ("x", 0)))] in
+    let updated = update_relative_offset ~var:original ~actual_values:values in
+    print_endline ("[Variable.update_relative_offset]     " ^ to_string original ^ " -> " ^ to_string updated);
+    match updated with
+    | Mem RIC { offset = ("x", new_off); _ } -> new_off = 1 + 10
+    | _ -> false
+
+  let%test "update_relative_offset_2" =
+    let original = mem 1 0 2 ("rel", 1) in
+    let values = String.Map.of_alist_exn [("rel", RIC.ric (1, Int 10, Int 11, ("", 0)))] in
+    let updated = update_relative_offset ~var:original ~actual_values:values in
+    print_endline ("[Variable.update_relative_offset]     " ^ to_string original ^ " -> " ^ to_string updated);
+    match updated with
+    | Mem RIC { lower_bound = Int 0; upper_bound = Int 3; offset = ("", 11); _ } -> true
+    | _ -> false
 end)
