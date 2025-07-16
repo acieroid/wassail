@@ -294,6 +294,27 @@ module RIC = struct
     | RIC {stride = 0; _} -> true
     | _ -> false
 
+  (** [extract_relative_offset r] returns the variable name used in the offset of [r]. *)
+  let extract_relative_offset (r : t) : string =
+    match r with
+    | Bottom | Top -> ""
+    | RIC {offset = (relative, _); _} -> relative
+  
+  (** [set_relative_offset r offset] sets the variable name in the offset of [r] to [offset]. *)
+  let set_relative_offset (r : t) (offset : string) : t =
+    match r with
+    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
+      ric (s, l, u, (offset, o))
+    | _ -> assert false
+
+  (** [remove_relative_offset r] returns [r] with its relative variable removed (set to ""). *)
+  let remove_relative_offset (r : t) : t =
+    match r with
+    | Top -> Top
+    | Bottom -> Bottom
+    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (_, o)} -> 
+      ric (s, l, u, ("", o))
+
   (** [of_congruence_and_interval c i] constructs a RIC value from congruence [c] and interval [i],
       and reduces the result for consistency. *)
   let of_congruence_and_interval (c : Congruence.t) (i : Interval.t) : t =
@@ -403,11 +424,24 @@ module RIC = struct
 
   (** [meet r1 r2] returns the intersection of [r1] and [r2]. *)
   let meet (ric1 : t) (ric2 : t) : t =
-    let (c1, i1) = to_congruence_and_interval ric1 in
-    let (c2, i2) = to_congruence_and_interval ric2 in
-    let c = Congruence.meet c1 c2 in
-    let i = Interval.meet i1 i2 in 
-    of_congruence_and_interval c i
+    if comparable_offsets ric1 ric2 then
+      let relative_offset = 
+        match ric1, ric2 with
+        | RIC _, _ -> extract_relative_offset ric1
+        | _, RIC _ -> extract_relative_offset ric2
+        | _ -> "" in
+      let ric1 = remove_relative_offset ric1 in
+      let ric2 = remove_relative_offset ric2 in
+      let (c1, i1) = to_congruence_and_interval ric1 in
+      let (c2, i2) = to_congruence_and_interval ric2 in
+      let c = Congruence.meet c1 c2 in
+      let i = Interval.meet i1 i2 in 
+      let m = of_congruence_and_interval c i in
+      match m with
+      | Top | Bottom -> m
+      | _ -> set_relative_offset m relative_offset
+    else
+      Bottom
   
   (** [disjoint r1 r2] returns [true] if [r1] and [r2] have no values in common. *)
   let disjoint (ric1 : t) (ric2 : t) : bool =
@@ -416,11 +450,21 @@ module RIC = struct
   (** [join r1 r2] returns the union (over-approximation) of [r1] and [r2]. *)
   let join (ric1 : t) (ric2 : t) : t =
     if comparable_offsets ric1 ric2 then
+      let relative_offset = 
+        match ric1, ric2 with
+        | RIC _, _ -> extract_relative_offset ric1
+        | _, RIC _ -> extract_relative_offset ric2
+        | _ -> "" in
+      let ric1 = remove_relative_offset ric1 in
+      let ric2 = remove_relative_offset ric2 in
       let (c1, i1) = to_congruence_and_interval ric1 in
       let (c2, i2) = to_congruence_and_interval ric2 in
       let c = Congruence.join c1 c2 in
       let i = Interval.join i1 i2 in 
-      of_congruence_and_interval c i
+      let j = of_congruence_and_interval c i in
+      match j with
+      | Top | Bottom -> j
+      | _ -> set_relative_offset j relative_offset
     else
       Top
 
@@ -498,11 +542,24 @@ module RIC = struct
 
   (** [widen r ~relative_to] returns the widening of [r] with respect to [relative_to]. *)
   let widen (ric1 : t) ~(relative_to : t) : t =
-    let (c1, i1) = to_congruence_and_interval ric1 in
-    let (c2, i2) = to_congruence_and_interval relative_to in
-    let widened_c = Congruence.widen c1 c2 in
-    let widened_i = Interval.widen i1 i2 in 
-    of_congruence_and_interval widened_c widened_i 
+    if comparable_offsets ric1 relative_to then
+      let relative_offset = 
+        match ric1, relative_to with
+        | RIC _, _ -> extract_relative_offset ric1
+        | _, RIC _ -> extract_relative_offset relative_to
+        | _ -> "" in
+      let ric1 = remove_relative_offset ric1 in
+      let relative_to = remove_relative_offset relative_to in
+      let (c1, i1) = to_congruence_and_interval ric1 in
+      let (c2, i2) = to_congruence_and_interval relative_to in
+      let widened_c = Congruence.widen c1 c2 in
+      let widened_i = Interval.widen i1 i2 in 
+      let w = of_congruence_and_interval widened_c widened_i in
+       match w with
+      | Top | Bottom -> w
+      | _ -> set_relative_offset w relative_offset
+    else
+      Top
 
   (** [partially_accessed ~by ~size] returns RICs that may be partially accessed by a memory access of [size] bytes. *)
   let partially_accessed ~(by : t) ~(size : int) : t list =
@@ -545,27 +602,6 @@ module RIC = struct
     let f = if size = 4 && (stride >= 4 || is_singleton value_set) then value_set else Bottom in
     let p = partially_accessed ~by:value_set ~size:size in
     {fully = f; partially = p}
-
-  (** [extract_relative_offset r] returns the variable name used in the offset of [r]. *)
-  let extract_relative_offset (r : t) : string =
-    match r with
-    | Bottom | Top -> ""
-    | RIC {offset = (relative, _); _} -> relative
-  
-  (** [set_relative_offset r offset] sets the variable name in the offset of [r] to [offset]. *)
-  let set_relative_offset (r : t) (offset : string) : t =
-    match r with
-    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
-      ric (s, l, u, (offset, o))
-    | _ -> assert false
-
-  (** [remove_relative_offset r] returns [r] with its relative variable removed (set to ""). *)
-  let remove_relative_offset (r : t) : t =
-    match r with
-    | Top -> Top
-    | Bottom -> Bottom
-    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (_, o)} -> 
-      ric (s, l, u, ("", o))
 
   (** [plus r1 r2] returns the over-approximation of the sum [r1] + [r2]. *)
   let plus (ric1 : t) (ric2 : t) : t =
@@ -621,6 +657,14 @@ module RIC = struct
       List.filter ~f:(fun r -> not (equal r Bottom)) (List.map ~f:(meet from) this_complement)
     else
       []
+
+  let update_relative_offset ~(ric_ : t) ~(actual_values : t String.Map.t) : t =
+    let offset = extract_relative_offset ric_ in
+    match Map.find actual_values offset with
+    | None -> ric_
+    | Some r ->
+      let ric_ = remove_relative_offset ric_ in
+      plus r ric_
 end
 
 
@@ -1382,6 +1426,13 @@ let%test_module "RIC tests" = (module struct
       print_endline ("[MEET of RICs]     " ^ to_string r1 ^ " ⊓ " ^ to_string r2 ^ " → " ^ to_string m);
       RIC.equal m Bottom
 
+    let%test "meet [0,1]+(g0-43) and [0,1]+(g0-42)" =
+      let r1 = ric (1, Int 0, Int 1, ("g0", -43)) in
+      let r2 = ric (1, Int 0, Int 1, ("g0", -42)) in
+      let m = meet r1 r2 in
+      print_endline ("[MEET of RICs]     " ^ to_string r1 ^ " ⊓ " ^ to_string r2 ^ " → " ^ to_string m);
+      RIC.equal m (ric (0, Int 0, Int 0, ("g0", -42)))
+
     let%test "join_top_and_r" =
       let r = ric (2, Int 0, Int 4, ("", 5)) in
       let j = join Top r in
@@ -1393,6 +1444,19 @@ let%test_module "RIC tests" = (module struct
       let j = join Bottom r in
       print_endline ("[JOIN of RICs]     ⊥ ⊔ " ^ to_string r ^ " → " ^ to_string j);
       RIC.equal j r
+
+    let%test "join_bottom_(g0-44)" =
+      let r = ric (0, Int 0, Int 0, ("g0", -44)) in
+      let j = join Bottom r in
+      print_endline ("[JOIN of RICs]     ⊥ ⊔ " ^ to_string r ^ " → " ^ to_string j);
+      RIC.equal j r
+
+    let%test "join 3[0,1]+(g0-43) and (g0-42)" =
+      let r1 = ric (3, Int 0, Int 1, ("g0", -43)) in
+      let r2 = ric (0, Int 0, Int 0, ("g0", -42)) in
+      let j = join r1 r2 in
+      print_endline ("[JOIN of RICs]     " ^ to_string r1 ^ " ⊔ " ^ to_string r2 ^ " → " ^ to_string j);
+      RIC.equal j (ric (1, Int 0, Int 3, ("g0", -43)))
 
     let%test "join_regular" =
       let r1 = ric (2, Int 0, Int 2, ("", 1)) in
