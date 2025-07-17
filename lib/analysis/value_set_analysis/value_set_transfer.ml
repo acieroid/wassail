@@ -263,7 +263,7 @@ module Make (*: Transfer.TRANSFER *) = struct
             let previously_affected = Abstract_store_domain.get state ~var:Variable.Affected in
             let state = Abstract_store_domain.set state ~var:Variable.Affected ~vs:(Abstract_store_domain.Value.join previously_affected (Abstract_store_domain.Value.ValueSet affected)) in
             print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
-            print_endline ("\tpartially accessed memory: " ^ List.to_string ~f:RIC.to_string accessed.partially);
+            print_endline ("\tpartially accessed memory: " ^ String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially));
             print_endline ("\taffected memory: " ^ RIC.to_string affected);
             let new_state = Abstract_store_domain.update_accessed_vars state accessed in
             if RIC.is_singleton (accessed.fully) then

@@ -138,13 +138,25 @@ let subsumes (t1 : t) (t2 : t) : bool =
       false)
 
 (** [to_string store] converts the abstract store to a string, showing all variable bindings. *)
-let to_string (vs : t) : string =
+let _to_string (vs : t) : string =
   Printf.sprintf "[%s]" (String.concat ~sep:"; "
                           (List.map (Variable.Map.to_alist vs)
                             ~f:(fun (k, t) ->
                                 Printf.sprintf "%s ↦ %s"
                                   (Variable.to_string k)
                                   (Value.to_string t)))) (* TODO: maybe no need to print booleans in the end to save space? *)
+
+let to_string (vs : t) : string = 
+  if !Value_set_options.show_intermediates then
+    _to_string vs
+  else
+    let vs =
+      Variable.Map.filter_keys vs 
+        ~f:(fun var ->
+          match var with
+          | Mem _ | Var Var.Global _ | Var Var.Local _ | Var Var.Return -> true
+          | _ -> false) in
+    _to_string vs
 
 (** [to_string_without_bottoms store] returns a string that omits any variables mapped to [RIC.Bottom]. *)
 let to_string_without_bottoms (vs : t) : string =

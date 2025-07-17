@@ -1,7 +1,7 @@
 open Core
 open Helpers
 
-(* module : Options = Value_set_options *)
+module Options = Value_set_options
 module Domain = Abstract_store_domain
 (* module RIC = Reduced_interval_congruence.RIC *)
 module Transfer = Value_set_transfer.Make

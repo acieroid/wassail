@@ -1,6 +1,8 @@
 open Core
 open Helpers
 
+let narrow_option = ref false
+
 (** The interface of an intra analysis *)
 module type INTRA = sig
   (** The state of the analysis *)
@@ -155,7 +157,7 @@ module Make (Transfer : Transfer.TRANSFER) (* : INTRA *) = struct
         narrow blocks
     in
     fixpoint (IntSet.singleton cfg.entry_block) 1;
-    narrow (IntMap.keys cfg.basic_blocks);
+    if !narrow_option then narrow (IntMap.keys cfg.basic_blocks);
     !instr_data
 
   let analyze (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (summaries : summary Int32Map.t): state Cfg.t * summary =

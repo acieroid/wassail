@@ -22,7 +22,7 @@
    Variable
    Value_set 
    Boolean
-   Abstract_store_domain Reduced_interval_congruence Value_set_transfer Value_set_summary
+   Abstract_store_domain Reduced_interval_congruence Value_set_transfer Value_set_summary Value_set_options
    )
  (libraries core_kernel wasm sexplib)
  (inline_tests (flags)) ;; To include online one test, use -only-test foo.ml:linenumber

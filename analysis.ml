@@ -74,11 +74,15 @@ let value_set_cfg =
   Command.basic
     ~summary:"Generate a DOT file representing the value-set-annotated CFG of function [fid] from the wasm file [in], in file [out]"
     Command.Let_syntax.(
-      let%map_open file_in = anon ("in" %: string) and
-      file_out = anon ("out" %: string) and
-      funs = anon (sequence ("funs" %: int32)) in
+      let%map_open file_in = anon ("in" %: string)
+      and file_out = anon ("out" %: string)
+      and funs = anon (sequence ("funs" %: int32)) 
+      and show_intermediates = flag "--all" no_arg ~doc:"Show all intermediate variables" 
+      and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" in
       fun () ->
         Spec_inference.use_const := true;
+        if show_intermediates then Value_set.Options.show_intermediates := true;
+        if narrow then Intra.narrow_option := true;
         let results = Value_set.analyze_intra (Wasm_module.of_file file_in) funs in
         (* We only output the latest analyzed CFG *)
         let annotated_cfg = Option.value_exn (snd (Int32Map.find_exn results (List.last_exn funs))) in
