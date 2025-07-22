@@ -201,7 +201,7 @@ module Make = struct
   let merge_flows (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * State.t) list) : State.t =
     let init_spec = (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx) (* , Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i)))*) )  in
     match states with
-    | [] -> init module_ (Wasm_module.get_funcinst module_ cfg.idx)
+    | [] -> bottom
     | _ ->
       (* one or multiple states *)
         begin match block.content with

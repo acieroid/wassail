@@ -122,14 +122,14 @@ let parse_from_lexbuf_textual name lexbuf run =
       run m
     | _ -> failwith "unsupported format" in
     input_from (fun _ ->
-        let var_opt, def = Wasm.Parse.parse name lexbuf Wasm.Parse.Module in
+        let var_opt, def = Wasm.Parse.Module.parse name lexbuf in
         [(var_opt, def)])
       extract
 
 let apply_to_script name lexbuf run =
   let extract (l : Wasm.Script.script) = List.map ~f:run l in
     input_from (fun _ ->
-        let res = Wasm.Parse.parse name lexbuf Wasm.Parse.Script in
+        let res = Wasm.Parse.Script.parse name lexbuf in
         res)
       extract
 

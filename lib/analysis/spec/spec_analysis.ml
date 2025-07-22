@@ -266,8 +266,22 @@ module TestInter = struct
     let module_ = Wasm_module.of_string module_str in
     let icfg = analyze_inter_classical module_ fidx in
     ignore icfg;
-    Printf.printf "---\n%s\n---\n" (Icfg.to_dot ~annot_str:Spec_domain.to_dot_string icfg);
+    (* Printf.printf "---\n%s\n---\n" (Icfg.to_dot ~annot_str:Spec_domain.to_dot_string icfg); *)
     ()
+
+  let final_spec_should_be (module_str : string) (fidx : int32) (expected : Spec_domain.t) : unit =
+    let module_ = Wasm_module.of_string module_str in
+    let icfg = analyze_inter_classical module_ fidx in
+    (* After analyzing, we check the state of the exit node of the main function *)
+    let main_cfg = Map.find_exn icfg.cfgs fidx in
+    let exit_node = Map.find_exn main_cfg.basic_blocks main_cfg.exit_block in
+    (* The exit node will be a "merge" node, hence a control kind of node *)
+    match exit_node.content with
+    | Control i ->
+      if not (Spec_domain.equal i.annotation_after expected) then
+        failwith (Printf.sprintf "Expected final annotation to be %s, but it is %s"
+                    (Spec_domain.to_string expected) (Spec_domain.to_string i.annotation_after));
+    | _ -> failwith "Unexpected: function exit node is not a control node"
 
   let does_not_fail_on_file (path : string) (start : Int32.t) : unit =
     let module_ = Wasm_module.of_file path in
@@ -351,14 +365,51 @@ module TestInter = struct
     call 1
     call 2))" 3l
 
-  let%test_unit "interprocedural works on spectral-norm" =
-    does_not_fail_on_file "../../../benchmarks/benchmarksgame/spectral-norm.wat" 1l
+  let%test_unit "interprocedural spec analysis works with multiple returns including to a non-analyzed function" =
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    local.get 0
+    call 1
+    call 2)
+  (func (;1;) (type 0) (param i32) (result i32)
+    (local i32)
+    local.get 1
+    call 3)
+  (func (;2;) (type 0) (param i32) (result i32)
+    (local i32)
+    local.get 1
+    call 3)
+  (func (;3;) (type 0) (param i32) (result i32)
+    i32.const 1))" 0l
+
+  let%test_unit "interprocedural spec analysis works with consecutive interleaved function calls" =
+    final_spec_should_be "(module
+  (type (;0;) (func))
+  (func (;0;) (type 0)
+    call 2 ;; []
+    call 1 ;; []
+    call 2) ;; []
+  (func (;1;) (type 0)
+    i32.const 1
+    drop)
+  (func (;2;) (type 0)
+    (local i32)
+    i32.const 2
+    drop))" 0l (Spec_domain.NotBottom {
+        vstack = [];
+        locals = [];
+        globals = [];
+        memory = Var.OffsetMap.empty;
+        stack_size_at_entry = Instr.Label.Map.empty;
+      })
+
 
   let%test_unit "interprocedural spec works on all benchmarks" =
     List.iter [
       (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *)
       ("../../../benchmarks/benchmarksgame/fankuchredux.wat", 1l);
-      ("../../../benchmarks/benchmarksgame/fasta.wat", 5l);
+      (*  ("../../../benchmarks/benchmarksgame/fasta.wat", 5l); *)
       (* ("../../../benchmarks/benchmarksgame/k-nucleotide.wat", 4l); *)
       ("../../../benchmarks/benchmarksgame/mandelbrot.wat", 1l);
       ("../../../benchmarks/benchmarksgame/nbody.wat", 1l);

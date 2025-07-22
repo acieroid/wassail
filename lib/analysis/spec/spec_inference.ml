@@ -91,6 +91,7 @@ module Spec_inference
       (cfg : annot_expected Cfg.t)
       (i : annot_expected Instr.labelled_data)
     : State.t -> State.t = State.lift (function state ->
+      Printf.printf "instr: %s\n" (Instr.Label.to_string i.label);
       let ret = Var.Var i.label in
       let state = compute_stack_size_at_entry cfg i.label state in
       match i.instr with
@@ -188,6 +189,9 @@ module Spec_inference
       (cfg : annot_expected Cfg.t)
       (block : annot_expected Basic_block.t)
       (states : State.t list) : State.t =
+    Printf.printf "merging at %ld.%s states %s\n"
+      block.fidx (Basic_block.to_string block)
+      (String.concat ~sep:"--\n" (List.map ~f:State.to_string states));
     let counter = ref 0 in
     let new_var () : Var.t =
       let res = Var.Merge (block.idx, !counter) in
@@ -200,14 +204,14 @@ module Spec_inference
         { s with vstack = List.mapi s.vstack ~f:(fun i v -> if i = 0 then Var.Return cfg.idx else v) }
       else
         s in
-    let is_entry = match block.content with
-      | Entry -> true
-      | _ -> false in
+    let is_entry, is_return = match block.content with
+      | Entry -> true, false
+      | Return _ -> false, true
+      | _ -> false, false in
     (* Multiple cases: either we have no predecessor, we have unanalyzed predecessors, or we have only analyzed predecessors *)
     (State.lift rename_exit) (begin match states with
         | [] ->
-          (* entry node *)
-          init module_ (Wasm_module.get_funcinst module_ block.fidx)
+          bottom
         | s :: [] ->
           (* single predecessor node, just keep the same state *)
           s
@@ -215,8 +219,8 @@ module Spec_inference
           (* multiple predecessors. Usually the case of a merge node, or an entry/return node in case of interprocedural analysis *)
           begin match List.filter states ~f:(fun s -> not (State.equal s bottom)) with
             | [] ->
-              (* No predecessors have been analyzed. Return bottom. In practice, this should only happen if one of the predecessors is the empty entry block. *)
-              init module_ (Wasm_module.get_funcinst module_ block.fidx)
+              (* No predecessors have been analyzed. Return bottom.  *)
+              bottom
             | s :: [] -> (* only one non-bottom predecessor *) s
             | state :: states ->
               (* multiple predecessors to merge *)
@@ -232,23 +236,34 @@ module Spec_inference
                           | v' when Var.equal v v' -> v'
                           | _ -> Var.Hole (* this is a hole *)
                         in
-                        let merge_locals locals1 locals2 =
-                          let locals1, locals2 =
+                        let merge_vstacks vstack1 vstack2 =
+                          let vstack1, vstack2 =
                             if is_entry then
-                              (* Function [entry] will deal with correctly adding the locals. We only care about preserving the arguments here *)
+                              (* We only need the arguments to enter the function *)
                               let funcinst = Wasm_module.get_funcinst module_ block.fidx in
                               let nargs = List.length (fst funcinst.typ) in
-                              List.take locals1 nargs, List.take locals2 nargs
+                              assert ((List.length vstack1 >= nargs) && (List.length vstack2 >= nargs));
+                              List.take vstack1 nargs, List.take vstack2 nargs
                             else
-                              locals1, locals2 in
-                          List.map2_exn locals1 locals2 ~f:f in
-                        if (List.length acc.vstack <> List.length s.vstack) then
-                          failwith "unsupported in spec_inference: incompatible stack lengths (probably due to mismatches in br_table branches)";
-                        assert (is_entry || (List.length acc.locals = List.length s.locals));
+                              vstack1, vstack2 in
+                          Printf.printf "merging %s and %s\n" (Var.list_to_string vstack1) (Var.list_to_string vstack2);
+                          List.map2_exn vstack1 vstack2 ~f in
+                        let merge_locals locals1 locals2 =
+                          (* In case of entry, function [entry] will deal with correctly adding the locals.
+                             In case of return, function [return] will deal with the locals too.
+                             In both case, we therefore just ignore locals completely here *)
+                          if is_entry || is_return then
+                            []
+                          else
+                            merge_vstacks locals1 locals2 in
+                        if (List.length acc.vstack <> List.length s.vstack) && not is_entry then
+                          failwith
+                            (Printf.sprintf "unsupported in spec_inference: incompatible stack lengths (probably due to mismatches in br_table branches). Block %ld.%s, stack lengths are %d and %d" block.fidx (Basic_block.to_string block) (List.length acc.vstack) (List.length s.vstack));
+                        assert (is_entry || is_return || (List.length acc.locals = List.length s.locals));
                         assert (List.length acc.globals = List.length s.globals);
-                        NotBottom ({ vstack = List.map2_exn acc.vstack s.vstack ~f:f;
+                        NotBottom ({ vstack = merge_vstacks acc.vstack s.vstack;
                                      locals = merge_locals acc.locals s.locals;
-                                     globals = List.map2_exn acc.globals s.globals ~f:f;
+                                     globals = List.map2_exn acc.globals s.globals ~f;
                                      memory = Var.OffsetMap.merge acc.memory s.memory ~f:(fun ~key:_ v -> match v with
                                          | `Both (v1, v2) -> Some (f v1 v2)
                                          | `Left _v | `Right _v ->
@@ -283,11 +298,15 @@ module Spec_inference
       (block : annot_expected Basic_block.t)
       (states : (int * State.t) list)
     : State.t =
-    (* Checks the validity of the merge and dispatches to `merge` We expect to have to merge only merge nodes, or entry nodes in the case of interprocedural analysis *)
+    (* Checks the validity of the merge and dispatches to `merge` We expect to
+       have to merge only merge nodes, or in the case of interprocedural
+       analysis, for entry nodes (multiple calls to the same function) or return
+       nodes (returns for multiple potential functions with call_indirect) *)
     begin match states with
       | _ :: _ :: _ -> begin match block.content with
           | Control { instr = Merge; _ } -> ()
           | Entry -> ()
+          | Return _ -> ()
           | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d in %ld, %s" block.idx cfg.idx (Basic_block.to_string block))
         end
       | _ -> ()
@@ -310,7 +329,8 @@ module Spec_inference
 
   let return (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (instr : annot_expected Instr.labelled_call) (state_before : State.t) (state_after : State.t) : State.t =
     match state_before, state_after with
-    | Bottom, _ | _, Bottom -> Bottom
+    | Bottom, _ -> Printf.printf "state before is bottom\n"; Bottom
+    | _, Bottom -> Printf.printf "state after is bottom\n"; Bottom
     | NotBottom { vstack = stack_before; locals; _ }, NotBottom ({ vstack = stack_after; _ } as after) ->
       let args, returns = Instr.call_types instr in
       let vstack = (List.take stack_after (List.length returns)) @ (List.drop stack_before (List.length args)) in
