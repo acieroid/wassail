@@ -287,6 +287,12 @@ module RIC = struct
   let relative_ric (var : string) : t =
     ric (0, Int 0, Int 0, (var, 0))
 
+  let spans_neg_inf_to_pos_inf (r : t) : bool =
+    match r with
+    | Top
+    | RIC {lower_bound = NegInfinity; upper_bound = Infinity; _} -> true
+    | _ -> false
+
   (** [is_singleton r] returns [true] if [r] contains exactly one value. *)
   let is_singleton (r : t) : bool =
     let r = reduce r in
@@ -299,13 +305,18 @@ module RIC = struct
     match r with
     | Bottom | Top -> ""
     | RIC {offset = (relative, _); _} -> relative
+
+  let is_stack (r : t) : bool =
+    match r with
+    | RIC {offset = (relative, _); _} -> String.equal relative "g0"
+    | _ -> false
   
   (** [set_relative_offset r offset] sets the variable name in the offset of [r] to [offset]. *)
   let set_relative_offset (r : t) (offset : string) : t =
     match r with
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
       ric (s, l, u, (offset, o))
-    | _ -> assert false
+    | _ -> r
 
   (** [remove_relative_offset r] returns [r] with its relative variable removed (set to ""). *)
   let remove_relative_offset (r : t) : t =
@@ -404,7 +415,7 @@ module RIC = struct
       match stride, interval, offset with 
       | "0", _, "" -> "0"
       | "0", _, o -> if String.equal "+" (String.sub o ~pos:0 ~len:1) then String.sub o ~pos:1 ~len:(String.length o - 1) else o
-      | "", "]-∞,∞[", _ -> "⊤"
+      | "", "]-∞,∞[", _ | "", "ℤ", _ -> "⊤"
       | _ -> stride ^ interval ^ offset
 
   (* [of_list l] constructs a RIC value that represents exactly the integers in [l]. *)
@@ -566,6 +577,14 @@ module RIC = struct
     let r = reduce by in
     if equal Top r then 
       [Top]
+    else if spans_neg_inf_to_pos_inf r then
+      match r with
+      | RIC {stride = s; _} when s <= size -> [Top]
+      | RIC _ -> 
+        List.fold (List.init (2 * size - 1) ~f:(fun i-> - size + 1 + i))
+          ~init:[]
+          ~f:(fun acc i -> (add_offset r i) :: acc)
+      | _ -> assert false
     else
       let rec aux (i : int) (acc : t list) : t list =
         match i, r with

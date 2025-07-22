@@ -42,25 +42,16 @@ module Make (*: Transfer.TRANSFER *) = struct
 
   (** [widen_state s1 s2] performs widening between abstract states [s1] and [s2]. *)
   let widen_state (s1 : state) (s2 : state) : state = 
-    print_endline "\twidening:";
-    print_endline ("\t\tstate1: " ^ Abstract_store_domain.to_string s1);
-    print_endline ("\t\tstate2: " ^ Abstract_store_domain.to_string s2);
     let widened_state = Abstract_store_domain.widen s1 s2 in
-    print_endline ("\t\twidened state: " ^ Abstract_store_domain.to_string widened_state);
+    if !Value_set_options.print_trace then 
+      (print_endline "\twidening:";
+      print_endline ("\t\tstate1: " ^ Abstract_store_domain.to_string s1);
+      print_endline ("\t\tstate2: " ^ Abstract_store_domain.to_string s2);
+      print_endline ("\t\twidened state: " ^ Abstract_store_domain.to_string widened_state););
+    if not (Abstract_store_domain.equal widened_state s1) then Intra.narrow_option := true;
     widened_state
-    (* Abstract_store_domain.join s1 s2 *)
-    (* TODO: Refine widening function to make it less agressive *)
 
   type summary = Value_set_summary.t
-
-  (** [print_all_globals i] prints the first three global variables before instruction [i]. Used for debugging. *)
-  let print_all_globals (i : annot_expected Instr.labelled_data) : unit = 
-    let g0 = (Variable.Var (get_nth (Spec.get_or_fail i.annotation_before).globals (Int32.of_int_exn 0))) in
-    let g1 = (Variable.Var (get_nth (Spec.get_or_fail i.annotation_before).globals (Int32.of_int_exn 1))) in
-    let g2 = (Variable.Var (get_nth (Spec.get_or_fail i.annotation_before).globals (Int32.of_int_exn 2))) in
-    print_endline ("g0:" ^ Variable.to_string g0);
-    print_endline ("g1:" ^ Variable.to_string g1);
-    print_endline ("g2:" ^ Variable.to_string g2)
 
   let is_this_the_value_of 
       (state : Spec.SpecWithoutBottom.t) 
@@ -76,7 +67,6 @@ module Make (*: Transfer.TRANSFER *) = struct
       Variable.equal value value'
     | _ -> false
 
-
   (** [data_instr_transfer m cfg i state] performs the abstract transfer function for a data instruction [i] on [state]. *)
   let data_instr_transfer
       (_module_ : Wasm_module.t)
@@ -84,6 +74,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       (i : annot_expected Instr.labelled_data)
       (state : state)
     : state =
+    if !Value_set_options.print_trace then print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.data_to_string i.instr);
     let ret (i : annot_expected Instr.labelled_data) : Variable.t = 
       match List.hd (Spec.get_or_fail i.annotation_after).vstack with
       | Some r -> Variable.Var r
@@ -92,156 +83,151 @@ module Make (*: Transfer.TRANSFER *) = struct
     | Nop | MemorySize | Drop | MemoryGrow -> state
     | MemoryCopy | MemoryFill | MemoryInit _ -> state
     | RefIsNull | RefNull _ | RefFunc _ -> state
-    | Select _ -> (* TODO: write this case. resulting variable will point to join of the two being selectd *) state
+    | Select _ ->
+      let x, y = pop2 (Spec.get_or_fail i.annotation_before).vstack in
+      let x_vs, y_vs = Abstract_store_domain.get state ~var:(Variable.Var x), Abstract_store_domain.get state ~var:(Variable.Var y) in
+      let joined_selection = Abstract_store_domain.Value.join x_vs y_vs in
+      if !Value_set_options.print_trace then 
+        Printf.printf "\tselecting from two options:\n\t\t%s   ⊔   %s   ->  %s\n"
+          (Abstract_store_domain.Value.to_string x_vs)
+          (Abstract_store_domain.Value.to_string y_vs) 
+          (Abstract_store_domain.Value.to_string joined_selection);
+        Abstract_store_domain.set state ~var:(ret i) ~vs:joined_selection
     | LocalGet l -> 
       let local_variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
-      print_endline ("local.get " ^ (Int32.to_string l) ^ ":\t" ^ Variable.to_string local_variable ^ " (" ^ Variable.to_string (ret i) ^ ")");
+      if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string local_variable ^ " (" ^ Variable.to_string (ret i) ^ ")");
       state
     | LocalSet l ->
-      print_endline ("local.set " ^ Int32.to_string l ^ ":");
       let variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
       let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in
-      (* let new_state = *)
         begin match top_of_stack with
         | Var.Const (Prim_value.I32 n) ->
-          print_endline ("\tadding constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
+          if !Value_set_options.print_trace then print_endline ("\tassigning constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
           Abstract_store_domain.assign_constant_value state
           ~const:n
           ~to_:variable
         | Var.Const (Prim_value.F32 n) ->
-          print_endline ("\t" ^ Variable.to_string variable ^ " = (Float32)" ^ Wasm.F32.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+          if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float32)" ^ Wasm.F32.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
           Abstract_store_domain.to_top_RIC state variable
         | Var.Const (Prim_value.I64 n) ->
-          print_endline ("\t" ^ Variable.to_string variable ^ " = (Int64)" ^ Int64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+          if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Int64)" ^ Int64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
           Abstract_store_domain.to_top_RIC state variable
         | Var.Const (Prim_value.F64 n) ->
-          print_endline ("\t" ^ Variable.to_string variable ^ " = (Float64)" ^ Wasm.F64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+          if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float64)" ^ Wasm.F64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
           Abstract_store_domain.to_top_RIC state variable
         | Var.Local _ | Var.Global _ ->
           let vs = Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
-          print_endline ("\tAssigning value-set " ^ Abstract_store_domain.Value.to_string vs ^ " to variable " ^ Variable.to_string variable);
+          if !Value_set_options.print_trace then print_endline ("\tassigning value-set " ^ Abstract_store_domain.Value.to_string vs ^ " to variable " ^ Variable.to_string variable);
           Abstract_store_domain.set state ~var:variable ~vs
         | _ ->
-          print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to local variable " ^ Variable.to_string variable);
+          if !Value_set_options.print_trace then print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to local variable " ^ Variable.to_string variable);
           Abstract_store_domain.copy_value_set state 
             ~from:(Variable.Var top_of_stack)
             ~to_:variable
         end
-      (* in
-      remove_temporary_variable new_state top_of_stack *)
     | LocalTee l -> (* TODO: Refactor a common function for LocalSet and LocalTee *)
-      print_endline ("local.tee " ^ Int32.to_string l ^ ":");
       let variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
       let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in
       begin match top_of_stack with
       | Var.Const (Prim_value.I32 n) ->
-        print_endline ("\tadding constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
+        if !Value_set_options.print_trace then print_endline ("\tadding constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
         Abstract_store_domain.assign_constant_value state
         ~const:n
         ~to_:variable
       | Var.Const (Prim_value.F32 n) ->
-        print_endline ("\t" ^ Variable.to_string variable ^ " = (Float32)" ^ Wasm.F32.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+        if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float32)" ^ Wasm.F32.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
         Abstract_store_domain.to_top_RIC state variable
       | Var.Const (Prim_value.I64 n) ->
-        print_endline ("\t" ^ Variable.to_string variable ^ " = (Int64)" ^ Int64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+        if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Int64)" ^ Int64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
         Abstract_store_domain.to_top_RIC state variable
       | Var.Const (Prim_value.F64 n) ->
-        print_endline ("\t" ^ Variable.to_string variable ^ " = (Float64)" ^ Wasm.F64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+        if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float64)" ^ Wasm.F64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
         Abstract_store_domain.to_top_RIC state variable
       | Var.Local _ | Var.Global _ ->
           let vs = Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
-          print_endline ("\tAssigning value-set " ^ Abstract_store_domain.Value.to_string vs ^ " to variable " ^ Variable.to_string variable);
+          if !Value_set_options.print_trace then print_endline ("\tassigning value-set " ^ Abstract_store_domain.Value.to_string vs ^ " to variable " ^ Variable.to_string variable);
           Abstract_store_domain.set state ~var:variable ~vs
       | _ ->
-        print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to local variable " ^ Variable.to_string variable);
+        if !Value_set_options.print_trace then print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to local variable " ^ Variable.to_string variable);
         Abstract_store_domain.copy_value_set state 
           ~from:(Variable.Var top_of_stack)
           ~to_:variable
       end
     | GlobalGet g -> 
       let global_variable = Variable.Var (Var.Global (Int32.to_int_exn g)) in
-      print_endline ("global.get " ^ (Int32.to_string g) ^ ":\t" ^ Variable.to_string global_variable);
+      if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string global_variable ^ " (" ^ Variable.to_string (ret i) ^ ")");
       if Variable.Map.mem state (ret i) then
         Abstract_store_domain.copy_value_set state
           ~from:(ret i)
           ~to_:global_variable
       else
         state
-        (* Abstract_store_domain.copy_value_set state 
-          ~from:global_variable
-          ~to_:(ret i) *)
     | GlobalSet g ->
-      print_endline ("global.set " ^ Int32.to_string g);
       let variable = Variable.Var (Var.Global (Int32.to_int_exn g)) in
       let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in
       (* let new_state = *)
         begin match top_of_stack with
         | Var.Const (Prim_value.I32 n) ->
-          print_endline ("\tadding constant value " ^ Int32.to_string n ^ " to global variable " ^ Variable.to_string variable);
+          if !Value_set_options.print_trace then print_endline ("\tassigning constant value " ^ Int32.to_string n ^ " to global variable " ^ Variable.to_string variable);
           Abstract_store_domain.assign_constant_value state
           ~const:n
           ~to_:variable
         | Var.Const (Prim_value.F32 n) ->
-          print_endline ("\t" ^ Variable.to_string variable ^ " = (Float32)" ^ Wasm.F32.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+          if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float32)" ^ Wasm.F32.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
           Abstract_store_domain.to_top_RIC state variable
         | Var.Const (Prim_value.I64 n) ->
-          print_endline ("\t" ^ Variable.to_string variable ^ " = (Int64)" ^ Int64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+          if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Int64)" ^ Int64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
           Abstract_store_domain.to_top_RIC state variable
         | Var.Const (Prim_value.F64 n) ->
-          print_endline ("\t" ^ Variable.to_string variable ^ " = (Float64)" ^ Wasm.F64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+          if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float64)" ^ Wasm.F64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
           Abstract_store_domain.to_top_RIC state variable
         | Var.Local _ | Var.Global _ ->
           let vs = Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
-          print_endline ("\tAssigning value-set " ^ Abstract_store_domain.Value.to_string vs ^ " to variable " ^ Variable.to_string variable);
+          if !Value_set_options.print_trace then print_endline ("\tassigning value-set " ^ Abstract_store_domain.Value.to_string vs ^ " to variable " ^ Variable.to_string variable);
           Abstract_store_domain.set state ~var:variable ~vs
         | _ ->
-          print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to global variable " ^ Variable.to_string variable);
+          if !Value_set_options.print_trace then print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to global variable " ^ Variable.to_string variable);
           Abstract_store_domain.copy_value_set state 
             ~from:(Variable.Var top_of_stack)
             ~to_:variable
         end
-      (* in
-      remove_temporary_variable new_state top_of_stack *)
-    | Const c -> 
-      let variable = (Variable.Var (pop (Spec.get_or_fail i.annotation_after).vstack)) in
+    | Const c ->
       begin match c with
-      | Prim_value.I32 _ -> print_endline ("i32.const " ^ Variable.to_string variable); state
-      | _ -> print_endline ("Non i32 constant added to the stack: " ^ Variable.to_string variable); state
+      | Prim_value.I32 _ -> state
+      | _ -> if !Value_set_options.print_trace then print_endline "\tnon i32 constant!"; state
       end
     | Binary binop -> 
       let x, y = pop2 (Spec.get_or_fail i.annotation_before).vstack in
-      let result = pop (Spec.get_or_fail i.annotation_after).vstack in
-      (* let new_state = *)
-        begin match binop with
-        | { op = Add; typ = I32 } -> (* i32 addition *) 
-          print_endline ("i32.add:\t" ^ Var.to_string x ^ " + " ^ Var.to_string y ^ " -> " ^ Var.to_string result);
-          Abstract_store_domain.i32_add state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result:(Variable.Var result)
-        | { op = Sub; typ = I32 } -> (* i32 subtraction *) 
-          print_endline ("i32.sub:\t" ^ Var.to_string y ^ " - " ^ Var.to_string x ^ " -> " ^ Var.to_string result);
-          Abstract_store_domain.i32_sub state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result:(Variable.Var result)
-        | { typ = I32; _ } 
-        | _ -> (* other operations result in a pointer that can point anywhere *)
-          Abstract_store_domain.to_top_RIC state (Variable.Var result)
-        end
-      (* in
-      remove_temporary_variable (remove_temporary_variable new_state x) y *)
+      (* let result = pop (Spec.get_or_fail i.annotation_after).vstack in *)
+      let result = ret i in
+      begin match binop with
+      | { op = Add; typ = I32 } -> (* i32 addition *) 
+        if !Value_set_options.print_trace then print_endline ("\t" ^ Var.to_string x ^ " + " ^ Var.to_string y ^ " -> " ^ Variable.to_string result);
+        Abstract_store_domain.i32_add state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result
+      | { op = Sub; typ = I32 } -> (* i32 subtraction *) 
+        if !Value_set_options.print_trace then print_endline ("\t" ^ Var.to_string y ^ " - " ^ Var.to_string x ^ " -> " ^ Variable.to_string result);
+        Abstract_store_domain.i32_sub state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result
+      | { typ = I32; _ } 
+      | _ -> (* other operations result in a pointer that can point anywhere *)
+        if !Value_set_options.print_trace then print_endline "\tthis type of binary operation results in a pointer that can point anywhere";
+        Abstract_store_domain.to_top_RIC state result
+      end
     | Load load ->
       let address = pop (Spec.get_or_fail i.annotation_before).vstack in
       begin match load with
       | { typ = F32; _ }
-      | { typ = I64; _ }
       | { typ = F64; _ } -> Abstract_store_domain.to_top_RIC state (ret i)
+      | { typ = I64; _ } -> Abstract_store_domain.to_top_RIC state (ret i) (* TODO: consider load32 operations *)
       | { typ = I32; offset = offset; _ } ->
-        print_endline ("i32.load offset=" ^ string_of_int offset);
         let vs = Abstract_store_domain.get state ~var:(Variable.Var address) in
         match vs with
         | Abstract_store_domain.Value.ValueSet vs ->
           let vs_plus_offset = RIC.add_offset vs offset in
-          print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into stack variable " ^ Variable.to_string (ret i));
+          if !Value_set_options.print_trace then print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into stack variable " ^ Variable.to_string (ret i));
           let memory_variable = Variable.Mem vs_plus_offset in
-          print_endline ("\ttarget memory variable: " ^ Variable.to_string memory_variable);
+          if !Value_set_options.print_trace then print_endline ("\ttarget memory variable: " ^ Variable.to_string memory_variable);
           let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
-          print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars));
+          if !Value_set_options.print_trace then print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars));
           Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:memory_variable)
         | Abstract_store_domain.Value.Boolean _ -> 
           (Log.warn "Using a boolean value as an address: loaded value is undefined";
@@ -255,22 +241,22 @@ module Make (*: Transfer.TRANSFER *) = struct
         begin match vs_address with
         | Abstract_store_domain.Value.ValueSet vs_address ->
           begin match store with
-          | { typ = I32; offset = offset; _ } ->
-            print_endline ("i32.store offset=" ^ string_of_int offset);
-            print_endline ("\tstoring value-set " ^ Abstract_store_domain.Value.to_string vs_value ^ " into memory variable " ^ Variable.to_string (Variable.Mem (RIC.add_offset vs_address offset)));
+          | { typ = I32; offset = offset; _ } -> (* TODO: check that store64 isn't a thing *)
+            if !Value_set_options.print_trace then print_endline ("\tstoring value-set " ^ Abstract_store_domain.Value.to_string vs_value ^ " into memory variable " ^ Variable.to_string (Variable.Mem (RIC.add_offset vs_address offset)));
             let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size:4 in
             let affected = List.fold (accessed.fully :: accessed.partially) ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) in
             let previously_affected = Abstract_store_domain.get state ~var:Variable.Affected in
             let state = Abstract_store_domain.set state ~var:Variable.Affected ~vs:(Abstract_store_domain.Value.join previously_affected (Abstract_store_domain.Value.ValueSet affected)) in
-            print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
-            print_endline ("\tpartially accessed memory: " ^ String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially));
-            print_endline ("\taffected memory: " ^ RIC.to_string affected);
+            if !Value_set_options.print_trace then 
+              (print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
+              print_endline ("\tpartially accessed memory: " ^ String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially));
+              print_endline ("\taffected memory: " ^ RIC.to_string affected););
             let new_state = Abstract_store_domain.update_accessed_vars state accessed in
             if RIC.is_singleton (accessed.fully) then
-              (print_endline "\tperforming STRONG update!";
+              (if !Value_set_options.print_trace then print_endline "\tperforming STRONG update";
               Abstract_store_domain.set new_state ~var:(Variable.Mem accessed.fully) ~vs:vs_value) (* STRONG update *)
             else
-              (print_endline "\tperforming weak update :(";
+              (if !Value_set_options.print_trace then print_endline "\tperforming WEAK update";
               (match vs_value with
               | Abstract_store_domain.Value.ValueSet vs_value ->
                 Abstract_store_domain.weak_update new_state ~previous_state:state ~var:(Variable.Mem accessed.fully) ~vs:vs_value
@@ -283,7 +269,7 @@ module Make (*: Transfer.TRANSFER *) = struct
             let state = Abstract_store_domain.set state ~var:Variable.Affected ~vs:(Abstract_store_domain.Value.join previously_affected (Abstract_store_domain.Value.ValueSet affected)) in
             Abstract_store_domain.update_accessed_vars state accessed
           | { typ = I64; offset = offset; _ }
-          | { typ = F64; offset = offset; _ } -> 
+          | { typ = F64; offset = offset; _ } ->
             let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size:8 in
             let affected = List.fold (accessed.fully :: accessed.partially) ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) in
             let previously_affected = Abstract_store_domain.get state ~var:Variable.Affected in
@@ -319,12 +305,12 @@ module Make (*: Transfer.TRANSFER *) = struct
       | ValueSet vs1, ValueSet vs2 ->
         begin match comp with
         | {op = LeU; typ = I32} -> 
-          print_endline ("i32.le_u\t" ^ RIC.to_string vs1 ^ " ≤ " ^ RIC.to_string vs2);
+          if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " ≤ " ^ RIC.to_string vs2);
           let vs2' = RIC.remove_lower_bound vs2 in
           let vs2'' = RIC.add_offset (RIC.remove_upper_bound vs2) 1 in
           let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
           let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
-          print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
+          if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
           begin match var1 with
           | Var.Const _ -> state
           | _ ->
@@ -334,12 +320,12 @@ module Make (*: Transfer.TRANSFER *) = struct
               ~vs:(Boolean (Variable.Map.set Variable.Map.empty ~key:(Variable.Var var1) ~data:Boolean.{true_ = vs1_true; false_ = vs1_false}))
           end
         | {op = LtU; typ = I32} ->
-          print_endline ("i32.lt_u\t" ^ RIC.to_string vs1 ^ " < " ^ RIC.to_string vs2);
+          if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " < " ^ RIC.to_string vs2);
           let vs2' = RIC.add_offset (RIC.remove_lower_bound vs2) (-1) in
           let vs2'' = RIC.remove_upper_bound vs2 in
           let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
           let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
-          print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
+          if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
           begin match var1 with
           | Var.Const _ -> state
           | _ ->
@@ -349,12 +335,12 @@ module Make (*: Transfer.TRANSFER *) = struct
               ~vs:(Boolean (Variable.Map.set Variable.Map.empty ~key:(Variable.Var var1) ~data:Boolean.{true_ = vs1_true; false_ = vs1_false}))
           end
         | {op = GeU; typ = I32} -> 
-          print_endline ("i32.ge_u\t" ^ RIC.to_string vs1 ^ " ≥ " ^ RIC.to_string vs2);
+          if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " ≥ " ^ RIC.to_string vs2);
           let vs2' = RIC.remove_upper_bound vs2 in
           let vs2'' = RIC.add_offset (RIC.remove_lower_bound vs2) (-1) in
           let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
           let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
-          print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
+          if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
           begin match var1 with
           | Var.Const _ -> state
           | _ ->
@@ -364,12 +350,12 @@ module Make (*: Transfer.TRANSFER *) = struct
               ~vs:(Boolean (Variable.Map.set Variable.Map.empty ~key:(Variable.Var var1) ~data:Boolean.{true_ = vs1_true; false_ = vs1_false}))
           end
         | {op = GtU; typ = I32} ->
-          print_endline ("i32.gt_u\t" ^ RIC.to_string vs1 ^ " > " ^ RIC.to_string vs2);
+          if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " > " ^ RIC.to_string vs2);
           let vs2' = RIC.add_offset (RIC.remove_upper_bound vs2) 1 in
           let vs2'' = RIC.remove_lower_bound vs2 in
           let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
           let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
-          print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
+          if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
           begin match var1 with
           | Var.Const _ -> state
           | _ ->
@@ -449,19 +435,20 @@ module Make (*: Transfer.TRANSFER *) = struct
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : state) (* the pre-state *)
     : [`Simple of state | `Branch of state * state] =
+    if !Value_set_options.print_trace then print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.control_to_string i.instr);
     let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
-      Log.info (Printf.sprintf "applying summary of function %ld" f);
-      print_endline ("\tState before the call: " ^ Abstract_store_domain.to_string state);
+      if !Value_set_options.print_trace then Log.info (Printf.sprintf "applying summary of function %ld" f);
+      if !Value_set_options.print_trace then print_endline ("\tState before the call: " ^ Abstract_store_domain.to_string state);
       match Int32Map.find summaries f with
       | None ->
         if Int32.(f < module_.nfuncimports) then begin
           Log.warn (Printf.sprintf "No summary found for function %ld (imported function): assuming value-sets are preserved" f);
           state
         end else
-          (Log.warn "This function depends on another function that has not been analyzed yet, so it is part of some recursive loop. It will eventually stabilize";
+          (if !Value_set_options.print_trace then Log.warn "This function depends on another function that has not been analyzed yet, so it is part of some recursive loop. It will eventually stabilize";
           state)
       | Some summary ->
-        print_endline ("\tSummary of function " ^ Int32.to_string f ^ ": " ^ Value_set_summary.to_string summary);
+        if !Value_set_options.print_trace then print_endline ("\tSummary of function " ^ Int32.to_string f ^ ": " ^ Value_set_summary.to_string summary);
         let args = List.take (Spec.get_or_fail i.annotation_before).vstack (fst arity) in
         let return_variable = if snd arity = 1 then List.hd (Spec.get_or_fail i.annotation_after).vstack else None in
         let value_set_after_call = Value_set_summary.apply
@@ -472,14 +459,14 @@ module Make (*: Transfer.TRANSFER *) = struct
         let export = List.find module_.exported_funcs ~f:(fun (id, _, _) -> Int32.(id = f)) in
         match export with
         | Some (_, fname, _) ->
-          Log.info (Printf.sprintf "function is named %s" fname);
-          Log.warn "Exports have not been implemented yet!";
+          if !Value_set_options.print_trace then Log.info (Printf.sprintf "function is named %s" fname);
+          if !Value_set_options.print_trace then Log.warn "Exports have not been implemented yet!";
           value_set_after_call
         | None -> value_set_after_call
     in
     match i.instr with
     | Call (arity, _, f) -> 
-      print_endline ("call " ^ Int32.to_string f ^ ":\t(nb of arguments: " ^ string_of_int (fst arity) ^ ", nb of return values: " ^ string_of_int (snd arity) ^ ")");
+      if !Value_set_options.print_trace then print_endline ("call " ^ Int32.to_string f ^ ":\t(nb of arguments: " ^ string_of_int (fst arity) ^ ", nb of return values: " ^ string_of_int (snd arity) ^ ")");
       let new_store = apply_summary f arity state in
       let new_store = Abstract_store_domain.remove_pointers_to_top new_store in
       `Simple new_store
@@ -495,11 +482,15 @@ module Make (*: Transfer.TRANSFER *) = struct
         `Branch (state_if_true, state_if_false)
       end
     | Return -> 
-      let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in
-      print_endline "return";
-      let vs = Abstract_store_domain.get state ~var:(Variable.Var top_of_stack) in
-      print_endline ("\treturned value-set: " ^ Abstract_store_domain.Value.to_string vs);
-      `Simple (Abstract_store_domain.set state ~var:(Variable.Var Var.Return) ~vs:vs)
+      begin match (Spec.get_or_fail i.annotation_before).vstack with
+      | [] -> `Simple state
+      | top_of_stack :: _ ->
+      (* let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in *)
+        (* if !Value_set_options.print_trace then print_endline "return"; *)
+        let vs = Abstract_store_domain.get state ~var:(Variable.Var top_of_stack) in
+        if !Value_set_options.print_trace then print_endline ("\treturned value-set: " ^ Abstract_store_domain.Value.to_string vs);
+        `Simple (Abstract_store_domain.set state ~var:(Variable.Var Var.Return) ~vs:vs)
+      end
     | Unreachable -> `Simple  Abstract_store_domain.bottom
     | _ -> `Simple state
 
@@ -531,66 +522,6 @@ module Make (*: Transfer.TRANSFER *) = struct
         | idx, NotBottom x -> idx, x.vstack)
       previous_annotations
 
-  (** [get_nth_state n states] returns the abstract state of block [n] from [states]. *)
-  (* let rec get_nth_state (n : int) (states : (int * state) list) : state =
-    match states with
-    | [] -> Abstract_store_domain.bottom
-    | (i, state) :: _ when i = n -> state
-    | _ :: states -> get_nth_state n states *)
-
-  (** [get_previous_stack_value_sets cfg block states] collects and joins value-sets from the stack across predecessor blocks. *)
-  (* let get_previous_stack_value_sets 
-      (cfg : annot_expected Cfg.t) 
-      (block : annot_expected Basic_block.t)  
-      (states : (int * state) list)
-    : Abstract_store_domain.Value.t list =
-    let predecessors = get_predecessors cfg block in
-    let previous_stacks = get_previous_stacks cfg predecessors in
-    let previous_value_sets = 
-      List.map 
-        ~f:(fun (idx, stk) ->
-          List.map 
-            ~f:(fun var ->
-              let state = get_nth_state idx states in
-              Abstract_store_domain.get state ~var:(Variable.Var var))
-            stk)
-        previous_stacks in
-    match previous_value_sets with
-    | [] -> []
-    | first_stack :: rest ->
-      List.fold ~init:first_stack ~f:(fun acc x -> List.map2_exn ~f:Abstract_store_domain.Value.join acc x) rest  *)
-
-
-  (* let merge_stacks 
-      (cfg : annot_expected Cfg.t) 
-      (block : annot_expected Basic_block.t) 
-      (states : (int * state) list)
-      (new_state_without_merges : state)
-      (merged_annotation : annot_expected)
-    : state =
-    let merged_stack =
-      match merged_annotation with
-      | Spec.Bottom -> []
-      | NotBottom annot -> annot.vstack in
-    let previous_value_sets = get_previous_stack_value_sets cfg block states in
-    assert (List.length merged_stack = List.length previous_value_sets);
-    let merged_stack_string =
-      List.fold2_exn ~init:[] ~f:(fun acc v vs -> 
-        match v with
-        | Const _ -> acc @ [Var.to_string v]
-        | _ -> acc @ [Var.to_string v ^ ":(" ^ Abstract_store_domain.Value.to_string vs ^ ")"])
-      merged_stack
-      previous_value_sets in
-    print_endline ("\tMerged stack:\t" ^ String.concat ~sep:"; " merged_stack_string);
-    List.fold2_exn 
-      ~init:new_state_without_merges
-      ~f:(fun state var vs -> 
-        match var with
-        | Merge (i, _) when i = block.idx -> Abstract_store_domain.set state ~var:(Variable.Var var) ~vs:vs
-        | _ -> state)
-      merged_stack
-      previous_value_sets *)
-
   let merge_variables
       (cfg : annot_expected Cfg.t) 
       (block : annot_expected Basic_block.t)
@@ -607,7 +538,7 @@ module Make (*: Transfer.TRANSFER *) = struct
           (v, Abstract_store_domain.Value.join vs existing_vs) :: acc)
     in
     let str_list = List.map ~f:(fun (a,b) -> Variable.to_string a ^ "->" ^ Abstract_store_domain.Value.to_string b) merged_variables in
-    print_endline ("\tmerged variables: [" ^ String.concat ~sep:"; " str_list ^ "]");
+    if !Value_set_options.print_trace then print_endline ("\tmerged variables: [" ^ String.concat ~sep:"; " str_list ^ "]");
     List.fold merged_variables ~init:state ~f:(fun acc (v, vs) -> Abstract_store_domain.set acc ~var:v ~vs)
 
 
@@ -620,26 +551,24 @@ module Make (*: Transfer.TRANSFER *) = struct
     : state =
     match states with
     | [] -> 
-      print_endline ("================ START OF FUNCTION ==================== DATA BLOCK #" ^ string_of_int block.idx);
+      if !Value_set_options.print_trace then print_endline ("================ START OF FUNCTION ==================== DATA BLOCK #" ^ string_of_int block.idx);
       init_state cfg
     | _ ->
       begin match block.content with
       | Control { instr = Merge; _ } ->
-        print_endline ("======================================================= " ^ (if IntSet.mem cfg.loop_heads block.idx then "LOOP HEAD" else "MERGE") ^ ": Control block #" ^ string_of_int block.idx);
+        if !Value_set_options.print_trace then print_endline ("======================================================= " ^ (if IntSet.mem cfg.loop_heads block.idx then "LOOP HEAD" else "MERGE") ^ ": Control block #" ^ string_of_int block.idx);
         let states' = List.map ~f:(fun (_, s) -> s) states in
         (* Join all previous states: *)
         let new_state_without_merges = List.reduce_exn states' ~f:join_state in 
-        (* let merged_annotation = (Cfg.state_before_block cfg block.idx (Spec_inference.init_state cfg)) in *)
-        (* let state = merge_stacks cfg block states new_state_without_merges merged_annotation in *)
         merge_variables cfg block new_state_without_merges
       | Control _ ->
-        print_endline ("======================================================= CONTROL BLOCK #" ^ string_of_int block.idx);
+        if !Value_set_options.print_trace then print_endline ("======================================================= CONTROL BLOCK #" ^ string_of_int block.idx);
         begin match states with
         | (_, s) :: [] -> s
         | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
         end
       | _ -> 
-        print_endline ("======================================================= DATA BLOCK #" ^ string_of_int block.idx);
+        if !Value_set_options.print_trace then print_endline ("======================================================= DATA BLOCK #" ^ string_of_int block.idx);
         begin match states with
         | (_, s) :: [] -> s
         | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
@@ -650,8 +579,8 @@ module Make (*: Transfer.TRANSFER *) = struct
 
   (** [summary cfg out_state] computes the value-set summary for a function using its [cfg] and final [out_state]. *)
   let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
-    print_endline "======================================================= SUMMARY";
-    print_endline ("END STATE:\t" ^ Abstract_store_domain.to_string out_state);
+    if !Value_set_options.print_trace then print_endline "======================================================= SUMMARY";
+    if !Value_set_options.print_trace then print_endline ("END STATE:\t" ^ Abstract_store_domain.to_string out_state);
     let init_spec = (Spec_inference.init_state cfg) in
     let function_summary =
       match Cfg.state_after_block cfg cfg.exit_block init_spec with
@@ -661,7 +590,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       | NotBottom _ ->
         Value_set_summary.make out_state
     in
-    print_endline ("SUMMARY:\t" ^ Value_set_summary.to_string function_summary);
+    if !Value_set_options.print_trace then print_endline ("SUMMARY:\t" ^ Value_set_summary.to_string function_summary);
     function_summary
 
   (** [extract_summary cfg analyzed_cfg] extracts a value-set summary from the final result of the analysis. *)

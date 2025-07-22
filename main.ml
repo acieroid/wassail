@@ -60,5 +60,6 @@ let () =
        (* Pointer analysis *)
        ; "value-set-intra", Analysis.value_set_intra
        ; "value-set-cfg", Analysis.value_set_cfg
+       ; "value-set-inter", Analysis.value_set_inter
        
        ])

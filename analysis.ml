@@ -66,7 +66,7 @@ let taint_cfg =
         output_to_file file_out (Cfg.to_dot annotated_cfg ~annot_str:Taint.Domain.only_non_id_to_string))
 
 let value_set_intra =
-  mk_intra "intra-procedural value-set analysis" Value_set.analyze_intra
+  mk_intra "intraprocedural value-set analysis" Value_set.analyze_intra
     (fun fid data ->
       Printf.printf "function %ld: %s\n" fid (Value_set.Summary.to_string (fst data)))
 
@@ -78,15 +78,36 @@ let value_set_cfg =
       and file_out = anon ("out" %: string)
       and funs = anon (sequence ("funs" %: int32)) 
       and show_intermediates = flag "--all" no_arg ~doc:"Show all intermediate variables" 
-      and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" in
+      and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" 
+      and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
       fun () ->
         Spec_inference.use_const := true;
         if show_intermediates then Value_set.Options.show_intermediates := true;
         if narrow then Intra.narrow_option := true;
+        if trace then Value_set.Options.print_trace := true;
         let results = Value_set.analyze_intra (Wasm_module.of_file file_in) funs in
         (* We only output the latest analyzed CFG *)
         let annotated_cfg = Option.value_exn (snd (Int32Map.find_exn results (List.last_exn funs))) in
         output_to_file file_out (Cfg.to_dot annotated_cfg ~annot_str:Value_set.Domain.to_string))
+
+let value_set_inter =
+  Command.basic
+    ~summary:"Performs interprocedural value-set analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1,2,3. The full schedule for any file can be computed using the `schedule` target."
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and sccs = anon (sequence ("funs" %: int32_comma_separated_list))
+      and show_intermediates = flag "--all" no_arg ~doc:"Show all intermediate variables" 
+      and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" 
+      and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
+      fun () ->
+        if show_intermediates then Value_set.Options.show_intermediates := true;
+        if narrow then Intra.narrow_option := true;
+        if trace then Value_set.Options.print_trace := true;
+        let results = Value_set.analyse_inter (Wasm_module.of_file filename) sccs in
+        let print = (fun fid (_, _, summary) -> Printf.printf "function %ld: %s\n" fid (Value_set.Summary.to_string summary)) in
+        Printf.printf "\nInterprocedural value-set analysis of file %s\n=======================================================\n" filename;
+        IntMap.iteri results ~f:(fun ~key:id ~data:summary -> print id summary)
+  )
 
 (* let relational_intra =
   mk_intra "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)" Relational.analyze_intra

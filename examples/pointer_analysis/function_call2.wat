@@ -5,7 +5,7 @@
   ;; Function that adds 42 to its argument
   (func $store42
     i32.const 42
-    f32.const 42
+    f32.const 422
     f32.store)
 
   ;; Main function that increments global g and calls add42(10)

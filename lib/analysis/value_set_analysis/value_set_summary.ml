@@ -191,15 +191,22 @@ let apply
       ~init:state 
       ~f:(fun ~key ~data acc -> Abstract_store_domain.set acc ~var:key ~vs:data) in
   (* Update memory variables: *)
+  (* print_endline ("before updating memory: " ^ Abstract_store_domain.to_string state); *)
   let state =
     match Abstract_store_domain.get summary ~var:Variable.Affected with
     | Abstract_store_domain.Value.ValueSet RIC.Bottom -> state
     | _ ->
-      let summary_mems = Variable.Map.filter_keys summary ~f:Variable.is_linear_memory in
+      (* let summary_mems = Variable.Map.filter_keys summary ~f:Variable.is_linear_memory in *)
+      let summary_mems = Variable.Map.filter_keys summary ~f:(fun key -> Variable.is_linear_memory key && not (Variable.equal key Variable.entire_memory)) in
+      (* print_endline ("summary mems: " ^ Abstract_store_domain.to_string summary_mems); *)
       Variable.Map.fold summary_mems 
         ~init:state 
-        ~f:(fun ~key ~data acc -> Abstract_store_domain.set acc ~var:key ~vs:data) 
+        ~f:(fun ~key ~data acc -> 
+          (* Printf.printf "key: %s, data: %s\n" (Variable.to_string key) (Abstract_store_domain.Value.to_string data);  *)
+          Abstract_store_domain.set acc ~var:key ~vs:data) 
   in
+  let state = Abstract_store_domain.remove_pointers_to_top state in
+  (* print_endline ("updated memory: " ^ Abstract_store_domain.to_string state); *)
   (* Set return value: *)
   match Variable.Map.find summary (Variable.Var Var.Return) with
   | Some vs -> Abstract_store_domain.set state ~var:(Variable.Var (Option.value_exn return_variable)) ~vs

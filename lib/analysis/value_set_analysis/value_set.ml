@@ -12,7 +12,6 @@ module Inter = Inter.Make(Intra)
 let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t option) Int32Map.t =
   Analysis_helpers.mk_intra
     (fun cfgs wasm_mod ->
-
       (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs wasm_mod `Bottom)))
     (fun data wasm_mod cfg ->
       Log.info
@@ -26,6 +25,25 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
 let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec.t Cfg.t) : Domain.t Cfg.t =
   let rel_cfg = (* Relational.Transfer.dummy_annotate *) spec_cfg in
   fst (Intra.analyze wasm_mod rel_cfg summaries)
+
+let analyse_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Abstract_store_domain.t Cfg.t * Summary.t) Int32Map.t =
+  Analysis_helpers.mk_inter
+    (fun _cfgs _wasm_mod -> Int32Map.empty)
+    (fun wasm_mod scc cfgs_and_summaries ->
+      Log.info
+        (Printf.sprintf "---------- Value-set analysis of SCC {%s} ----------"
+          (String.concat ~sep:", " (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
+      (* Run the value-set analysis *)
+      let annotated_scc = scc in
+       let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_spec_cfg, _value_set_cfg, summary) -> summary) in
+       let summaries' = List.fold_left wasm_mod.imported_funcs
+           ~init:summaries
+           ~f:(fun summaries (idx, name, (args, ret)) ->
+               Int32Map.set summaries ~key:idx ~data:(Summary.of_import name wasm_mod.nglobals args ret)) in
+       let results = Inter.analyze wasm_mod annotated_scc summaries' in
+       Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
+           let spec_cfg = Int32Map.find_exn scc idx in
+           (spec_cfg, taint_cfg, summary)))
 
 (* let check (expected : Summary.t) (actual : Summary.t) : bool =
   if Summary.subsumes actual expected then

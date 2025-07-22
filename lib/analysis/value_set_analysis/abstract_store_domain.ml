@@ -23,7 +23,7 @@ module Value = struct
     match value1, value2 with
     | ValueSet vs1, ValueSet vs2 -> ValueSet (RIC.join vs1 vs2)
     | Boolean b1, Boolean b2 -> Boolean (Boolean.join b1 b2)
-    | _ -> assert false
+    | _ -> ValueSet RIC.Top (* TODO: check that a boolean can only take two values [0,1] and join accordingly *)
 
   let meet (value1 : t) (value2 : t) : t =
     match value1, value2 with
@@ -204,22 +204,6 @@ let widen (store1 : t) (store2 : t) : t =
     | Var _, `Left ValueSet x -> Some (Value.ValueSet (RIC.widen RIC.Bottom ~relative_to:x))
     | _ -> Some (Value.ValueSet RIC.Top))
 
-(** [to_top_RIC store var] sets [var] to [RIC.Top] in [store]. *)
-let to_top_RIC (store : t) (var : Variable.t) : t =
-  Variable.Map.set store ~key:var ~data:(Value.ValueSet RIC.Top)
-
-(** [to_top_RICs store vars] sets each variable in [vars] to [RIC.Top] in [store]. *)
-let to_top_RICs (store : t) (vars : Variable.Set.t) : t =
-  Variable.Set.fold vars ~init:store ~f:to_top_RIC
-
-(** [to_bottom_RIC store var] sets [var] to [RIC.Bottom] in [store]. *)
-let to_bottom_RIC (store : t) (var : Variable.t) : t =
-  Variable.Map.set store ~key:var ~data:(Value.ValueSet RIC.Bottom)
-
-(** [to_bottom_RICs store vars] sets each variable in [vars] to [RIC.Bottom] in [store]. *)
-let to_bottom_RICs (store : t) (vars : Variable.Set.t) : t =
-  Variable.Set.fold vars ~init:store ~f:to_bottom_RIC
-
 let filter_relative_offsets (store : t) (rel_offset : string) : t =
   Variable.Map.filteri store
     ~f:(fun ~key:var ~data:vs ->
@@ -287,6 +271,24 @@ let remove_pointers_to_top (store : t) : t =
   else
     store
 
+(** [to_top_RIC store var] sets [var] to [RIC.Top] in [store]. *)
+let to_top_RIC (store : t) (var : Variable.t) : t =
+  remove_pointers_to_top 
+    (Variable.Map.set store ~key:var ~data:(Value.ValueSet RIC.Top))
+
+(** [to_top_RICs store vars] sets each variable in [vars] to [RIC.Top] in [store]. *)
+let to_top_RICs (store : t) (vars : Variable.Set.t) : t =
+  remove_pointers_to_top
+    (Variable.Set.fold vars ~init:store ~f:to_top_RIC)
+
+(** [to_bottom_RIC store var] sets [var] to [RIC.Bottom] in [store]. *)
+let to_bottom_RIC (store : t) (var : Variable.t) : t =
+  Variable.Map.set store ~key:var ~data:(Value.ValueSet RIC.Bottom)
+
+(** [to_bottom_RICs store vars] sets each variable in [vars] to [RIC.Bottom] in [store]. *)
+let to_bottom_RICs (store : t) (vars : Variable.Set.t) : t =
+  Variable.Set.fold vars ~init:store ~f:to_bottom_RIC
+
 (** [join store1 store2] computes the least upper bound of two stores. 
     Missing memory variables are treated as [RIC.Top]. *)
 let join (store1 : t) (store2 : t) : t =
@@ -315,15 +317,18 @@ let join (store1 : t) (store2 : t) : t =
 (** [update_accessed_vars store accessed_addresses] applies [truncate_memory_var] to all memory variables. *)
 let update_accessed_vars (store : t) (accessed_addresses : RIC.accessed) : t =
   let memory_vars = extract_memory_variables store in
-  let store = 
-    List.fold 
-      ~init:store 
-      ~f:(fun store var -> truncate_memory_var store ~var:var ~accessed_addresses:accessed_addresses) memory_vars 
-  in
-  if List.is_empty (extract_memory_variables store) then 
-    set store ~var:Variable.entire_memory ~vs:(ValueSet RIC.Top)
-  else
-    store
+  match memory_vars with
+  | x :: _ when Variable.equal Variable.entire_memory x -> store
+  | _ ->
+    let store = 
+      List.fold 
+        ~init:store 
+        ~f:(fun store var -> truncate_memory_var store ~var:var ~accessed_addresses:accessed_addresses) memory_vars 
+    in
+    if List.is_empty (extract_memory_variables store) then 
+      set store ~var:Variable.entire_memory ~vs:(ValueSet RIC.Top)
+    else
+      store
 
 (** [weak_update store ~previous_state ~var ~vs] weakly updates [store] at [var] by joining [vs] with 
     the value in [previous_state], preserving values for unaffected regions. *)
