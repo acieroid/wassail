@@ -79,12 +79,14 @@ let value_set_cfg =
       and funs = anon (sequence ("funs" %: int32)) 
       and show_intermediates = flag "--all" no_arg ~doc:"Show all intermediate variables" 
       and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" 
+      and disjoint_stack = flag "--stack" no_arg ~doc:"Consider stack disjoint from rest of linear memory" 
       and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
       fun () ->
         Spec_inference.use_const := true;
         if show_intermediates then Value_set.Options.show_intermediates := true;
         if narrow then Intra.narrow_option := true;
         if trace then Value_set.Options.print_trace := true;
+        if disjoint_stack then Value_set.Options.disjoint_stack := true;
         let results = Value_set.analyze_intra (Wasm_module.of_file file_in) funs in
         (* We only output the latest analyzed CFG *)
         let annotated_cfg = Option.value_exn (snd (Int32Map.find_exn results (List.last_exn funs))) in
@@ -98,11 +100,13 @@ let value_set_inter =
       and sccs = anon (sequence ("funs" %: int32_comma_separated_list))
       and show_intermediates = flag "--all" no_arg ~doc:"Show all intermediate variables" 
       and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" 
+      and disjoint_stack = flag "--stack" no_arg ~doc:"Consider stack disjoint from rest of linear memory" 
       and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
       fun () ->
         if show_intermediates then Value_set.Options.show_intermediates := true;
         if narrow then Intra.narrow_option := true;
         if trace then Value_set.Options.print_trace := true;
+        if disjoint_stack then Value_set.Options.disjoint_stack := true;
         let results = Value_set.analyse_inter (Wasm_module.of_file filename) sccs in
         let print = (fun fid (_, _, summary) -> Printf.printf "function %ld: %s\n" fid (Value_set.Summary.to_string summary)) in
         Printf.printf "\nInterprocedural value-set analysis of file %s\n=======================================================\n" filename;

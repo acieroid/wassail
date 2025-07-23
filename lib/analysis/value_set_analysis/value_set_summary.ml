@@ -5,7 +5,7 @@ open Reduced_interval_congruence
 (** A value set summary *)
 type t = Abstract_store_domain.t
 
-let subsumes = Abstract_store_domain.subsumes
+(* let subsumes = Abstract_store_domain.subsumes *)
 
 let to_string (s : t) : string =
   let ret = Variable.Map.find s (Variable.Var Var.Return) in
@@ -19,6 +19,9 @@ let to_string (s : t) : string =
   let memory =
     Variable.Map.filter_keys s
       ~f:(fun key -> Variable.is_linear_memory key) in
+  let stack =
+    Variable.Map.filter_keys s
+      ~f:(fun key -> Variable.is_stack key) in
   let string_list =
     begin match ret with
     | None -> []
@@ -38,9 +41,11 @@ let to_string (s : t) : string =
       ["AFFECTED MEMORY:" ^ RIC.to_string addresses ^ ", " ^
       "LINEAR MEMORY:" ^ Abstract_store_domain.to_string memory]
     end
+    @ if !Value_set_options.disjoint_stack then ["Stack:" ^ Abstract_store_domain.to_string stack] else []
   in String.concat ~sep:", " string_list
   
 
+(* TODO: do I need to mention stack and memory? *)
 let bottom (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
   let nb_of_globals = List.length (cfg.global_types) in
   let global_indices = List.init nb_of_globals ~f:(fun i -> i) in
@@ -88,7 +93,9 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
       end in
     (* Linear memory has been modified, but we don't know how: *)
     let summary = Variable.Map.set summary ~key:(Variable.Affected) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top) in
-    Variable.Map.set summary ~key:(Variable.entire_memory) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top)
+    let summary = Variable.Map.set summary ~key:(Variable.entire_memory) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top) in
+    (* Stack portion of the linear memory is assumed to not have been changed *)
+    Variable.Map.set summary ~key:(Variable.entire_stack) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
   | "fd_close" | "proc_exit" ->
     (* Globals are unchanged *)
     let globals = List.init (Int32.to_int_exn nglobals) ~f:(fun i -> Variable.Var (Var.Global i)) in
@@ -101,7 +108,9 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
       | _ -> failwith "more than one return value"
       end in
     (* Linear memory is unchanged: *)
-    Variable.Map.set summary ~key:(Variable.Affected) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
+    let summary = Variable.Map.set summary ~key:(Variable.Affected) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom) in
+    (* Stack portion of the linear memory is assumed to not have been changed *)
+    Variable.Map.set summary ~key:(Variable.entire_stack) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
   | _ ->
     (* There is no way to know if global variables have been changed *)
     Log.warn (Printf.sprintf "Imported function is not modelled: %s" name);
@@ -117,7 +126,9 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
       end in
     (* Linear memory may have been modified, but we don't know how: *)
     let summary = Variable.Map.set summary ~key:(Variable.Affected) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top) in
-    Variable.Map.set summary ~key:(Variable.entire_memory) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top)
+    let summary = Variable.Map.set summary ~key:(Variable.entire_memory) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top) in
+    (* Stack portion of the linear memory is assumed to not have been changed *)
+    Variable.Map.set summary ~key:(Variable.entire_stack) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
 
 let initial_summaries 
     (cfgs : 'a Cfg.t Int32Map.t) 
@@ -139,6 +150,7 @@ let make (state : Abstract_store_domain.t) : t =
       | Variable.Var Var.Global _
       | Variable.Var Var.Return
       | Variable.Mem _
+      | Variable.Stack _
       | Variable.Affected -> true
       | _ -> false)
 
@@ -181,8 +193,8 @@ let apply
     Variable.Map.filter_keys state 
       ~f:(fun var -> 
         match var with
-        | Variable.Var _ | Variable.Affected -> true
-        | Variable.Mem _ -> Variable.comparable_offsets var affected_mem_var && (not (Variable.share_addresses var affected_mem_var))) in
+        | Var _ | Affected | Stack _-> true
+        | Mem _ -> Variable.comparable_offsets var affected_mem_var && (not (Variable.share_addresses var affected_mem_var))) in
   (* Up to here, the affected memory areas have been earased and the list of affected addresses has been updated *)
   (* Update globals: *)
   let summary_globals = Variable.Map.filter_keys summary ~f:Variable.is_global in
@@ -191,23 +203,27 @@ let apply
       ~init:state 
       ~f:(fun ~key ~data acc -> Abstract_store_domain.set acc ~var:key ~vs:data) in
   (* Update memory variables: *)
-  (* print_endline ("before updating memory: " ^ Abstract_store_domain.to_string state); *)
   let state =
     match Abstract_store_domain.get summary ~var:Variable.Affected with
     | Abstract_store_domain.Value.ValueSet RIC.Bottom -> state
     | _ ->
-      (* let summary_mems = Variable.Map.filter_keys summary ~f:Variable.is_linear_memory in *)
       let summary_mems = Variable.Map.filter_keys summary ~f:(fun key -> Variable.is_linear_memory key && not (Variable.equal key Variable.entire_memory)) in
-      (* print_endline ("summary mems: " ^ Abstract_store_domain.to_string summary_mems); *)
       Variable.Map.fold summary_mems 
         ~init:state 
         ~f:(fun ~key ~data acc -> 
-          (* Printf.printf "key: %s, data: %s\n" (Variable.to_string key) (Abstract_store_domain.Value.to_string data);  *)
           Abstract_store_domain.set acc ~var:key ~vs:data) 
   in
+  (* Update stack variables: *)
+  let state = 
+    let summery_stack = Variable.Map.filter_keys summary ~f:(fun key -> Variable.is_stack key && not (Variable.equal key Variable.entire_stack)) in
+    Variable.Map.fold summery_stack 
+      ~init:state 
+      ~f:(fun ~key ~data acc -> 
+        Abstract_store_domain.set acc ~var:key ~vs:data) 
+  in
   let state = Abstract_store_domain.remove_pointers_to_top state in
-  (* print_endline ("updated memory: " ^ Abstract_store_domain.to_string state); *)
   (* Set return value: *)
-  match Variable.Map.find summary (Variable.Var Var.Return) with
-  | Some vs -> Abstract_store_domain.set state ~var:(Variable.Var (Option.value_exn return_variable)) ~vs
-  | None -> state
+  match Variable.Map.find summary (Variable.Var Var.Return), return_variable with
+  | Some vs, Some return_variable -> Abstract_store_domain.set state ~var:(Variable.Var return_variable) ~vs
+  | None, None -> state
+  | _ -> assert false (* TODO: error message? *)

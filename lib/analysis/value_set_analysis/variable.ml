@@ -20,6 +20,7 @@ module T = struct
   type t = 
     | Var of Var.t
     | Mem of RIC.t
+    | Stack of RIC.t (* used when considering the stack disjoint from the rest of the memory *)
     | Affected (* used to store all the addresses that have been affected by a function *)
   [@@deriving sexp, compare, equal]
 
@@ -28,6 +29,7 @@ module T = struct
     match var with 
     | Var v -> Var.to_string v
     | Mem ric -> "mem[" ^ RIC.to_string ric ^ "]"
+    | Stack ric -> "stack[" ^ RIC.to_string (RIC.remove_relative_offset ric) ^"]"
     | Affected -> "Affected_memory"
 
   let mem (ric : int * ExtendedInt.t * ExtendedInt.t * (string * int)) : t =
@@ -35,9 +37,16 @@ module T = struct
 
   let entire_memory = Mem RIC.Top
 
+  let entire_stack = Stack RIC.Top
+
   let is_linear_memory (v : t) : bool =
     match v with
     | Mem _ -> true
+    | _ -> false
+  
+  let is_stack (v : t) : bool =
+    match v with
+    | Stack _ -> true
     | _ -> false
 
   let is_global (v : t) : bool =
@@ -48,11 +57,13 @@ module T = struct
   let get_address (var : t) : RIC.t =
     match var with
     | Mem address -> address
+    | Stack address -> address
     | _ -> RIC.Bottom
 
   let get_relative_offset (v : t) : string =
     match v with
     | Mem RIC {offset = (offset, _); _} -> offset
+    | Stack _ -> "g0"
     | _ -> ""
 
   let list_to_string (vars : t list) : string = String.concat ~sep:", " (List.map vars ~f:to_string)
@@ -63,6 +74,8 @@ module T = struct
     | Mem RIC.Top -> true
     | Mem RIC {stride = _; lower_bound = l; upper_bound = u; offset = _}
         when ExtendedInt.equal l NegInfinity || ExtendedInt.equal u Infinity -> true
+    | Stack RIC {stride = _; lower_bound = l; upper_bound = u; offset = _}
+        when ExtendedInt.equal l NegInfinity || ExtendedInt.equal u Infinity -> true
     | _ -> false
 
   let is_finite (var : t) : bool = not (is_infinite var)
@@ -70,10 +83,10 @@ module T = struct
   let is_singleton (var : t) : bool =
     match var with
     | Mem RIC {lower_bound = l; upper_bound = u; _} when not (ExtendedInt.equal l u) -> false
+    | Stack RIC {lower_bound = l; upper_bound = u; _} when not (ExtendedInt.equal l u) -> false
     | _ -> true
 
-
-  let rec to_singletons (var : t) : t list =
+  (* let rec to_singletons (var : t) : t list =
     assert (is_finite var);
     match var with
     | Var _ -> [var]
@@ -83,30 +96,13 @@ module T = struct
       let new_singleton = mem (0, Int 0, Int 0, (v, s * l + o)) in
       let leftovers = mem (s, Int (l + 1), u, (v, o)) in
       new_singleton :: to_singletons leftovers
-    | _ -> assert false
+    | _ -> assert false *)
 
   let share_addresses (var1 : t) (var2 : t) : bool =
     match var1, var2 with
     | Mem ric1, Mem ric2 -> not (RIC.equal RIC.Bottom (RIC.meet ric1 ric2))
+    | Stack ric1, Stack ric2 -> not (RIC.equal RIC.Bottom (RIC.meet ric1 ric2))
     | _ -> false
-
-  (* let remove ~(these_addresses : RIC.t) ~(from : t) : t list =
-    match these_addresses, from with
-    | _, Var _ -> [from]
-    | Top, _ -> []
-    | Bottom, _ -> [from] 
-    | ric1, Mem ric2 when RIC.is_subset ric2 ~of_:(RIC.meet ric1 ric2) -> []
-    | ric1, Mem ric2 when not (RIC.comparable_offsets ric1 ric2) -> []
-    | _, Mem _ when is_finite from -> 
-      let singletons = to_singletons from in
-      List.filter ~f:(
-        fun v -> 
-          match v with
-          | Mem ric -> RIC.equal RIC.Bottom (RIC.meet ric these_addresses)
-          | _ -> false
-        ) singletons
-
-    | _ -> failwith "not implemented yet" *)
 
   let remove ~(these_addresses : RIC.t) ~(from : t) : t list =
     let address = get_address from in
@@ -125,14 +121,27 @@ module T = struct
 
   (* TODO: Test this function *)
   let is_covered ~(by : t list) (v : t) : bool =
-    let v_addr = match v with | Mem r -> r | _ -> assert false in
-    let not_covered = List.fold ~init:[v_addr]
-                                ~f:(fun acc x ->
-                                  match x with
-                                  | Var _ | Affected -> acc
-                                  | Mem addr -> 
-                                    List.concat (List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y) acc))
-                                by in
+    let not_covered =
+      match v with
+      | Mem v_addr ->
+        (* let v_addr = match v with | Mem r -> r | _ -> assert false in *)
+        List.fold ~init:[v_addr]
+          ~f:(fun acc x ->
+            match x with
+            | Var _ | Stack _ | Affected -> acc
+            | Mem addr -> 
+              List.concat (List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y) acc))
+          by
+      | Stack v_addr -> 
+        List.fold ~init:[v_addr]
+          ~f:(fun acc x ->
+            match x with
+            | Var _ | Mem _ | Affected -> acc
+            | Stack addr -> 
+              List.concat (List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y) acc))
+          by
+      | _ -> assert false
+    in
     let not_covered = List.filter ~f:(fun x -> not (RIC.equal RIC.Bottom x)) not_covered in
     List.is_empty not_covered
 
@@ -142,6 +151,18 @@ module T = struct
     | Mem address ->
       let new_address = RIC.update_relative_offset ~ric_:address ~actual_values in
       Mem new_address
+    | Stack address ->
+      let new_address = RIC.update_relative_offset ~ric_:address ~actual_values in
+      let new_stack_var = Stack new_address in
+      begin match new_stack_var with
+      | Stack RIC {offset = (o, _); _} -> 
+        if String.equal "g0" o then
+          new_stack_var
+        else
+          failwith "Inconsistent stack pointer. This analysis only works when global variable g0 is used as stack pointer."
+      | Stack RIC.Top -> new_stack_var
+      | _ -> assert false
+      end
 end
 include T
 
@@ -176,6 +197,10 @@ module Map = struct
     let all_vars = keys store in
     List.filter ~f:T.is_linear_memory all_vars
 
+  let extract_stack_variables (store : 'a t) : T.t list =
+    let all_vars = keys store in
+    List.filter ~f:T.is_stack all_vars
+
   let extract_locals_and_globals (store : 'a t) : T.t list =
     let all_vars = keys store in
     List.filter ~f:(fun v -> match v with | Var Var.Local _ | Var Var.Global _ -> true | _ -> false) all_vars
@@ -189,29 +214,56 @@ module Map = struct
     let store2 = relative_to in
     let mems1 = extract_memory_variables store1 in
     let mems2 = extract_memory_variables store2 in
+    let new_store =
+      List.fold
+        ~init:store1
+        ~f:(fun store m2 ->
+          match m2 with
+          | T.Mem addr_m2 -> 
+            List.fold
+              ~init:store
+              ~f:(fun store m1 ->
+                match m1 with
+                | T.Mem addr_m1 ->
+                  let met_addrs = RIC.meet addr_m2 addr_m1 in
+                  if RIC.equal RIC.Bottom met_addrs then
+                    store
+                  else
+                    let new_addresses = met_addrs :: (RIC.remove ~this:met_addrs ~from:addr_m1) in
+                    let new_mem_vars = List.map ~f:(fun addr -> T.Mem addr) new_addresses in
+                    let vs = get store ~var:m1 in
+                    let store = remove store m1 in
+                    update_all store (Set.of_list new_mem_vars) vs
+                | _ -> store )
+              mems1
+          | _ -> store)
+        mems2
+    in
+    let stack1 = extract_stack_variables new_store in
+    let stack2 = extract_stack_variables store2 in
     List.fold
-      ~init:store1
+      ~init:new_store
       ~f:(fun store m2 ->
         match m2 with
-        | T.Mem addr_m2 -> 
+        | T.Stack addr_m2 -> 
           List.fold
             ~init:store
             ~f:(fun store m1 ->
               match m1 with
-              | T.Mem addr_m1 ->
+              | T.Stack addr_m1 ->
                 let met_addrs = RIC.meet addr_m2 addr_m1 in
                 if RIC.equal RIC.Bottom met_addrs then
                   store
                 else
                   let new_addresses = met_addrs :: (RIC.remove ~this:met_addrs ~from:addr_m1) in
-                  let new_mem_vars = List.map ~f:(fun addr -> T.Mem addr) new_addresses in
+                  let new_stack_vars = List.map ~f:(fun addr -> T.Stack addr) new_addresses in
                   let vs = get store ~var:m1 in
                   let store = remove store m1 in
-                  update_all store (Set.of_list new_mem_vars) vs
+                  update_all store (Set.of_list new_stack_vars) vs
               | _ -> store )
-            mems1
+            stack1
         | _ -> store)
-      mems2
+      stack2
 end
 
 
@@ -245,7 +297,7 @@ let%test_module "Variable tests" = (module struct
     print_endline "_______ _______________ _______\n        Variable module        \n------- --------------- -------\n";
     true
 
-  let%test "to_singletons simple" =
+  (* let%test "to_singletons simple" =
     let v = mem 0 0 0 ("stack", 0) in
     let result = to_singletons v in
     print_endline ("[Variable.to_singletons]     " ^ to_string v ^ " -> " ^ String.concat ~sep:", " (List.map ~f:to_string result));
@@ -255,7 +307,7 @@ let%test_module "Variable tests" = (module struct
     let v = mem 1 0 4 ("stack", 0) in
     let result = to_singletons v in
     print_endline ("[Variable.to_singletons]     " ^ to_string v ^ " -> " ^ String.concat ~sep:", " (List.map ~f:to_string result));
-    List.length result = 5
+    List.length result = 5 *)
 
   let%test "share_addresses yes" =
     let v1 = mem 1 0 4 ("", 0) in
