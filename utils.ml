@@ -49,9 +49,9 @@ let imports =
       let%map_open file_in = anon ("in" %: string) in
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
-        List.iter wasm_mod.imported_funcs ~f:(fun (idx, name, ftype) ->
+        List.iter wasm_mod.imported_funcs ~f:(fun desc ->
             Printf.printf "%ld\t%s\t%s\n"
-              idx name (Type.funtype_to_string ftype)))
+              desc.idx desc.name (Type.funtype_to_string (desc.arguments, desc.returns))))
 
 let exports =
   Command.basic
@@ -60,9 +60,9 @@ let exports =
       let%map_open file_in = anon ("in" %: string) in
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
-        List.iter wasm_mod.exported_funcs ~f:(fun (idx, name, ftype) ->
+        List.iter wasm_mod.exported_funcs ~f:(fun desc ->
             Printf.printf "%ld\t%s\t%s\n"
-              idx name (Type.funtype_to_string ftype)))
+              desc.idx desc.name (Type.funtype_to_string (desc.arguments, desc.returns))))
 
 let instructions =
   Command.basic

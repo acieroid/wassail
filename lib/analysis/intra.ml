@@ -67,8 +67,8 @@ module Result (Transfer : Transfer.TRANSFER_BASE) = struct
 
   let join  (r1 : t) (r2 : t) : t =
     match (r1, r2) with
-    | Simple s1, _ when Poly.equal s1 Transfer.bottom -> r2
-    | _, Simple s2 when Poly.equal s2 Transfer.bottom -> r1
+    | Simple s1, _ when Transfer.State.equal s1 Transfer.bottom -> r2
+    | _, Simple s2 when Transfer.State.equal s2 Transfer.bottom -> r1
     | Uninitialized, _ -> r2
     | _, Uninitialized -> r1
     | Simple st1, Simple st2 ->
@@ -484,6 +484,17 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
         if is_entry then
           Transfer.init module_ (Wasm_module.get_funcinst module_ block.fidx)
         else
+          (* TODO: if it's a return state, we need to take the imported functions into account here. *)
+          (* TODO: The problem: we need a block index, which we can't have. The
+             block index is only used to extract the previous annot_expected. We
+             could compute it, but we need an "init annot_expected", which is
+             annoying. BUT maybe we can just replicate what state_after_|lock
+             does, and ignore the entry case. After all, if there's a merge, we
+             don't expect to come from the entry state? This would be because
+             entry_state is only used if the block is Data[], Etnry, or Return,
+             and there's no predecessor or only empty ones *)
+          (* TODO: merge_flows can correctly deal with defined functions. But for imported ones, we likely need something different. *)
+          (* TODO: it would be much easier to have a dummy function for imported with a specific block. Then one can just define the transfer on that kind of block *)
           Transfer.merge_flows module_ cfg block (List.map ~f:(fun (b, s) -> (b.block_idx, s)) pred_states) in
       (* We analyze it *)
       transfer block in_state

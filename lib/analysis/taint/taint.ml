@@ -54,8 +54,8 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
        let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_spec_cfg, _taint_cfg, summary) -> summary) in
        let summaries' = List.fold_left wasm_mod.imported_funcs
            ~init:summaries
-           ~f:(fun summaries (idx, name, (args, ret)) ->
-               Int32Map.set summaries ~key:idx ~data:(Summary.of_import name wasm_mod.nglobals args ret)) in
+           ~f:(fun summaries desc ->
+               Int32Map.set summaries ~key:desc.idx ~data:(Summary.of_import desc.name wasm_mod.nglobals desc.arguments desc.returns)) in
        let results = Inter.analyze wasm_mod ~cfgs:annotated_scc ~summaries:summaries' in
        Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
            let spec_cfg = Int32Map.find_exn scc idx in

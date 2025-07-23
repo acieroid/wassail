@@ -55,7 +55,7 @@ let indirect_call_targets (wasm_mod : Wasm_module.t) (typ : Int32.t) : Int32.t l
     funs_with_matching_type
   | None ->
     (* All functions with the proper type can be called. *)
-    let funs = List.map wasm_mod.imported_funcs ~f:(fun (idx, _, _) -> idx) @ (List.map wasm_mod.funcs ~f:(fun f -> f.idx)) in
+    let funs = List.map wasm_mod.imported_funcs ~f:(fun desc -> desc.idx) @ (List.map wasm_mod.funcs ~f:(fun f -> f.idx)) in
     let ftype = Wasm_module.get_type wasm_mod typ in
     (* These are all the functions with a valid type *)
    List.filter funs ~f:(fun idx -> Stdlib.(ftype = (Wasm_module.get_func_type wasm_mod( idx))))

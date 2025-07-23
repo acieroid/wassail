@@ -180,10 +180,10 @@ module Make = struct
            ~f:(fun ((a, _offset), b) ->
                (* Log.warn (Printf.sprintf "XXX: ignoring offset\n"); *)
                [a; b])) ret in
-    let export = List.find module_.exported_funcs ~f:(fun (id, _, _) -> Int32.(id = f)) in
+    let export = List.find module_.exported_funcs ~f:(fun desc -> Int32.(desc.idx = f)) in
     match export with
-    | Some (_, fname, _) ->
-      begin match ret, StringMap.find !taint_specifications fname with
+    | Some desc ->
+      begin match ret, StringMap.find !taint_specifications desc.name with
         | Some ret_var, Some (ret_taint, args_taint) ->
           (* This function returns a specific taint that we have to add to ret.
              Moreover, it might taint its argument, so we propagate this taint

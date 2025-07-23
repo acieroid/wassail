@@ -90,8 +90,8 @@ let initial_summaries (cfgs : 'a Cfg.t Int32Map.t) (module_ : Wasm_module.t) (ty
         (match typ with
          | `Bottom -> bottom
          | `Top -> top) cfg Var.Set.empty))
-    ~f:(fun summaries (idx, name, (args, ret)) ->
-        Int32Map.set summaries ~key:idx ~data:(of_import name module_.nglobals args ret))
+    ~f:(fun summaries desc ->
+        Int32Map.set summaries ~key:desc.idx ~data:(of_import desc.name module_.nglobals desc.arguments desc.returns))
 
 let make (_cfg : 'a Cfg.t) (state : Taint_domain.t)
     (ret : Var.t option) (globals_post : Var.t list)

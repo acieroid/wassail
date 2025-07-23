@@ -21,7 +21,7 @@ module type TRANSFER_BASE = sig
 
   (** The bottom state *)
   val bottom : State.t
-  (** The initial state for a function. TODO most likely for intra only/summary, not for inter? *)
+  (** The initial state for a function. Used for the initial state of the main function in an inter analysis *)
   val init : Wasm_module.t -> Func_inst.t -> State.t
 
   (** Transfer function for data instructions *)

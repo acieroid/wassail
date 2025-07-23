@@ -190,9 +190,9 @@ let generate_slice (filename : string) (output_file : string) =
   let module_ = Wasm_module.of_file filename in
   let address = find_criterion filename in
   (* Find the index of the printf function (it should be exported, otherwise it is unnamed) *)
-  let printf_export_idx = match List.find_map module_.exported_funcs ~f:(fun (idx, name, _type) ->
-      if String.equal name "printf" then
-        Some idx
+  let printf_export_idx = match List.find_map module_.exported_funcs ~f:(fun desc ->
+      if String.equal desc.name "printf" then
+        Some desc.idx
       else
         None) with
   | Some idx -> idx
@@ -309,9 +309,9 @@ let count_instructions_in_slice (filename : string) (output_file : string) =
   | Some idx -> idx
   | None -> failwith "cannot find pattern in any data segment" in
   (* Find the index of the printf function (it should be exported, otherwise it is unnamed) *)
-  let printf_export_idx = match List.find_map module_.exported_funcs ~f:(fun (idx, name, _type) ->
-      if String.equal name "printf" then
-        Some idx
+  let printf_export_idx = match List.find_map module_.exported_funcs ~f:(fun desc ->
+      if String.equal desc.name "printf" then
+        Some desc.idx
       else
         None) with
   | Some idx -> idx

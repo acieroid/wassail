@@ -3,6 +3,14 @@ open Helpers
 
 module T = struct
   (** A WebAssembly module *)
+  type func_desc = {
+    idx: Int32.t; (* The index of the imported/exported function *)
+    name: string;
+    arguments: Type.t list;
+    returns: Type.t list;
+  }
+  [@@deriving sexp, compare, equal]
+
   type t = {
     start : Int32.t option;
     types : (Type.t list * Type.t list) list; (** The types declared in the module *)
@@ -13,9 +21,9 @@ module T = struct
     nglobals : Int32.t; (** The number of globals *)
     nfuncimports : Int32.t; (** The number of functions imported *)
     imports : Import.t list;
-    imported_funcs : (Int32.t * string * (Type.t list * Type.t list)) list; (** The description of the imported function: their id, name, and type *)
+    imported_funcs : func_desc list; (** The description of the imported function: their id, name, and type *)
     exports : Export.t list;
-    exported_funcs : (Int32.t * string * (Type.t list * Type.t list)) list; (** The description of the exported functions: the id, name, and type *)
+    exported_funcs : func_desc list; (** The description of the exported functions: the id, name, and type *)
     funcs : Func_inst.t list; (** The functions defined in the module *)
     memories : Memory.t list; (** The memory types *)
     memory_insts : Memory_inst.t list; (** The memory instances *)
@@ -82,7 +90,7 @@ let get_func_type (m : t) (fidx : Int32.t) : Type.t list * Type.t list =
       | None -> failwith "get_func_type nth exception"
   else
     match List32.nth m.imported_funcs fidx with
-      | Some v -> let (_,_,t)=v in t
+      | Some desc -> (desc.arguments, desc.returns)
       | None -> failwith "get_func_type nth exception"
 
 (** Remove a function from the module *)
@@ -101,12 +109,15 @@ let replace_func (m : t) (fidx : Int32.t) (finst : Func_inst.t) : t =
 let of_wasm (m : Wasm.Ast.module_) : t =
   let imported_funcs = List.filter_mapi m.it.imports ~f:(fun idx import -> match import.it.idesc.it with
       | FuncImport v ->
-        Some (Int32.of_int_exn idx, Wasm.Ast.string_of_name import.it.item_name,
-              let type_idx = v.it in
-              match (List32.nth m.it.types type_idx) with
-              | Some {it = Wasm.Types.FuncType (a, b); _} ->
-                (List.map a ~f:Type.of_wasm, List.map b ~f:Type.of_wasm)
-              | None -> failwith "of_wasm: nth error when looking for imports")
+        let idx = Int32.of_int_exn idx in
+        let name = Wasm.Ast.string_of_name import.it.item_name in
+        let arguments, returns =
+          let type_idx = v.it in
+          match (List32.nth m.it.types type_idx) with
+          | Some {it = Wasm.Types.FuncType (a, b); _} ->
+            (List.map a ~f:Type.of_wasm, List.map b ~f:Type.of_wasm)
+          | None -> failwith "of_wasm: nth error when looking for imports" in
+        Some { idx; name; arguments; returns }
       | _ -> None) in
   let nfuncimports = List32.length imported_funcs in
   let imported_globals = List.filter_map m.it.imports ~f:(fun import -> match import.it.idesc.it with
@@ -121,7 +132,7 @@ let of_wasm (m : Wasm.Ast.module_) : t =
   let funcs = List32.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m Int32.(i+nfuncimports) f) in
   let ftype (fidx : Int32.t) : Type.t list * Type.t list = if Int32.(fidx < nfuncimports) then
       match List32.nth imported_funcs fidx with
-      | Some (_, _, typ) -> typ
+      | Some desc -> (desc.arguments, desc.returns)
       | None -> failwith "of_wasm: nth error when looking for imported function type"
     else
       match List32.nth funcs Int32.(fidx-nfuncimports) with
@@ -133,7 +144,13 @@ let of_wasm (m : Wasm.Ast.module_) : t =
   let exported_funcs = List.filter_map m.it.exports ~f:(fun export -> match export.it.edesc.it with
       | FuncExport v ->
         let idx = v.it in
-        Some (idx, (Wasm.Ast.string_of_name export.it.name), ftype idx)
+        let arguments, returns = ftype idx in
+        Some {
+          idx;
+          name = Wasm.Ast.string_of_name export.it.name;
+          arguments;
+          returns;
+        }
       | _ -> None) in
   let memories = List.map m.it.memories ~f:Memory.of_wasm in
   let memory_insts = List.filter_map m.it.imports ~f:(fun import -> match import.it.idesc.it with
