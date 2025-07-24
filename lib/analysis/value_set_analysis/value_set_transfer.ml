@@ -506,11 +506,16 @@ module Make (*: Transfer.TRANSFER *) = struct
     in
     match i.instr with
     | Call (arity, _, f) -> 
-      if !Value_set_options.print_trace then print_endline ("call " ^ Int32.to_string f ^ ":\t(nb of arguments: " ^ string_of_int (fst arity) ^ ", nb of return values: " ^ string_of_int (snd arity) ^ ")");
+      if !Value_set_options.print_trace then print_endline ("\t(nb of arguments: " ^ string_of_int (fst arity) ^ ", nb of return values: " ^ string_of_int (snd arity) ^ ")");
       let new_store = apply_summary f arity state in
       let new_store = Abstract_store_domain.remove_pointers_to_top new_store in
       `Simple new_store
-    | CallIndirect _ -> Log.warn "indirect calls not yet implemented"; `Simple state
+    | CallIndirect (_, arity, _, typ) ->
+      let targets = Call_graph.indirect_call_targets module_ typ in
+      (* Apply the summaries *)
+      `Simple (List.fold_left targets
+        ~init:Abstract_store_domain.bottom
+        ~f:(fun acc idx -> Abstract_store_domain.join (apply_summary idx arity state) acc))
     | Br _ -> `Simple state
     | BrIf _ | If _ -> 
       let condition = Variable.Var (pop (Spec.get_or_fail i.annotation_before).vstack) in
