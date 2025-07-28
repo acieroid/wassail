@@ -415,6 +415,7 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
       @param module_ is the overall WebAssembly module, needed to access type information, tables, etc.
       @param cfg is the CFG to analyze *)
   let analyze_ (module_ : Wasm_module.t) (icfg : Transfer.annot_expected Icfg.t) : Result.intra_results =
+    let is_imported (fidx : Int32.t) : bool = Int32.(fidx < module_.nfuncimports) in
     let bottom = Result.Uninitialized in
     (* Data of the analysis, per block *)
     let block_out : Result.t Icfg.BlockIdx.Map.t ref = ref Icfg.BlockIdx.Map.empty in
@@ -439,8 +440,15 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
           instr_data := Instr.Label.Map.set !instr_data ~key:{ label = instr.label; kind = None } ~data:(state, Simple poststate);
           Simple poststate
         | Entry ->
-          let poststate = Transfer.entry module_ cfg state in
-          Simple poststate
+          if is_imported b.fidx then
+            (* We prefer not to call Transfer.entry here, as it may require
+               inspecting the function instance, which doesn't exist for
+               imported function. The analysis of imported function will be made
+               by Transfer.imported *)
+            Simple state
+          else
+            let poststate = Transfer.entry module_ cfg state in
+            Simple poststate
         | Return instr ->
           let state_before_entry = match Map.find !instr_data { label = instr.label; kind = None } with
             | None ->
