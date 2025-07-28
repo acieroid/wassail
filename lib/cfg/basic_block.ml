@@ -8,6 +8,7 @@ module T = struct
     | Call of 'a Instr.labelled_call
     | Entry
     | Return of 'a Instr.labelled_call (* no-op, annotated with the corresponding call *)
+    | Imported of Wasm_module.func_desc (* Dummy block for imported functions *)
   [@@deriving sexp, compare, equal]
 
   (** A basic block *)
@@ -27,13 +28,18 @@ let to_string ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : s
     | Call instr -> Printf.sprintf "call block: %s" (Instr.call_to_string instr.instr)
     | Entry -> Printf.sprintf "entry block"
     | Return _ -> Printf.sprintf "return block"
+    | Imported desc -> Printf.sprintf "import %ld" desc.idx
     | Data instrs -> Printf.sprintf "data block: %s" (String.concat ~sep:"\\l"
          (List.map instrs
             ~f:(fun instr ->
                 Printf.sprintf "%s" (Instr.data_to_string instr.instr)))))
 
 (** Convert a basic block to its dot representation *)
-let to_dot ?prefix:(prefix : string = "") ?color:(color : string = "") ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : string =
+let to_dot
+    ?prefix:(prefix : string = "")
+    ?color:(color : string = "")
+    ?annot_str:(annot_str : 'a -> string = fun _ -> "")
+    (b : 'a t) : string =
   match b.content with
   | Data instrs ->
     let first_annot = match List.hd instrs with
@@ -73,7 +79,12 @@ let to_dot ?prefix:(prefix : string = "") ?color:(color : string = "") ?annot_st
       (match annot_str instr.annotation_after with
        | "" -> ""
        | s -> Printf.sprintf "|{%s}" s)
-  | Entry | Return _ -> "" (* not represented *)
+  | Imported desc ->
+    Printf.sprintf "block%s%d [shape=Mrecord, color=%s, label=\"{Imported function %ld}\"];"
+      prefix b.idx
+      color
+      desc.idx
+  | Entry | Return _ -> "" (* not represented here *)
   | Control instr ->
     Printf.sprintf "block%s%d [shape=Mrecord, color=%s, label=\"{Control block %s%d|%s<instr%s>%s:%s%s}\"];"
       prefix b.idx
@@ -94,7 +105,7 @@ let all_direct_instruction_labels (b : 'a t) : Instr.Label.Set.t =
   match b.content with
   | Control { label; _ } | Call { label; _ } -> Instr.Label.Set.singleton label
   | Data d -> Instr.Label.Set.of_list (List.map d ~f:(fun i -> i.label))
-  | Entry | Return _ -> Instr.Label.Set.empty
+  | Entry | Return _ | Imported _ -> Instr.Label.Set.empty
 
 (** Return all annotations *)
 let all_annots (b : 'a t) : 'a list =
@@ -102,7 +113,7 @@ let all_annots (b : 'a t) : 'a list =
   | Control { annotation_before; annotation_after; _ }
   | Call { annotation_before; annotation_after; _} -> [annotation_before; annotation_after]
   | Data d -> List.fold_left d ~init:[] ~f:(fun acc i -> [i.annotation_before; i.annotation_after] @ acc)
-  | Entry | Return _ -> []
+  | Entry | Return _ | Imported _ -> []
 
 (** Map a function over annotations of the block *)
 let map_annotations (b : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
@@ -112,6 +123,7 @@ let map_annotations (b : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
         | Data instrs -> Data (List.map instrs ~f:(Instr.map_annotation_data ~f))
         | Return c -> Return (Instr.map_annotation_call c ~f)
         | Entry -> Entry
+        | Imported desc -> Imported desc
       end }
 
 (** Clear the annotation of the block *)

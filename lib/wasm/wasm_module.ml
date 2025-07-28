@@ -5,6 +5,7 @@ module T = struct
   (** A WebAssembly module *)
   type func_desc = {
     idx: Int32.t; (* The index of the imported/exported function *)
+    type_idx : Int32.t;
     name: string;
     arguments: Type.t list;
     returns: Type.t list;
@@ -111,13 +112,13 @@ let of_wasm (m : Wasm.Ast.module_) : t =
       | FuncImport v ->
         let idx = Int32.of_int_exn idx in
         let name = Wasm.Ast.string_of_name import.it.item_name in
+        let type_idx = v.it in
         let arguments, returns =
-          let type_idx = v.it in
           match (List32.nth m.it.types type_idx) with
           | Some {it = Wasm.Types.FuncType (a, b); _} ->
             (List.map a ~f:Type.of_wasm, List.map b ~f:Type.of_wasm)
           | None -> failwith "of_wasm: nth error when looking for imports" in
-        Some { idx; name; arguments; returns }
+        Some { idx; type_idx; name; arguments; returns }
       | _ -> None) in
   let nfuncimports = List32.length imported_funcs in
   let imported_globals = List.filter_map m.it.imports ~f:(fun import -> match import.it.idesc.it with
@@ -147,6 +148,10 @@ let of_wasm (m : Wasm.Ast.module_) : t =
         let arguments, returns = ftype idx in
         Some {
           idx;
+          type_idx = begin match List32.nth funcs Int32.(idx-nfuncimports) with
+            | Some f -> f.type_idx
+            | None -> failwith (Printf.sprintf "of_wasm: nth error when looking for function type (function %ld unfound in type list of length %ld)" Int32.(idx-nfuncimports) (List32.length funcs))
+          end;
           name = Wasm.Ast.string_of_name export.it.name;
           arguments;
           returns;

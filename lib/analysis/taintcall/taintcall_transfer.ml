@@ -106,3 +106,6 @@ let entry (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (state : Stat
 
 let return (_module : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (state_after_call : State.t) : State.t =
   state_after_call
+
+let imported (_module_ : Wasm_module.t) (_desc : Wasm_module.func_desc) : State.t -> State.t =
+  failwith "TODO: taintcall imported"

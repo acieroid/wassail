@@ -369,10 +369,55 @@ let build (module_ : Wasm_module.t) (fidx : Int32.t) : unit Cfg.t =
     label_to_enclosing_block_id = compute_enclosing_block_id (List.map ~f:snd (IntMap.to_alist basic_blocks));
   }
 
+let build_imported (module_ : Wasm_module.t) (desc : Wasm_module.func_desc) : unit Cfg.t =
+  (* An imported function only contains one dummy basic block and a final merge block *)
+  let imported_block = Basic_block.{
+      idx = 0;
+      fidx = desc.idx;
+      content = Imported desc
+    } in
+  let last_block = Basic_block.{
+      idx = 1;
+      fidx = desc.idx;
+      content = Control {
+        instr = Merge;
+        label = { section = MergeInFunction desc.idx; id = 1 };
+        line_number = -1;
+        annotation_before = ();
+        annotation_after = ();
+      };
+    } in
+  Cfg.{
+    exported = false;
+    name = desc.name;
+    idx = desc.idx;
+    local_types = []; (* TODO: or arguments? *)
+    type_idx = desc.type_idx;
+    global_types = module_.imported_global_types @ module_.global_types;
+    arg_types = desc.arguments;
+    return_types = desc.returns;
+    basic_blocks = IntMap.of_alist_exn [
+        (imported_block.idx, imported_block);
+        (last_block.idx, last_block);
+      ];
+    edges = IntMap.of_alist_exn [(imported_block.idx, Edge.Set.singleton (last_block.idx, None))];
+    back_edges = IntMap.of_alist_exn [(last_block.idx, Edge.Set.singleton (imported_block.idx, None))];
+    entry_block = imported_block.idx;
+    exit_block = last_block.idx;
+    loop_heads = IntSet.empty;
+    instructions = [];
+    label_to_instr = Instr.Label.Map.empty;
+    block_arities = Instr.Label.Map.empty;
+    label_to_enclosing_block = Instr.Label.Map.empty;
+    label_to_enclosing_block_id = Instr.Label.Map.empty;
+  }
+
 let build_all (mod_ : Wasm_module.t) : unit Cfg.t Int32Map.t =
-  Int32Map.of_alist_exn (List.mapi mod_.funcs ~f:(fun i _ ->
+  Int32Map.of_alist_exn
+    ((List.map mod_.imported_funcs ~f:(fun desc -> (desc.idx, build_imported mod_ desc))) @
+      (List.mapi mod_.funcs ~f:(fun i _ ->
       let faddr = Int32.(mod_.nfuncimports + (Int32.of_int_exn i)) in
-      (faddr, build mod_ faddr)))
+      (faddr, build mod_ faddr))))
 
 module Test = struct
   (** Check that building the CFG for each function of a .wat file succeeds.

@@ -115,6 +115,7 @@ module Make
     (* Applies the transfer function to an entire block *)
     let transfer (b : 'a Basic_block.t) (state : Transfer.State.t) : Result.t =
       match b.content with
+      | Imported _ -> Simple state (* we don't care about imported function for an intra analysis *)
       | Data instrs ->
         Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
             let poststate = Transfer.data module_ cfg instr prestate in
@@ -256,6 +257,7 @@ module MakeSumm
     (* Applies the transfer function to an entire block *)
     let transfer (b : 'a Basic_block.t) (state : Transfer.State.t) : Result.t =
       match b.content with
+      | Imported _ -> Simple state (* we don't care about analyzing the import here, as the summary will be constructed by analyze_import *)
       | Data instrs ->
         Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
             let poststate = Transfer.data module_ cfg instr prestate in
@@ -385,7 +387,7 @@ module SummaryCallAdapter (Transfer : Transfer.SUMMARY_TRANSFER)
       let targets = Call_graph.indirect_call_targets module_ typ in
       (* Apply the summaries and joins them *)
       List.fold_left targets
-        ~init:state
+        ~init:state (* TODO: should be bottom *)
         ~f:(fun acc idx -> Transfer.State.join (apply_summary idx arity state) acc)
 end
 
@@ -425,7 +427,8 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
     let transfer (b : 'a Basic_block.t) (state : Transfer.State.t) : Result.t =
        Printf.printf "Analysis of block %ld_%d from state %s\n" b.fidx b.idx (Transfer.State.to_string state);
       let cfg = Map.find_exn icfg.cfgs b.fidx in
-      let result = match b.content with
+      let result : Result.t = match b.content with
+        | Imported desc -> Simple (Transfer.imported module_ desc state)
         | Data instrs ->
           Result.Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
               let poststate = Transfer.data module_ cfg instr prestate in

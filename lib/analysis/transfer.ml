@@ -49,6 +49,7 @@ module type TRANSFER_BASE = sig
     (* the resulting state after applying the transfer function *)
     -> [ `Simple of State.t (* This is the state for the only successor *)
        | `Branch of State.t * State.t ] (* In case of br_if, there is one "true" and one "false" successor *)
+
 end
 
 module type INTRA_ONLY_TRANSFER = sig
@@ -109,4 +110,11 @@ module type CLASSICAL_INTER_TRANSFER = sig
     -> State.t (* The state before the call. Often useful to have *)
     -> State.t (* The state after the call, before the return to restore the stack *)
     -> State.t (* the resulting state after applying the transfer function *)
+
+  (** Transfer function for imported functions *)
+  val imported
+    : Wasm_module.t (* the wasm module *)
+    -> Wasm_module.func_desc (* the imported function *)
+    -> State.t (* the state at the entry of the function *)
+    -> State.t (* the state resulting from the function *)
 end

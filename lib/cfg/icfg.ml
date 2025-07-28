@@ -161,7 +161,7 @@ module ICFG = struct
         callees |> Set.to_list
         |> List.filter_map ~f:(fun { target = callee; _ } ->
             match Map.find icfg.cfgs callee with
-            | None -> None (* A return after an imported function, we consider it has no predecessor as there is no function body *)
+            | None -> failwith (Printf.sprintf "Unexpected: no CFG found for function %ld" callee)
             | Some callee_cfg ->
               (* The predecessor must be a regular node (a Return cannot be preceded by another Return or an Entry, there must be an instruction *)
               (* XXX: what if there's an empty function? It is technically possible, but I don't see it happen in practice *)
@@ -260,9 +260,12 @@ let to_dot
   (* Each CFG is put into a cluster *)
   let clusters = List.map (Int32Map.to_alist icfg.cfgs) ~f:(fun (fidx, cfg) ->
       let prefix = Printf.sprintf "%ld_" fidx in
+      Printf.printf "function %ld\n" fidx;
+      Printf.printf "basic blocks: %s\n" (String.concat ~sep:"," (List.map ~f:Int.to_string (IntMap.keys cfg.basic_blocks)));
       (* The nodes are the same than the CFG ones, but we introduce extra nodes for returns *)
       let nodes = String.concat ~sep:"\n" (List.concat_map (IntMap.to_alist cfg.basic_blocks)
                                              ~f:(fun (_, b) ->
+                                                 Printf.printf "node: %s\n" (Basic_block.to_string b);
                                                  let color =
                                                    if b.idx = cfg.entry_block then
                                                      "green"
@@ -271,7 +274,7 @@ let to_dot
                                                    else
                                                      "black" in
                                                  (Basic_block.to_dot ~prefix ~color ~annot_str b) ::
-                                                 (* If this is a call node, we add an extra return edge *)
+                                                 (* If this is a call node, we add an extra return edge. TODO: there is already a block (or should be) *)
                                                  (if Basic_block.is_call b then
                                                    [Printf.sprintf "block%ld_%dreturn [shape=Mrecord, label=\"{Return %ld_%d}\"];" fidx b.idx fidx b.idx]
                                                  else

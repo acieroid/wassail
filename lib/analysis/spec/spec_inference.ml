@@ -336,6 +336,15 @@ module Spec_inference
       let vstack = (List.take stack_after (List.length returns)) @ (List.drop stack_before (List.length args)) in
       State.NotBottom { after with vstack; locals }
 
+  let imported (_module_ : Wasm_module.t) (desc : Wasm_module.func_desc) : State.t -> State.t =
+    assert (List.length desc.returns <= 1); (* we could support more than one return, but I haven't seen it used in practice *)
+    State.lift (fun state ->
+        (* TODO: unsound, we keep globals / memory from before. We probably shouldn't *)
+        { state with
+          vstack = [Var.Return desc.idx];
+          locals = [];
+        }
+      )
 end
 
 module Inter = Intra.MakeClassicalInter(Spec_inference)

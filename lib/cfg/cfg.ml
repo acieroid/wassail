@@ -90,9 +90,11 @@ module Cfg = struct
     instructions: Instr.Label.t list;
     (** Maps labels to their actual instructions *)
     label_to_instr: unit Instr.t Instr.Label.Map.t;
-    (** The arity of each block, indexed by the label of the block. The arity is
-        the number of values expected on the stack before the block, and the
-        number of values remaining on the stack after the execution of block *)
+    (** The arity of each block (WebAssembly block, so loop and block
+        instructions, not basic block), indexed by the label of the block. The
+        arity is the number of values expected on the stack before the block,
+        and the number of values remaining on the stack after the execution of
+        block *)
     block_arities: (int * int) Instr.Label.Map.t;
     (** Maps labels to the label of the block that contains the corresponding instruction *)
     label_to_enclosing_block: Instr.Label.t Instr.Label.Map.t;
@@ -162,6 +164,7 @@ module Cfg = struct
                       | Call instr -> ("c", Instr.call_to_string instr.instr)
                       | Entry -> ("e", "")
                       | Return instr -> ("r", Instr.call_to_string instr.instr)
+                      | Imported desc -> ("i", Printf.sprintf "import %ld" desc.idx)
                       | Control instr -> ("c", Instr.control_to_short_string instr.instr)
                       | Data instrs -> ("d", List.map instrs ~f:(fun i -> Instr.data_to_string i.instr) |> String.concat ~sep:":" )
                     in Printf.sprintf "%d:%s:%s" idx t content)
@@ -261,7 +264,7 @@ module Cfg = struct
         match block.content with
         | Control i -> Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Control i)
         | Call i -> Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Call i)
-        | Entry | Return _ -> acc
+        | Entry | Return _ | Imported _ -> acc
         | Data d -> List.fold_left d ~init:acc ~f:(fun acc i ->
             Instr.Label.Map.add_exn acc ~key:i.label ~data:(Instr.Data i)))
 
@@ -310,12 +313,14 @@ module Cfg = struct
   let body (cfg : 'a t) : unit Instr.t list =
     List.map cfg.instructions ~f:(fun l -> Instr.Label.Map.find_exn cfg.label_to_instr l)
 
+  (* TODO: why not just keep this as block annotation stored in memory?! *)
   let rec state_before_block (cfg : 'a t) (block_idx : int) (entry_state : 'a) : 'a =
     let block = find_block_exn cfg block_idx in
     match block.content with
     | Control i -> Instr.annotation_before (Control i)
     | Call i -> Instr.annotation_before (Call i)
     | Data (i :: _) -> Instr.annotation_before (Data i)
+    | Imported _ -> entry_state
     | Data [] | Entry | Return _ -> begin match non_empty_predecessors cfg block_idx with
         | [] ->
           begin match predecessors cfg block_idx with
@@ -337,6 +342,7 @@ module Cfg = struct
     match block.content with
     | Control i -> Instr.annotation_after (Control i)
     | Call i -> Instr.annotation_after (Call i)
+    | Imported _ -> failwith "TODO: should not look state after import"
     | Data [] | Entry | Return _ -> begin match non_empty_predecessors cfg block_idx with
         | [] -> begin match predecessors cfg block_idx with
             | [] ->
