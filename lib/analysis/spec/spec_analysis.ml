@@ -404,6 +404,27 @@ module TestInter = struct
         stack_size_at_entry = Instr.Label.Map.empty;
       })
 
+  let%test_unit "interprocedural spec analysis works with interleaved function calls and a block" =
+    final_spec_should_be "(module
+  (type (;0;) (func))
+  (type (;1;) (func (result i32)))
+  (func (;0;) (type 0)
+    block  ;; label = @1
+      call 1 ;; needed
+      drop
+      i32.const 0
+      br_if 0 (;@1;)
+    end)
+  (func (;1;) (type 1) (result i32) i32.const 0))" 0l (Spec_domain.NotBottom {
+        vstack = [];
+        locals = [];
+        globals = [];
+        memory = Var.OffsetMap.empty;
+        stack_size_at_entry = Instr.Label.Map.singleton Instr.Label.{
+            section = Function 0l;
+            id = 0;
+          } 0;
+      })
 
   let%test_unit "interprocedural spec works on all benchmarks" =
     List.iter [

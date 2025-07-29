@@ -130,10 +130,11 @@ module Spec_inference
     : State.t -> [ `Simple of State.t | `Branch of State.t * State.t ] =
     State.wrap ~default:(`Simple bottom) (function state ->
       let state = compute_stack_size_at_entry cfg i.label state in
-      let get_block_return_stack_size n =
+      let get_block_return_stack_size (n : Int32.t) : int =
         let stack_size_at_entry = match Cfg.find_enclosing_block cfg i.label with
           | None -> 0 (* the stack is initially empty *)
-          | Some block_label -> begin match Instr.Label.Map.find state.stack_size_at_entry block_label with
+          | Some block_label ->
+            begin match Instr.Label.Map.find state.stack_size_at_entry block_label with
               | Some size -> size
               | None -> failwith "Spec inference: no stack size computed at entry of block"
             end in
@@ -313,8 +314,10 @@ module Spec_inference
     end;
     merge module_ cfg block (List.map ~f:snd states)
 
-  let call_inter (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (state : State.t) : State.t =
-    state
+  let call_inter (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_call) : State.t -> State.t =
+    State.lift (function state ->
+        let state = compute_stack_size_at_entry cfg i.label state in
+        state)
 
   let entry (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : State.t -> State.t =
     let funcinst = Wasm_module.get_funcinst module_ cfg.idx in

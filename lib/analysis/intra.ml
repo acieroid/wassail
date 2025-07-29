@@ -517,25 +517,19 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
       else
         let block_idx = Set.min_elt_exn worklist in
         let block = Icfg.find_block_exn icfg block_idx in
-        Printf.printf "-----------------------\n Analyzing block %s\n" (Icfg.BlockIdx.to_string block_idx);
+        Printf.printf "-----------------------\nAnalyzing block %s\n" (Icfg.BlockIdx.to_string block_idx);
         let out_state = analyze_block block_idx block in
         Log.debug (Printf.sprintf "out_state is: %s\n" (Result.to_string out_state));
         (* Has out state changed? *)
         let previous_out_state = after_block block_idx in
-        Printf.printf "out_state is %s and previous is %s, are they equal? %d\n"
-          (Result.to_string out_state)
-          (Result.to_string previous_out_state)
-          (Result.compare out_state previous_out_state);
         match out_state with
         | st when Result.compare previous_out_state st = 0 ->
           (* Didn't change (or stayed bottom), we can safely ignore the successors *)
           fixpoint (IntSet.remove worklist block_idx) (iteration+1)
         | Simple s when Transfer.State.equal s Transfer.bottom ->
-          Printf.printf "stayed bottom\n";
           (* Didn't change (or stayed bottom), we can safely ignore the successors *)
           fixpoint (IntSet.remove worklist block_idx) (iteration+1)
         | _ ->
-          Printf.printf "fall through\n";
           (* Update the out state in the analysis results.
              We join with the previous results *)
           let new_out_state =
@@ -543,10 +537,6 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
             if Icfg.is_loop_head icfg block_idx then
               Result.widen previous_out_state (Result.join previous_out_state out_state)
             else begin
-              Printf.printf "joining %s and %s at %s\n"
-                (Result.to_string previous_out_state)
-                (Result.to_string out_state)
-                (Icfg.BlockIdx.to_string block_idx);
               Result.join previous_out_state out_state
             end
           in

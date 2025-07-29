@@ -14,7 +14,7 @@ module SpecWithoutBottom = struct
   [@@deriving compare, equal]
 
   let to_string (s : t) : string =
-    Printf.sprintf "[%s];[%s]"
+    Printf.sprintf "stack:[%s];locals:[%s]"
       (String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
       (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))
     (* Printf.sprintf "{\nvstack: [%s]\nlocals: [%s]\nglobals: [%s]\nmemory: [%s]\nsize_entry: %s}"
