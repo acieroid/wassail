@@ -428,15 +428,15 @@ module TestInter = struct
 
   let%test_unit "interprocedural spec works on all benchmarks" =
     List.iter [
-      (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *)
+      (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *) (* not enough elements in var list *)
       ("../../../benchmarks/benchmarksgame/fankuchredux.wat", 1l);
-      (*  ("../../../benchmarks/benchmarksgame/fasta.wat", 5l); *)
-      (* ("../../../benchmarks/benchmarksgame/k-nucleotide.wat", 4l); *)
+      (*  ("../../../benchmarks/benchmarksgame/fasta.wat", 5l); *) (* not enough elements in var list *)
+      (* ("../../../benchmarks/benchmarksgame/k-nucleotide.wat", 4l); *) (* not enough elements in var list *)
       ("../../../benchmarks/benchmarksgame/mandelbrot.wat", 1l);
       ("../../../benchmarks/benchmarksgame/nbody.wat", 1l);
-      (* ("../../../benchmarks/benchmarksgame/reverse-complement.wat", 6l); *)
+      (* ("../../../benchmarks/benchmarksgame/reverse-complement.wat", 6l); *) (* not enough elements in var list *)
       ("../../../benchmarks/benchmarksgame/spectral-norm.wat", 1l);
-      (* ("../../../benchmarks/polybench-clang/2mm.wat", 5l);
+      (* ("../../../benchmarks/polybench-clang/2mm.wat", 5l); (* not enough elements in var list *)
       ("../../../benchmarks/polybench-clang/3mm.wat", 5l);
       ("../../../benchmarks/polybench-clang/adi.wat", 5l);
       ("../../../benchmarks/polybench-clang/atax.wat", 5l);

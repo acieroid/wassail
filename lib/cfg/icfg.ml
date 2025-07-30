@@ -274,9 +274,9 @@ let to_dot
                                                    else
                                                      "black" in
                                                  (Basic_block.to_dot ~prefix ~color ~annot_str b) ::
-                                                 (* If this is a call node, we add an extra return edge. TODO: there is already a block (or should be) *)
+                                                 (* If this is a call node, we add an extra return edge. *)
                                                  (if Basic_block.is_call b then
-                                                   [Printf.sprintf "block%ld_%dreturn [shape=Mrecord, label=\"{Return %ld_%d}\"];" fidx b.idx fidx b.idx]
+                                                   [Printf.sprintf "block%ld_%dreturn [shape=rectangle, label=<<table border=\"0\"><tr><td>Return %ld_%d</td></tr></table>>];" fidx b.idx fidx b.idx]
                                                  else
                                                    []))) in
       (* The edges of the CFGs, with the edges from call dashed *)
