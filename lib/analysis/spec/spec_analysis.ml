@@ -259,6 +259,31 @@ module TestIntra = struct
     let _ = Spec_inference.Intra.analyze module_ cfg () in
     ()
 
+  let%test_unit "spec inference on br_if with different return should not fail" =
+    let program = "(module
+  (type (;0;) (func (result i32))) ;; result needed
+  (type (;1;) (func))
+  (func (;0;) (type 1)
+    (local i32 i32)
+    call 2
+    drop
+    call 1)
+  (func (;1;) (type 1)
+    block  ;; label = @1
+      i32.const 0 ;; [0]
+      call 2      ;; [0, 0]
+      br_if 1 (;@1;) ;; here, if this is true, we return from the block with an empty stack; if this is false, we keep an element on the stack
+      drop
+    end
+    )
+  (func (;2;) (type 0) (result i32) i32.const 1)
+  (table (;0;) 5 5 funcref)
+  (global (;0;) (mut i32) (i32.const 68304)))" in
+    let module_ = Wasm_module.of_string program in
+    let cfg = Cfg_builder.build module_ 1l in
+    let _ = Spec_inference.Intra.analyze module_ cfg () in
+    ()
+
 end
 
 module TestInter = struct

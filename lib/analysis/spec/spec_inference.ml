@@ -67,16 +67,21 @@ module Spec_inference
   let set (n : Int32.t) (l : Var.t list) (v : Var.t) = List.mapi l ~f:(fun i v' -> if i = (Int32.to_int_exn n) then v else v')
 
   let rec compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : State.SpecWithoutBottom.t) : State.SpecWithoutBottom.t =
+    Printf.printf "===> compute_stack_size_at_entry %s with state %s\n" (Instr.Label.to_string label) (State.SpecWithoutBottom.to_string state);
     match Cfg.find_enclosing_block cfg label with
     | None -> (* no enclosing block, the stack is initially empty at the beginning of the function, we ignore that *)
+      Printf.printf "no enclosing block\n";
       state
     | Some block_label ->
+      Printf.printf "enclosing block is: %s\n" (Instr.Label.to_string block_label);
       begin match Instr.Label.Map.find state.stack_size_at_entry block_label with
         | None ->
+          Printf.printf "no info found, using state stack size\n";
           (* We are at the first instruction, the current stack size is the stack size at entry *)
           let size = List.length state.vstack in
           (* It could be that this is e.g., a block contained in an if. The block and loop instructions are not reified in the CFG, and we therefore have to manually map them to their parent for stack size computation. This is done by a recursive call: if block 1 is an if, containing block 2, a block, containing an instruction with `label`, we compute the stack size at etnry of both block 1 and 2 from the current state. *)
           let state = compute_stack_size_at_entry cfg block_label state in
+          Printf.printf "setting stack size at entry of %s to be %d\n" (Instr.Label.to_string block_label) size;
           { state with
             stack_size_at_entry = Instr.Label.Map.set state.stack_size_at_entry ~key:block_label ~data:size }
         | Some _ ->
@@ -131,6 +136,7 @@ module Spec_inference
     State.wrap ~default:(`Simple bottom) (function state ->
       let state = compute_stack_size_at_entry cfg i.label state in
       let get_block_return_stack_size (n : Int32.t) : int =
+        (* The return stack size of a block is its out arity + the stack size at entry *)
         let stack_size_at_entry = match Cfg.find_enclosing_block cfg i.label with
           | None -> 0 (* the stack is initially empty *)
           | Some block_label ->
@@ -138,6 +144,7 @@ module Spec_inference
               | Some size -> size
               | None -> failwith "Spec inference: no stack size computed at entry of block"
             end in
+        Printf.printf "stack size at entry = %d\n" stack_size_at_entry;
         let out_arity = match Cfg.find_nth_parent_block cfg i.label n with
           | Some block_label ->
             let arity = Cfg.block_arity cfg block_label in
@@ -152,8 +159,10 @@ module Spec_inference
       | Br n ->
         `Simple (State.NotBottom ({ state with vstack = take state.vstack (get_block_return_stack_size n) }))
       | BrIf n ->
-        let state' = State.NotBottom ({ state with vstack = take (drop 1 state.vstack) (get_block_return_stack_size n) }) in
-        `Branch (state', state')
+        Printf.printf "br_if: dropping 1 and taking %d from %s\n" (get_block_return_stack_size n) (State.SpecWithoutBottom.to_string state);
+        let true_state = State.NotBottom ({ state with vstack = take (drop 1 state.vstack) (get_block_return_stack_size n) }) in
+        let false_state = State.NotBottom ({ state with vstack = drop 1 state.vstack }) in
+        `Branch (true_state, false_state)
       | If _ ->
         let state' = State.NotBottom ({ state with vstack = drop 1 state.vstack }) in
         `Branch (state', state')
@@ -334,10 +343,10 @@ module Spec_inference
     match state_before, state_after with
     | Bottom, _ -> Printf.printf "state before is bottom\n"; Bottom
     | _, Bottom -> Printf.printf "state after is bottom\n"; Bottom
-    | NotBottom { vstack = stack_before; locals; _ }, NotBottom ({ vstack = stack_after; _ } as after) ->
+    | NotBottom { vstack = stack_before; locals; stack_size_at_entry; _ }, NotBottom ({ vstack = stack_after; _ } as after) ->
       let args, returns = Instr.call_types instr in
       let vstack = (List.take stack_after (List.length returns)) @ (List.drop stack_before (List.length args)) in
-      State.NotBottom { after with vstack; locals }
+      State.NotBottom { after with vstack; locals; stack_size_at_entry }
 
   let imported (_module_ : Wasm_module.t) (desc : Wasm_module.func_desc) : State.t -> State.t =
     assert (List.length desc.returns <= 1); (* we could support more than one return, but I haven't seen it used in practice *)

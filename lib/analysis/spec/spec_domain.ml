@@ -14,9 +14,10 @@ module SpecWithoutBottom = struct
   [@@deriving compare, equal]
 
   let to_string (s : t) : string =
-    Printf.sprintf "stack:[%s];locals:[%s]"
+    Printf.sprintf "stack:[%s];locals:[%s];sizes:[%s]"
       (String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
       (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))
+       (String.concat ~sep:", " (List.map ~f:(fun (k, v) -> Printf.sprintf "%s: %d" (Instr.Label.to_string k) v) (Instr.Label.Map.to_alist s.stack_size_at_entry)))
     (* Printf.sprintf "{\nvstack: [%s]\nlocals: [%s]\nglobals: [%s]\nmemory: [%s]\nsize_entry: %s}"
       (String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
       (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))
@@ -25,16 +26,13 @@ module SpecWithoutBottom = struct
        (String.concat ~sep:", " (List.map ~f:(fun (k, v) -> Printf.sprintf "%s: %d" (Instr.Label.to_string k) v) (Instr.Label.Map.to_alist s.stack_size_at_entry))) *)
 
   let to_dot_string (s : t) : string =
-    let stack =
-    "stack:|" ^
-    (String.concat ~sep:"|" (List.map s.vstack ~f:(fun v ->
-         Printf.sprintf "<%s>%s" (Var.to_string v) (Var.to_string v)))) in
+    let stack = String.concat ~sep:"," (List.map s.vstack ~f:Var.to_string) in
     let locals =
     (if List.length s.locals > 0 then
-       "|locals:|" ^ (String.concat ~sep:"|" (List.map s.locals ~f:Var.to_string))
+       String.concat ~sep:"," (List.map s.locals ~f:Var.to_string)
      else
        "") in
-    stack ^ locals
+    Printf.sprintf "<tr><td>%s</td><td>%s</td></tr>" stack locals
   (* (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))*)
   (* (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v)))) *)
 
