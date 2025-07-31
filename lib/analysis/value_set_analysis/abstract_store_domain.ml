@@ -173,9 +173,10 @@ let _to_string (vs : t) : string =
   Printf.sprintf "[%s]" (String.concat ~sep:"; "
                           (List.map (Variable.Map.to_alist vs)
                             ~f:(fun (k, t) ->
-                                Printf.sprintf "%s ↦ %s"
-                                  (Variable.to_string k)
-                                  (Value.to_string t)))) (* TODO: maybe no need to print booleans in the end to save space? *)
+                                let var_string = Variable.to_string k in
+                                let val_string = Value.to_string t in
+                                if String.equal var_string val_string then var_string else
+                                  Printf.sprintf "%s ↦ %s" var_string val_string)))
 
 let to_string (vs : t) : string = 
   if !Value_set_options.show_intermediates then

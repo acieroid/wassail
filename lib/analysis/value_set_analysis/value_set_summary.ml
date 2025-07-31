@@ -38,11 +38,11 @@ let to_string (s : t) : string =
     | None | Some (Abstract_store_domain.Value.ValueSet RIC.Bottom) -> []
     | Some Abstract_store_domain.Value.Boolean _ -> assert false
     | Some (Abstract_store_domain.Value.ValueSet addresses) ->
-      ["AFFECTED MEMORY:" ^ RIC.to_string addresses ^ ", " ^
+      ["AFFECTED MEMORY:" ^ RIC.to_string addresses ^ "\n\t" ^
       "LINEAR MEMORY:" ^ Abstract_store_domain.to_string memory]
     end
     @ if !Value_set_options.disjoint_stack then ["Stack:" ^ Abstract_store_domain.to_string stack] else []
-  in String.concat ~sep:", " string_list
+  in "\t" ^ String.concat ~sep:"\n\t" string_list
   
 
 (* TODO: do I need to mention stack and memory? *)
@@ -91,11 +91,18 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
       | _ :: [] -> Variable.Map.set summary ~key:(Variable.Var Var.Return) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top)
       | _ -> failwith "more than one return value"
       end in
-    (* Linear memory has been modified, but we don't know how: *)
-    let summary = Variable.Map.set summary ~key:(Variable.Affected) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top) in
-    let summary = Variable.Map.set summary ~key:(Variable.entire_memory) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top) in
-    (* Stack portion of the linear memory is assumed to not have been changed *)
-    Variable.Map.set summary ~key:(Variable.entire_stack) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
+    if !Value_set_options.ignore_imports then 
+      (* Linear memory is considered to be unchanged *)
+      let summary = Variable.Map.set summary ~key:(Variable.Affected) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom) in
+      let summary = Variable.Map.set summary ~key:(Variable.entire_memory) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom) in
+      (* Stack portion of the linear memory is assumed to not have been changed *)
+      Variable.Map.set summary ~key:(Variable.entire_stack) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
+    else
+      (* Linear memory has been modified, but we don't know how: *)
+      let summary = Variable.Map.set summary ~key:(Variable.Affected) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top) in
+      let summary = Variable.Map.set summary ~key:(Variable.entire_memory) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top) in
+      (* Stack portion of the linear memory is assumed to not have been changed *)
+      Variable.Map.set summary ~key:(Variable.entire_stack) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
   | "fd_close" | "proc_exit" ->
     (* Globals are unchanged *)
     let globals = List.init (Int32.to_int_exn nglobals) ~f:(fun i -> Variable.Var (Var.Global i)) in
@@ -124,11 +131,18 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
       | _ :: [] -> Variable.Map.set summary ~key:(Variable.Var Var.Return) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top)
       | _ -> failwith "more than one return value"
       end in
-    (* Linear memory may have been modified, but we don't know how: *)
-    let summary = Variable.Map.set summary ~key:(Variable.Affected) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top) in
-    let summary = Variable.Map.set summary ~key:(Variable.entire_memory) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top) in
-    (* Stack portion of the linear memory is assumed to not have been changed *)
-    Variable.Map.set summary ~key:(Variable.entire_stack) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
+    if !Value_set_options.ignore_imports then 
+      (* Linear memory is considered to be unchanged *)
+      let summary = Variable.Map.set summary ~key:(Variable.Affected) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom) in
+      let summary = Variable.Map.set summary ~key:(Variable.entire_memory) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom) in
+      (* Stack portion of the linear memory is assumed to not have been changed *)
+      Variable.Map.set summary ~key:(Variable.entire_stack) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
+    else
+      (* Linear memory may have been modified, but we don't know how: *)
+      let summary = Variable.Map.set summary ~key:(Variable.Affected) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top) in
+      let summary = Variable.Map.set summary ~key:(Variable.entire_memory) ~data:(Abstract_store_domain.Value.ValueSet RIC.Top) in
+      (* Stack portion of the linear memory is assumed to not have been changed *)
+      Variable.Map.set summary ~key:(Variable.entire_stack) ~data:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
 
 let initial_summaries 
     (cfgs : 'a Cfg.t Int32Map.t) 

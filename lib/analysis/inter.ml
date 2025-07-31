@@ -46,6 +46,11 @@ module Make (Intra : Intra.INTRA) (*: INTER*) = struct
             | None -> failwith "Inter: can't find CFG" in
           Log.info
             (Printf.sprintf "Analyzing cfg %s (name: %s)\n" (Int32.to_string cfg_idx) cfg.name);
+          let () =
+            let oc = Out_channel.create ~append:true "store_types.txt" in
+            Out_channel.output_string oc (Printf.sprintf "==================================(function %s: %s)" (Int32.to_string cfg_idx) cfg.name ^ "\n");
+            Out_channel.close oc;
+          in
           (* Perform intra-procedural analysis *)
           let (results, summary) = Intra.analyze module_ cfg summaries in
           (* Check difference with previous state, if there was any *)

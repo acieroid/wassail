@@ -101,14 +101,24 @@ let value_set_inter =
       and show_intermediates = flag "--all" no_arg ~doc:"Show all intermediate variables" 
       and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" 
       and disjoint_stack = flag "--stack" no_arg ~doc:"Consider stack disjoint from rest of linear memory" 
+      and ignore_imports = flag "--ignore-imports" no_arg ~doc:"Ignore changes made by imported functions"
       and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
       fun () ->
         if show_intermediates then Value_set.Options.show_intermediates := true;
         if narrow then Intra.narrow_option := true;
         if trace then Value_set.Options.print_trace := true;
         if disjoint_stack then Value_set.Options.disjoint_stack := true;
+        if ignore_imports then Value_set.Options.ignore_imports := true;
         let results = Value_set.analyse_inter (Wasm_module.of_file filename) sccs in
-        let print = (fun fid (_, _, summary) -> Printf.printf "function %ld: %s\n" fid (Value_set.Summary.to_string summary)) in
+        let function_name (summary : Spec.t Wassail.Cfg.t * Value_set.Domain.t Wassail.Cfg.t * Value_set.Domain.t) : string =
+          let name =
+            match summary with
+            | (cfg, _, _) -> cfg.name in
+          if String.equal "<unexported>" name then "" else "(" ^ name ^ ")" in
+        let get_summary (summary : Spec.t Wassail.Cfg.t * Value_set.Domain.t Wassail.Cfg.t * Value_set.Domain.t) : Value_set.Domain.t =
+          match summary with
+          | (_, _, summary) -> summary in
+        let print = (fun fid summary -> Printf.printf "function %ld %s: \n%s\n" fid (function_name summary) (Value_set.Summary.to_string (get_summary summary))) in
         Printf.printf "\nInterprocedural value-set analysis of file %s\n=======================================================\n" filename;
         IntMap.iteri results ~f:(fun ~key:id ~data:summary -> print id summary)
   )

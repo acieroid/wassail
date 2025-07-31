@@ -35,28 +35,19 @@ let analyse_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Abstra
           (String.concat ~sep:", " (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
       (* Run the value-set analysis *)
       let annotated_scc = scc in
-       let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_spec_cfg, _value_set_cfg, summary) -> summary) in
-       let summaries' = List.fold_left wasm_mod.imported_funcs
-           ~init:summaries
-           ~f:(fun summaries (idx, name, (args, ret)) ->
-               Int32Map.set summaries ~key:idx ~data:(Summary.of_import name wasm_mod.nglobals args ret)) in
-       let results = Inter.analyze wasm_mod annotated_scc summaries' in
-       Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
-           let spec_cfg = Int32Map.find_exn scc idx in
-           (spec_cfg, taint_cfg, summary)))
-
-(* let check (expected : Summary.t) (actual : Summary.t) : bool =
-  if Summary.subsumes actual expected then
-    if Summary.equal actual expected then
-      true
-    else begin
-      Printf.printf "\n[IMPRECISION] summaries not equal:\nexpected: %s\nactual: %s\n" (Summary.to_string expected) (Summary.to_string actual);
-      true (* not equal, but it does subsume so the test does not fail *)
-    end
-  else begin
-    Printf.printf "\nsummaries does not subsume:\nexpected: %s\nactual: %s\n" (Summary.to_string expected) (Summary.to_string actual);
-    false
-  end *)
+      let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_spec_cfg, _value_set_cfg, summary) -> summary) in
+      let summaries' = List.fold_left wasm_mod.imported_funcs
+          ~init:summaries
+          ~f:(fun summaries (idx, name, (args, ret)) ->
+              Int32Map.set summaries ~key:idx ~data:(Summary.of_import name wasm_mod.nglobals args ret)) in
+      let _ =
+        let oc = Out_channel.create "store_types.txt" in
+        Out_channel.close oc
+      in
+      let results = Inter.analyze wasm_mod annotated_scc summaries' in
+      Int32Map.mapi results ~f:(fun ~key:idx ~data:(value_set_cfg, summary) ->
+          let spec_cfg = Int32Map.find_exn scc idx in
+          (spec_cfg, value_set_cfg, summary)))
 
 module Test = struct
   let%test "add.wat" =

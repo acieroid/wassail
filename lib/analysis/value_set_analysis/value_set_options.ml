@@ -6,3 +6,6 @@ let print_trace = ref false
 
 (** Set to true if you want to separate the stack from the heap in the linear memory *)
 let disjoint_stack = ref false
+
+(** Set to true to ignore modifications made by imported functions *)
+let ignore_imports = ref false
