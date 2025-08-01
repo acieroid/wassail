@@ -7,6 +7,7 @@
 *)
 open Core
 open Reduced_interval_congruence 
+open Helpers
 
 module Value = struct
   type t =
@@ -74,7 +75,7 @@ let get (store : t) ~(var : Variable.t) : Value.t =
     | None ->
       ValueSet 
         (match var with
-        | Affected -> RIC.Bottom
+        | Affected | Accessed -> RIC.Bottom
         | Var Const I32 n -> Reduced_interval_congruence.RIC.ric (0, Int 0, Int 0, ("", Option.value_exn (Int32.to_int n)))
         | Var Const _ -> Reduced_interval_congruence.RIC.Top
         (* | Var Merge _ -> RIC.Bottom *)
@@ -256,7 +257,7 @@ let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : R
     (if Variable.is_linear_memory var then
       let untouched_addresses =
         match var with
-        | Var _ | Affected | Stack _-> assert false
+        | Var _ | Affected | Accessed | Stack _-> assert false
         | Mem addr ->
           if !Value_set_options.disjoint_stack && String.equal "g0" relative_offset then
             [addr]
@@ -269,7 +270,7 @@ let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : R
     else if Variable.is_stack var then
       (let untouched_addresses =
         match var with
-        | Var _ | Affected | Mem _-> assert false
+        | Var _ | Affected | Accessed | Mem _-> assert false
         | Stack addr ->
           if not (String.equal "g0" relative_offset) then
             [addr]
@@ -296,7 +297,7 @@ let set (store : t) ~(var : Variable.t) ~(vs : Value.t) : t =
     Variable.Map.fold store ~init:true ~f:(fun ~key:k ~data:_ acc ->
       acc && 
       match k, var with
-      | Var _, _ | _, Var _  | Affected, _ | _, Affected | Mem _, Stack _ | Stack _, Mem _-> true
+      | Var _, _ | _, Var _  | Affected, _ | _, Affected | Accessed, _ | _, Accessed | Mem _, Stack _ | Stack _, Mem _-> true
       | Mem _, Mem _ 
       | Stack _, Stack _ ->
         Variable.equal k var ||
@@ -411,7 +412,7 @@ let update_accessed_vars (store : t) (accessed_addresses : RIC.accessed) : t =
 let weak_update (store : t) ~(previous_state : t) ~(var : Variable.t) ~(vs : RIC.t) : t =
   let address = 
     match var with
-    | Var _ | Affected -> assert false
+    | Var _ | Affected | Accessed -> assert false
     | Mem address -> address
     | Stack address -> address
   in
@@ -420,7 +421,7 @@ let weak_update (store : t) ~(previous_state : t) ~(var : Variable.t) ~(vs : RIC
     List.filter ~f:(fun (v, _) -> not (Variable.equal v (Mem RIC.Bottom)))
       (List.map ~f:(fun v -> 
           match v with 
-          | Var _ | Affected | Stack _ -> assert false
+          | Var _ | Affected | Accessed | Stack _ -> assert false
           | Mem addr -> (Variable.Mem (RIC.meet addr address)), (get previous_state ~var:v))
         memory_variables)
   in
@@ -542,8 +543,190 @@ let affect_memory (store : t) ~(addresses : Value.t) : t =
   let new_affected_memory = Value.join previously_affected (addresses) in
   Variable.Map.set store ~key:(Variable.Affected) ~data:new_affected_memory
 
+let access_memory (store : t) ~(addresses : Value.t) : t =
+  (match addresses with
+  | Value.Boolean _ -> assert false
+  | _ -> ());
+  let previously_accessed = get store ~var:(Variable.Accessed) in
+  (match previously_accessed with
+  | Value.Boolean _ -> assert false
+  | _ -> ());
+  let new_accessed_memory = Value.join previously_accessed (addresses) in
+  Variable.Map.set store ~key:(Variable.Accessed) ~data:new_accessed_memory
 
 
+let store 
+    ~(state : t) 
+    ~(instruction : Memoryop.t) 
+    ~(annotation_before : Spec.t option) 
+    ~(value : Var.t option)
+    ~(address : Var.t option)
+  : t =
+  let value, address = 
+    match annotation_before, value, address with
+    | Some annotation_before, None, None ->
+      pop2 (Spec.get_or_fail annotation_before).vstack 
+    | None, Some value, Some address -> value, address
+    | _ -> assert false
+  in
+  let vs_address = get state ~var:(Variable.Var address) in
+  let () =
+    let oc = Out_channel.create ~append:true "store_types.txt" in
+    begin match address with
+    | Var.Global _ ->
+      Out_channel.output_string oc ("[GLOBAL] " ^(Var.to_string address) ^ "\n");
+    | Var.Local _ -> 
+      Out_channel.output_string oc ("[FUNCTION PARAMETER] " ^ (Var.to_string address) ^ "\n");
+    | Var.Var _ -> 
+      (* Out_channel.output_string oc ("[INTERMEDIATE]" ^ (Var.to_string address)); *)
+      begin match vs_address with
+      | Value.ValueSet RIC.Top -> 
+        Out_channel.output_string oc (Var.to_string address ^ "[TOP]\n");
+      | Value.ValueSet RIC {offset = (o, _); _} -> 
+        (if String.equal o "g0" then
+          Out_channel.output_string oc ("[STACK POINTER]\n")
+        else if String.equal (String.prefix o 1) "g" then
+          Out_channel.output_string oc ("[GLOBAL]\n")
+        else if String.equal (String.prefix o 1) "l" then
+          Out_channel.output_string oc ("[LOCAL OFFSET]\n")
+        else if String.equal (String.prefix o 1) "" then
+          Out_channel.output_string oc ("[ABSOLUTE]\n")
+        else 
+          Out_channel.output_string oc ("[OTHER]\n"));
+      | Value.ValueSet Bottom -> 
+        Out_channel.output_string oc ("[BOTTOM]\n");
+      | Value.Boolean _ -> 
+        Out_channel.output_string oc ("[BOOLEAN]\n");
+      end
+    | Var.Merge _ -> 
+      Out_channel.output_string oc ("[MERGE]" ^ (Var.to_string address));
+      begin match vs_address with
+      | Value.ValueSet RIC.Top -> 
+        Out_channel.output_string oc (Var.to_string address ^ "[TOP]\n");
+      | Value.ValueSet RIC {offset = (o, _); _} -> 
+        (if String.equal o "g0" then
+          Out_channel.output_string oc (" [STACK POINTER]\n")
+        else if String.equal (String.prefix o 1) "g" then
+          Out_channel.output_string oc (" [GLOBAL]\n")
+        else if String.equal (String.prefix o 1) "l" then
+          Out_channel.output_string oc (" [LOCAL OFFSET]\n")
+        else if String.equal (String.prefix o 1) "" then
+          Out_channel.output_string oc (" [ABSOLUTE]\n")
+        else 
+          Out_channel.output_string oc (" [OTHER]\n"));
+      | Value.ValueSet Bottom -> 
+        Out_channel.output_string oc (" [BOTTOM]\n");
+      | Value.Boolean _ -> 
+        Out_channel.output_string oc (" [BOOLEAN]\n");
+      end
+    | Var.Const _ -> 
+      Out_channel.output_string oc ("[CONSTANT] " ^ (Var.to_string address) ^ "\n");
+    | _ -> 
+      Out_channel.output_string oc ("[UNKNOWN] " ^ (Var.to_string address) ^ "\n");
+    end;
+    Out_channel.close oc
+  in
+  let is_g0 = String.equal "g0" (Value.extract_relative_offset vs_address) in
+  let disjoint_stack = !Value_set_options.disjoint_stack in
+  let is_stack = is_g0 && disjoint_stack in
+  let vs_value = get state ~var:(Variable.Var value) in
+  let size = Option.value_exn (Int32.to_int (Memoryop.size instruction)) in
+  let new_state =
+    begin match vs_address with
+    | Value.ValueSet vs_address ->
+      begin match instruction with
+      | { typ = I32; offset = offset; _ } ->
+        let vs_value = if size = 4 then vs_value else Value.ValueSet RIC.Top in
+        if !Value_set_options.print_trace then 
+          print_endline ("\tstoring value-set " 
+          ^ Value.to_string vs_value 
+          ^ if is_stack then " into stack variable " else " into memory variable " 
+          ^ Variable.to_string (if is_stack then Variable.Stack (RIC.add_offset vs_address offset) else Variable.Mem (RIC.add_offset vs_address offset)));
+        let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
+        let affected = 
+          if is_stack then
+            RIC.Bottom (* TODO: affect stack too *)
+          else
+            List.fold (accessed.fully :: accessed.partially) ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) in
+        let previously_affected = get state ~var:Variable.Affected in
+        let state = set state ~var:Variable.Affected ~vs:(Value.join previously_affected (Value.ValueSet affected)) in
+        if !Value_set_options.print_trace then 
+          (print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
+          print_endline ("\tpartially accessed memory: " ^ String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially));
+          print_endline ("\taffected memory: " ^ RIC.to_string affected););
+        let new_state = update_accessed_vars state accessed in
+        let variable_to_update =
+            if is_stack then
+              Variable.Stack accessed.fully
+            else
+              Variable.Mem accessed.fully in
+        if !Value_set_options.print_trace then print_endline ("\tvariable to update: " ^ Variable.to_string variable_to_update);
+        if RIC.equal accessed.fully RIC.Bottom then
+          (if !Value_set_options.print_trace then print_endline "\tno update necessary";
+          new_state)
+        else
+          if RIC.is_singleton (accessed.fully) then
+            (if !Value_set_options.print_trace then print_endline "\tperforming STRONG update";
+            set new_state ~var:variable_to_update ~vs:vs_value) (* STRONG update *)
+          else
+            (if !Value_set_options.print_trace then print_endline "\tperforming WEAK update";
+            (match vs_value with
+            | Value.ValueSet vs_value ->
+              weak_update new_state ~previous_state:state ~var:variable_to_update ~vs:vs_value
+            | _ ->
+              weak_update new_state ~previous_state:state ~var:variable_to_update ~vs:RIC.Top))
+      | { typ = F32; offset = offset; _ } ->
+        if !Value_set_options.print_trace then 
+          print_endline ("\tstoring value-set ⊤" 
+          ^ if is_stack then " into stack variable " else " into memory variable " 
+          ^ Variable.to_string (if is_stack then Variable.Stack (RIC.add_offset vs_address offset) else Variable.Mem (RIC.add_offset vs_address offset)));
+        let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
+        let affected =
+          if is_stack then
+            RIC.Bottom
+          else
+            List.fold (accessed.fully :: accessed.partially) ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) in
+        let previously_affected = get state ~var:Variable.Affected in
+        let state = set state ~var:Variable.Affected ~vs:(Value.join previously_affected (Value.ValueSet affected)) in
+        if !Value_set_options.print_trace then 
+          (print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
+          print_endline ("\tpartially accessed memory: " ^ String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially));
+          print_endline ("\taffected memory: " ^ RIC.to_string affected););
+        update_accessed_vars state accessed
+      | { typ = I64; offset = offset; _ }
+      | { typ = F64; offset = offset; _ } ->
+        if !Value_set_options.print_trace then 
+          print_endline ("\tstoring value-set ⊤" 
+          ^ if is_stack then " into stack variable " else " into memory variable " 
+          ^ Variable.to_string (if is_stack then Variable.Stack (RIC.add_offset vs_address offset) else Variable.Mem (RIC.add_offset vs_address offset)));
+        let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
+        let affected = 
+          if is_stack then
+            RIC.Bottom
+          else
+            List.fold (accessed.fully :: accessed.partially) ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) in
+        let previously_affected = get state ~var:Variable.Affected in
+        let state = set state ~var:Variable.Affected ~vs:(Value.join previously_affected (Value.ValueSet affected)) in
+        if !Value_set_options.print_trace then 
+          (print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
+          print_endline ("\tpartially accessed memory: " ^ String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially));
+          print_endline ("\taffected memory: " ^ RIC.to_string affected););
+        update_accessed_vars state accessed
+      end
+    | Value.Boolean _ ->
+      (Log.warn "Using a boolean value as an address: linear memory is now compromized";
+      let accessed = RIC.accessed ~value_set:RIC.Top ~size in
+      let affected = 
+          if is_stack then
+            RIC.Top (* TODO: check that this is even possible *)
+          else
+            List.fold (accessed.fully :: accessed.partially) ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) in
+      let previously_affected = get state ~var:Variable.Affected in
+        let state = set state ~var:Variable.Affected ~vs:(Value.join previously_affected (Value.ValueSet affected)) in
+      update_accessed_vars state accessed)
+    end
+  in
+  remove_pointers_to_top new_state
 
 
 

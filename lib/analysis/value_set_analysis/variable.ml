@@ -22,6 +22,7 @@ module T = struct
     | Mem of RIC.t
     | Stack of RIC.t (* used when considering the stack disjoint from the rest of the memory *)
     | Affected (* used to store all the addresses that have been affected by a function *)
+    | Accessed (* used to store all the addresses that have been read by a function *)
   [@@deriving sexp, compare, equal]
 
   (** Converts a variable to a human-readable string representation. Memory blocks are printed as ranges. *)
@@ -31,6 +32,7 @@ module T = struct
     | Mem ric -> "mem[" ^ RIC.to_string ric ^ "]"
     | Stack ric -> "stack[" ^ RIC.to_string (RIC.remove_relative_offset ric) ^"]"
     | Affected -> "Affected_memory"
+    | Accessed -> "Accessed_memory"
 
   let mem (ric : int * ExtendedInt.t * ExtendedInt.t * (string * int)) : t =
     Mem (RIC.ric ric)
@@ -86,18 +88,6 @@ module T = struct
     | Stack RIC {lower_bound = l; upper_bound = u; _} when not (ExtendedInt.equal l u) -> false
     | _ -> true
 
-  (* let rec to_singletons (var : t) : t list =
-    assert (is_finite var);
-    match var with
-    | Var _ -> [var]
-    | Mem Bottom -> []
-    | Mem _ when is_singleton var -> [var]
-    | Mem RIC {stride = s; lower_bound = Int l; upper_bound = u; offset = (v, o)} ->
-      let new_singleton = mem (0, Int 0, Int 0, (v, s * l + o)) in
-      let leftovers = mem (s, Int (l + 1), u, (v, o)) in
-      new_singleton :: to_singletons leftovers
-    | _ -> assert false *)
-
   let share_addresses (var1 : t) (var2 : t) : bool =
     match var1, var2 with
     | Mem ric1, Mem ric2 -> not (RIC.equal RIC.Bottom (RIC.meet ric1 ric2))
@@ -128,7 +118,7 @@ module T = struct
         List.fold ~init:[v_addr]
           ~f:(fun acc x ->
             match x with
-            | Var _ | Stack _ | Affected -> acc
+            | Var _ | Stack _ | Affected | Accessed -> acc
             | Mem addr -> 
               List.concat (List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y) acc))
           by
@@ -136,7 +126,7 @@ module T = struct
         List.fold ~init:[v_addr]
           ~f:(fun acc x ->
             match x with
-            | Var _ | Mem _ | Affected -> acc
+            | Var _ | Mem _ | Affected | Accessed -> acc
             | Stack addr -> 
               List.concat (List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y) acc))
           by
@@ -147,7 +137,7 @@ module T = struct
 
   let update_relative_offset ~(var : t) ~(actual_values : RIC.t String.Map.t) : t =
     match var with
-    | Var _ | Affected -> var
+    | Var _ | Affected | Accessed -> var
     | Mem address ->
       let new_address = RIC.update_relative_offset ~ric_:address ~actual_values in
       Mem new_address
