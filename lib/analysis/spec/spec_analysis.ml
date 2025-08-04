@@ -451,6 +451,31 @@ module TestInter = struct
           } 0;
       })
 
+  let%test_unit "interprocedural spec analysis works with br_if in block and call_indirect" =
+    final_spec_should_be "(module
+  (type (;0;) (func (result i32)))
+  (func (;0;) (type 0) (result i32)
+    block  ;; label = @1
+      i32.const 1
+      call_indirect (type 0)
+      br_if 0 (;@1;)
+    end
+    i32.const 0)
+  (func (;1;) (type 0) (result i32) i32.const 0)
+  (func (;2;) (type 0) (result i32) i32.const 0)
+  (table (;0;) 5 5 funcref)
+  (elem (;0;) (i32.const 1) 1 2))" 0l (Spec_domain.NotBottom {
+        vstack = [];
+        locals = [];
+        globals = [];
+        memory = Var.OffsetMap.empty;
+        (* TODO: need to be adapted *)
+        stack_size_at_entry = Instr.Label.Map.singleton Instr.Label.{
+            section = Function 0l;
+            id = 0;
+          } 0;
+      })
+
   let%test_unit "interprocedural spec works on all benchmarks" =
     List.iter [
       (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *) (* not enough elements in var list *)

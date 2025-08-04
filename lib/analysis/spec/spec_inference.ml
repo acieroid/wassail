@@ -326,7 +326,11 @@ module Spec_inference
   let call_inter (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_call) : State.t -> State.t =
     State.lift (function state ->
         let state = compute_stack_size_at_entry cfg i.label state in
-        state)
+        match i.instr with
+        | CallDirect _ -> state
+        | CallIndirect _ ->
+          (* Need to drop the first element of the stack which is the index of the function to call indirectly *)
+          { state with vstack = drop 1 state.vstack })
 
   let entry (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : State.t -> State.t =
     let funcinst = Wasm_module.get_funcinst module_ cfg.idx in
@@ -345,7 +349,10 @@ module Spec_inference
     | _, Bottom -> Printf.printf "state after is bottom\n"; Bottom
     | NotBottom { vstack = stack_before; locals; stack_size_at_entry; _ }, NotBottom ({ vstack = stack_after; _ } as after) ->
       let args, returns = Instr.call_types instr in
-      let vstack = (List.take stack_after (List.length returns)) @ (List.drop stack_before (List.length args)) in
+      let extra_drop = match instr.instr with
+        | CallDirect _ -> 0
+        | CallIndirect _ -> 1 in
+      let vstack = (List.take stack_after (List.length returns)) @ (List.drop stack_before ((List.length args)+extra_drop)) in
       State.NotBottom { after with vstack; locals; stack_size_at_entry }
 
   let imported (_module_ : Wasm_module.t) (desc : Wasm_module.func_desc) : State.t -> State.t =

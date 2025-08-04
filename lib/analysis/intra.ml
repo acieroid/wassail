@@ -114,8 +114,9 @@ module Make
     let instr_data : Result.intra_results ref = ref Instr.Label.Map.empty in
     (* Applies the transfer function to an entire block *)
     let transfer (b : 'a Basic_block.t) (state : Transfer.State.t) : Result.t =
-      match b.content with
-      | Imported _ -> Simple state (* we don't care about imported function for an intra analysis *)
+      Printf.printf "Analysis of block %ld_%d from state %s\n" b.fidx b.idx (Transfer.State.to_string state);
+      let result = match b.content with
+      | Imported _ -> Result.Simple state (* we don't care about imported function for an intra analysis *)
       | Data instrs ->
         Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
             let poststate = Transfer.data module_ cfg instr prestate in
@@ -133,6 +134,8 @@ module Make
         in
         instr_data := Instr.Label.Map.set !instr_data ~key:instr.label ~data:(state, poststate);
         poststate in
+       Printf.printf "Analysis of block %ld_%d results in state %s\n" b.fidx b.idx (Result.to_string result);
+       result in
 
     (* Analyzes one block, returning the state after this block *)
     let analyze_block (block_idx : Cfg.BlockIdx.t) : Result.t =
@@ -165,9 +168,9 @@ module Make
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = Set.min_elt_exn worklist in
-        Log.debug (Printf.sprintf "-----------------------\n Analyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
+        Printf.printf "-----------------------\n Analyzing block %s\n" (Cfg.BlockIdx.to_string block_idx);
         let out_state = analyze_block block_idx in
-        Log.debug (Printf.sprintf "out_state is: %s\n" (Result.to_string out_state));
+        Printf.printf "out_state is: %s\n" (Result.to_string out_state);
         (* Has out state changed? *)
         let previous_out_state = after_block block_idx in
         match previous_out_state with
@@ -308,9 +311,9 @@ module MakeSumm
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = Set.min_elt_exn worklist in
-        Log.debug (Printf.sprintf "-----------------------\n Analyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
+        Printf.printf "-----------------------\n Analyzing block %s\n" (Cfg.BlockIdx.to_string block_idx);
         let out_state = analyze_block block_idx in
-        Log.debug (Printf.sprintf "out_state is: %s\n" (Result.to_string out_state));
+        Printf.printf "out_state is: %s\n" (Result.to_string out_state);
         (* Has out state changed? *)
         let previous_out_state = after_block block_idx in
         match previous_out_state with
