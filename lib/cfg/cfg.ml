@@ -313,7 +313,7 @@ module Cfg = struct
   let body (cfg : 'a t) : unit Instr.t list =
     List.map cfg.instructions ~f:(fun l -> Instr.Label.Map.find_exn cfg.label_to_instr l)
 
-  (* TODO: why not just keep this as block annotation stored in memory?! *)
+  (* XXX: why not just keep this as block annotation stored in memory?! *)
   let rec state_before_block (cfg : 'a t) (block_idx : int) (entry_state : 'a) : 'a =
     let block = find_block_exn cfg block_idx in
     match block.content with
@@ -342,7 +342,7 @@ module Cfg = struct
     match block.content with
     | Control i -> Instr.annotation_after (Control i)
     | Call i -> Instr.annotation_after (Call i)
-    | Imported _ -> failwith "TODO: should not look state after import"
+    | Imported _ -> failwith "state_after_block: should not look state after import"
     | Data [] | Entry | Return _ -> begin match non_empty_predecessors cfg block_idx with
         | [] -> begin match predecessors cfg block_idx with
             | [] ->

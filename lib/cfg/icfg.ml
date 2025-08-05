@@ -139,7 +139,7 @@ module ICFG = struct
         | Some edges ->
           List.filter_map (Edge.Set.to_list edges) ~f:(fun edge ->
               match Map.find icfg.cfgs edge.target with
-              | None -> None (* failwith (Printf.sprintf "No target: %ld" edge.target) (* TODO: call to improted function, what to do? *) *)
+              | None -> None (* Call to imported function, ignore it here *)
               | Some cfg -> Some (edge.target, cfg.entry_block, cfg.exit_block))
 
       end

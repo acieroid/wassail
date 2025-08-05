@@ -391,7 +391,7 @@ let build_imported (module_ : Wasm_module.t) (desc : Wasm_module.func_desc) : un
     exported = false;
     name = desc.name;
     idx = desc.idx;
-    local_types = []; (* TODO: or arguments? *)
+    local_types = [];
     type_idx = desc.type_idx;
     global_types = module_.imported_global_types @ module_.global_types;
     arg_types = desc.arguments;

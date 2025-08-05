@@ -352,14 +352,26 @@ module Spec_inference
 
   let return (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (instr : annot_expected Instr.labelled_call) (state_before : State.t) (state_after : State.t) : State.t =
     match state_before, state_after with
-    | Bottom, _ -> Printf.printf "state before is bottom\n"; Bottom
-    | _, Bottom -> Printf.printf "state after is bottom\n"; Bottom
-    | NotBottom { vstack = stack_before; locals; stack_size_at_entry; _ }, NotBottom ({ vstack = stack_after; _ } as after) ->
+    | Bottom, _ -> Bottom
+    | _, Bottom -> Bottom
+    | NotBottom { vstack = stack_before; locals; stack_size_at_entry = size_before; _ },
+      NotBottom ({ vstack = stack_after; stack_size_at_entry = size_after; _ } as after) ->
       let args, returns = Instr.call_types instr in
       let extra_drop = match instr.instr with
         | CallDirect _ -> 0
         | CallIndirect _ -> 1 in
       let vstack = (List.take stack_after (List.length returns)) @ (List.drop stack_before ((List.length args)+extra_drop)) in
+      let stack_size_at_entry =
+        (* We need to merge both, as we might have an empty value from the stack after due to imported functions. (Not sure why though) *)
+        Map.merge size_before size_after ~f:(fun ~key:_ elem ->
+            match elem with
+            | `Left before -> Some before
+            | `Right after -> Some after
+            | `Both (before, _) ->
+              (* should not happen, but if it does, before makes more sense *)
+              Some before)
+      in
+      ignore size_before;
       State.NotBottom { after with vstack; locals; stack_size_at_entry }
 
   let imported (_module_ : Wasm_module.t) (desc : Wasm_module.func_desc) : State.t -> State.t =
