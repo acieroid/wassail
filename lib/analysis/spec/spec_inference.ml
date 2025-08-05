@@ -250,8 +250,8 @@ module Spec_inference
                           let vstack1, vstack2 =
                             if is_entry then
                               (* We only need the arguments to enter the function *)
-                              let funcinst = Wasm_module.get_funcinst module_ block.fidx in
-                              let nargs = List.length (fst funcinst.typ) in
+                              let (args, _) = Wasm_module.get_func_type module_ block.fidx in
+                              let nargs = List.length args in
                               assert ((List.length vstack1 >= nargs) && (List.length vstack2 >= nargs));
                               List.take vstack1 nargs, List.take vstack2 nargs
                             else
@@ -268,7 +268,7 @@ module Spec_inference
                             merge_vstacks locals1 locals2 in
                         if (List.length acc.vstack <> List.length s.vstack) && not is_entry then
                           failwith
-                            (Printf.sprintf "unsupported in spec_inference: incompatible stack lengths (probably due to mismatches in br_table branches). Block %ld.%s, stack lengths are %d and %d" block.fidx (Basic_block.to_string block) (List.length acc.vstack) (List.length s.vstack));
+                            (Printf.sprintf "unsupported in spec_inference: incompatible stack lengths. Block %ld.%s, stack lengths are %d and %d" block.fidx (Basic_block.to_string block) (List.length acc.vstack) (List.length s.vstack));
                         assert (is_entry || is_return || (List.length acc.locals = List.length s.locals));
                         assert (List.length acc.globals = List.length s.globals);
                         NotBottom ({ vstack = merge_vstacks acc.vstack s.vstack;

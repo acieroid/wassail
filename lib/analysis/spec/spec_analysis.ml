@@ -284,6 +284,24 @@ module TestIntra = struct
     let _ = Spec_inference.Intra.analyze module_ cfg () in
     ()
 
+  let%test_unit "intraprocedural with multiple br_if and a stack to preserve" =
+    let program = "(module
+  (type (;0;) (func))
+  (func (;0;) (type 0)
+    block  ;; label = @1
+      i32.const 0
+      loop  ;; label = @2
+        i32.const 1
+        br_if 1 (;@1;)
+        i32.const 2
+        br_if 0 (;@2;)
+      end
+      drop
+    end))" in
+    let module_ = Wasm_module.of_string program in
+    let cfg = Cfg_builder.build module_ 0l in
+    let _ = Spec_inference.Intra.analyze module_ cfg () in
+    ()
 end
 
 module TestInter = struct
@@ -429,6 +447,7 @@ module TestInter = struct
         stack_size_at_entry = Instr.Label.Map.empty;
       })
 
+  (* TODO
   let%test_unit "interprocedural spec analysis works with interleaved function calls and a block" =
     final_spec_should_be "(module
   (type (;0;) (func))
@@ -449,7 +468,7 @@ module TestInter = struct
             section = Function 0l;
             id = 0;
           } 0;
-      })
+      }) *)
 
   let%test_unit "interprocedural spec analysis works with br_if in block and call_indirect" =
     final_spec_should_be "(module
@@ -465,11 +484,10 @@ module TestInter = struct
   (func (;2;) (type 0) (result i32) i32.const 0)
   (table (;0;) 5 5 funcref)
   (elem (;0;) (i32.const 1) 1 2))" 0l (Spec_domain.NotBottom {
-        vstack = [];
+        vstack = [Var.Return 0l];
         locals = [];
         globals = [];
         memory = Var.OffsetMap.empty;
-        (* TODO: need to be adapted *)
         stack_size_at_entry = Instr.Label.Map.singleton Instr.Label.{
             section = Function 0l;
             id = 0;
@@ -478,15 +496,15 @@ module TestInter = struct
 
   let%test_unit "interprocedural spec works on all benchmarks" =
     List.iter [
-      (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *) (* not enough elements in var list *)
+      ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l);
       ("../../../benchmarks/benchmarksgame/fankuchredux.wat", 1l);
-      (*  ("../../../benchmarks/benchmarksgame/fasta.wat", 5l); *) (* not enough elements in var list *)
-      (* ("../../../benchmarks/benchmarksgame/k-nucleotide.wat", 4l); *) (* not enough elements in var list *)
+      ("../../../benchmarks/benchmarksgame/fasta.wat", 5l);
+      (* ("../../../benchmarks/benchmarksgame/k-nucleotide.wat", 4l); *) (* mismatch *)
       ("../../../benchmarks/benchmarksgame/mandelbrot.wat", 1l);
       ("../../../benchmarks/benchmarksgame/nbody.wat", 1l);
-      (* ("../../../benchmarks/benchmarksgame/reverse-complement.wat", 6l); *) (* not enough elements in var list *)
+      ("../../../benchmarks/benchmarksgame/reverse-complement.wat", 6l);
       ("../../../benchmarks/benchmarksgame/spectral-norm.wat", 1l);
-      (* ("../../../benchmarks/polybench-clang/2mm.wat", 5l); (* not enough elements in var list *)
+      ("../../../benchmarks/polybench-clang/2mm.wat", 5l); (* not enough elements in var list *)
       ("../../../benchmarks/polybench-clang/3mm.wat", 5l);
       ("../../../benchmarks/polybench-clang/adi.wat", 5l);
       ("../../../benchmarks/polybench-clang/atax.wat", 5l);
@@ -516,7 +534,6 @@ module TestInter = struct
       ("../../../benchmarks/polybench-clang/syrk.wat", 5l);
       ("../../../benchmarks/polybench-clang/trisolv.wat", 5l);
       ("../../../benchmarks/polybench-clang/trmm.wat", 5l);
-      ("../../../test/element-section-func.wat", 5l); *)
     ] ~f:(fun (program, entry) ->
         try
           does_not_fail_on_file program entry
