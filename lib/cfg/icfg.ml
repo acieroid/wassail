@@ -459,41 +459,51 @@ module Test = struct
           (Instr.Label.{ section = Function 1l; id = 0; }, Edge.Set.of_list [{ target = 0l; direct = true }]);
           (Instr.Label.{ section = Function 1l; id = 32; }, Edge.Set.of_list [{ target = 0l; direct = true }])])
 
-  (* Computes all successors, assuming there's no loop *)
-  let all (first : BlockIdx.t) (next : BlockIdx.t -> BlockIdx.t list) : BlockIdx.t list list =
-    let rec aux (n : BlockIdx.t) : BlockIdx.t list list =
+  type 'a tree =
+    | Leaf of 'a
+    | Node of 'a * 'a tree list
+  [@@deriving equal]
+
+  let rec tree_to_string (inner_to_string : 'a -> string) (t : 'a tree) : string =
+    match t with
+    | Leaf x -> Printf.sprintf "%s" (inner_to_string x)
+    | Node (x, subtree) ->
+      Printf.sprintf "%s(%s)" (inner_to_string x) (String.concat ~sep:"," (List.map subtree ~f:(tree_to_string inner_to_string)))
+
+  (* Computes all successors as a tree, assuming there's no loop *)
+  let all (first : BlockIdx.t) (next : BlockIdx.t -> BlockIdx.t list) : BlockIdx.t tree =
+    let rec aux (n : BlockIdx.t) : BlockIdx.t tree =
       let succs = next n in
       if List.length succs = 0 then
-        []
+        Leaf n
       else begin
         Printf.printf "%s -> %s\n" (BlockIdx.to_string n) (List.map ~f:BlockIdx.to_string succs |> String.concat ~sep:",");
-        succs :: (List.concat_map succs ~f:aux)
+        Node (n, List.map succs ~f:aux)
       end in
-    [first] :: (aux first)
+    aux first
 
-  let all_successors (icfg : 'a t) : BlockIdx.t list list =
+  let all_successors (icfg : 'a t) : BlockIdx.t tree =
     all (entry_block icfg) (successors icfg)
 
-  let all_predecessors (icfg : 'a t) (last : BlockIdx.t) : BlockIdx.t list list =
-    Printf.printf "-----\n";
+  let all_predecessors (icfg : 'a t) (last : BlockIdx.t) : BlockIdx.t tree =
     all last (fun n -> predecessors icfg n |> List.map ~f:fst)
 
-  let print_diff (expected : BlockIdx.t list list) (actual : BlockIdx.t list list) : unit =
+  let print_diff (expected : BlockIdx.t tree) (actual : BlockIdx.t tree) : unit =
     Printf.printf "expected: %s\nactual: %s\n"
-      (expected |> List.map ~f:(fun l -> String.concat ~sep:"," (List.map ~f:BlockIdx.to_string l)) |> String.concat ~sep:"--")
-      (actual |> List.map ~f:(fun l -> String.concat ~sep:"," (List.map ~f:BlockIdx.to_string l)) |> String.concat ~sep:"--")
+      (tree_to_string BlockIdx.to_string expected)
+      (tree_to_string BlockIdx.to_string actual)
 
-  let expect_successors (icfg : 'a t) (expected : BlockIdx.t list list) : bool =
+  let expect_successors (icfg : 'a t) (expected : BlockIdx.t tree) : bool =
     let actual = all_successors icfg in
-    if not (List.equal (List.equal BlockIdx.equal) expected actual) then begin
+    if not (equal_tree BlockIdx.equal expected actual) then begin
       print_diff expected actual;
       false
     end else
       true
 
-  let expect_predecessors (icfg : 'a t) (last : BlockIdx.t) (expected : BlockIdx.t list list) : bool =
+  let expect_predecessors (icfg : 'a t) (last : BlockIdx.t) (expected : BlockIdx.t tree) : bool =
     let actual = all_predecessors icfg last in
-    if not (List.equal (List.equal BlockIdx.equal) expected actual) then begin
+    if not (equal_tree BlockIdx.equal expected actual) then begin
       print_diff expected actual;
       false
     end else
@@ -511,13 +521,12 @@ module Test = struct
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
     let icfg = make module_ 0l in
-    let order = BlockIdx.[
-      [{fidx = 0l; block_idx = 0; kind = Regular}];
-      [{fidx = 0l; block_idx = 1; kind = Regular}]
-    ] in
-    expect_successors icfg order && expect_predecessors icfg {fidx = 0l; block_idx = 1; kind = Regular} (List.rev order)
+    let order = Node (BlockIdx.{fidx = 0l; block_idx = 0; kind = Regular},
+                      [Leaf {fidx = 0l; block_idx = 1; kind = Regular}]) in
+    let rev_order = Node (BlockIdx.{fidx = 0l; block_idx = 1; kind = Regular},
+                      [Leaf {fidx = 0l; block_idx = 0; kind = Regular}]) in
+    expect_successors icfg order && expect_predecessors icfg {fidx = 0l; block_idx = 1; kind = Regular} rev_order
 
-  (* TODO
   let%test "ICFG successors with call" =
     let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
@@ -535,15 +544,24 @@ module Test = struct
     i32.add) ;; [i1_2]
   )" in
     let icfg = make module_ 0l in
-    let order = BlockIdx.[
-        [{fidx = 0l; block_idx = 0; kind = Regular}]; (* 0_0 *)
-        [{fidx = 0l; block_idx = 1; kind = Regular}]; (* 0_1 *)
-        [{fidx = 1l; block_idx = 0; kind = Entry}];   (* 1_0entry *)
-        [{fidx = 1l; block_idx = 0; kind = Regular}]; (* 1_0 *)
-        [{fidx = 1l; block_idx = 1; kind = Regular}]; (* 1_1 *)
-        [{fidx = 0l; block_idx = 1; kind = Return}];  (* 0_1_return *)
-        [{fidx = 0l; block_idx = 3; kind = Regular}]; (* 0_3 *)
-      ] in
-    expect_successors icfg order && expect_predecessors icfg {fidx = 0l; block_idx = 3; kind = Regular} (List.rev order)
-*)
+    let order =
+      Node (BlockIdx.{fidx = 0l; block_idx = 0; kind = Regular}, (* 0_0 *)
+            [Node ({fidx = 0l; block_idx = 1; kind = Regular}, (* 0_1 *)
+                   [Node ({fidx = 1l; block_idx = 0; kind = Entry}, (* 1_0entry *)
+                          [Node ({fidx = 1l; block_idx = 0; kind = Regular}, (* 1_0 *)
+                                 [Node ({fidx = 1l; block_idx = 1; kind = Regular}, (* 1_1 *)
+                                        [Node ({fidx = 0l; block_idx = 1; kind = Return},  (* 0_1_return *)
+                                              [Leaf {fidx = 0l; block_idx = 3; kind = Regular}])])])]); (* 0_3 *)
+                   Node ({fidx = 0l; block_idx = 1; kind = Return}, (* 0_1return *)
+                         [Leaf {fidx = 0l; block_idx = 3; kind = Regular}])])]) in (* 0_3 *)
+    (* Note how there's no pred link from the call *)
+    let rev_order =
+      Node (BlockIdx.{fidx = 0l; block_idx = 3; kind = Regular},
+            [Node ({fidx = 0l; block_idx = 1; kind = Return},
+                   [Node ({fidx = 1l; block_idx = 1; kind = Regular},
+                          [Node ({fidx = 1l; block_idx = 0; kind = Regular},
+                                 [Node ({fidx = 1l; block_idx = 0; kind = Entry},
+                                        [Node ({fidx = 0l; block_idx = 1; kind = Regular},
+                                              [Leaf {fidx = 0l; block_idx = 0; kind = Regular}])])])])])])  in
+    expect_successors icfg order && expect_predecessors icfg {fidx = 0l; block_idx = 3; kind = Regular} rev_order
 end
