@@ -251,7 +251,7 @@ end
 
 include ICFG
 
-(* TODO: refactor to use most code in common with successors function *)
+(* XXX: this should probably be based on successor/predecessor defined above *)
 let to_dot
     ?annot_str:(annot_str : ('a -> string) = fun _ -> "")
     ?extra_data:(extra_data : string = "")
