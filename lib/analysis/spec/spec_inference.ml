@@ -266,29 +266,36 @@ module Spec_inference
                             []
                           else
                             merge_vstacks locals1 locals2 in
-                        if (List.length acc.vstack <> List.length s.vstack) && not is_entry then
-                          failwith
-                            (Printf.sprintf "unsupported in spec_inference: incompatible stack lengths. Block %ld.%s, stack lengths are %d and %d" block.fidx (Basic_block.to_string block) (List.length acc.vstack) (List.length s.vstack));
+                        let shortest_length = min (List.length acc.vstack) (List.length s.vstack) in
                         assert (is_entry || is_return || (List.length acc.locals = List.length s.locals));
                         assert (List.length acc.globals = List.length s.globals);
-                        NotBottom ({ vstack = merge_vstacks acc.vstack s.vstack;
-                                     locals = merge_locals acc.locals s.locals;
-                                     globals = List.map2_exn acc.globals s.globals ~f;
-                                     memory = Var.OffsetMap.merge acc.memory s.memory ~f:(fun ~key:_ v -> match v with
-                                         | `Both (v1, v2) -> Some (f v1 v2)
-                                         | `Left _v | `Right _v ->
-                                           (* If a binding is only present in one branch, then it is lost upon join.
+                        NotBottom ({
+                            (* It can be the case that stacks are different on a
+                               merge point, e.g., with br_table or br_if that
+                               exit a block with some extraneous values on the
+                               stack. These values need to be discarded. A
+                               cleaner approach would be to drop them upon block
+                               exit, but we don't have enough information in the
+                               CFG to do so. So we just take the shortest stack
+                               size. *)
+                            vstack = merge_vstacks (List.take acc.vstack shortest_length) (List.take s.vstack shortest_length);
+                            locals = merge_locals acc.locals s.locals;
+                            globals = List.map2_exn acc.globals s.globals ~f;
+                            memory = Var.OffsetMap.merge acc.memory s.memory ~f:(fun ~key:_ v -> match v with
+                                | `Both (v1, v2) -> Some (f v1 v2)
+                                | `Left _v | `Right _v ->
+                                  (* If a binding is only present in one branch, then it is lost upon join.
                                               This is necessary to preserve soundness.
                                               For example, if one branch has memory [m: v], the other has memory [],
                                               then after the join point of these branches, only [] is a valid memory
                                               (otherwise we could derive information assuming that m is bound to v,
                                               which is not always the case)*)
-                                           None);
-                                     stack_size_at_entry = Instr.Label.Map.merge acc.stack_size_at_entry s.stack_size_at_entry ~f:(fun ~key:_ presence -> match presence with
-                                         | `Both (a, b) ->
-                                           if a <> b then failwith "Cannot merge due to different stack sizes" else Some a
-                                         | `Left a | `Right a -> Some a)
-                                   })) in
+                                  None);
+                            stack_size_at_entry = Instr.Label.Map.merge acc.stack_size_at_entry s.stack_size_at_entry ~f:(fun ~key:_ presence -> match presence with
+                                | `Both (a, b) ->
+                                  if a <> b then failwith "Cannot merge due to different stack sizes" else Some a
+                                | `Left a | `Right a -> Some a)
+                          })) in
               (* Then, add merge variables *)
               let plug_holes = (function
                   | Var.Hole -> (* add a merge variable *) new_var ()
