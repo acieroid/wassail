@@ -1,5 +1,6 @@
 open Core
 open Helpers
+open Reduced_interval_congruence
 
 module Make (*: Transfer.TRANSFER *) = struct
 
@@ -17,19 +18,21 @@ module Make (*: Transfer.TRANSFER *) = struct
   (** [init_state cfg] initializes the abstract state using the function argument and global variables from [cfg]. *)
   let init_state (cfg : 'a Cfg.t) : state =
     let nb_of_arguments = List.length cfg.arg_types in
-    Variable.Map.of_alist_exn (
-      (List.mapi cfg.arg_types ~f:(fun i _ -> 
-        let variable = Var.Local i in
-        let var_name = Var.to_string variable in
-        (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0, Int 0, Int 0, (var_name, 0)))))) @
-      (List.mapi cfg.global_types ~f:(fun i _ -> 
-        let variable = Var.Global i in
-        let var_name = Var.to_string variable in
-        (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0, Int 0, Int 0, (var_name, 0)))))) @
-      (List.mapi cfg.local_types ~f:(fun i _ -> 
-        let variable = Var.Local (i + nb_of_arguments) in
-        (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0, Int 0, Int 0, ("", 0)))))) @
-      [(Variable.Mem RIC.Top), Abstract_store_domain.Value.ValueSet RIC.Top])
+    { abstract_store =
+        Variable.Map.of_alist_exn (
+          (List.mapi cfg.arg_types ~f:(fun i _ -> 
+            let variable = Var.Local i in
+            let var_name = Var.to_string variable in
+            (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0, Int 0, Int 0, (var_name, 0)))))) @
+          (List.mapi cfg.global_types ~f:(fun i _ -> 
+            let variable = Var.Global i in
+            let var_name = Var.to_string variable in
+            (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0, Int 0, Int 0, (var_name, 0)))))) @
+          (List.mapi cfg.local_types ~f:(fun i _ -> 
+            let variable = Var.Local (i + nb_of_arguments) in
+            (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0, Int 0, Int 0, ("", 0)))))) @
+          [(Variable.Mem RIC.Top), Abstract_store_domain.Value.ValueSet RIC.Top]);
+      store_operations = RICSet.empty }
 
   (** [bottom_state cfg] returns the bottom abstract state. *)
   let bottom_state (_cfg : 'a Cfg.t) : state = Abstract_store_domain.bottom
@@ -159,7 +162,7 @@ module Make (*: Transfer.TRANSFER *) = struct
     | GlobalGet g -> 
       let global_variable = Variable.Var (Var.Global (Int32.to_int_exn g)) in
       if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string global_variable ^ " (" ^ Variable.to_string (ret i) ^ ")");
-      if Variable.Map.mem state (ret i) then
+      if Variable.Map.mem state.abstract_store (ret i) then
         Abstract_store_domain.copy_value_set state
           ~from:(ret i)
           ~to_:global_variable
@@ -358,7 +361,10 @@ module Make (*: Transfer.TRANSFER *) = struct
       | I32Eqz -> (* TODO: implement this *)
         begin match vs with
           | Boolean b -> 
-            let state = Variable.Map.remove state (Variable.Var var) in (* TODO: check that this is sound *)
+            let state = 
+              { Abstract_store_domain.abstract_store = 
+                  Variable.Map.remove state.abstract_store (Variable.Var var);
+                store_operations = state.store_operations } in (* TODO: check that this is sound *)
             Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.Value.Boolean (Boolean.not_ b))
           | ValueSet _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean Variable.Map.empty)
         end
@@ -374,40 +380,52 @@ module Make (*: Transfer.TRANSFER *) = struct
       ~(condition : Variable.t * Boolean.t)
       (spec_state : Spec.SpecWithoutBottom.t) 
       : state * state =
-    let state = Variable.Map.remove state (fst condition) in
+    let state = 
+      { Abstract_store_domain.abstract_store = Variable.Map.remove state.abstract_store (fst condition);
+        store_operations = state.store_operations } in
     let locals_and_globals = Abstract_store_domain.extract_locals_and_globals state in
     let true_ = 
       Abstract_store_domain.make_compatible 
-        ~this_store:(Variable.Map.map ~f:(fun x -> (Abstract_store_domain.Value.ValueSet x.true_)) (snd condition))
+        ~this_store:
+          { Abstract_store_domain.abstract_store = (Variable.Map.map ~f:(fun x -> (Abstract_store_domain.Value.ValueSet x.true_)) (snd condition));
+            store_operations = state.store_operations }
         ~relative_to:state in
     let true_ =
-      Variable.Map.fold true_
-        ~init:state 
-        ~f:(fun ~key ~data acc -> 
-          let acc = Variable.Map.set ~key ~data acc in
-          List.fold locals_and_globals
-            ~init:acc
-            ~f:(fun acc v -> 
-              if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
-                Variable.Map.set ~key:v ~data acc
-              else
-                acc)) in
+      { Abstract_store_domain.abstract_store =
+          Variable.Map.fold true_.abstract_store
+            ~init:state.abstract_store 
+            ~f:(fun ~key ~data acc -> 
+              let acc = Variable.Map.set ~key ~data acc in
+              List.fold locals_and_globals
+                ~init:acc
+                ~f:(fun acc v -> 
+                  if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
+                    Variable.Map.set ~key:v ~data acc
+                  else
+                    acc));
+        store_operations = state.store_operations }
+    in
     let false_ = 
       Abstract_store_domain.make_compatible 
-        ~this_store:(Variable.Map.map ~f:(fun x -> (Abstract_store_domain.Value.ValueSet x.false_)) (snd condition)) 
+        ~this_store:
+          { Abstract_store_domain.abstract_store = (Variable.Map.map ~f:(fun x -> (Abstract_store_domain.Value.ValueSet x.false_)) (snd condition));
+            store_operations = state.store_operations }
         ~relative_to:state in
     let false_ =
-      Variable.Map.fold false_
-        ~init:state 
-        ~f:(fun ~key ~data acc -> 
-          let acc = Variable.Map.set ~key ~data acc in
-          List.fold locals_and_globals
-            ~init:acc
-            ~f:(fun acc v -> 
-              if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
-                Variable.Map.set ~key:v ~data acc
-              else
-                acc))  in
+      { Abstract_store_domain.abstract_store =
+          Variable.Map.fold false_.abstract_store
+            ~init:state.abstract_store 
+            ~f:(fun ~key ~data acc -> 
+              let acc = Variable.Map.set ~key ~data acc in
+              List.fold locals_and_globals
+                ~init:acc
+                ~f:(fun acc v -> 
+                  if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
+                    Variable.Map.set ~key:v ~data acc
+                  else
+                    acc));
+        store_operations = state.store_operations }
+    in
     true_, false_
 
 

@@ -21,7 +21,7 @@ module T = struct
     | Var of Var.t
     | Mem of RIC.t
     | Stack of RIC.t (* used when considering the stack disjoint from the rest of the memory *)
-    | Affected (* used to store all the addresses that have been affected by a function *)
+    (* | Affected used to store all the addresses that have been affected by a function *)
     | Accessed (* used to store all the addresses that have been read by a function *)
   [@@deriving sexp, compare, equal]
 
@@ -31,7 +31,7 @@ module T = struct
     | Var v -> Var.to_string v
     | Mem ric -> "mem[" ^ RIC.to_string ric ^ "]"
     | Stack ric -> "stack[" ^ RIC.to_string (RIC.remove_relative_offset ric) ^"]"
-    | Affected -> "Affected_memory"
+    (* | Affected -> "Affected_memory" *)
     | Accessed -> "Accessed_memory"
 
   let mem (ric : int * ExtendedInt.t * ExtendedInt.t * (string * int)) : t =
@@ -118,7 +118,7 @@ module T = struct
         List.fold ~init:[v_addr]
           ~f:(fun acc x ->
             match x with
-            | Var _ | Stack _ | Affected | Accessed -> acc
+            | Var _ | Stack _ | Accessed -> acc
             | Mem addr -> 
               List.concat (List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y) acc))
           by
@@ -126,7 +126,7 @@ module T = struct
         List.fold ~init:[v_addr]
           ~f:(fun acc x ->
             match x with
-            | Var _ | Mem _ | Affected | Accessed -> acc
+            | Var _ | Mem _ | Accessed -> acc
             | Stack addr -> 
               List.concat (List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y) acc))
           by
@@ -137,7 +137,7 @@ module T = struct
 
   let update_relative_offset ~(var : t) ~(actual_values : RIC.t String.Map.t) : t =
     match var with
-    | Var _ | Affected | Accessed -> var
+    | Var _ | Accessed -> var
     | Mem address ->
       let new_address = RIC.update_relative_offset ~ric_:address ~actual_values in
       Mem new_address

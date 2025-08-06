@@ -687,6 +687,20 @@ module RIC = struct
 end
 
 
+module RICSet = struct
+  include Set
+  module S = struct
+    include Set.Make(RIC)
+    let to_string (r : t) : string =
+      String.concat ~sep:"; " (List.map ~f:RIC.to_string (Set.to_list r))
+
+
+    (* TODO: RICSET.union that checks for included RICs... *)
+  end
+  include Set
+  include S
+  include Test.Helpers(S)
+end
 
 
 
