@@ -247,11 +247,7 @@ let apply
         match vs with
         | `Left vs | `Right vs -> Some vs
         | `Both _ -> assert false) in
-  (* Map.iteri actual_values 
-    ~f:(fun ~key ~data -> print_endline (key ^ " -> " ^ (RIC.to_string data) ^ "\n")); *)
-  (* print_endline ("state before call: " ^ Abstract_store_domain.to_string state); *)
   let summary = update_relative_offsets summary ~actual_values in
-  (* print_endline ("after updating offsets: " ^ to_string summary); *)
   let accessed_memory = Abstract_store_domain.get summary ~var:(Variable.Accessed) in
   let state = Abstract_store_domain.access_memory state ~addresses:accessed_memory in
   let affected_mem_vars =
@@ -280,7 +276,7 @@ let apply
               ~init:true 
               ~f:(fun acc v -> 
                 acc 
-                && Variable.comparable_offsets var v (* TODO: add an option that gets rid of this *)
+                && (if !Value_set_options.disjoint_memory_spaces then true else Variable.comparable_offsets var v)
                 && not (Variable.share_addresses var v))
           in
           if is_safe then

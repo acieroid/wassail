@@ -189,10 +189,19 @@ module Make (*: Transfer.TRANSFER *) = struct
           Abstract_store_domain.to_top_RIC state variable
         | Var.Local _ | Var.Global _ ->
           let vs = Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
+                    if Abstract_store_domain.Value.equal vs (Abstract_store_domain.Value.ValueSet RIC.Top) then
+                      (print_endline "SETTING GLOBAL TO TOP!!!!!!!!! press enter to continue";
+                let _ = In_channel.input_line_exn In_channel.stdin in
+                ());
           if !Value_set_options.print_trace then print_endline ("\tassigning value-set " ^ Abstract_store_domain.Value.to_string vs ^ " to variable " ^ Variable.to_string variable);
           Abstract_store_domain.set state ~var:variable ~vs
         | _ ->
           if !Value_set_options.print_trace then print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to global variable " ^ Variable.to_string variable);
+                    let vs = Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
+                    if Abstract_store_domain.Value.equal vs (Abstract_store_domain.Value.ValueSet RIC.Top) then
+                      (print_endline "SETTING GLOBAL TO TOP!!!!!!!!! press enter to continue";
+                    let _ = In_channel.input_line_exn In_channel.stdin in
+                    ());
           Abstract_store_domain.copy_value_set state 
             ~from:(Variable.Var top_of_stack)
             ~to_:variable

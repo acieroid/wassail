@@ -267,6 +267,7 @@ let filter_relative_offsets (store : t) (rel_offset : string) : t =
 (** [truncate_memory_var store ~var ~accessed_addresses] removes accessed addresses from [var]'s region. 
     The untouched portion is preserved in the store. *)
 let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : RIC.accessed) : t =
+  (* let disjoint_memory = !Value_set_options.disjoint_memory_spaces in *)
   let vs = get store ~var:var in
   let abstract_store = Variable.Map.remove store.abstract_store var in
   let accessed = accessed_addresses.fully :: accessed_addresses.partially in
@@ -280,9 +281,11 @@ let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : R
           if !Value_set_options.disjoint_stack && String.equal "g0" relative_offset then
             [addr]
           else
-            (List.fold ~init:[addr]
-                       ~f:(fun acc x -> List.concat (List.map ~f:(fun y -> RIC.remove ~this:x ~from:y) acc))
-                       accessed)
+            (List.fold 
+              ~init:[addr]
+              ~f:(fun acc x -> List.concat (List.map ~f:(fun y -> 
+                RIC.remove ~this:x ~from:y) acc))
+              accessed)
       in
       Variable.Set.of_list (List.map ~f:(fun x -> Variable.Mem x) untouched_addresses)
     else if Variable.is_stack var then
@@ -309,13 +312,19 @@ let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : R
 let set (store : t) ~(var : Variable.t) ~(vs : Value.t) : t =
   let store = 
     if Variable.is_linear_memory var || Variable.is_stack var then 
-      let store = make_compatible 
-        ~this_store:store ~relative_to:
-          { abstract_store = (Variable.Map.empty |> Variable.Map.set ~key:var ~data:vs);
-            store_operations = RICSet.empty }
-    in
-      { abstract_store = Variable.Map.filter_keys ~f:(fun v -> not (Variable.share_addresses v var)) store.abstract_store;
-        store_operations = store.store_operations }
+      let store = 
+        make_compatible 
+          ~this_store:store 
+          ~relative_to:
+            { abstract_store = 
+                (Variable.Map.empty |> Variable.Map.set ~key:var ~data:vs);
+              store_operations = RICSet.empty }
+      in
+        { abstract_store = 
+            Variable.Map.filter_keys 
+              ~f:(fun v -> not (Variable.share_addresses v var)) 
+              store.abstract_store;
+          store_operations = store.store_operations }
     else 
       store
   in
@@ -327,14 +336,17 @@ let set (store : t) ~(var : Variable.t) ~(vs : Value.t) : t =
       | Mem _, Mem _ 
       | Stack _, Stack _ ->
         Variable.equal k var ||
-        not (Variable.share_addresses k var)) in
+        not (Variable.share_addresses k var))
+  in
   if not is_valid then
     failwith "error: trying to update a memory/stack variable that overlaps with other memory variables"
   else
-    let store = if Variable.is_linear_memory var then
-      filter_relative_offsets store (Variable.get_relative_offset var)
-    else
-      store
+    let store = 
+      if (not !Value_set_options.disjoint_memory_spaces) 
+         && Variable.is_linear_memory var then
+          filter_relative_offsets store (Variable.get_relative_offset var)
+      else
+        store
     in
     { abstract_store = Variable.Map.set store.abstract_store ~key:var ~data:vs; 
       store_operations = store.store_operations }
@@ -442,7 +454,7 @@ let update_accessed_vars (store : t) (accessed_addresses : RIC.accessed) : t =
           ~init:new_store 
           ~f:(fun store var -> truncate_memory_var store ~var:var ~accessed_addresses:accessed_addresses) stack_vars 
       in
-      if List.is_empty (extract_memory_variables store) then 
+      if List.is_empty (extract_stack_variables store) then 
         set store ~var:Variable.entire_stack ~vs:(ValueSet RIC.Top)
       else
         store
@@ -597,6 +609,64 @@ let access_memory (store : t) ~(addresses : Value.t) : t =
   set store ~var:(Variable.Accessed) ~vs:new_accessed_memory
 
 
+let log_address_type (address : Var.t) (vs_address : Value.t) : unit =
+  let oc = Out_channel.create ~append:true "store_types.txt" in
+  begin match address with
+  | Var.Global _ ->
+    Out_channel.output_string oc ("[GLOBAL] " ^(Var.to_string address) ^ "\n");
+  | Var.Local _ -> 
+    Out_channel.output_string oc ("[FUNCTION PARAMETER] " ^ (Var.to_string address) ^ "\n");
+  | Var.Var _ -> 
+    (* Out_channel.output_string oc ("[INTERMEDIATE]" ^ (Var.to_string address)); *)
+    begin match vs_address with
+    | Value.ValueSet RIC.Top -> 
+      Out_channel.output_string oc (Var.to_string address ^ "[TOP]\n");
+    | Value.ValueSet RIC {offset = (o, _); _} -> 
+      (if String.equal o "g0" then
+        Out_channel.output_string oc ("[STACK POINTER]\n")
+      else if String.equal (String.prefix o 1) "g" then
+        Out_channel.output_string oc ("[GLOBAL]\n")
+      else if String.equal (String.prefix o 1) "l" then
+        Out_channel.output_string oc ("[LOCAL OFFSET]\n")
+      else if String.equal (String.prefix o 1) "" then
+        Out_channel.output_string oc ("[ABSOLUTE]\n")
+      else 
+        Out_channel.output_string oc ("[OTHER]\n"));
+    | Value.ValueSet Bottom -> 
+      Out_channel.output_string oc ("[BOTTOM]\n");
+    | Value.Boolean _ -> 
+      Out_channel.output_string oc ("[BOOLEAN]\n");
+    end
+  | Var.Merge _ -> 
+    Out_channel.output_string oc ("[MERGE]" ^ (Var.to_string address));
+    begin match vs_address with
+    | Value.ValueSet RIC.Top -> 
+      Out_channel.output_string oc (Var.to_string address ^ "[TOP]\n");
+    | Value.ValueSet RIC {offset = (o, _); _} -> 
+      (if String.equal o "g0" then
+        Out_channel.output_string oc (" [STACK POINTER]\n")
+      else if String.equal (String.prefix o 1) "g" then
+        Out_channel.output_string oc (" [GLOBAL]\n")
+      else if String.equal (String.prefix o 1) "l" then
+        Out_channel.output_string oc (" [LOCAL OFFSET]\n")
+      else if String.equal (String.prefix o 1) "" then
+        Out_channel.output_string oc (" [ABSOLUTE]\n")
+      else 
+        Out_channel.output_string oc (" [OTHER]\n"));
+    | Value.ValueSet Bottom -> 
+      Out_channel.output_string oc (" [BOTTOM]\n");
+    | Value.Boolean _ -> 
+      Out_channel.output_string oc (" [BOOLEAN]\n");
+    end
+  | Var.Const _ -> 
+    Out_channel.output_string oc ("[CONSTANT] " ^ (Var.to_string address) ^ "\n");
+  | _ -> 
+    Out_channel.output_string oc ("[UNKNOWN] " ^ (Var.to_string address) ^ "\n");
+  end;
+  Out_channel.close oc
+
+    
+(** store function *)
 let store 
     ~(state : t) 
     ~(instruction : Memoryop.t) 
@@ -604,7 +674,6 @@ let store
     ~(value : Var.t option)
     ~(address : Var.t option)
   : t =
-  (* print_endline ("Store operations before storing: " ^ RICSet.to_string state.store_operations); *)
   let value, address = 
     match annotation_before, value, address with
     | Some annotation_before, None, None ->
@@ -627,64 +696,9 @@ let store
       print_endline "USING TOP AS AN ADDRESS!!!!!!!!! press any key to continue";
       let _ = In_channel.input_line_exn In_channel.stdin in
       ()
-    | _ -> ()
+    | _ -> () 
   in
-  let () =
-    let oc = Out_channel.create ~append:true "store_types.txt" in
-    begin match address with
-    | Var.Global _ ->
-      Out_channel.output_string oc ("[GLOBAL] " ^(Var.to_string address) ^ "\n");
-    | Var.Local _ -> 
-      Out_channel.output_string oc ("[FUNCTION PARAMETER] " ^ (Var.to_string address) ^ "\n");
-    | Var.Var _ -> 
-      (* Out_channel.output_string oc ("[INTERMEDIATE]" ^ (Var.to_string address)); *)
-      begin match vs_address with
-      | Value.ValueSet RIC.Top -> 
-        Out_channel.output_string oc (Var.to_string address ^ "[TOP]\n");
-      | Value.ValueSet RIC {offset = (o, _); _} -> 
-        (if String.equal o "g0" then
-          Out_channel.output_string oc ("[STACK POINTER]\n")
-        else if String.equal (String.prefix o 1) "g" then
-          Out_channel.output_string oc ("[GLOBAL]\n")
-        else if String.equal (String.prefix o 1) "l" then
-          Out_channel.output_string oc ("[LOCAL OFFSET]\n")
-        else if String.equal (String.prefix o 1) "" then
-          Out_channel.output_string oc ("[ABSOLUTE]\n")
-        else 
-          Out_channel.output_string oc ("[OTHER]\n"));
-      | Value.ValueSet Bottom -> 
-        Out_channel.output_string oc ("[BOTTOM]\n");
-      | Value.Boolean _ -> 
-        Out_channel.output_string oc ("[BOOLEAN]\n");
-      end
-    | Var.Merge _ -> 
-      Out_channel.output_string oc ("[MERGE]" ^ (Var.to_string address));
-      begin match vs_address with
-      | Value.ValueSet RIC.Top -> 
-        Out_channel.output_string oc (Var.to_string address ^ "[TOP]\n");
-      | Value.ValueSet RIC {offset = (o, _); _} -> 
-        (if String.equal o "g0" then
-          Out_channel.output_string oc (" [STACK POINTER]\n")
-        else if String.equal (String.prefix o 1) "g" then
-          Out_channel.output_string oc (" [GLOBAL]\n")
-        else if String.equal (String.prefix o 1) "l" then
-          Out_channel.output_string oc (" [LOCAL OFFSET]\n")
-        else if String.equal (String.prefix o 1) "" then
-          Out_channel.output_string oc (" [ABSOLUTE]\n")
-        else 
-          Out_channel.output_string oc (" [OTHER]\n"));
-      | Value.ValueSet Bottom -> 
-        Out_channel.output_string oc (" [BOTTOM]\n");
-      | Value.Boolean _ -> 
-        Out_channel.output_string oc (" [BOOLEAN]\n");
-      end
-    | Var.Const _ -> 
-      Out_channel.output_string oc ("[CONSTANT] " ^ (Var.to_string address) ^ "\n");
-    | _ -> 
-      Out_channel.output_string oc ("[UNKNOWN] " ^ (Var.to_string address) ^ "\n");
-    end;
-    Out_channel.close oc
-  in
+  log_address_type address vs_address;
   let is_g0 = String.equal "g0" (Value.extract_relative_offset vs_address) in
   let disjoint_stack = !Value_set_options.disjoint_stack in
   let is_stack = is_g0 && disjoint_stack in
@@ -702,13 +716,6 @@ let store
           ^ if is_stack then " into stack variable " else " into memory variable " 
           ^ Variable.to_string (if is_stack then Variable.Stack (RIC.add_offset vs_address offset) else Variable.Mem (RIC.add_offset vs_address offset)));
         let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
-        (* let affected = 
-          if is_stack then
-            RIC.Bottom (* TODO: affect stack too *)
-          else
-            List.fold (accessed.fully :: accessed.partially) ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) in *)
-        (* let previously_affected = get state ~var:Variable.Affected in
-        let state = set state ~var:Variable.Affected ~vs:(Value.join previously_affected (Value.ValueSet affected)) in *)
         if !Value_set_options.print_trace then 
           (print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
           print_endline ("\tpartially accessed memory: " ^ String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially)););
@@ -720,11 +727,6 @@ let store
         in
         let new_state = { abstract_store = new_state.abstract_store; 
                           store_operations = RICSet.union added_store_operations new_state.store_operations} in
-        (* print_endline ("store_operations " ^ RICSet.to_string new_state.store_operations); *)
-        (* if RICSet.mem new_state.store_operations RIC.Top then
-          (print_endline "Top is present!!!";
-          let _ = In_channel.input_line_exn In_channel.stdin in
-          ()); *)
         let variable_to_update =
             if is_stack then
               Variable.Stack accessed.fully
@@ -751,24 +753,12 @@ let store
           ^ if is_stack then " into stack variable " else " into memory variable " 
           ^ Variable.to_string (if is_stack then Variable.Stack (RIC.add_offset vs_address offset) else Variable.Mem (RIC.add_offset vs_address offset)));
         let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
-        (* let affected =
-          if is_stack then
-            RIC.Bottom
-          else
-            List.fold (accessed.fully :: accessed.partially) ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) in
-        let previously_affected = get state ~var:Variable.Affected in
-        let state = set state ~var:Variable.Affected ~vs:(Value.join previously_affected (Value.ValueSet affected)) in *)
         let added_store_operations = 
           RICSet.filter 
             ~f:(fun addr -> not (RIC.equal addr RIC.Bottom)) 
             (RICSet.of_list (accessed.fully :: accessed.partially)) 
         in
         let state = {abstract_store = state.abstract_store; store_operations = RICSet.union added_store_operations state.store_operations} in
-        (* print_endline ("store_operations " ^ RICSet.to_string state.store_operations); *)
-        (* if RICSet.mem state.store_operations RIC.Top then
-          (print_endline "Top is present!!!";
-          let _ = In_channel.input_line_exn In_channel.stdin in
-          ()); *)
         if !Value_set_options.print_trace then 
           (print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
           print_endline ("\tpartially accessed memory: " ^ String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially)););
@@ -780,24 +770,12 @@ let store
           ^ if is_stack then " into stack variable " else " into memory variable " 
           ^ Variable.to_string (if is_stack then Variable.Stack (RIC.add_offset vs_address offset) else Variable.Mem (RIC.add_offset vs_address offset)));
         let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
-        (* let affected = 
-          if is_stack then
-            RIC.Bottom
-          else
-            List.fold (accessed.fully :: accessed.partially) ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) in *)
-        (* let previously_affected = get state ~var:Variable.Affected in
-        let state = set state ~var:Variable.Affected ~vs:(Value.join previously_affected (Value.ValueSet affected)) in *)
         let added_store_operations = 
           RICSet.filter 
             ~f:(fun addr -> not (RIC.equal addr RIC.Bottom)) 
             (RICSet.of_list (accessed.fully :: accessed.partially)) 
         in
         let state = {abstract_store = state.abstract_store; store_operations = RICSet.union added_store_operations state.store_operations} in
-        (* print_endline ("store_operations " ^ RICSet.to_string state.store_operations); *)
-        (* if RICSet.mem state.store_operations RIC.Top then
-          (print_endline "Top is present!!!";
-          let _ = In_channel.input_line_exn In_channel.stdin in
-          ()); *)
         if !Value_set_options.print_trace then 
           (print_endline ("\tfully accessed memory: " ^ RIC.to_string accessed.fully);
           print_endline ("\tpartially accessed memory: " ^ String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially)););

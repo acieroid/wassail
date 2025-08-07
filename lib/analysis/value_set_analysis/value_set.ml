@@ -41,7 +41,7 @@ let analyse_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Abstra
           ~f:(fun summaries (idx, name, (args, ret)) ->
               Int32Map.set summaries ~key:idx ~data:(Summary.of_import name wasm_mod.nglobals args ret)) in
       let _ =
-        let oc = Out_channel.create "store_types.txt" in
+        let oc = Out_channel.create ~append:true "store_types.txt" in
         Out_channel.close oc
       in
       let results = Inter.analyze wasm_mod annotated_scc summaries' in

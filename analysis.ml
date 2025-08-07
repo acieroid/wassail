@@ -80,13 +80,15 @@ let value_set_cfg =
       and show_intermediates = flag "--all" no_arg ~doc:"Show all intermediate variables" 
       and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" 
       and disjoint_stack = flag "--stack" no_arg ~doc:"Consider stack disjoint from rest of linear memory" 
-      and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
+      and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" 
+      and disjoint = flag "--disjoint" no_arg ~doc:"Consider memory spaces accessed via different relative offsets to be disjoint" in
       fun () ->
         Spec_inference.use_const := true;
         if show_intermediates then Value_set.Options.show_intermediates := true;
         if narrow then Intra.narrow_option := true;
         if trace then Value_set.Options.print_trace := true;
         if disjoint_stack then Value_set.Options.disjoint_stack := true;
+        if disjoint then Value_set.Options.disjoint_memory_spaces := true;
         let results = Value_set.analyze_intra (Wasm_module.of_file file_in) funs in
         (* We only output the latest analyzed CFG *)
         let annotated_cfg = Option.value_exn (snd (Int32Map.find_exn results (List.last_exn funs))) in
@@ -102,13 +104,19 @@ let value_set_inter =
       and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" 
       and disjoint_stack = flag "--stack" no_arg ~doc:"Consider stack disjoint from rest of linear memory" 
       and ignore_imports = flag "--ignore-imports" no_arg ~doc:"Ignore changes made by imported functions"
-      and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
+      and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" 
+      and disjoint = flag "--disjoint" no_arg ~doc:"Consider memory spaces accessed via different relative offsets to be disjoint" in
       fun () ->
         if show_intermediates then Value_set.Options.show_intermediates := true;
         if narrow then Intra.narrow_option := true;
         if trace then Value_set.Options.print_trace := true;
         if disjoint_stack then Value_set.Options.disjoint_stack := true;
         if ignore_imports then Value_set.Options.ignore_imports := true;
+        if disjoint then Value_set.Options.disjoint_memory_spaces := true;
+        let _ =
+        let oc = Out_channel.create ~append:false "store_types.txt" in
+          Out_channel.close oc
+        in
         let results = Value_set.analyse_inter (Wasm_module.of_file filename) sccs in
         let function_name (summary : Spec.t Wassail.Cfg.t * Value_set.Domain.t Wassail.Cfg.t * Value_set.Domain.t) : string =
           let name =

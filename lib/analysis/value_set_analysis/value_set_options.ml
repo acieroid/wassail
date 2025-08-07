@@ -9,3 +9,6 @@ let disjoint_stack = ref false
 
 (** Set to true to ignore modifications made by imported functions *)
 let ignore_imports = ref false
+
+(** Set to true to consider dissferent unknown memory offsets as disjoint memory spaces *)
+let disjoint_memory_spaces = ref false

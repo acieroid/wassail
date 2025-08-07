@@ -671,9 +671,12 @@ module RIC = struct
 
   (** [remove ~this ~from] returns the parts of [from] that are not in [this]. *)
   let remove ~(this : t) ~(from : t) : t list =
-    if comparable_offsets this from then
-      let this_complement = complement this in
-      List.filter ~f:(fun r -> not (equal r Bottom)) (List.map ~f:(meet from) this_complement)
+    let disjoint_memory = !Value_set_options.disjoint_memory_spaces in
+    if disjoint_memory && not (comparable_offsets this from) then
+      [from]
+    else if comparable_offsets this from then
+      (let this_complement = complement this in
+      List.filter ~f:(fun r -> not (equal r Bottom)) (List.map ~f:(meet from) this_complement))
     else
       []
 

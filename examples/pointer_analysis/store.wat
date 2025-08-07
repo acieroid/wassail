@@ -6,8 +6,8 @@
     i32.const 36
     global.get $g0
     i32.store offset=8
-    global.get $g0
-    ;;i32.const 36
+    ;; global.get $g0
+    i32.const 36
     i32.load offset=8
     i32.const 4
     i32.add
