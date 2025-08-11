@@ -16,6 +16,8 @@ module T = struct
     idx: int; (** Its index *)
     fidx: Int32.t; (** The function index containing this block *)
     content: 'a block_content; (** Its content *)
+    annotation_before: 'a;
+    annotation_after: 'a;
   }
   [@@deriving sexp, compare, equal]
 end
@@ -99,7 +101,7 @@ let all_annots (b : 'a t) : 'a list =
   | Entry | Return _ | Imported _ -> []
 
 (** Map a function over annotations of the block *)
-let map_annotations (b : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
+let map_annotations (b : 'a t) ~(f : 'a Instr.t -> 'b * 'b) (before : 'b) (after :'b) : 'b t =
   { b with content = begin match b.content with
         | Control c -> Control (Instr.map_annotation_control c ~f)
         | Call c -> Call (Instr.map_annotation_call c ~f)
@@ -107,11 +109,14 @@ let map_annotations (b : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
         | Return c -> Return (Instr.map_annotation_call c ~f)
         | Entry -> Entry
         | Imported desc -> Imported desc
-      end }
+      end;
+           annotation_before = before;
+           annotation_after = after;
+  }
 
 (** Clear the annotation of the block *)
 let clear_annotation (b : 'a t) : unit t =
-  map_annotations b ~f:(fun _ -> (), ())
+  map_annotations b ~f:(fun _ -> (), ()) () ()
 
 (** Check if the block is a merge block *)
 let is_merge (b : 'a t) : bool =

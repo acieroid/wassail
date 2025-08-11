@@ -41,7 +41,7 @@ include T
 let get_funcinst (m : t) (fidx : Int32.t) : Func_inst.t =
   match List32.nth m.funcs Int32.(fidx-(Int32.of_int_exn (List.length m.imported_funcs))) with
   | Some v -> v
-  | None -> failwith (Printf.sprintf "get_funcinst: no funcinst for function %ld" fidx)
+  | None -> failwith (Printf.sprintf "get_funcinst: no funcinst for function %ld. Is it an imported function?" fidx)
 
 let get_n_locals (m : t) (fidx : Int32.t) : int =
   let inst = get_funcinst m fidx in
@@ -65,6 +65,10 @@ let get_funcnames (m : t) : int32 StringMap.t =
            | _ -> false))
       ~f:(fun idx f -> (f.item_name, (Int32.of_int_exn idx))) in
   StringMap.of_alist_exn (alist @ imported)
+
+(** Checks if a function is an imported function. *)
+let is_imported (m : t) (fidx : Int32.t) : bool =
+  Int32.(fidx < (Int32.of_int_exn (List.length m.imported_funcs)))
 
 (** Checks if a function is exported or not. An exported function has a name. *)
 let is_exported (m : t) (fidx : Int32.t) : bool =

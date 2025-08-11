@@ -100,7 +100,11 @@ module Taint = struct
   end
 end
 
-module Make : Helpers.ABSTRACT_DOMAIN with type t = Taint.t Var.Map.t = struct
+module Make : sig
+  include Helpers.ABSTRACT_DOMAIN with type t = Taint.t Var.Map.t
+  val to_dot_string : t -> string
+end
+= struct
 
   (** The state of the taint analysis is a map from variables to their taint values.
       If a variable is not bound in the state, it is assumed that its taint is bottom *)
@@ -118,6 +122,8 @@ module Make : Helpers.ABSTRACT_DOMAIN with type t = Taint.t Var.Map.t = struct
                                     Printf.sprintf "%s: %s"
                                       (Var.to_string k)
                                       (Taint.to_string t))))
+  let to_dot_string (s : t) : string =
+    Printf.sprintf "<tr><td></td><td>%s</td></tr>" (to_string s)
 
   (** Join two taint maps together *)
   let join (s1 : t) (s2 : t) : t =

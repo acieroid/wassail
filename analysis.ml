@@ -71,9 +71,18 @@ let taint_cfg =
         output_to_file file_out (Cfg.to_dot annotated_cfg ~annot_str:Taint.Domain.only_non_id_to_string))
 
 let taint_inter =
-  mk_summary_inter "Performs inter analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target."
+  mk_summary_inter "Performs summary-based interprocedural taint analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target."
     Taint.analyze_inter
     (fun fid (_, _, summary) -> Printf.printf "function %ld: %s\n" fid (Taint.Summary.to_string summary))
+
+let taint_inter_classical =
+  mk_classical_inter "Perform classical interprocedural taint analysis from a given entry point"
+    (fun module_ fidx ->
+       Taint.analyze_inter_classical module_ fidx)
+    (fun file_out icfg ->
+       Out_channel.with_file file_out
+         ~f:(fun ch ->
+             Out_channel.output_string ch (ICFG.to_dot icfg ~annot_str:Taint.Domain.to_dot_string)))
 
 let find_indirect_calls =
   Command.basic

@@ -65,8 +65,7 @@ let eqs_data_instr (instr : (Instr.data, Spec_domain.t) Instr.labelled) : VarEq.
   | RefIsNull | RefNull _ | RefFunc _ -> VarEq.Set.empty
 
 (** Perform variable propagation *)
-let var_prop (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : Spec_domain.t Cfg.t =
-  let init_spec = Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx) in
+let var_prop (_module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : Spec_domain.t Cfg.t =
   (* Go over each instruction and basic block, record all equality constraints that can be derived *)
   let equalities : VarEq.Set.t = List.fold_left (Cfg.all_blocks cfg)
       ~init:VarEq.Set.empty
@@ -77,11 +76,11 @@ let var_prop (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : Spec_domain
             List.fold_left instrs ~init:eqs ~f:(fun eqs instr -> VarEq.Set.union eqs (eqs_data_instr instr))
           | Control { instr = Merge; _ } ->
             (* Equate annotation after each predecessor of this merge block with the annotation after this merge block *)
-            let spec = Cfg.state_after_block cfg block.idx init_spec in
+            let spec = Cfg.state_after_block cfg block.idx in
             List.fold_left (Cfg.predecessors cfg block.idx)
               ~init:eqs
               ~f:(fun eqs (pred, _) ->
-                  let pred_spec = Spec_domain.get_or_fail (Cfg.state_after_block cfg pred init_spec) in
+                  let pred_spec = Spec_domain.get_or_fail (Cfg.state_after_block cfg pred) in
                   let spec = Spec_domain.get_or_fail spec in
                   assert (List.length pred_spec.vstack = List.length spec.vstack);
                   assert (List.length pred_spec.locals = List.length spec.locals);
@@ -149,15 +148,23 @@ let var_prop (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : Spec_domain
         rewrite_target class_
       | None -> v) in
   Cfg.map_annotations cfg
-    ~f:(fun i -> (fannot (Instr.annotation_before i), fannot (Instr.annotation_after i)))
+    ~instrs:(fun instr -> (fannot (Instr.annotation_before instr), fannot (Instr.annotation_after instr)))
+    ~blocks:(fun block_idx ->
+        let block = Cfg.find_block_exn cfg block_idx in
+        (fannot block.annotation_before, fannot block.annotation_after))
 
 let all_vars (cfg : Spec_domain.t Cfg.t) : Var.Set.t =
   let vars : Var.Set.t ref = ref Var.Set.empty in
   let fannot (annot : Spec_domain.t) : Spec_domain.t = Spec_domain.map_vars annot ~f:(fun (v : Var.t) ->
       vars := Var.Set.add !vars v;
       v) in
+  (* Map over the annotations so that we visit everything *)
   let _cfg = Cfg.map_annotations cfg
-      ~f:(fun i -> (fannot (Instr.annotation_before i), fannot (Instr.annotation_after i))) in
+      ~instrs:(fun instr -> (fannot (Instr.annotation_before instr), fannot (Instr.annotation_after instr)))
+      ~blocks:(fun block_idx ->
+          (* Not really needed to do this since we already visit the instructions *)
+          let block = Cfg.find_block_exn cfg block_idx in
+          (fannot block.annotation_before, fannot block.annotation_after)) in
   !vars
 
 let count_vars (cfg : Spec_domain.t Cfg.t) : int =

@@ -302,63 +302,31 @@ module Cfg = struct
   let all_annots (cfg : 'a t) : 'a list =
     IntMap.fold cfg.basic_blocks ~init:[] ~f:(fun ~key:_ ~data:block l -> (Basic_block.all_annots block) @ l)
 
-  let map_annotations (cfg : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
+  let map_annotations
+      (cfg : 'a t)
+      ~(instrs : 'a Instr.t -> 'b * 'b)
+      ~(blocks : BlockIdx.t -> 'b * 'b)
+    : 'b t =
     { cfg with
-      basic_blocks = IntMap.map ~f:(fun b -> Basic_block.map_annotations b ~f) cfg.basic_blocks;
+      basic_blocks = IntMap.mapi ~f:(fun ~key:bidx ~data:b ->
+          let before, after = blocks bidx in
+          Basic_block.map_annotations b ~f:instrs before after) cfg.basic_blocks;
     }
 
   let clear_annotations (cfg : 'a t) : unit t =
-    map_annotations cfg ~f:(fun _ -> (), ())
+    map_annotations cfg ~instrs:(fun _ -> (), ()) ~blocks:(fun _ -> (), ())
 
   let body (cfg : 'a t) : unit Instr.t list =
     List.map cfg.instructions ~f:(fun l -> Instr.Label.Map.find_exn cfg.label_to_instr l)
 
   (* XXX: why not just keep this as block annotation stored in memory?! *)
-  let rec state_before_block (cfg : 'a t) (block_idx : int) (entry_state : 'a) : 'a =
+  let state_before_block (cfg : 'a t) (block_idx : int) : 'a =
     let block = find_block_exn cfg block_idx in
-    match block.content with
-    | Control i -> Instr.annotation_before (Control i)
-    | Call i -> Instr.annotation_before (Call i)
-    | Data (i :: _) -> Instr.annotation_before (Data i)
-    | Imported _ -> entry_state
-    | Data [] | Entry | Return _ -> begin match non_empty_predecessors cfg block_idx with
-        | [] ->
-          begin match predecessors cfg block_idx with
-            | [] ->
-              (* Can only be the entry block? *)
-              assert (block_idx = cfg.entry_block);
-              entry_state
-            | (pred, _) :: [] -> state_before_block cfg pred entry_state
-            | _ -> failwith "state_before_block: multiple predecessors for an empty block"
-          end
-        | pred :: [] ->
-          (* The state before this block is the state after its non-empty predecessor *)
-          state_after_block cfg pred entry_state
-        | _ -> failwith "state_before_block: multiple predecessors for an empty block"
-      end
-  and state_after_block (cfg : 'a t) (block_idx : int) (entry_state : 'a) : 'a =
+    block.annotation_before
+  let state_after_block (cfg : 'a t) (block_idx : int) : 'a =
     (* This implementation is the complement of state_before_block *)
     let block = find_block_exn cfg block_idx in
-    match block.content with
-    | Control i -> Instr.annotation_after (Control i)
-    | Call i -> Instr.annotation_after (Call i)
-    | Imported _ -> failwith "state_after_block: should not look state after import"
-    | Data [] | Entry | Return _ -> begin match non_empty_predecessors cfg block_idx with
-        | [] -> begin match predecessors cfg block_idx with
-            | [] ->
-              if block_idx <> cfg.entry_block then
-                failwith "state_after_block: state is empty and has no predecessor";
-              entry_state
-            | (pred, _) :: [] ->
-              state_after_block cfg pred entry_state
-            | _ -> failwith "state_after_block: multiple predecessors of an empty block"
-          end
-        | pred :: [] ->
-          (* INCORRECT: go one more block before *)
-          state_after_block cfg pred entry_state
-        | _ -> failwith "state_after_block: multiple successors for an empty block"
-      end
-    | Data l -> Instr.annotation_after (Data (List.last_exn l))
+    block.annotation_after
 
   let replace_block (cfg : 'a t) (block : 'a Basic_block.t) : 'a t =
     { cfg with

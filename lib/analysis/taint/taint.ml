@@ -126,4 +126,5 @@ module TestInter = struct
     i32.const 0
     i32.add)
   )" 0l
+
 end

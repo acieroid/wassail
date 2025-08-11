@@ -198,19 +198,19 @@ module Make = struct
     | None ->
       taint_after_call
 
-  let merge_flows (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * State.t) list) : State.t =
-    let init_spec = (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx) (* , Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i)))*) )  in
+  let merge_flows (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * State.t) list) : State.t =
     match states with
     | [] -> bottom
     | _ ->
       (* one or multiple states *)
         begin match block.content with
-          | Control { instr = Merge; _ } ->
+          | Control { instr = Merge; _ }
+          | Entry | Return _ ->
             (* block is a control-flow merge *)
-            let spec = Cfg.state_after_block cfg block.idx init_spec in
+            let spec = Cfg.state_after_block cfg block.idx in
             let states' = List.map states ~f:(fun (idx, s) ->
                 (* get the spec after that state *)
-                let spec' = Cfg.state_after_block cfg idx init_spec in
+                let spec' = Cfg.state_after_block cfg idx in
                 (* equate all different variables in the post-state with the ones in the pre-state *)
                 List.fold_left (Spec_domain.extract_different_vars spec spec')
                   ~init:s
@@ -227,9 +227,9 @@ module Make = struct
             end
         end
 
-  let extract_summary (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (analyzed_cfg : State.t Cfg.t) : summary =
-    let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block (init module_ (Wasm_module.get_funcinst module_ cfg.idx)) in
-    Taint_summary.summary_of module_ cfg out_state
+  let extract_summary (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (analyzed_cfg : State.t Cfg.t) : summary =
+    let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block in
+    Taint_summary.summary_of cfg out_state
 
   let call_inter
       (_module : Wasm_module.t)
@@ -243,7 +243,7 @@ module Make = struct
     state
 
   let entry (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (state : State.t) : State.t =
-    state (* Everything is actually already done by spec analysis! We can just propagete the state *)
+    state (* Everything is actually already done by spec analysis! We can just propagate the state *)
 
   let return (_module : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (state_after_call : State.t) : State.t =
     state_after_call

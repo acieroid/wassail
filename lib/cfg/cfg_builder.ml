@@ -63,11 +63,11 @@ let build (module_ : Wasm_module.t) (fidx : Int32.t) : unit Cfg.t =
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
   let mk_data_block (reverse_instrs : (Instr.data, unit) Instr.labelled list) : unit Basic_block.t =
     let instrs = List.rev reverse_instrs in
-    Basic_block.{ idx = new_idx (); content = Data instrs; fidx; } in
+    Basic_block.{ idx = new_idx (); content = Data instrs; fidx; annotation_before = (); annotation_after = () } in
   let mk_control_block (instr : (unit Instr.control, unit) Instr.labelled) : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Control instr; fidx } in
+    Basic_block.{ idx = new_idx (); content = Control instr; fidx; annotation_before = (); annotation_after = () } in
   let mk_call_block (instr : (Instr.call, unit) Instr.labelled) : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Call instr; fidx } in
+    Basic_block.{ idx = new_idx (); content = Call instr; fidx; annotation_before = (); annotation_after = () } in
   let mk_merge_block () =
     let idx = new_idx () in
     Basic_block.{ idx ; fidx; content = Control {
@@ -77,9 +77,11 @@ let build (module_ : Wasm_module.t) (fidx : Int32.t) : unit Cfg.t =
         annotation_before = ();
         annotation_after = ();
       };
+        annotation_before = ();
+        annotation_after = ();
     } in
   let mk_empty_block () : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Data []; fidx; } in
+    Basic_block.{ idx = new_idx () ; content = Data []; fidx; annotation_before = (); annotation_after = () } in
   let loop_heads = ref IntSet.empty in
   let rec helper (instrs : (Instr.data, unit) Instr.labelled list) (remaining : 'a Instr.t list) : (
     (* The blocks created *)
@@ -374,7 +376,9 @@ let build_imported (module_ : Wasm_module.t) (desc : Wasm_module.func_desc) : un
   let imported_block = Basic_block.{
       idx = 0;
       fidx = desc.idx;
-      content = Imported desc
+      content = Imported desc;
+      annotation_before = ();
+      annotation_after = ();
     } in
   let last_block = Basic_block.{
       idx = 1;
@@ -386,6 +390,8 @@ let build_imported (module_ : Wasm_module.t) (desc : Wasm_module.func_desc) : un
         annotation_before = ();
         annotation_after = ();
       };
+      annotation_before = ();
+      annotation_after = ();
     } in
   Cfg.{
     exported = false;

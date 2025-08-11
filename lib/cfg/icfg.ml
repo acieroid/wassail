@@ -98,24 +98,27 @@ module ICFG = struct
 
   (** Creates an ICFG given a module and a specific entry point. The entry point can be the start function of the module if there is one (wasm_mod.start), or any other function *)
   let make (wasm_mod : Wasm_module.t) (entry : Int32.t) : 'a t =
-    let cfgs = Cfg_builder.build_all wasm_mod in
-    let calls = make_calls wasm_mod in
-    let reverse_calls = Map.to_alist calls
-                        |> List.concat_map ~f:(fun (source, edges) ->
-                            let source_fidx = match source.section with
-                              | Function n | MergeInFunction n -> n
-                              | _ -> failwith "invalid instruction source" in
-                            let cfg = Map.find_exn cfgs source_fidx in
-                            let source_block = Map.find_exn cfg.label_to_enclosing_block_id source in
-                            Edge.Set.to_list edges
-                            |> List.map ~f:(fun edge -> (edge.target, ReverseEdge.{
-                                source_fidx;
-                                source_block;
-                                direct = edge.direct
-                              })))
-                        |> Int32Map.of_alist_multi
-                        |> Int32Map.map ~f:ReverseEdge.Set.of_list in
-    { entry; cfgs; calls; reverse_calls }
+    if Wasm_module.is_imported wasm_mod entry then
+      failwith (Printf.sprintf "Can't use function %ld as the entry point: it is an imported function" entry)
+    else
+      let cfgs = Cfg_builder.build_all wasm_mod in
+      let calls = make_calls wasm_mod in
+      let reverse_calls = Map.to_alist calls
+                          |> List.concat_map ~f:(fun (source, edges) ->
+                              let source_fidx = match source.section with
+                                | Function n | MergeInFunction n -> n
+                                | _ -> failwith "invalid instruction source" in
+                              let cfg = Map.find_exn cfgs source_fidx in
+                              let source_block = Map.find_exn cfg.label_to_enclosing_block_id source in
+                              Edge.Set.to_list edges
+                              |> List.map ~f:(fun edge -> (edge.target, ReverseEdge.{
+                                  source_fidx;
+                                  source_block;
+                                  direct = edge.direct
+                                })))
+                          |> Int32Map.of_alist_multi
+                          |> Int32Map.map ~f:ReverseEdge.Set.of_list in
+      { entry; cfgs; calls; reverse_calls }
 
   let find_block_exn (icfg : 'a t) (block_idx : BlockIdx.t) : 'a Basic_block.t =
     let cfg = Int32Map.find_exn icfg.cfgs block_idx.fidx in
@@ -243,9 +246,16 @@ module ICFG = struct
       block_idx = cfg.entry_block;
       kind = Regular; (* Not an entry block, as entry blocks have to contain the corresponding call block (and there is none here) *) }
 
-  let map_annotations (icfg : 'a t) ~(f : 'a Instr.t -> 'b * 'b) : 'b t =
+  let map_annotations
+      (icfg : 'a t)
+      ~(instrs : 'a Instr.t -> 'b * 'b)
+      ~(blocks : BlockIdx.t -> 'b * 'b)
+    : 'b t =
     { icfg with
-      cfgs = Int32Map.map icfg.cfgs ~f:(Cfg.map_annotations ~f) }
+      cfgs = Map.mapi icfg.cfgs ~f:(fun ~key:fidx ~data:cfg ->
+          Cfg.map_annotations cfg ~instrs ~blocks:(fun block_idx ->
+              (* TODO: make sure the kind is correct here *)
+              blocks { fidx; block_idx; kind = Regular })) }
 
 end
 

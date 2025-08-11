@@ -67,21 +67,16 @@ module Spec_inference
   let set (n : Int32.t) (l : Var.t list) (v : Var.t) = List.mapi l ~f:(fun i v' -> if i = (Int32.to_int_exn n) then v else v')
 
   let rec compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : State.SpecWithoutBottom.t) : State.SpecWithoutBottom.t =
-    Printf.printf "===> compute_stack_size_at_entry %s with state %s\n" (Instr.Label.to_string label) (State.SpecWithoutBottom.to_string state);
     match Cfg.find_enclosing_block cfg label with
     | None -> (* no enclosing block, the stack is initially empty at the beginning of the function, we ignore that *)
-      Printf.printf "no enclosing block\n";
       state
     | Some block_label ->
-      Printf.printf "enclosing block is: %s\n" (Instr.Label.to_string block_label);
       begin match Instr.Label.Map.find state.stack_size_at_entry block_label with
         | None ->
-          Printf.printf "no info found, using state stack size\n";
           (* We are at the first instruction, the current stack size is the stack size at entry *)
           let size = List.length state.vstack in
           (* It could be that this is e.g., a block contained in an if. The block and loop instructions are not reified in the CFG, and we therefore have to manually map them to their parent for stack size computation. This is done by a recursive call: if block 1 is an if, containing block 2, a block, containing an instruction with `label`, we compute the stack size at etnry of both block 1 and 2 from the current state. *)
           let state = compute_stack_size_at_entry cfg block_label state in
-          Printf.printf "setting stack size at entry of %s to be %d\n" (Instr.Label.to_string block_label) size;
           { state with
             stack_size_at_entry = Instr.Label.Map.set state.stack_size_at_entry ~key:block_label ~data:size }
         | Some _ ->
@@ -390,12 +385,12 @@ module Intra = Intra.MakeIntraOnly(Spec_inference)
 include Spec_inference
 
 (** Extract vars that have been redefined in a merge block *)
-let new_merge_variables (module_ : Wasm_module.t) (cfg : State.t Cfg.t) (merge_block : State.t Basic_block.t) : (Var.t * Var.t) list =
+let new_merge_variables (_module_ : Wasm_module.t) (cfg : State.t Cfg.t) (merge_block : State.t Basic_block.t) : (Var.t * Var.t) list =
   (* The predecessors of merge_block *)
   let preds = Cfg.predecessors cfg merge_block.idx in
-  let state_after = Cfg.state_after_block cfg merge_block.idx (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx)) in
+  let state_after = Cfg.state_after_block cfg merge_block.idx in
   List.fold_left preds ~init:[] ~f:(fun acc (pred_idx, _) ->
-      let state_before = Cfg.state_after_block cfg pred_idx (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx)) in
+      let state_before = Cfg.state_after_block cfg pred_idx in
       if State.equal state_before Spec_inference.bottom then
         (* Ignore bottom state *)
         acc

@@ -110,7 +110,7 @@ let make (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : (Def.t Var.Map.
   let uses: Use.Set.t Var.Map.t = Var.Map.empty in
   (* Add definitions for all locals, globals, and memory variables *)
   let defs =
-    let entry_spec = Cfg.state_before_block cfg cfg.entry_block (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx)) in
+    let entry_spec = Cfg.state_before_block cfg cfg.entry_block in
     let vars = Spec_domain.vars_of entry_spec in
     Var.Set.fold vars ~init:defs ~f:(fun defs var ->
         match Var.Map.add defs ~key:var ~data:(Def.Entry var) with

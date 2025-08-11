@@ -157,9 +157,8 @@ let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pr
   with_mem
 
 
-let summary_of (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (out_state : Taint_domain.t) : t =
-  let init_spec = (Spec_inference.init module_ (Wasm_module.get_funcinst module_ cfg.idx) (*, Relational_transfer.bottom_state (Cfg.map_annotations cfg ~f:(fun i -> fst (Instr.annotation_before i), fst (Instr.annotation_after i))) *)) in
-  match Cfg.state_after_block cfg cfg.exit_block init_spec with
+let summary_of (cfg : Spec_domain.t Cfg.t) (out_state : Taint_domain.t) : t =
+  match Cfg.state_after_block cfg cfg.exit_block with
   | Bottom ->
     (* The function exit is likely unreachable, so we use a bottom summary *)
       { ret = None;
