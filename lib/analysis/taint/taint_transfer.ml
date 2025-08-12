@@ -17,7 +17,30 @@ module Make = struct
   (* The taint specifications as a map from function name to specification.
      Stored as a reference so that it can be extended *)
   let taint_specifications : taint_specification StringMap.t ref=
-    ref (StringMap.of_alist_exn [])
+    let bottom = Taint_domain.Taint.bottom in
+    let of_var (v : Var.t) = Taint_domain.Taint.taint v in
+    ref (StringMap.of_alist_exn [
+      (* https://wasix.org/docs/api-reference/wasi/proc_exit *)
+      "proc_exit", { return = bottom; arguments = [bottom] };
+      (* https://wasix.org/docs/api-reference/wasi/fd_seek *)
+      "fd_seek", { return = bottom; arguments = [of_var (Var.Other "fd_seek.fd");
+                                                 bottom;
+                                                 bottom;
+                                                 of_var (Var.Other "fd_seek.newoffset")] };
+      (* https://wasix.org/docs/api-reference/wasi/fd_write *)
+      "fd_write", { return = bottom; arguments = [of_var (Var.Other "fd_write.fd");
+                                                  bottom;
+                                                  bottom;
+                                                  bottom] };
+      (* https://wasix.org/docs/api-reference/wasi/fd_read *)
+      "fd_read", { return = bottom; arguments = [bottom;
+                                                 of_var (Var.Other "fd_read.iovs");
+                                                 bottom;
+                                                 bottom] };
+      (* https://wasix.org/docs/api-reference/wasi/fd_fdstat_get *)
+      "fd_fdstat_get", { return = bottom; arguments = [bottom;
+                                                       of_var (Var.Other "fd_fdstat_get.buf_ptr")] };
+    ])
 
   (** In the initial state, we only set the taint for parameters and the globals. *)
   let init (module_ : Wasm_module.t) (funcinst : Func_inst.t) : State.t =
@@ -251,10 +274,14 @@ module Make = struct
               Taint_domain.add_taint state ret_var spec.return in
           (* Taint the arguments *)
           let args = List.take annotation_before.vstack (List.length desc.arguments) in
-          let state = List.fold_left (List.zip_exn args spec.arguments)
-              ~init:state
-              ~f:(fun state (var, taint) ->
-                  Taint_domain.add_taint state var taint) in
-          state))
+          if List.length args <> List.length spec.arguments then
+            failwith (Printf.sprintf "Improperly modeled function %s: got %d arguments, but modeled with %d"
+                        desc.name (List.length args) (List.length spec.arguments))
+          else
+            let state = List.fold_left (List.zip_exn args spec.arguments)
+                ~init:state
+                ~f:(fun state (var, taint) ->
+                    Taint_domain.add_taint state var taint) in
+            state))
 
 end

@@ -149,21 +149,20 @@ module TestInter = struct
     i32.const 0))"
       1l (* analyzing 1, which is called by 0, which depends on its result *)
 
-  (* TODO: need to deal with imported before enabling this
   let%test_unit "interprocedural taint works on benchmarks" =
     List.iter [
-      ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l);
+      (* disabled because it takes ~15 seconds *) (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *)
       ("../../../benchmarks/benchmarksgame/fankuchredux.wat", 1l);
-      ("../../../benchmarks/benchmarksgame/fasta.wat", 5l);
+      (* disabled because it takes ~1 minute *) (* ("../../../benchmarks/benchmarksgame/fasta.wat", 5l); *)
       (* disabled because it is huge *) (* ("../../../benchmarks/benchmarksgame/k-nucleotide.wat", 4l);  *)
       ("../../../benchmarks/benchmarksgame/mandelbrot.wat", 1l);
       ("../../../benchmarks/benchmarksgame/nbody.wat", 1l);
       (* disable because it is huge *) (* ("../../../benchmarks/benchmarksgame/reverse-complement.wat", 6l); *)
       ("../../../benchmarks/benchmarksgame/spectral-norm.wat", 1l);
-      ("../../../benchmarks/polybench-clang/2mm.wat", 5l); (* disabled the other polybench as they are quite big and not so different *)
+      (* disabled because it takes ~45 seconds *) (* ("../../../benchmarks/polybench-clang/2mm.wat", 5l); *) (* disabled the other polybench as they are quite big and not so different *)
     ] ~f:(fun (program, entry) ->
         try
           does_not_fail_on_file program entry
-        with e -> failwith (Printf.sprintf "Inter taint failed on %s: %s" program (Exn.to_string e))) *)
+        with e -> failwith (Printf.sprintf "Inter taint failed on %s: %s" program (Exn.to_string e)))
 
 end

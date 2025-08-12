@@ -370,7 +370,7 @@ module Spec_inference
     : State.t -> State.t =
     assert (List.length desc.returns <= 1); (* we could support more than one return, but I haven't seen it used in practice *)
     State.lift ~f:(fun state ->
-        (* TODO: unsound, we keep globals / memory from before. We probably shouldn't *)
+        (* XXX: unsound, we keep globals / memory from before. We probably shouldn't *)
         { state with
           vstack = [Var.Return desc.idx];
           locals = [];
