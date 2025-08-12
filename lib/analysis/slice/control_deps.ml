@@ -75,7 +75,7 @@ let control_dep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (is_immedi
   Log.warn "using incorrect control_dep algorithm";
   let tree : Tree.t = Dominance.cfg_dominator cfg in
   let push (block : Spec_domain.t Basic_block.t) (preds : Pred.t list) : Pred.t list =
-    match Dominance.branch_condition module_ cfg block with
+    match Dominance.branch_condition block with
     | Some pred -> (* It is a branch *)
       begin match block.content with
         | Control i -> (pred, i.label) :: preds
@@ -111,9 +111,9 @@ let control_dep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (is_immedi
   vnode tree.entry []
 
 (** Construct a map from predicates at the end of a block (according to `branch_condition`), to the corresponding block index *)
-let extract_preds (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : int Var.Map.t =
+let extract_preds (_module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : int Var.Map.t =
   IntMap.fold cfg.basic_blocks ~init:Var.Map.empty ~f:(fun ~key:idx ~data:block acc ->
-      match Dominance.branch_condition module_ cfg block with
+      match Dominance.branch_condition block with
       | Some pred ->
         Var.Map.add_exn acc ~key:pred ~data:idx
       | None -> acc)

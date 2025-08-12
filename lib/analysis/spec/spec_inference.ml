@@ -388,9 +388,10 @@ include Spec_inference
 let new_merge_variables (_module_ : Wasm_module.t) (cfg : State.t Cfg.t) (merge_block : State.t Basic_block.t) : (Var.t * Var.t) list =
   (* The predecessors of merge_block *)
   let preds = Cfg.predecessors cfg merge_block.idx in
-  let state_after = Cfg.state_after_block cfg merge_block.idx in
+  let state_after = merge_block.annotation_after in
   List.fold_left preds ~init:[] ~f:(fun acc (pred_idx, _) ->
-      let state_before = Cfg.state_after_block cfg pred_idx in
+      let block_before = Cfg.find_block_exn cfg pred_idx in
+      let state_before = block_before.annotation_after in
       if State.equal state_before Spec_inference.bottom then
         (* Ignore bottom state *)
         acc

@@ -76,11 +76,12 @@ let var_prop (_module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : Spec_domai
             List.fold_left instrs ~init:eqs ~f:(fun eqs instr -> VarEq.Set.union eqs (eqs_data_instr instr))
           | Control { instr = Merge; _ } ->
             (* Equate annotation after each predecessor of this merge block with the annotation after this merge block *)
-            let spec = Cfg.state_after_block cfg block.idx in
+            let spec = block.annotation_after in
             List.fold_left (Cfg.predecessors cfg block.idx)
               ~init:eqs
               ~f:(fun eqs (pred, _) ->
-                  let pred_spec = Spec_domain.get_or_fail (Cfg.state_after_block cfg pred) in
+                  let pred_block = Cfg.find_block_exn cfg pred in
+                  let pred_spec = Spec_domain.get_or_fail pred_block.annotation_after in
                   let spec = Spec_domain.get_or_fail spec in
                   assert (List.length pred_spec.vstack = List.length spec.vstack);
                   assert (List.length pred_spec.locals = List.length spec.locals);

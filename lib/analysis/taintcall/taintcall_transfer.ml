@@ -84,7 +84,8 @@ let apply_summary
   add_call (apply_summary (List.map args ~f:(Taint_domain.get_taint (snd state)))) f arity, sndstate'
 
 let extract_summary (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (analyzed_cfg : State.t Cfg.t) : summary =
-  let out_state = Cfg.state_after_block analyzed_cfg analyzed_cfg.exit_block in
+  let exit_block = Cfg.find_block_exn analyzed_cfg analyzed_cfg.exit_block in
+  let out_state = exit_block.annotation_after in
   (fst out_state, Taint_summary.summary_of cfg (snd out_state))
 
 let merge_flows (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * State.t) list) : State.t =

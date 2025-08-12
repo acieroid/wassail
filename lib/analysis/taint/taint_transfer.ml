@@ -42,7 +42,7 @@ module Make = struct
     let ret (i : annot_expected Instr.labelled_data) : Var.t = match List.hd (Spec_domain.get_or_fail i.annotation_after).vstack with
       | Some r -> r
       | None -> failwith "Taint: no return value" in
-    match i.instr with
+    let result = match i.instr with
     | Nop | MemorySize | Drop | MemoryGrow -> state
     | MemoryCopy | MemoryFill | MemoryInit _ -> state (* Not model entirely properly *)
     | RefIsNull | RefNull _ | RefFunc _ -> state
@@ -111,8 +111,11 @@ module Make = struct
       (* Simplest case: set the taint for the entire memory
          Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
       let vval, _vaddr = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
+      Printf.printf "vval: %s, vaddr: %s\n" (Var.to_string vval) (Var.to_string _vaddr);
       let mem = (Spec_domain.get_or_fail i.annotation_after).memory in
       let all_locs = Var.OffsetMap.keys mem in
+      Printf.printf "all_locs: %s\n" (String.concat ~sep:"," (List.map all_locs ~f:(fun (v, i) ->
+          Printf.sprintf "%s(%d)" (Var.to_string v) i)));
       (* Refine memory locations using relational innformation, if available *)
       let locs = (* if !Taint_options.use_relational then
           let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (vaddr, offset) with
@@ -132,7 +135,12 @@ module Make = struct
       List.fold_left locs ~init:state ~f:(fun s (k, offset) ->
           (* Log.warn (Printf.sprintf "XXX: ignoring offsets!"); *)
           Taint_domain.add_taint_v (Taint_domain.add_taint_v s k vval)
-            (Var.OffsetMap.find_exn mem (k, offset)) vval)
+            (Var.OffsetMap.find_exn mem (k, offset)) vval) in
+    Printf.printf "Analysis of instruction %s with state %s yields result %s\n"
+      (Instr.data_to_string i.instr)
+      (State.to_string state)
+      (State.to_string result);
+    result
 
   let control
       (_module_ : Wasm_module.t) (* The wasm module (read-only) *)
@@ -207,10 +215,11 @@ module Make = struct
           | Control { instr = Merge; _ }
           | Entry | Return _ ->
             (* block is a control-flow merge *)
-            let spec = Cfg.state_after_block cfg block.idx in
+            let spec = block.annotation_after in
             let states' = List.map states ~f:(fun (idx, s) ->
                 (* get the spec after that state *)
-                let spec' = Cfg.state_after_block cfg idx in
+                let pred_block = Cfg.find_block_exn cfg idx in
+                let spec' = pred_block.annotation_after in
                 (* equate all different variables in the post-state with the ones in the pre-state *)
                 List.fold_left (Spec_domain.extract_different_vars spec spec')
                   ~init:s
@@ -228,8 +237,8 @@ module Make = struct
         end
 
   let extract_summary (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (analyzed_cfg : State.t Cfg.t) : summary =
-    let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block in
-    Taint_summary.summary_of cfg out_state
+    let exit_block = Cfg.find_block_exn analyzed_cfg cfg.exit_block in
+    Taint_summary.summary_of cfg exit_block.annotation_after
 
   let call_inter
       (_module : Wasm_module.t)

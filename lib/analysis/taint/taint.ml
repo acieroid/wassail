@@ -82,22 +82,28 @@ module TestIntra = struct
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
     let actual = fst (Int32Map.find_exn (analyze_intra module_ [0l]) 0l) in
-    let expected = Summary.{ ret = Some Domain.Taint.bottom; mem = Domain.Taint.bottom; globals = [Domain.Taint.taint (Var.Global 0)] } in
+    let expected = Summary.{
+        ret = Some Domain.Taint.bottom;
+        mem = Domain.Taint.bottom;
+        globals = [Domain.Taint.taint (Var.Global 0)] } in
     check expected actual
 
-  let%test "test store" =
+  let%test "store taints the memory" =
     let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
-    global.get 0
-    local.get 0
+    global.get 0 ;; address
+    local.get 0 ;; value to store
     i32.store
     local.get 0)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
     let actual = fst (Int32Map.find_exn (analyze_intra module_ [0l]) 0l) in
-    let expected = Summary.{ ret = Some (Domain.Taint.taint (Var.Local 0)); mem = Domain.Taint.taint (Var.Local 0); globals = [Domain.Taint.taint (Var.Global 0)] } in
+    let expected = Summary.{
+        ret = Some (Domain.Taint.taint (Var.Local 0));
+        mem = Domain.Taint.taint (Var.Local 0); (* memory is tainted *)
+        globals = [Domain.Taint.taint (Var.Global 0)] } in
     check expected actual
 end
 

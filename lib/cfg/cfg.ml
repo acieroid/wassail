@@ -319,15 +319,6 @@ module Cfg = struct
   let body (cfg : 'a t) : unit Instr.t list =
     List.map cfg.instructions ~f:(fun l -> Instr.Label.Map.find_exn cfg.label_to_instr l)
 
-  (* XXX: why not just keep this as block annotation stored in memory?! *)
-  let state_before_block (cfg : 'a t) (block_idx : int) : 'a =
-    let block = find_block_exn cfg block_idx in
-    block.annotation_before
-  let state_after_block (cfg : 'a t) (block_idx : int) : 'a =
-    (* This implementation is the complement of state_before_block *)
-    let block = find_block_exn cfg block_idx in
-    block.annotation_after
-
   let replace_block (cfg : 'a t) (block : 'a Basic_block.t) : 'a t =
     { cfg with
       basic_blocks = IntMap.update cfg.basic_blocks block.idx ~f:(function

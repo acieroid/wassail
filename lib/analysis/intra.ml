@@ -176,9 +176,9 @@ module Make
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = Set.min_elt_exn worklist in
-        Printf.printf "-----------------------\n Analyzing block %s\n" (Cfg.BlockIdx.to_string block_idx);
+        Printf.printf "-----------------------\nAnalyzing block %s\n" (Cfg.BlockIdx.to_string block_idx);
         let (in_state, out_state) = analyze_block block_idx in
-        Printf.printf "out_state is: %s\n" (Result.to_string out_state);
+        Printf.printf "in_state was: %s, out_state is: %s\n" (Transfer.State.to_string in_state) (Result.to_string out_state);
         (* Has out state changed? *)
         let previous_out_state = after_block block_idx in
         match previous_out_state with

@@ -158,7 +158,8 @@ let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pr
 
 
 let summary_of (cfg : Spec_domain.t Cfg.t) (out_state : Taint_domain.t) : t =
-  match Cfg.state_after_block cfg cfg.exit_block with
+  let block = Cfg.find_block_exn cfg cfg.exit_block in
+  match block.annotation_after with
   | Bottom ->
     (* The function exit is likely unreachable, so we use a bottom summary *)
       { ret = None;
