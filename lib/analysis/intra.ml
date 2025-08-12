@@ -122,7 +122,7 @@ module Make
       | None -> bottom in
     (* Applies the transfer function to an entire block *)
     let transfer (b : 'a Basic_block.t) (state : Transfer.State.t) : Result.t =
-      Printf.printf "Analysis of block %ld_%d from state %s\n" b.fidx b.idx (Transfer.State.to_string state);
+      Log.debug (Printf.sprintf "Analysis of block %ld_%d from state %s\n" b.fidx b.idx (Transfer.State.to_string state));
       let result = match b.content with
       | Imported _ -> Result.Simple state (* we don't care about imported function for an intra analysis *)
       | Data instrs ->
@@ -142,7 +142,7 @@ module Make
         in
         analysis_data := { !analysis_data with instrs = Map.set !analysis_data.instrs ~key:instr.label ~data:(state, poststate) };
         poststate in
-      Printf.printf "Analysis of block %ld_%d results in state %s\n" b.fidx b.idx (Result.to_string result);
+      Log.debug (Printf.sprintf "Analysis of block %ld_%d results in state %s\n" b.fidx b.idx (Result.to_string result));
       result in
 
     (* Analyzes one block, returning the state before and after this block *)
@@ -178,9 +178,9 @@ module Make
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = Set.min_elt_exn worklist in
-        Printf.printf "-----------------------\nAnalyzing block %s\n" (Cfg.BlockIdx.to_string block_idx);
+        Log.debug (Printf.sprintf "-----------------------\nAnalyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
         let (in_state, out_state) = analyze_block block_idx in
-        Printf.printf "in_state was: %s, out_state is: %s\n" (Transfer.State.to_string in_state) (Result.to_string out_state);
+        Log.debug (Printf.sprintf "in_state was: %s, out_state is: %s\n" (Transfer.State.to_string in_state) (Result.to_string out_state));
         (* Has out state changed? *)
         let previous_out_state = after_block block_idx in
         match previous_out_state with
@@ -332,9 +332,9 @@ module MakeSumm
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = Set.min_elt_exn worklist in
-        Printf.printf "-----------------------\n Analyzing block %s\n" (Cfg.BlockIdx.to_string block_idx);
+        Log.debug (Printf.sprintf "-----------------------\n Analyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
         let (in_state, out_state) = analyze_block block_idx in
-        Printf.printf "out_state is: %s\n" (Result.to_string out_state);
+        Log.debug (Printf.sprintf "out_state is: %s\n" (Result.to_string out_state));
         (* Has out state changed? *)
         let previous_out_state = after_block block_idx in
         match previous_out_state with
@@ -403,7 +403,8 @@ module SummaryCallAdapter (Transfer : Transfer.SUMMARY_TRANSFER)
       match Int32Map.find summaries f with
       | None ->
         if Int32.(f < module_.nfuncimports) then
-          Transfer.apply_imported module_ f arity instr state
+          let desc = List32.nth_exn module_.imported_funcs f in
+          Transfer.imported module_ desc instr.annotation_before instr.annotation_after state
         else
           (* This function depend on another function that has not been analyzed yet, so it is part of some recursive loop. It will eventually stabilize *)
           state
@@ -461,10 +462,9 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
       | None -> bottom in
     (* Applies the transfer function to an entire block *)
     let transfer (b : 'a Basic_block.t) (state : Transfer.State.t) : Result.t =
-       Printf.printf "Analysis of block %ld_%d from state %s\n" b.fidx b.idx (Transfer.State.to_string state);
       let cfg = Map.find_exn icfg.cfgs b.fidx in
       let result : Result.t = match b.content with
-        | Imported desc -> Simple (Transfer.imported module_ desc state)
+        | Imported desc -> Simple (Transfer.imported module_ desc b.annotation_before b.annotation_after state)
         | Data instrs ->
           Result.Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
               let poststate = Transfer.data module_ cfg instr prestate in
@@ -492,7 +492,6 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
                  2 calls 4.
                  3 calls 4.
                  Then, 1 will be analyzed, followed by 2, followed by 4. Upon return, we will go to the return site of 3 as well, even though we haven't analyzed the call in 3. *)
-              Printf.printf "Return block has no previous state %ld_%d\n" b.fidx b.idx;
               Transfer.bottom
             | Some (state, _) -> state in
           let poststate = Transfer.return module_ cfg instr state_before_entry state in
@@ -505,7 +504,6 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
           in
           analysis_data := { !analysis_data with instrs = Map.set !analysis_data.instrs ~key:{ label = instr.label; kind = None } ~data:(state, poststate) };
           poststate in
-       Printf.printf "Analysis of block %ld_%d results in state %s\n" b.fidx b.idx (Result.to_string result);
       result in
 
     (* Analyzes one block, returning the state after this block *)
@@ -543,9 +541,9 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
       else
         let block_idx = Set.min_elt_exn worklist in
         let block = Icfg.find_block_exn icfg block_idx in
-        Printf.printf "-----------------------\nAnalyzing block %s\n" (Icfg.BlockIdx.to_string block_idx);
+        Log.debug (Printf.sprintf "-----------------------\nAnalyzing block %s\n" (Icfg.BlockIdx.to_string block_idx));
         let (in_state, out_state) = analyze_block block_idx block in
-        Log.debug (Printf.sprintf "out_state is: %s\n" (Result.to_string out_state));
+        Log.debug (Printf.sprintf "in_state was: %s, out_state is: %s\n" (Transfer.State.to_string in_state) (Result.to_string out_state));
         (* Has out state changed? *)
         let previous_out_state = after_block block_idx in
         match out_state with
@@ -577,7 +575,6 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
                  after the call but before entering the function *)
               successors @ [{block_idx with kind = Return}] (* add it at the end because usually we want to analyze the callee before *)
             | _ -> successors in
-          Printf.printf "adding successors: %s\n" (String.concat ~sep:"," (List.map ~f:Icfg.BlockIdx.to_string successors));
           fixpoint (IntSet.union (IntSet.remove worklist block_idx) (Icfg.BlockIdx.Set.of_list successors)) (iteration+1)
     in
     (* Performs narrowing by re-analyzing once each block *)

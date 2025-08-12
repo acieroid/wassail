@@ -607,16 +607,16 @@ module Test = struct
      let _, expected_cfg = build_cfg ~fidx sliced in
      let expected = Cfg.body expected_cfg in
      if List.length expected <> List.length actual then begin
-       Printf.printf "slices are different:\n---expected:---\n%s\n---\nand\n---actual:---\n%s\n---\n"
-         (Instr.list_to_string expected (fun () -> ""))
-         (Instr.list_to_string actual (fun () -> ""));
+       Log.error (Printf.sprintf "slices are different:\n---expected:---\n%s\n---\nand\n---actual:---\n%s\n---\n"
+                    (Instr.list_to_string expected (fun () -> ""))
+                    (Instr.list_to_string actual (fun () -> "")));
        false
      end else
        List.equal (fun x y ->
            if Instr.equal (fun () () -> true) (Instr.drop_labels x) (Instr.drop_labels y) then
              true
            else begin
-             Printf.printf "instruction not equal: %s != %s\n" (Instr.to_string x) (Instr.to_string y);
+             Log.error (Printf.sprintf "instruction not equal: %s != %s\n" (Instr.to_string x) (Instr.to_string y));
              false
            end) expected actual
 

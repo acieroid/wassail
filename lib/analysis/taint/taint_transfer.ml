@@ -7,17 +7,17 @@ module Make = struct
   (** We need the variable names as annotations *)
   type annot_expected = Spec_domain.t
 
-  (* This is a map from function index to:
-     - the taint of its return value
-     - the taint of its arguments
-     XXX: fill it from the names of the imports/exports
-   *)
-  let taint_specifications : (Taint_domain.Taint.t * (Taint_domain.Taint.t list)) StringMap.t ref =
-    let bottom = Taint_domain.Taint.Taints Var.Set.empty in
-    ref (StringMap.of_alist_exn [
-        ("fgets", (Taint_domain.Taint.Taints (Var.Set.singleton (Var.Other "fgets")),
-                   [Taint_domain.Taint.Taints (Var.Set.singleton (Var.Other "fgets")); bottom; bottom]))
-      ])
+  (** The taint specification for an imported function is the taint to add to each component *)
+  type taint_specification = {
+    return : Taint_domain.Taint.t;
+    arguments : Taint_domain.Taint.t list;
+    (* XXX: taint on globals and memory is not modeled yet *)
+  }
+
+  (* The taint specifications as a map from function name to specification.
+     Stored as a reference so that it can be extended *)
+  let taint_specifications : taint_specification StringMap.t ref=
+    ref (StringMap.of_alist_exn [])
 
   (** In the initial state, we only set the taint for parameters and the globals. *)
   let init (module_ : Wasm_module.t) (funcinst : Func_inst.t) : State.t =
@@ -44,101 +44,98 @@ module Make = struct
             let ret () =
               (* Wrapped in a function as we don't want to compute it when there's no return *)
               Option.value_exn ~error:(Error.of_string "Taint: no return value") (List.hd annotation_after.vstack) in
-            let result = match i.instr with
-              | Nop | MemorySize | Drop | MemoryGrow -> state
-              | MemoryCopy | MemoryFill | MemoryInit _ -> state (* Not model entirely properly *)
-              | RefIsNull | RefNull _ | RefFunc _ -> state
-              | Select _ ->
-                let (_c, v2, v1) = pop3 annotation_before.vstack in
-                (* XXX: could improve precision by checking the constraints on c: if it is precisely zero/not-zero, we can only include v1 or v2 *)
-                Taint_domain.add_taint_v (Taint_domain.add_taint_v state (ret ()) v1) (ret ()) v2
-              | LocalGet l ->
-                Taint_domain.add_taint_v state (ret ()) (get_nth annotation_before.locals l)
-              | LocalSet l ->
-                Taint_domain.add_taint_v state (get_nth annotation_before.locals l) (pop annotation_before.vstack)
-              | LocalTee l ->
-                Taint_domain.add_taint_v
-                  (Taint_domain.add_taint_v state (get_nth annotation_before.locals l) (pop annotation_before.vstack))
-                  (ret ()) (get_nth annotation_before.locals l)
-              | GlobalGet g ->
-                Taint_domain.add_taint_v state (ret ()) (get_nth annotation_before.globals g)
-              | GlobalSet g ->
-                Taint_domain.add_taint_v state (get_nth annotation_before.globals g) (pop annotation_before.vstack)
-              | Const _ -> state
-              | Binary _ | Compare _ ->
-                let v1, v2 = pop2 annotation_before.vstack in
-                Taint_domain.add_taint_v
-                  (Taint_domain.add_taint_v state (ret ()) v1)
-                  (ret ()) v2
-              | Unary _ | Test _ | Convert _ ->
-                Taint_domain.add_taint_v state (ret ()) (pop annotation_before.vstack)
-              | Load { offset = _offset; _ } ->
-                (* Simplest case: get the taint of the entire memory.
-                   Refined case: get the taint of the memory cells that can pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-                let _addr = pop annotation_before.vstack in
-                let mem = annotation_before.memory in
-                let all_locs = Var.OffsetMap.keys mem in
-                (* Filter the memory location using results from the relational analysis if possible *)
-                let locs = (* if !Taint_options.use_relational then
-                              (* We need to filter locs to only have the locs that can be loaded.
-                              This means for each loc, we can ask the relational domain if are_equal loc v (where v is the top of the stack.
-                              If some are truly equal, we know we can only keep these. Otherwise, if some maybe equal, then these have to be kept. *)
-                              let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (addr, offset) with
-                              | (true, false) -> true
-                              | _ -> false) in
-                              if not (List.is_empty equal) then
-                              (* There are addresses that are definitely equal to addr, so we get their taint *)
-                              equal
-                              else
-                              (* No address is definitely equal to addr, so we take the ones that may be equal *)
-                              List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (addr, offset) with
-                              | (true, _) -> true
-                              | _ -> false)
-                              else *)
-                  all_locs in
-                (* Get the taint of possible memory location and their value.
-                   In practice, both the memory location and the value have the same taint
-                *)
-                let taints = List.map locs ~f:(fun (k, offset) ->
-                    (* Log.warn
-                       (Printf.sprintf "XXX: currently ignoring offsets in taints!!!\n--------------------\n--------------\n"); (* maybe only the values should be tainted, not the keys *) *)
-                    Taint_domain.Taint.join (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Var.OffsetMap.find_exn mem (k, offset)))) in
-                Taint_domain.add_taint
-                  state
-                  (ret ())
-                  (* ret is the join of all these taints *)
-                  (List.fold_left taints ~init:Taint_domain.Taint.bottom ~f:Taint_domain.Taint.join)
-              | Store { offset = _offset; _ } ->
-                (* Simplest case: set the taint for the entire memory
-                   Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-                let vval, _vaddr = pop2 annotation_before.vstack in
-                let mem = annotation_after.memory in
-                let all_locs = Var.OffsetMap.keys mem in
-                (* Refine memory locations using relational innformation, if available *)
-                let locs = (* if !Taint_options.use_relational then
-                              let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (vaddr, offset) with
-                              | (true, false) -> true
-                              | _ -> false) in
-                              if not (List.is_empty equal) then
-                              (* There are addresses that are definitely equal to addr, so we get their taint *)
-                              equal
-                              else
-                              (* No address is definitely equal to addr, so we take the ones that may be equal *)
-                              List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (vaddr, offset) with
-                              | (true, _) -> true
-                              | _ -> false)
-                              else *)
-                  all_locs in
-                (* Set the taint of memory locations and the value to the taint of vval *)
-                List.fold_left locs ~init:state ~f:(fun s (k, offset) ->
-                    (* Log.warn (Printf.sprintf "XXX: ignoring offsets!"); *)
-                    Taint_domain.add_taint_v (Taint_domain.add_taint_v s k vval)
-                      (Var.OffsetMap.find_exn mem (k, offset)) vval) in
-            Printf.printf "Analysis of instruction %s with state %s yields result %s\n"
-              (Instr.data_to_string i.instr)
-              (State.to_string state)
-              (State.to_string result);
-            result))
+            match i.instr with
+            | Nop | MemorySize | Drop | MemoryGrow -> state
+            | MemoryCopy | MemoryFill | MemoryInit _ -> state (* Not model entirely properly *)
+            | RefIsNull | RefNull _ | RefFunc _ -> state
+            | Select _ ->
+              let (_c, v2, v1) = pop3 annotation_before.vstack in
+              (* XXX: could improve precision by checking the constraints on c: if it is precisely zero/not-zero, we can only include v1 or v2 *)
+              Taint_domain.add_taint_v (Taint_domain.add_taint_v state (ret ()) v1) (ret ()) v2
+            | LocalGet l ->
+              Taint_domain.add_taint_v state (ret ()) (get_nth annotation_before.locals l)
+            | LocalSet l ->
+              Taint_domain.add_taint_v state (get_nth annotation_before.locals l) (pop annotation_before.vstack)
+            | LocalTee l ->
+              Taint_domain.add_taint_v
+                (Taint_domain.add_taint_v state (get_nth annotation_before.locals l) (pop annotation_before.vstack))
+                (ret ()) (get_nth annotation_before.locals l)
+            | GlobalGet g ->
+              Taint_domain.add_taint_v state (ret ()) (get_nth annotation_before.globals g)
+            | GlobalSet g ->
+              Taint_domain.add_taint_v state (get_nth annotation_before.globals g) (pop annotation_before.vstack)
+            | Const _ -> state
+            | Binary _ | Compare _ ->
+              let v1, v2 = pop2 annotation_before.vstack in
+              Taint_domain.add_taint_v
+                (Taint_domain.add_taint_v state (ret ()) v1)
+                (ret ()) v2
+            | Unary _ | Test _ | Convert _ ->
+              Taint_domain.add_taint_v state (ret ()) (pop annotation_before.vstack)
+            | Load { offset = _offset; _ } ->
+              (* Simplest case: get the taint of the entire memory. Refined
+                 case: get the taint of the memory cells that can pointed to,
+                 according to the previous analysis stages (i.e., relational
+                 analysis) *)
+              let _addr = pop annotation_before.vstack in
+              let mem = annotation_before.memory in
+              let all_locs = Var.OffsetMap.keys mem in
+              (* Filter the memory location using results from the relational analysis if possible *)
+              let locs = (* if !Taint_options.use_relational then
+                            (* We need to filter locs to only have the locs that can be loaded.
+                            This means for each loc, we can ask the relational domain if are_equal loc v (where v is the top of the stack.
+                            If some are truly equal, we know we can only keep these. Otherwise, if some maybe equal, then these have to be kept. *)
+                            let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (addr, offset) with
+                            | (true, false) -> true
+                            | _ -> false) in
+                            if not (List.is_empty equal) then
+                            (* There are addresses that are definitely equal to addr, so we get their taint *)
+                            equal
+                            else
+                            (* No address is definitely equal to addr, so we take the ones that may be equal *)
+                            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (addr, offset) with
+                            | (true, _) -> true
+                            | _ -> false)
+                            else *)
+                all_locs in
+              (* Get the taint of possible memory location and their value.
+                 In practice, both the memory location and the value have the same taint
+              *)
+              let taints = List.map locs ~f:(fun (k, offset) ->
+                  (* Log.warn
+                     (Printf.sprintf "XXX: currently ignoring offsets in taints!!!\n--------------------\n--------------\n"); (* maybe only the values should be tainted, not the keys *) *)
+                  Taint_domain.Taint.join (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Var.OffsetMap.find_exn mem (k, offset)))) in
+              Taint_domain.add_taint
+                state
+                (ret ())
+                (* ret is the join of all these taints *)
+                (List.fold_left taints ~init:Taint_domain.Taint.bottom ~f:Taint_domain.Taint.join)
+            | Store { offset = _offset; _ } ->
+              (* Simplest case: set the taint for the entire memory
+                 Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
+              let vval, _vaddr = pop2 annotation_before.vstack in
+              let mem = annotation_after.memory in
+              let all_locs = Var.OffsetMap.keys mem in
+              (* Refine memory locations using relational innformation, if available *)
+              let locs = (* if !Taint_options.use_relational then
+                            let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (vaddr, offset) with
+                            | (true, false) -> true
+                            | _ -> false) in
+                            if not (List.is_empty equal) then
+                            (* There are addresses that are definitely equal to addr, so we get their taint *)
+                            equal
+                            else
+                            (* No address is definitely equal to addr, so we take the ones that may be equal *)
+                            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (vaddr, offset) with
+                            | (true, _) -> true
+                            | _ -> false)
+                            else *)
+                all_locs in
+              (* Set the taint of memory locations and the value to the taint of vval *)
+              List.fold_left locs ~init:state ~f:(fun s (k, offset) ->
+                  (* Log.warn (Printf.sprintf "XXX: ignoring offsets!"); *)
+                  Taint_domain.add_taint_v (Taint_domain.add_taint_v s k vval)
+                    (Var.OffsetMap.find_exn mem (k, offset)) vval)))
 
   let control
       (_module_ : Wasm_module.t) (* The wasm module (read-only) *)
@@ -153,18 +150,8 @@ module Make = struct
     | Unreachable -> `Simple Taint_domain.bottom
     | _ -> `Simple state
 
-  let apply_imported
-      (_module : Wasm_module.t)
-      (f : Int32.t)
-      (_arity : int * int)
-      (_i : annot_expected Instr.labelled_call)
-      (state : State.t)
-    : State.t =
-    Log.warn (Printf.sprintf "No summary found for function %ld (imported function): assuming taint is preserved" f);
-    state
-
   let apply_summary
-      (module_ : Wasm_module.t)
+      (_module_ : Wasm_module.t)
       (f : Int32.t)
       (arity : int * int)
       (i : annot_expected Instr.labelled_call)
@@ -186,23 +173,7 @@ module Make = struct
            ~f:(fun ((a, _offset), b) ->
                (* Log.warn (Printf.sprintf "XXX: ignoring offset\n"); *)
                [a; b])) ret in
-    let export = List.find module_.exported_funcs ~f:(fun desc -> Int32.(desc.idx = f)) in
-    match export with
-    | Some desc ->
-      begin match ret, StringMap.find !taint_specifications desc.name with
-        | Some ret_var, Some (ret_taint, args_taint) ->
-          (* This function returns a specific taint that we have to add to ret.
-             Moreover, it might taint its argument, so we propagate this taint
-             too. *)
-          List.fold_left (List.zip_exn (List.rev args) args_taint)
-            ~init:(Taint_domain.add_taint taint_after_call ret_var ret_taint)
-            ~f:(fun state (var, taint) ->
-                Printf.printf "adding taint %s to var %s\n" (Taint_domain.Taint.to_string taint) (Var.to_string var);
-                Taint_domain.add_taint state var taint)
-        | _ -> taint_after_call
-      end
-    | None ->
-      taint_after_call
+    taint_after_call
 
   let merge_flows
       (_module_ : Wasm_module.t)
@@ -259,7 +230,31 @@ module Make = struct
   let return (_module : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (state_after_call : State.t) : State.t =
     state_after_call
 
-  let imported (_module_ : Wasm_module.t) (_desc : Wasm_module.func_desc) : State.t -> State.t =
-    failwith "TODO: taint imported"
+  let imported
+      (_module : Wasm_module.t)
+      (desc : Wasm_module.func_desc)
+      (annot_before : annot_expected)
+      (annot_after : annot_expected)
+      (state : State.t)
+    : State.t =
+    Spec_domain.wrap annot_before ~default:State.bottom ~f:(fun annotation_before ->
+    Spec_domain.wrap annot_after ~default:State.bottom ~f:(fun annotation_after ->
+        match StringMap.find !taint_specifications desc.name with
+        | None ->
+          Log.warn (Printf.sprintf "No specification found for imported function %s (index: %ld): assuming taint is preserved" desc.name desc.idx);
+          state
+        | Some spec ->
+          (* Taint the return value *)
+          let state = match List.hd annotation_after.vstack with
+            | None -> state (* no return value to taint *)
+            | Some ret_var ->
+              Taint_domain.add_taint state ret_var spec.return in
+          (* Taint the arguments *)
+          let args = List.take annotation_before.vstack (List.length desc.arguments) in
+          let state = List.fold_left (List.zip_exn args spec.arguments)
+              ~init:state
+              ~f:(fun state (var, taint) ->
+                  Taint_domain.add_taint state var taint) in
+          state))
 
 end

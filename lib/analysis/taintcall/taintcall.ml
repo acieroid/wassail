@@ -43,7 +43,6 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
        let results = Inter.analyze module_ ~cfgs:annotated_scc ~summaries:summaries in
        Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
            let spec_cfg = Int32Map.find_exn scc idx in
-           Printf.printf "%ld call summary: %s\n" idx (Domain.Call.to_string (fst summary));
            (spec_cfg, taint_cfg, summary)))
 
 (** Detects calls to sinks with data coming from the exported functions' arguments.

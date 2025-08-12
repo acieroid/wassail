@@ -113,13 +113,6 @@ let make (_cfg : 'a Cfg.t) (state : Taint_domain.t)
     The process is similar for globals.
  *)
 let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pre : Var.t list) (globals_post : Var.t list) (mem_post : Var.t list) (ret : Var.t option) : Taint_domain.t =
-  (* Printf.printf "apply summary, args are %s, globals_pre are: %s, globals_post are: %s, ret is: %s\n"
-    (String.concat ~sep:"," (List.map args ~f:Var.to_string))
-    (String.concat ~sep:"," (List.map globals_pre ~f:Var.to_string))
-    (String.concat ~sep:"," (List.map globals_post ~f:Var.to_string))
-    (match ret with
-     | Some v -> Var.to_string v
-     | None -> "__none__"); *)
   (* The arguments of the summary are l0, l1, etc. *)
   let summary_args = List.init (List.length args) ~f:(fun i -> Var.Local i) in
   (* The globals of the summary are g0, g1, etc. *)

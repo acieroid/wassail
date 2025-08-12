@@ -33,11 +33,11 @@ let check (expected : Summary.t) (actual : Summary.t) : bool =
     if Summary.equal actual expected then
       true
     else begin
-      Printf.printf "\n[IMPRECISION] summaries not equal:\nexpected: %s\nactual: %s\n" (Summary.to_string expected) (Summary.to_string actual);
+      Log.imprecision (Printf.sprintf "summaries not equal: expected: %s; actual: %s" (Summary.to_string expected) (Summary.to_string actual));
       true (* not equal, but it does subsume so the test does not fail *)
     end
   else begin
-    Printf.printf "\nsummaries does not subsume:\nexpected: %s\nactual: %s\n" (Summary.to_string expected) (Summary.to_string actual);
+    Log.error (Printf.sprintf "summaries does not subsume: expected: %s; actual: %s" (Summary.to_string expected) (Summary.to_string actual));
     false
   end
 
@@ -115,7 +115,6 @@ module TestInter = struct
     let module_ = Wasm_module.of_string module_str in
     let icfg = analyze_inter_classical module_ fidx in
     ignore icfg;
-    (* Printf.printf "---\n%s\n---\n" (Icfg.to_dot ~annot_str:Domain.to_dot_string icfg); *)
     ()
 
   let does_not_fail_on_file (path : string) (start : Int32.t) : unit =
@@ -137,6 +136,18 @@ module TestInter = struct
     i32.const 0
     i32.add)
   )" 0l
+
+  let%test_unit "interprocedural taint does not fail if analyzed function is called from unanalyzed code" =
+    does_not_fail "(module
+  (type (;0;) (func))
+  (type (;1;) (func (result i32)))
+  (func (;0;) (type 0)
+    (local i32)
+    call 1
+    local.set 0)
+  (func (;1;) (type 1) (result i32)
+    i32.const 0))"
+      1l (* analyzing 1, which is called by 0, which depends on its result *)
 
   (* TODO: need to deal with imported before enabling this
   let%test_unit "interprocedural taint works on benchmarks" =

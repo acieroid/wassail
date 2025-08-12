@@ -71,8 +71,8 @@ module type SUMMARY_TRANSFER = sig
   (** The type of summaries used by the analysis (can be unit) *)
   type summary
 
-  (** Apply an imported function, given its function index, arity, and state before calling it *)
-  val apply_imported : Wasm_module.t -> Int32.t -> (int * int) -> annot_expected Instr.labelled_call -> State.t -> State.t
+  (** Apply an imported function, given its description, annotation before and after the call, and state before calling it *)
+  val imported : Wasm_module.t -> Wasm_module.func_desc -> annot_expected -> annot_expected -> State.t -> State.t
 
   (** Apply a summary, given the function index, arity, state before calling it, and the summary *)
   val apply_summary : Wasm_module.t -> Int32.t -> (int * int) -> annot_expected Instr.labelled_call -> State.t -> summary -> State.t
@@ -115,6 +115,8 @@ module type CLASSICAL_INTER_TRANSFER = sig
   val imported
     : Wasm_module.t (* the wasm module *)
     -> Wasm_module.func_desc (* the imported function *)
+    -> annot_expected (* the annotation before the call *)
+    -> annot_expected (* the annotation after the call *)
     -> State.t (* the state at the entry of the function *)
     -> State.t (* the state resulting from the function *)
 end

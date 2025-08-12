@@ -48,16 +48,6 @@ let control
     end
   | `Branch (s1, s2) -> `Branch ((fst state, s1), (fst state, s2))
 
-let apply_imported
-    (_module : Wasm_module.t)
-    (f : Int32.t)
-    (_arity : int * int)
-    (_i : annot_expected Instr.labelled_call)
-    (state : State.t)
-  : State.t =
-  Log.warn (Printf.sprintf "No summary found for function %ld (imported function): assuming taint is preserved" f);
-    state
-
 let apply_summary
     (module_ : Wasm_module.t)
     (f : Int32.t)
@@ -112,5 +102,11 @@ let entry (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (state : Stat
 let return (_module : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (state_after_call : State.t) : State.t =
   state_after_call
 
-let imported (_module_ : Wasm_module.t) (_desc : Wasm_module.func_desc) : State.t -> State.t =
-  failwith "TODO: taintcall imported"
+let imported
+    (_module_ : Wasm_module.t)
+    (_desc : Wasm_module.func_desc)
+    (_annot_before : annot_expected)
+    (_annot_after : annot_expected)
+    (_state : State.t)
+  : State.t =
+  failwith "taintcall does not model imported functions"

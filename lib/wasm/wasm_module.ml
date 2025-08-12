@@ -66,6 +66,11 @@ let get_funcnames (m : t) : int32 StringMap.t =
       ~f:(fun idx f -> (f.item_name, (Int32.of_int_exn idx))) in
   StringMap.of_alist_exn (alist @ imported)
 
+(** Checks if a function is present *)
+let is_function (m : t) (fidx : Int32.t) : bool =
+  let nfuncs = Int32.((List32.length m.funcs) + (List32.length m.imported_funcs)) in
+  Int32.(fidx < nfuncs)
+
 (** Checks if a function is an imported function. *)
 let is_imported (m : t) (fidx : Int32.t) : bool =
   Int32.(fidx < (Int32.of_int_exn (List.length m.imported_funcs)))

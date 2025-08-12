@@ -91,7 +91,6 @@ module Spec_inference
       (cfg : annot_expected Cfg.t)
       (i : annot_expected Instr.labelled_data)
     : State.t -> State.t = State.lift ~f:(function state ->
-      Printf.printf "instr: %s\n" (Instr.Label.to_string i.label);
       let ret = Var.Var i.label in
       let state = compute_stack_size_at_entry cfg i.label state in
       match i.instr with
@@ -139,7 +138,6 @@ module Spec_inference
               | Some size -> size
               | None -> failwith "Spec inference: no stack size computed at entry of block"
             end in
-        Printf.printf "stack size at entry = %d\n" stack_size_at_entry;
         let out_arity = match Cfg.find_nth_parent_block cfg i.label n with
           | Some block_label ->
             let arity = Cfg.block_arity cfg block_label in
@@ -154,7 +152,6 @@ module Spec_inference
       | Br n ->
         `Simple (State.NotBottom ({ state with vstack = take state.vstack (get_block_return_stack_size n) }))
       | BrIf n ->
-        Printf.printf "br_if: dropping 1 and taking %d from %s\n" (get_block_return_stack_size n) (State.SpecWithoutBottom.to_string state);
         let true_state = State.NotBottom ({ state with vstack = take (drop 1 state.vstack) (get_block_return_stack_size n) }) in
         let false_state = State.NotBottom ({ state with vstack = drop 1 state.vstack }) in
         `Branch (true_state, false_state)
@@ -194,9 +191,6 @@ module Spec_inference
       (cfg : annot_expected Cfg.t)
       (block : annot_expected Basic_block.t)
       (states : State.t list) : State.t =
-    Printf.printf "merging at %ld.%s states %s\n"
-      block.fidx (Basic_block.to_string block)
-      (String.concat ~sep:"--\n" (List.map ~f:State.to_string states));
     let counter = ref 0 in
     let new_var () : Var.t =
       let res = Var.Merge (block.idx, !counter) in
@@ -251,7 +245,6 @@ module Spec_inference
                               List.take vstack1 nargs, List.take vstack2 nargs
                             else
                               vstack1, vstack2 in
-                          Printf.printf "merging %s and %s\n" (Var.list_to_string vstack1) (Var.list_to_string vstack2);
                           List.map2_exn vstack1 vstack2 ~f in
                         let merge_locals locals1 locals2 =
                           (* In case of entry, function [entry] will deal with correctly adding the locals.
@@ -369,7 +362,12 @@ module Spec_inference
       ignore size_before;
       State.NotBottom { after with vstack; locals; stack_size_at_entry }
 
-  let imported (_module_ : Wasm_module.t) (desc : Wasm_module.func_desc) : State.t -> State.t =
+  let imported
+      (_module_ : Wasm_module.t)
+      (desc : Wasm_module.func_desc)
+      (_annot_before : unit)
+      (_annot_after : unit)
+    : State.t -> State.t =
     assert (List.length desc.returns <= 1); (* we could support more than one return, but I haven't seen it used in practice *)
     State.lift ~f:(fun state ->
         (* TODO: unsound, we keep globals / memory from before. We probably shouldn't *)

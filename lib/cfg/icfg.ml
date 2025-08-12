@@ -98,7 +98,9 @@ module ICFG = struct
 
   (** Creates an ICFG given a module and a specific entry point. The entry point can be the start function of the module if there is one (wasm_mod.start), or any other function *)
   let make (wasm_mod : Wasm_module.t) (entry : Int32.t) : 'a t =
-    if Wasm_module.is_imported wasm_mod entry then
+    if not (Wasm_module.is_function wasm_mod entry) then
+      failwith (Printf.sprintf "Can't use function %ld as the entry point: it is not a function of the binary" entry)
+    else if Wasm_module.is_imported wasm_mod entry then
       failwith (Printf.sprintf "Can't use function %ld as the entry point: it is an imported function" entry)
     else
       let cfgs = Cfg_builder.build_all wasm_mod in
@@ -269,12 +271,9 @@ let to_dot
   (* Each CFG is put into a cluster *)
   let clusters = List.map (Int32Map.to_alist icfg.cfgs) ~f:(fun (fidx, cfg) ->
       let prefix = Printf.sprintf "%ld_" fidx in
-      Printf.printf "function %ld\n" fidx;
-      Printf.printf "basic blocks: %s\n" (String.concat ~sep:"," (List.map ~f:Int.to_string (IntMap.keys cfg.basic_blocks)));
       (* The nodes are the same than the CFG ones, but we introduce extra nodes for returns *)
       let nodes = String.concat ~sep:"\n" (List.concat_map (IntMap.to_alist cfg.basic_blocks)
                                              ~f:(fun (_, b) ->
-                                                 Printf.printf "node: %s\n" (Basic_block.to_string b);
                                                  let color =
                                                    if b.idx = cfg.entry_block then
                                                      "green"
@@ -360,7 +359,6 @@ module Test = struct
       ("../../../benchmarks/polybench-clang/syrk.wat", 5l);
       ("../../../benchmarks/polybench-clang/trisolv.wat", 5l);
       ("../../../benchmarks/polybench-clang/trmm.wat", 5l);
-      ("../../../test/element-section-func.wat", 5l);
     ] ~f:(fun (program, entry) ->
         try
           let _icfg = make (Wasm_module.of_file program) entry in
@@ -370,8 +368,6 @@ module Test = struct
   let expect (module_str : string) (entry : Int32.t) (calls : Edge.Set.t Instr.Label.Map.t) : bool =
     let module_ = Wasm_module.of_string module_str in
     let icfg = make module_ entry in
-    (* Printf.printf "%s\n" (String.concat ~sep:"," (List.map ~f:Instr.Label.to_string (Instr.Label.Map.keys calls)));
-       Printf.printf "%s\n" (String.concat ~sep:"," (List.map ~f:Instr.Label.to_string (Instr.Label.Map.keys icfg.calls))); *)
     Instr.Label.Map.equal Edge.Set.equal icfg.calls calls
 
   let%test "ICFG for module with two functions and one direct call" =
@@ -486,7 +482,6 @@ module Test = struct
       if List.length succs = 0 then
         Leaf n
       else begin
-        Printf.printf "%s -> %s\n" (BlockIdx.to_string n) (List.map ~f:BlockIdx.to_string succs |> String.concat ~sep:",");
         Node (n, List.map succs ~f:aux)
       end in
     aux first
@@ -498,9 +493,9 @@ module Test = struct
     all last (fun n -> predecessors icfg n |> List.map ~f:fst)
 
   let print_diff (expected : BlockIdx.t tree) (actual : BlockIdx.t tree) : unit =
-    Printf.printf "expected: %s\nactual: %s\n"
-      (tree_to_string BlockIdx.to_string expected)
-      (tree_to_string BlockIdx.to_string actual)
+    Log.error (Printf.sprintf "expected: %s\nactual: %s\n"
+                 (tree_to_string BlockIdx.to_string expected)
+                 (tree_to_string BlockIdx.to_string actual))
 
   let expect_successors (icfg : 'a t) (expected : BlockIdx.t tree) : bool =
     let actual = all_successors icfg in

@@ -309,7 +309,6 @@ module TestInter = struct
     let module_ = Wasm_module.of_string module_str in
     let icfg = analyze_inter_classical module_ fidx in
     ignore icfg;
-    (* Printf.printf "---\n%s\n---\n" (Icfg.to_dot ~annot_str:Spec_domain.to_dot_string icfg); *)
     ()
 
   let final_spec_should_be (module_str : string) (fidx : int32) (expected : Spec_domain.t) : unit =

@@ -160,7 +160,7 @@ let apply_to_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
                    | Wasm.Script.Module (_, { it = Wasm.Script.Textual m; _ }) -> Some (f m)
                    | _ -> None)) ~f:(fun x -> x))
   | ext ->
-    Printf.printf "Invalid extension for WebAssembly module: %s. Assuming .wat extension\n" ext;
+    Log.warn (Printf.sprintf "Invalid extension for WebAssembly module: %s. Assuming .wat extension\n" ext);
     apply_to_textual_file filename f
 
 
