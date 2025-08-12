@@ -493,7 +493,7 @@ module TestInter = struct
           } 0;
       })
 
-  let%test_unit "interprocedural spec works on all benchmarks" =
+  let%test_unit "interprocedural spec works on benchmarks" =
     List.iter [
       ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l);
       ("../../../benchmarks/benchmarksgame/fankuchredux.wat", 1l);

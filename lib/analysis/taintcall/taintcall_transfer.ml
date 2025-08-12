@@ -88,11 +88,15 @@ let extract_summary (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (ana
   let out_state = exit_block.annotation_after in
   (fst out_state, Taint_summary.summary_of cfg (snd out_state))
 
-let merge_flows (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (block : annot_expected Basic_block.t) (states : (int * State.t) list) : State.t =
-  (match List.reduce (List.map ~f:(fun x -> fst (snd x)) states) ~f:Taintcall_domain.Call.join with
+let merge_flows
+    (module_ : Wasm_module.t)
+    (cfg : annot_expected Cfg.t)
+    (block : annot_expected Basic_block.t)
+    (predecessors : ('a Basic_block.t * State.t) list) : State.t =
+  (match List.reduce (List.map ~f:(fun x -> fst (snd x)) predecessors) ~f:Taintcall_domain.Call.join with
    | None -> init module_ (Wasm_module.get_funcinst module_ cfg.idx)
    | Some s' -> s',
-   TaintTransfer.merge_flows module_ cfg block (List.map states ~f:(fun x -> (fst x, (snd (snd x))))))
+   TaintTransfer.merge_flows module_ cfg block (List.map predecessors ~f:(fun x -> (fst x, (snd (snd x))))))
 
 let call_inter
     (_module : Wasm_module.t)

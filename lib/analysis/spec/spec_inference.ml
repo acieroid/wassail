@@ -90,7 +90,7 @@ module Spec_inference
       (_module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t)
       (i : annot_expected Instr.labelled_data)
-    : State.t -> State.t = State.lift (function state ->
+    : State.t -> State.t = State.lift ~f:(function state ->
       Printf.printf "instr: %s\n" (Instr.Label.to_string i.label);
       let ret = Var.Var i.label in
       let state = compute_stack_size_at_entry cfg i.label state in
@@ -128,7 +128,7 @@ module Spec_inference
       (cfg : 'a Cfg.t)
       (i : annot_expected Instr.labelled_control)
     : State.t -> [ `Simple of State.t | `Branch of State.t * State.t ] =
-    State.wrap ~default:(`Simple bottom) (function state ->
+    State.wrap ~default:(`Simple bottom) ~f:(function state ->
       let state = compute_stack_size_at_entry cfg i.label state in
       let get_block_return_stack_size (n : Int32.t) : int =
         (* The return stack size of a block is its out arity + the stack size at entry *)
@@ -179,7 +179,7 @@ module Spec_inference
       (cfg : annot_expected Cfg.t)
       (i : annot_expected Instr.labelled_call)
       : State.t -> State.t =
-    State.wrap ~default:bottom (function state ->
+    State.wrap ~default:bottom ~f:(function state ->
       let state = compute_stack_size_at_entry cfg i.label state in
       let ret = Var.Var i.label in
       match i.instr with
@@ -214,7 +214,7 @@ module Spec_inference
       | Return _ -> false, true
       | _ -> false, false in
     (* Multiple cases: either we have no predecessor, we have unanalyzed predecessors, or we have only analyzed predecessors *)
-    (State.lift rename_exit) (begin match states with
+    (State.lift ~f:rename_exit) (begin match states with
         | [] ->
           bottom
         | s :: [] ->
@@ -295,7 +295,7 @@ module Spec_inference
               let plug_holes = (function
                   | Var.Hole -> (* add a merge variable *) new_var ()
                   | v -> (* no hole, keep the variable *) v) in
-              State.lift (fun s -> { vstack = List.map s.vstack ~f:plug_holes;
+              State.lift ~f:(fun s -> { vstack = List.map s.vstack ~f:plug_holes;
                                     locals = List.map s.locals ~f:plug_holes;
                                     globals = List.map s.globals ~f:plug_holes;
                                     memory = Var.OffsetMap.map s.memory ~f:plug_holes;
@@ -308,13 +308,13 @@ module Spec_inference
       (module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t)
       (block : annot_expected Basic_block.t)
-      (states : (int * State.t) list)
+      (predecessors : (annot_expected Basic_block.t * State.t) list)
     : State.t =
     (* Checks the validity of the merge and dispatches to `merge` We expect to
        have to merge only merge nodes, or in the case of interprocedural
        analysis, for entry nodes (multiple calls to the same function) or return
        nodes (returns for multiple potential functions with call_indirect) *)
-    begin match states with
+    begin match predecessors with
       | _ :: _ :: _ -> begin match block.content with
           | Control { instr = Merge; _ } -> ()
           | Entry -> ()
@@ -323,10 +323,10 @@ module Spec_inference
         end
       | _ -> ()
     end;
-    merge module_ cfg block (List.map ~f:snd states)
+    merge module_ cfg block (List.map ~f:snd predecessors)
 
   let call_inter (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_call) : State.t -> State.t =
-    State.lift (function state ->
+    State.lift ~f:(function state ->
         let state = compute_stack_size_at_entry cfg i.label state in
         match i.instr with
         | CallDirect _ -> state
@@ -338,7 +338,7 @@ module Spec_inference
     let funcinst = Wasm_module.get_funcinst module_ cfg.idx in
     let nargs = List.length (fst funcinst.typ) in
     let locals = funcinst.code.locals in
-    State.wrap ~default:bottom (fun state ->
+    State.wrap ~default:bottom ~f:(fun state ->
         let args = List.take state.vstack nargs in
         let zeroes = List.map locals ~f:(fun t -> Var.Const (Prim_value.zero_of_t t)) in
         let vstack = [] in
@@ -371,7 +371,7 @@ module Spec_inference
 
   let imported (_module_ : Wasm_module.t) (desc : Wasm_module.func_desc) : State.t -> State.t =
     assert (List.length desc.returns <= 1); (* we could support more than one return, but I haven't seen it used in practice *)
-    State.lift (fun state ->
+    State.lift ~f:(fun state ->
         (* TODO: unsound, we keep globals / memory from before. We probably shouldn't *)
         { state with
           vstack = [Var.Return desc.idx];

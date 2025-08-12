@@ -118,6 +118,11 @@ module TestInter = struct
     (* Printf.printf "---\n%s\n---\n" (Icfg.to_dot ~annot_str:Domain.to_dot_string icfg); *)
     ()
 
+  let does_not_fail_on_file (path : string) (start : Int32.t) : unit =
+    let module_ = Wasm_module.of_file path in
+    let _ = analyze_inter_classical module_ start in
+    ()
+
   let%test_unit "interprocedural taint does not fail with function call" =
     does_not_fail "(module
   (type (;0;) (func (param i32) (result i32)))
@@ -132,5 +137,22 @@ module TestInter = struct
     i32.const 0
     i32.add)
   )" 0l
+
+  (* TODO: need to deal with imported before enabling this
+  let%test_unit "interprocedural taint works on benchmarks" =
+    List.iter [
+      ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l);
+      ("../../../benchmarks/benchmarksgame/fankuchredux.wat", 1l);
+      ("../../../benchmarks/benchmarksgame/fasta.wat", 5l);
+      (* disabled because it is huge *) (* ("../../../benchmarks/benchmarksgame/k-nucleotide.wat", 4l);  *)
+      ("../../../benchmarks/benchmarksgame/mandelbrot.wat", 1l);
+      ("../../../benchmarks/benchmarksgame/nbody.wat", 1l);
+      (* disable because it is huge *) (* ("../../../benchmarks/benchmarksgame/reverse-complement.wat", 6l); *)
+      ("../../../benchmarks/benchmarksgame/spectral-norm.wat", 1l);
+      ("../../../benchmarks/polybench-clang/2mm.wat", 5l); (* disabled the other polybench as they are quite big and not so different *)
+    ] ~f:(fun (program, entry) ->
+        try
+          does_not_fail_on_file program entry
+        with e -> failwith (Printf.sprintf "Inter taint failed on %s: %s" program (Exn.to_string e))) *)
 
 end

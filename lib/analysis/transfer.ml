@@ -37,7 +37,7 @@ module type TRANSFER_BASE = sig
     : Wasm_module.t (* the wasm module *)
     -> annot_expected Cfg.t (* the CFG *)
     -> annot_expected Basic_block.t (* the basic block for which flows should be merged *)
-    -> (Cfg.BlockIdx.t * State.t) list (* the predecessor flows, as pairs of block indices and state *)
+    -> (annot_expected Basic_block.t * State.t) list (* the predecessor flows, as pairs of block indices and state *)
     -> State.t (* the state resulting from the merge *)
 
   (** Transfer function for control instructions *)

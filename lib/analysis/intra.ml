@@ -153,14 +153,16 @@ module Make
       (* in_state is the join of all the the out_state of the predecessors.
          Special case: if the out_state of a predecessor is not a simple one, that means we are the target of a break.
          If this is the case, we pick the right branch, according to the edge data *)
-      let pred_states = (List.map incoming ~f:(fun (idx, d) -> match (after_block idx, d) with
-          | Simple s, _ -> (idx, s)
-          | Branch (t, _), Some true -> (idx, t)
-          | Branch (_, f), Some false -> (idx, f)
+      let pred_states = List.map incoming ~f:(fun (idx, d) ->
+          let pred_block = Cfg.find_block_exn cfg idx in
+          (pred_block, match (after_block idx, d) with
+          | Simple s, _ -> s
+          | Branch (t, _), Some true -> t
+          | Branch (_, f), Some false -> f
           | Branch _, None -> failwith (Printf.sprintf "invalid branch state at block %s, from block %s"
                                           (Cfg.BlockIdx.to_string block_idx)
                                           (Cfg.BlockIdx.to_string idx))
-          | Uninitialized, _ -> (idx, Transfer.bottom))) in
+          | Uninitialized, _ -> Transfer.bottom)) in
       let is_entry = cfg.entry_block = block_idx in
       let in_state =
         (* If it's the entry state, take the init value (there should only be one way to reach the entry), otherwise merge the flows *)
@@ -304,14 +306,16 @@ module MakeSumm
       (* in_state is the join of all the the out_state of the predecessors.
          Special case: if the out_state of a predecessor is not a simple one, that means we are the target of a break.
          If this is the case, we pick the right branch, according to the edge data *)
-      let pred_states = (List.map incoming ~f:(fun (idx, d) -> match (after_block idx, d) with
-          | Simple s, _ -> (idx, s)
-          | Branch (t, _), Some true -> (idx, t)
-          | Branch (_, f), Some false -> (idx, f)
+      let pred_states = List.map incoming ~f:(fun (idx, d) ->
+          let pred_block = Cfg.find_block_exn cfg idx in
+          (pred_block, match (after_block idx, d) with
+          | Simple s, _ -> s
+          | Branch (t, _), Some true -> t
+          | Branch (_, f), Some false -> f
           | Branch _, None -> failwith (Printf.sprintf "invalid branch state at block %s, from block %s"
                                           (Cfg.BlockIdx.to_string block_idx)
                                           (Cfg.BlockIdx.to_string idx))
-          | Uninitialized, _ -> (idx, Transfer.bottom))) in
+          | Uninitialized, _ -> Transfer.bottom)) in
       let is_entry = cfg.entry_block = block_idx in
       let in_state =
         (* If it's the entry state, take the init value (there should only be one way to reach the entry), otherwise merge the flows *)
@@ -510,14 +514,16 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
       (* in_state is the join of all the the out_state of the predecessors.
          Special case: if the out_state of a predecessor is not a simple one, that means we are the target of a break.
          If this is the case, we pick the right branch, according to the edge data *)
-      let pred_states = (List.map incoming ~f:(fun (idx, d) -> match (after_block idx, d) with
-          | Simple s, _ -> (idx, s)
-          | Branch (t, _), Some true -> (idx, t)
-          | Branch (_, f), Some false -> (idx, f)
+      let pred_states = List.map incoming ~f:(fun (idx, d) ->
+          let pred_block = Icfg.find_block_exn icfg idx in
+          (pred_block, match (after_block idx, d) with
+          | Simple s, _ -> s
+          | Branch (t, _), Some true -> t
+          | Branch (_, f), Some false -> f
           | Branch _, None -> failwith (Printf.sprintf "invalid branch state at block %s, from block %s"
                                           (Icfg.BlockIdx.to_string block_idx)
                                           (Icfg.BlockIdx.to_string idx))
-          | Uninitialized, _ -> (idx, Transfer.bottom))) in
+          | Uninitialized, _ -> Transfer.bottom)) in
       let cfg = Map.find_exn icfg.cfgs block_idx.fidx in
       let is_entry = Int32.(icfg.entry = block_idx.fidx) && cfg.entry_block = block_idx.block_idx &&
                      match block_idx.kind with Regular -> true | _ -> false in
@@ -526,7 +532,7 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
         if is_entry then
           Transfer.init module_ (Wasm_module.get_funcinst module_ block.fidx)
         else
-          Transfer.merge_flows module_ cfg block (List.map ~f:(fun (b, s) -> (b.block_idx, s)) pred_states) in
+          Transfer.merge_flows module_ cfg block pred_states in
       (* We analyze it *)
       in_state, transfer block in_state
     in
@@ -586,12 +592,6 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
     fixpoint (Icfg.BlockIdx.Set.singleton (Icfg.entry_block icfg)) 1;
     (* _narrow (IntMap.keys cfg.basic_blocks); *)
     !analysis_data
-    (* TODO: remove !instr_data
-    |> Map.to_alist
-    |> List.filter_map ~f:(fun (k, v) -> match k.kind with
-        | None -> Some (k.label, v)
-        | _ -> None)
-       |> Instr.Label.Map.of_alist_exn *)
 
   let analyze
       (module_ : Wasm_module.t)

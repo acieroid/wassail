@@ -58,7 +58,10 @@ module SpecWithoutBottom = struct
       and the second element is the new variable *)
   let extract_different_vars (s1 : t) (s2 : t) : (Var.t * Var.t) list =
     let f (l1 : Var.t list) (l2 : Var.t list) : (Var.t * Var.t) list =
-      assert (List.length l1 = List.length l2);
+      (* We take the shortest length; as we could have stacks with more elements in case of br that leaves too many values on the stack *)
+      let shortest_length = min (List.length l1) (List.length l2) in
+      let l1 = List.take l1 shortest_length in
+      let l2 = List.take l2 shortest_length in
       List.filter_map (List.map2_exn l1 l2 ~f:(fun v1 v2 -> (v1, v2, Var.equal v1 v2)))
         ~f:(fun (v1, v2, eq) -> if not eq then Some (v1, v2) else None) in
     let fvstack (l1 : Var.t list) (l2 : Var.t list) : (Var.t * Var.t) list =
@@ -87,21 +90,21 @@ module Spec = struct
     | NotBottom of SpecWithoutBottom.t
   [@@deriving compare, equal]
 
-  let lift (f : SpecWithoutBottom.t -> SpecWithoutBottom.t) : t -> t = function
+  let lift ~(f : SpecWithoutBottom.t -> SpecWithoutBottom.t) : t -> t = function
     | Bottom -> Bottom
     | NotBottom s -> NotBottom (f s)
 
-  let bind (f : SpecWithoutBottom.t -> t) : t -> t = function
+  let bind ~(f : SpecWithoutBottom.t -> t) : t -> t = function
     | Bottom -> Bottom
     | NotBottom s -> f s
 
-  let wrap ~(default : 'a) (f : SpecWithoutBottom.t -> 'a) : t -> 'a = function
+  let wrap ~(default : 'a) ~(f : SpecWithoutBottom.t -> 'a) : t -> 'a = function
     | Bottom -> default
     | NotBottom s -> f s
 
   let get_or_fail (s : t) : SpecWithoutBottom.t = match s with
     | NotBottom s -> s
-    | Bottom -> failwith "Spec.get_or_fail called on bottom"
+    | Bottom -> failwith "Spec.get_or_fail called on bottom. If this is a classical interprocedural analysis, it is likely that the analysis didn't start at the entry point."
 
   let to_string (s : t) : string = match s with
     | Bottom -> "bottom"

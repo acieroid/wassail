@@ -254,7 +254,6 @@ module ICFG = struct
     { icfg with
       cfgs = Map.mapi icfg.cfgs ~f:(fun ~key:fidx ~data:cfg ->
           Cfg.map_annotations cfg ~instrs ~blocks:(fun block_idx ->
-              (* TODO: make sure the kind is correct here *)
               blocks { fidx; block_idx; kind = Regular })) }
 
 end
