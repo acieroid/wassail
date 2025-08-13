@@ -122,7 +122,8 @@ let is (v : t) (n : int) : bool = match v with
 let zero_of_t (t : Type.t) : t = match t with
   | I32 -> I32 0l
   | I64 -> I64 0L
-  | _ -> failwith "unsupported type"
+  | F32 -> F32 Wasm.F32.zero
+  | F64 -> F64 Wasm.F64.zero
 
 (** Returns zero in the same type as v *)
 let zero_of_same_t (v : t) : t = match v with
@@ -204,7 +205,7 @@ let rotr = lift_wasm_bin Wasm.I32.rotr Wasm.I64.rotr
 let clz = lift_wasm_un Wasm.I32.clz Wasm.I64.clz
 let popcnt = lift_wasm_un Wasm.I32.popcnt Wasm.I64.popcnt
 
-(* TODO extend_s is a wasm op that is not defined here*)
+(* XXX extend_s is a wasm op that is not defined here*)
 
 let eqz = lift_wasm_test Wasm.I32.eqz Wasm.I64.eqz
 

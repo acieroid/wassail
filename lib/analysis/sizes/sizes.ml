@@ -137,7 +137,6 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
     let var (x : Int32.t) = vu32 x
 
     let block_type = function
-      (* TODO: VarBlockType x -> vs33 x.it *)
       | [], [] -> vs7 (-0x40)
       | [], [t] -> value_type t
       | _ -> failwith "unsupported: sizes with other block type"
@@ -346,6 +345,10 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
           | Convert ({typ = F64; op = Convertop.ReinterpretInt}) -> op 0xbf
           | _ -> assert false
         end
+      | Call c -> begin match c.instr with
+          | CallDirect (_, _, x) -> op 0x10; var x
+          | CallIndirect (y, _, _, x) -> op 0x11; var y; var x
+        end
       | Control c -> begin match c.instr with
           | Unreachable -> op 0x00
 
@@ -360,8 +363,6 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
           | BrIf x -> op 0x0d; var x
           | BrTable (xs, x) -> op 0x0e; vec var xs; var x
           | Return -> op 0x0f
-          | Call (_, _, x) -> op 0x10; var x
-          | CallIndirect (y, _, _, x) -> op 0x11; var y; var x
           | Merge -> ()
         end
 

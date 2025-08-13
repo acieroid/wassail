@@ -25,9 +25,9 @@ module Label = struct
     }
     [@@deriving sexp, compare, equal]
 
-    let to_string (l : t) : string = match l.section with
-      | Function _ -> Printf.sprintf "%d" l.id (* Printed differently to have a cleaner output *)
-      | _ -> Printf.sprintf "%s_%d" (section_to_string l.section) l.id
+    let to_string (l : t) : string =
+      Printf.sprintf "%s_%d" (section_to_string l.section) l.id
+
   end
   include T
 
@@ -109,14 +109,11 @@ module T = struct
     | RefFunc of Int32.t
     | RefIsNull
 
-
   (** Control instructions *)
   and 'a control =
     | Block of block_type * arity * 'a t list
     | Loop of block_type * arity * 'a t list
     | If of block_type * arity * 'a t list * 'a t list
-    | Call of arity * (Type.t list * Type.t list) * Int32.t
-    | CallIndirect of Int32.t * arity * (Type.t list * Type.t list) * Int32.t
     | Br of Int32.t
     | BrIf of Int32.t
     | BrTable of Int32.t list * Int32.t
@@ -124,21 +121,34 @@ module T = struct
     | Unreachable
     | Merge (* Special instruction not existing in Wasm, used to handle control-flow merges *)
 
+  (** Call instructions *)
+  and call =
+    | CallDirect of arity * (Type.t list * Type.t list) * Int32.t
+    | CallIndirect of Int32.t * arity * (Type.t list * Type.t list) * Int32.t
+
   (** Labelled control instructions *)
   and 'a labelled_control = ('a control, 'a) labelled
 
   (** Labelled data instructions *)
   and 'a labelled_data = (data, 'a) labelled
 
+  (** Labelled call instruction *)
+  and 'a labelled_call = (call, 'a) labelled
+
   (** All instructions *)
   and 'a t =
     | Data of 'a labelled_data
     | Control of 'a labelled_control
+    | Call of 'a labelled_call
   [@@deriving sexp, compare, equal]
 
 end
 
 include T
+
+let call_types (instr : 'a labelled_call) : Type.t list * Type.t list = match instr.instr with
+  | CallDirect (_, ts, _) -> ts
+  | CallIndirect (_, _, ts, _) -> ts
 
 let is_block (instr : 'a t) : bool = match instr with
   | Control { instr = Block _; _ } -> true
@@ -150,46 +160,52 @@ let is_block (instr : 'a t) : bool = match instr with
 let label (instr : 'a t) : Label.t = match instr with
   | Data i -> i.label
   | Control i -> i.label
+  | Call i -> i.label
 
 (** Convert a data instruction to its string representation *)
 let data_to_string (instr : data) : string =
   match instr with
-     | Nop -> "nop"
-     | Drop -> "drop"
-     | Select _ -> "select"
-     | MemorySize -> "memory.size"
-     | MemoryGrow -> "memory.grow"
-     | MemoryCopy -> "memory.copy"
-     | MemoryFill -> "memory.fill"
-     | MemoryInit m -> Printf.sprintf "memory.init %ld" m
-     | Const v -> Printf.sprintf "%s.const %s" (Type.to_string (Prim_value.typ v)) (Prim_value.to_string v)
-     | Binary b -> Printf.sprintf "%s" (Binop.to_string b)
-     | Unary u -> Printf.sprintf "%s" (Unop.to_string u)
-     | Compare r -> Printf.sprintf "%s" (Relop.to_string r)
-     | Test t -> Printf.sprintf "%s" (Testop.to_string t)
-     | Convert t -> Printf.sprintf "%s" (Convertop.to_string t)
-     | LocalGet v -> Printf.sprintf "local.get %s" (Int32.to_string v)
-     | LocalSet v -> Printf.sprintf "local.set %s" (Int32.to_string v)
-     | LocalTee v -> Printf.sprintf "local.tee %s" (Int32.to_string v)
-     | GlobalGet v -> Printf.sprintf "global.get %s" (Int32.to_string v)
-     | GlobalSet v -> Printf.sprintf "global.set %s" (Int32.to_string v)
-     | Load op ->
-       let memop = Memoryop.to_string op in
-       Printf.sprintf "%s.load%s%s%s"
-         (Type.to_string op.typ)
-         (Memoryop.suffix_to_string op true)
-         (if String.is_empty memop then "" else " ")
-         memop
-     | Store op ->
-       let memop = Memoryop.to_string op in
-       Printf.sprintf "%s.store%s%s%s"
-         (Type.to_string op.typ)
-         (Memoryop.suffix_to_string op false)
-         (if String.is_empty memop then "" else " ")
-         memop
-     | RefNull t -> Printf.sprintf "ref.null %s" (Ref_type.to_string t)
-     | RefFunc f -> Printf.sprintf "ref.func %ld" f
-     | RefIsNull -> "ref.isnull"
+  | Nop -> "nop"
+  | Drop -> "drop"
+  | Select _ -> "select"
+  | MemorySize -> "memory.size"
+  | MemoryGrow -> "memory.grow"
+  | MemoryCopy -> "memory.copy"
+  | MemoryFill -> "memory.fill"
+  | MemoryInit m -> Printf.sprintf "memory.init %ld" m
+  | Const v -> Printf.sprintf "%s.const %s" (Type.to_string (Prim_value.typ v)) (Prim_value.to_string v)
+  | Binary b -> Printf.sprintf "%s" (Binop.to_string b)
+  | Unary u -> Printf.sprintf "%s" (Unop.to_string u)
+  | Compare r -> Printf.sprintf "%s" (Relop.to_string r)
+  | Test t -> Printf.sprintf "%s" (Testop.to_string t)
+  | Convert t -> Printf.sprintf "%s" (Convertop.to_string t)
+  | LocalGet v -> Printf.sprintf "local.get %s" (Int32.to_string v)
+  | LocalSet v -> Printf.sprintf "local.set %s" (Int32.to_string v)
+  | LocalTee v -> Printf.sprintf "local.tee %s" (Int32.to_string v)
+  | GlobalGet v -> Printf.sprintf "global.get %s" (Int32.to_string v)
+  | GlobalSet v -> Printf.sprintf "global.set %s" (Int32.to_string v)
+  | Load op ->
+    let memop = Memoryop.to_string op in
+    Printf.sprintf "%s.load%s%s%s"
+      (Type.to_string op.typ)
+      (Memoryop.suffix_to_string op true)
+      (if String.is_empty memop then "" else " ")
+      memop
+  | Store op ->
+    let memop = Memoryop.to_string op in
+    Printf.sprintf "%s.store%s%s%s"
+      (Type.to_string op.typ)
+      (Memoryop.suffix_to_string op false)
+      (if String.is_empty memop then "" else " ")
+      memop
+  | RefNull t -> Printf.sprintf "ref.null %s" (Ref_type.to_string t)
+  | RefFunc f -> Printf.sprintf "ref.func %ld" f
+  | RefIsNull -> "ref.isnull"
+
+let call_to_string (instr : call) : string =
+  match instr with
+  | CallDirect (_, _, v) -> Printf.sprintf "call %s" (Int32.to_string v)
+  | CallIndirect (_, _, _, v) -> Printf.sprintf "call_indirect (type %ld)" v
 
 let block_type_to_string (bt : block_type) : string =
   let to_str (ts : Type.t list) : string = String.concat ~sep:" " (List.map ~f:Type.to_string ts) in
@@ -202,8 +218,6 @@ let block_type_to_string (bt : block_type) : string =
 (** Converts a control instruction to its string representation *)
 let rec control_to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot_to_string : 'a -> string = fun _ -> "") (instr : 'a control)  : string =
   match instr with
-  | Call (_, _, v) -> Printf.sprintf "call %s" (Int32.to_string v)
-  | CallIndirect (_, _, _, v) -> Printf.sprintf "call_indirect (type %ld)" v
   | Br b -> Printf.sprintf "br %s" (Int32.to_string b)
   | BrIf b -> Printf.sprintf "br_if %s" (Int32.to_string b)
   | BrTable (t, b) -> Printf.sprintf "br_table %s %s" (String.concat ~sep:" " (List.map t ~f:Int32.to_string)) (Int32.to_string b)
@@ -225,7 +239,8 @@ and to_string ?sep:(sep : string = "\n") ?indent:(i : int = 0) ?annot_str:(annot
   Printf.sprintf "%s%s" (String.make i ' ')
     (match instr with
      | Data instr -> data_to_string instr.instr
-     | Control instr -> control_to_string instr.instr ~annot_str:annot_to_string ~sep:sep ~indent:i)
+     | Control instr -> control_to_string instr.instr ~annot_str:annot_to_string ~sep:sep ~indent:i
+     | Call instr -> call_to_string instr.instr)
     (* (Label.to_string (label instr)) *)
 and list_to_string ?indent:(i : int = 0) ?sep:(sep : string = ", ") (l : 'a t list) (annot_to_string : 'a -> string) : string =
   String.concat ~sep:sep (List.map l ~f:(fun instr -> to_string instr ~annot_str:annot_to_string ?sep:(Some sep) ?indent:(Some i)))
@@ -285,14 +300,16 @@ let to_mnemonic (instr : 'a t) : string = match instr with
       | Block (_, _, _) -> "block"
       | Loop (_, _, _) -> "loop"
       | If (_, _, _, _) -> "if"
-      | Call (_, _, _) -> "call"
-      | CallIndirect (_, _, _, _) -> "call_indirect"
       | Br _ -> "br"
       | BrIf _ -> "br_if"
       | BrTable (_, _) -> "br_table"
       | Return -> "return"
       | Unreachable -> "unreachable"
       | Merge -> "merge"
+    end
+  | Call c -> begin match c.instr with
+      | CallDirect (_, _, _) -> "call"
+      | CallIndirect (_, _, _, _) -> "call_indirect"
     end
 
 (** Create an instruction from a WebAssembly instruction *)
@@ -310,6 +327,11 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
       | Some l -> l
       | None -> new_label () in
     Control { instr; label; line_number; annotation_before = (); annotation_after = (); } in
+  let call_labelled ?label:(lab : Label.t option) (instr : call) : 'a t =
+    let label = match lab with
+      | Some l -> l
+      | None -> new_label () in
+    Call { instr; label; line_number; annotation_before = (); annotation_after = (); } in
   match i.it with
   | Nop -> data_labelled Nop
   | Drop -> data_labelled Drop
@@ -341,7 +363,13 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
     let ((arity_in, arity_out), t) = Wasm_helpers.arity_and_type_of_fun m f in
     if arity_out > 1 then
       failwith "Unsupported: direct function call with more than one return value";
-    control_labelled (Call ((arity_in, arity_out), t, f.it))
+    call_labelled (CallDirect ((arity_in, arity_out), t, f.it))
+  | CallIndirect (table, f) ->
+    let ((arity_in, arity_out), t) = Wasm_helpers.arity_and_type_of_fun_type m f in
+    if arity_out > 1 then
+      failwith "Unsupported: indirect function call with more than one return value"
+    else
+    call_labelled (CallIndirect (table.it, (arity_in, arity_out), t, f.it))
   | Return ->
     control_labelled (Return)
   | Unreachable ->
@@ -351,7 +379,7 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
   | Loop (st, instrs) ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_block m st in
     assert (arity_in = 0); (* what does it mean to have arity_in > 0 for a loop? *)
-    assert (arity_out <= 1); (* TODO: support any arity out? *)
+    assert (arity_out <= 1); (* XXX: support any arity out? *)
     let label = new_label () in
     let body = seq_of_wasm m new_label instrs in
     control_labelled ~label:label (Loop (Wasm_helpers.type_of_block m st, (arity_in, arity_out), body))
@@ -361,12 +389,6 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
     let body1 = seq_of_wasm m new_label instrs1 in
     let body2 = seq_of_wasm m new_label instrs2 in
     control_labelled ~label:label (If (Wasm_helpers.type_of_block m st, (arity_in, arity_out), body1, body2))
-  | CallIndirect (table, f) ->
-    let ((arity_in, arity_out), t) = Wasm_helpers.arity_and_type_of_fun_type m f in
-    if arity_out > 1 then
-      failwith "Unsupported: indirect function call with more than one return value"
-    else
-    control_labelled (CallIndirect (table.it, (arity_in, arity_out), t, f.it))
   | GlobalGet g ->
     data_labelled (GlobalGet g.it)
   | GlobalSet g ->
@@ -405,10 +427,14 @@ and seq_of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (is : Wasm.
 
 let rec map_annotation (i : 'a t) ~(f : 'a t -> 'b * 'b) : 'b t =
   match i with
-  | Data d -> Data (map_annotation_data d ~f:f)
-  | Control c -> Control (map_annotation_control c ~f:f)
+  | Data d -> Data (map_annotation_data d ~f)
+  | Control c -> Control (map_annotation_control c ~f)
+  | Call c -> Call (map_annotation_call c ~f)
 and map_annotation_data (i : (data, 'a) labelled) ~(f : 'a t -> 'b * 'b) : (data, 'b) labelled =
   let (annotation_before, annotation_after) = f (Data i) in
+  { i with annotation_before; annotation_after }
+and map_annotation_call (i : (call, 'a) labelled) ~(f : 'a t -> 'b * 'b) : (call, 'b) labelled =
+  let (annotation_before, annotation_after) = f (Call i) in
   { i with annotation_before; annotation_after }
 and map_annotation_control (i : ('a control, 'a) labelled) ~(f : 'a t ->  'b * 'b) : ('b control, 'b) labelled =
   let (annotation_before, annotation_after) = f (Control i) in
@@ -419,8 +445,6 @@ and map_annotation_control (i : ('a control, 'a) labelled) ~(f : 'a t ->  'b * '
              | If (bt, arity, then_, else_) -> If (bt, arity,
                                                List.map then_ ~f:(map_annotation ~f:f),
                                                List.map else_ ~f:(map_annotation ~f:f))
-             | Call (arity, t, f) -> Call (arity, t, f)
-             | CallIndirect (table, arity, t, f) -> CallIndirect (table, arity, t, f)
              | Br n -> Br n
              | BrIf n -> BrIf n
              | BrTable (l, n) -> BrTable (l, n)
@@ -432,8 +456,11 @@ let rec drop_labels (i : 'a t) : 'a t =
   match i with
   | Data d -> Data (drop_labels_data d)
   | Control c -> Control (drop_labels_control c)
+  | Call c -> Call (drop_labels_call c)
 and drop_labels_data (i : (data, 'a) labelled) : (data, 'a) labelled =
   { i with label = Label.{ section = Dummy; id = 0 }; line_number = 0; }
+and drop_labels_call (i : (call, 'a) labelled) : (call, 'a) labelled =
+  { i with label = Label.{ section = Dummy; id = 0}; line_number = 0; }
 and drop_labels_control (i : ('a control, 'a) labelled) : ('a control, 'a) labelled =
   { i with label = Label.{ section = Dummy; id = 0 };
            line_number = 0;
@@ -443,8 +470,6 @@ and drop_labels_control (i : ('a control, 'a) labelled) : ('a control, 'a) label
              | If (bt, arity, then_, else_) -> If (bt, arity,
                                                List.map then_ ~f:drop_labels,
                                                    List.map else_ ~f:drop_labels)
-             | Call (arity, t, f) -> Call (arity, t, f)
-             | CallIndirect (table, arity, t, f) -> CallIndirect (table, arity, t, f)
              | Br n -> Br n
              | BrIf n -> BrIf n
              | BrTable (l, n) -> BrTable (l, n)
@@ -463,15 +488,18 @@ let annotation_before (i : 'a t) : 'a =
   match i with
   | Data d -> d.annotation_before
   | Control c -> c.annotation_before
+  | Call c -> c.annotation_before
 
 let annotation_after (i : 'a t) : 'a =
   match i with
   | Data d -> d.annotation_after
   | Control c -> c.annotation_after
+  | Call c -> c.annotation_after
 
 let rec all_labels_no_blocks (i : 'a t) : Label.Set.t =
   match i with
   | Data d -> Label.Set.singleton d.label
+  | Call c -> Label.Set.singleton c.label
   | Control c -> begin match c.instr with
       | Block (_, _, instrs)
       | Loop (_, _, instrs) -> List.fold_left instrs ~init:Label.Set.empty ~f:(fun acc i ->
@@ -485,6 +513,7 @@ let rec all_labels_no_blocks (i : 'a t) : Label.Set.t =
 let rec all_labels_no_merge (i : 'a t) : Label.Set.t =
   match i with
   | Data d -> Label.Set.singleton d.label
+  | Call c -> Label.Set.singleton c.label
   | Control c -> begin match c.instr with
       | Block (_, _, instrs)
       | Loop (_, _, instrs) -> List.fold_left instrs ~init:(Label.Set.singleton c.label) ~f:(fun acc i ->
@@ -500,6 +529,7 @@ let rec all_labels_no_merge (i : 'a t) : Label.Set.t =
 let rec all_labels_no_blocks_no_merge (i : 'a t) : Label.Set.t =
   match i with
   | Data d -> Label.Set.singleton d.label
+  | Call c -> Label.Set.singleton c.label
   | Control c -> begin match c.instr with
       | Block (_, _, instrs)
       | Loop (_, _, instrs) -> List.fold_left instrs ~init:Label.Set.empty ~f:(fun acc i ->
@@ -514,6 +544,7 @@ let rec all_labels_no_blocks_no_merge (i : 'a t) : Label.Set.t =
 let rec all_labels (i : 'a t) : Label.Set.t =
   match i with
   | Data d -> Label.Set.singleton d.label
+  | Call c -> Label.Set.singleton c.label
   | Control c -> Label.Set.add (begin match c.instr with
       | Block (_, _, instrs)
       | Loop (_, _, instrs) -> List.fold_left instrs ~init:Label.Set.empty ~f:(fun acc i ->
@@ -536,6 +567,7 @@ let rec contains ~f:(f : 'a t -> bool) (instr : 'a t) : bool =
 
 let instructions_contained_in (i : 'a t) : 'a t list = match i with
   | Data _ -> []
+  | Call _ -> []
   | Control c -> match c.instr with
     | Block (_, _, instrs)
     | Loop (_, _, instrs) -> instrs
@@ -544,4 +576,5 @@ let instructions_contained_in (i : 'a t) : 'a t list = match i with
 
 let line_number (i : 'a t) : int = match i with
   | Data d -> d.line_number
+  | Call c -> c.line_number
   | Control c -> c.line_number

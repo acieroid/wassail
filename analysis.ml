@@ -12,6 +12,26 @@ let mk_intra (desc : string) (analysis : Wasm_module.t -> Int32.t list -> 'a Int
       let results = analysis (Wasm_module.of_file filename) funs in
       Int32Map.iteri results ~f:(fun ~key:id ~data:summary -> print id summary))
 
+let mk_summary_inter (desc : string) (analysis : Wasm_module.t -> Int32.t list list -> 'a Int32Map.t) (print : Int32.t -> 'a -> unit) =
+  Command.basic
+    ~summary:desc
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and sccs = anon (sequence ("funs" %: int32_comma_separated_list)) in
+      fun () ->
+        let results = analysis (Wasm_module.of_file filename) sccs in
+        Int32Map.iteri results ~f:(fun ~key:id ~data: summary -> print id summary))
+
+let mk_classical_inter (desc : string) (analysis : Wasm_module.t -> Int32.t -> 'a) (print : string -> 'a -> unit) =
+  Command.basic
+    ~summary:desc
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and fidx = anon ("fidx" %: int32)
+      and file_out = anon ("file_out" %: string) in
+      fun () ->
+        let results = analysis (Wasm_module.of_file filename) fidx in
+        print file_out results)
 
 let spec_inference =
   mk_intra "Annotate the CFG with the inferred variables"
@@ -20,7 +40,16 @@ let spec_inference =
        let file_out = Printf.sprintf "%ld.dot" fid in
        Out_channel.with_file file_out
          ~f:(fun ch ->
-             Out_channel.output_string ch (Cfg.to_dot annotated_cfg ~annot_str:Spec.to_dot_string)))
+             Out_channel.output_string ch (Cfg.to_dot annotated_cfg ~annot_str:Spec_domain.to_dot_string)))
+
+let spec_inference_inter =
+  mk_classical_inter "Annotate the ICFG with the inferred variables"
+    (fun module_ fidx ->
+       Spec_analysis.analyze_inter_classical module_ fidx)
+    (fun file_out icfg ->
+       Out_channel.with_file file_out
+         ~f:(fun ch ->
+             Out_channel.output_string ch (ICFG.to_dot icfg ~annot_str:Spec_domain.to_dot_string)))
 
 let taint_intra =
   mk_intra "Just like `intra`, but only performs the taint analysis" Taint.analyze_intra
@@ -41,31 +70,32 @@ let taint_cfg =
         let annotated_cfg = Option.value_exn (snd (Int32Map.find_exn results (List.last_exn funs))) in
         output_to_file file_out (Cfg.to_dot annotated_cfg ~annot_str:Taint.Domain.only_non_id_to_string))
 
-
-(* let relational_intra =
-  mk_intra "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)" Relational.analyze_intra
-    (fun fid summary ->
-       Printf.printf "function %ld: %s" fid (Relational.Summary.to_string summary))
-
-let reltaint_intra =
-  mk_intra "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)" Reltaint.analyze_intra
-    (fun fid summary ->
-       Printf.printf "function %ld: %s, %s" fid (Relational.Summary.to_string (fst summary)) (Taint.Summary.to_string (snd summary))) *)
-
-let mk_inter (desc : string) (analysis : Wasm_module.t -> Int32.t list list -> 'a Int32Map.t) (print : Int32.t -> 'a -> unit) =
-  Command.basic
-    ~summary:desc
-    Command.Let_syntax.(
-      let%map_open filename = anon ("file" %: string)
-      and sccs = anon (sequence ("funs" %: int32_comma_separated_list)) in
-      fun () ->
-        let results = analysis (Wasm_module.of_file filename) sccs in
-        Int32Map.iteri results ~f:(fun ~key:id ~data: summary -> print id summary))
-
 let taint_inter =
-  mk_inter "Performs inter analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target."
+  mk_summary_inter "Performs summary-based interprocedural taint analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target."
     Taint.analyze_inter
     (fun fid (_, _, summary) -> Printf.printf "function %ld: %s\n" fid (Taint.Summary.to_string summary))
+
+let taint_inter_classical =
+  mk_classical_inter "Perform classical interprocedural taint analysis from a given entry point"
+    (fun module_ fidx ->
+       Taint.analyze_inter_classical module_ fidx)
+    (fun file_out icfg ->
+       Out_channel.with_file file_out
+         ~f:(fun ch ->
+             Out_channel.output_string ch (ICFG.to_dot icfg ~annot_str:Taint.Domain.to_dot_string)))
+
+let find_indirect_calls =
+  Command.basic
+    ~summary:"Find call_indirect instructions and shows the function in which they appear as well as their label"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string) in
+      fun () ->
+        let module_ = Wasm_module.of_file filename in
+        List.iter module_.funcs ~f:(fun finst ->
+            let cfg = Spec_analysis.analyze_intra1 module_ finst.idx in
+            let indirect_calls = Slicing.find_call_indirect_instructions cfg in
+            List.iter indirect_calls ~f:(fun label ->
+                Printf.printf "function %ld, instruction %s\n" finst.idx (Instr.Label.to_string label))))
 
 let taint_flow_from_exported_to_imported =
   Command.basic
@@ -106,16 +136,3 @@ let taintcall_cfg =
             Out_channel.with_file file_out
               ~f:(fun ch ->
                   Out_channel.output_string ch (Cfg.to_dot cfg ~annot_str:Taintcall.Domain.to_string))))
-
-let find_indirect_calls =
-  Command.basic
-    ~summary:"Find call_indirect instructions and shows the function in which they appear as well as their label"
-    Command.Let_syntax.(
-      let%map_open filename = anon ("file" %: string) in
-      fun () ->
-        let module_ = Wasm_module.of_file filename in
-        List.iter module_.funcs ~f:(fun finst ->
-            let cfg = Spec_analysis.analyze_intra1 module_ finst.idx in
-            let indirect_calls = Slicing.find_call_indirect_instructions cfg in
-            List.iter indirect_calls ~f:(fun label ->
-                Printf.printf "function %ld, instruction %s\n" finst.idx (Instr.Label.to_string label))))

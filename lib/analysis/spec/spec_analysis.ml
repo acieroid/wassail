@@ -1,21 +1,24 @@
+open Core
 open Helpers
 
-let analyze_intra : Wasm_module.t -> Int32.t list -> Spec.t Cfg.t Int32Map.t =
+let analyze_intra : Wasm_module.t -> Int32.t list -> Spec_domain.t Cfg.t Int32Map.t =
   Analysis_helpers.mk_intra
     (fun _cfgs _wasm_mod -> Int32Map.empty)
     (fun _summaries _wasm_mod cfg -> cfg)
 
-let analyze_intra1 (module_ : Wasm_module.t) (idx : Int32.t) : Spec.t Cfg.t =
+let analyze_intra1 (module_ : Wasm_module.t) (idx : Int32.t) : Spec_domain.t Cfg.t =
   let results = analyze_intra module_ [idx] in
   match Int32Map.find results idx with
   | Some res -> res
   | None -> failwith "Spec_analysis.analyze_intra did not actually analyze"
 
+let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Spec_domain.t Icfg.t =
+  Analysis_helpers.mk_inter_classical module_ entry
 
-module Test = struct
-  let does_not_fail (module_str : string) : unit =
+module TestIntra = struct
+  let does_not_fail (module_str : string) (fidx : int32) : unit =
     let module_ = Wasm_module.of_string module_str in
-    let _ : Spec.t Cfg.t = analyze_intra1 module_ 0l in
+    let _ : Spec_domain.t Cfg.t = analyze_intra1 module_ fidx in
     ()
 
   let%test_unit "spec analysis does not error on trivial code" =
@@ -28,7 +31,7 @@ module Test = struct
     select)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))"
+  (global (;0;) (mut i32) (i32.const 66560)))" 0l
 
   let%test_unit "spec analysis suceeds on simple program with if and globals" =
     does_not_fail "(module
@@ -43,7 +46,7 @@ module Test = struct
     end)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
-  (global (;0;) (mut i32) (i32.const 66560)))"
+  (global (;0;) (mut i32) (i32.const 66560)))" 0l
 
   let%test_unit "spec analysis suceeds with imported globals" =
     does_not_fail "(module
@@ -54,7 +57,7 @@ module Test = struct
     global.set 1)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
-  (global (;1;) (mut i32) (i32.const 66560)))"
+  (global (;0;) (mut i32) (i32.const 66560)))" 0l
 
   let%test_unit "spec analysis succeeds with blocks" =
     does_not_fail "(module
@@ -68,7 +71,7 @@ module Test = struct
       i32.add
       drop
     end
-    local.get 0))"
+    local.get 0))" 0l
 
   let%test_unit "spec analysis succeeds even in the presence of unreachable code" =
     does_not_fail "(module
@@ -80,7 +83,7 @@ module Test = struct
       unreachable ;; stack length here is 0, and it is connected to the exit of the function
     end
     local.get 0 ;; stack length here is 1, hence there is a length mismatch
-))"
+))" 0l
 
   let%test_unit "spec analysis succeeds even in the presence of unreachable code" =
     does_not_fail "(module
@@ -95,7 +98,7 @@ module Test = struct
       i32.const 1 ;; unreachable
       local.set 0 ;; also unreachable
     end
-    local.get 1))"
+    local.get 1))" 0l
 
   let%test_unit "spec analysis succeeds even in the presence of stack-polymorphic instructions" =
     does_not_fail  "(module
@@ -112,7 +115,7 @@ module Test = struct
       else
       end
       i32.const 4
-    end))"
+    end))" 0l
 
   let%test_unit "spec analysis succeeds on example from the wild" =
     does_not_fail "(module
@@ -139,7 +142,370 @@ module Test = struct
     else
       i32.const -10420289 ;; [_]
     end)
-  (memory (;0;) 2))"
+  (memory (;0;) 2))" 0l
 
+  let%test_unit "spec analysis succeeds on word count" =
+    does_not_fail "(module
+  (type (;0;) (func))
+  (type (;1;) (func (result i32)))
+  (func (;0;) (type 1) ;; char getchar()
+    i32.const 0)
+  (func (;1;) (type 0) ;; void main()
+    (local i32 i32 i32 i32 i32)
+    ;; Local 0: c
+    ;; Local 1: nl
+    ;; Local 2: nw
+    ;; Local 3: nc
+    ;; Local 4: inword
+    ;; EOF = -1
+    ;; '\\n' = 10
+    ;; ' ' = 32
+    ;; '\\t' = 9
+    call 0 ;; getchar();
+    local.tee 0 ;; c = result of getchar();
+    i32.const 0 ;; EOF
+    i32.ne ;; c != EOF
+    if ;; label = @1
+      loop ;; label = @2
+        local.get 3
+        i32.const 1
+        i32.add
+        local.set 3 ;; nc = nc + 1
+        local.get 0
+        i32.const 10
+        i32.eq ;; c = '\\n'
+        if
+          local.get 1
+          i32.const 1
+          i32.add
+          local.set 1 ;; nl = nl + 1
+        end
+        local.get 0
+        i32.const 32
+        i32.eq ;; c == ' '
+        ;; In the original program, the condition is c == ' ' || c == '\\n' || c = '\\t'
+        if
+          i32.const 0
+          local.set 4 ;; inword = NO
+        else
+          local.get 4
+          if ;; inword == NO
+            i32.const 1
+            local.set 4 ;; inword = YES
+            local.get 2
+            i32.const 1
+            i32.add
+            local.set 2 ;; nw = nw + 1
+          end
+        end
+        call 0
+        local.tee 0
+        i32.const 0 ;; EOF
+        i32.ne ;; c != EOF
+        br_if 0
+      end
+    end
+    local.get 0 ;; c
+    drop
+    local.get 1 ;; nl
+    drop
+    local.get 2 ;; nw
+    drop
+    local.get 3 ;; nc
+    drop
+    local.get 4 ;; inword
+    drop))" 1l
+
+  let%test_unit "spec inference on slice of word count should not fail" =
+    does_not_fail "(module
+(type (;0;) (func))
+(type (;1;) (func (result i32)))
+(func (;0;) (type 1)
+  i32.const 0)
+(func (;1;) (type 0)
+(local i32 i32 i32 i32 i32)
+  call 0  ;; getchar()
+  local.tee 0  ;; c = getchar();
+  i32.const 0
+  i32.ne ;; c != EOF
+  if
+    loop
+      call 0 ;; getchar()
+      local.tee 0 ;; c = getchar()
+      i32.const 0
+      i32.ne ;; c != EOF
+      br_if 0
+    end
+  end
+  local.get 0 ;; c
+  drop
+))" 1l
+
+  let%test_unit "spec inference on call in block should not fail" =
+    let program = "(module
+(type (;0;) (func))
+(type (;1;) (func (result i32)))
+(func (;0;) (type 1)
+  i32.const 0)
+(func (;1;) (type 0)
+(local i32 i32 i32 i32 i32)
+  block
+    call 0
+    br_if 0
+  end
+))" in
+    let module_ = Wasm_module.of_string program in
+    let cfg = Cfg_builder.build module_ 1l in
+    let _ = Spec_inference.Intra.analyze module_ cfg () in
+    ()
+
+  let%test_unit "spec inference on br_if with different return should not fail" =
+    let program = "(module
+  (type (;0;) (func (result i32))) ;; result needed
+  (type (;1;) (func))
+  (func (;0;) (type 1)
+    (local i32 i32)
+    call 2
+    drop
+    call 1)
+  (func (;1;) (type 1)
+    block  ;; label = @1
+      i32.const 0 ;; [0]
+      call 2      ;; [0, 0]
+      br_if 1 (;@1;) ;; here, if this is true, we return from the block with an empty stack; if this is false, we keep an element on the stack
+      drop
+    end
+    )
+  (func (;2;) (type 0) (result i32) i32.const 1)
+  (table (;0;) 5 5 funcref)
+  (global (;0;) (mut i32) (i32.const 68304)))" in
+    let module_ = Wasm_module.of_string program in
+    let cfg = Cfg_builder.build module_ 1l in
+    let _ = Spec_inference.Intra.analyze module_ cfg () in
+    ()
+
+  let%test_unit "intraprocedural with multiple br_if and a stack to preserve" =
+    let program = "(module
+  (type (;0;) (func))
+  (func (;0;) (type 0)
+    block  ;; label = @1
+      i32.const 0
+      loop  ;; label = @2
+        i32.const 1
+        br_if 1 (;@1;)
+        i32.const 2
+        br_if 0 (;@2;)
+      end
+      drop
+    end))" in
+    let module_ = Wasm_module.of_string program in
+    let cfg = Cfg_builder.build module_ 0l in
+    let _ = Spec_inference.Intra.analyze module_ cfg () in
+    ()
+end
+
+module TestInter = struct
+  let does_not_fail (module_str : string) (fidx : int32) : unit =
+    let module_ = Wasm_module.of_string module_str in
+    let icfg = analyze_inter_classical module_ fidx in
+    ignore icfg;
+    ()
+
+  let final_spec_should_be (module_str : string) (fidx : int32) (expected : Spec_domain.t) : unit =
+    let module_ = Wasm_module.of_string module_str in
+    let icfg = analyze_inter_classical module_ fidx in
+    (* After analyzing, we check the state of the exit node of the main function *)
+    let main_cfg = Map.find_exn icfg.cfgs fidx in
+    let exit_node = Map.find_exn main_cfg.basic_blocks main_cfg.exit_block in
+    (* The exit node will be a "merge" node, hence a control kind of node *)
+    match exit_node.content with
+    | Control i ->
+      if not (Spec_domain.equal i.annotation_after expected) then
+        failwith (Printf.sprintf "Expected final annotation to be %s, but it is %s"
+                    (Spec_domain.to_string expected) (Spec_domain.to_string i.annotation_after));
+    | _ -> failwith "Unexpected: function exit node is not a control node"
+
+  let does_not_fail_on_file (path : string) (start : Int32.t) : unit =
+    let module_ = Wasm_module.of_file path in
+    let _ = analyze_inter_classical module_ start in
+    ()
+
+  let%test_unit "interprocedural spec analysis does not fail on trivial code" =
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    i32.const 256
+    i32.const 512
+    i32.const 0
+    select)
+  (table (;0;) 1 1 funcref)
+  (memory (;0;) 2)
+  (global (;0;) (mut i32) (i32.const 66560)))" 0l
+
+  let%test_unit "interprocedural spec analysis does not fail with function call" =
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    ;; locals: [p0], globals: []
+    local.get 0 ;; [l0]
+    i32.const 2 ;; [2, l0]
+    i32.mul    ;; [iX]
+
+    call 1 ;; [i2]
+  )
+  (func (;1;) (type 0) (param i32) (result i32)
+    ;; []
+    local.get 0 ;; [p0]
+    i32.const 0 ;; [i1_1, p0]
+    i32.add) ;; [i1_2]
+  )" 0l
+
+  let%test_unit "interprocedural spec analysis does not fail with function call and a mix of locals and params" =
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    ;; locals: [p0], globals: []
+    local.get 0 ;; [l0]
+    i32.const 2 ;; [2, l0]
+    i32.mul    ;; [iX]
+
+    call 1 ;; [i2]
+  )
+  (func (;1;) (type 0) (param i32) (result i32)
+    (local i32 i32)
+    ;; []
+    local.get 0 ;; [p0]
+    local.get 2 ;; [i1_1, p0]
+    i32.add) ;; [i1_2]
+  )" 0l
+
+  let%test_unit "interprocedural spec analysis works even with imported functions" =
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (import \"foo\" \"somefun\" (func (;0;) (type 0)))
+  (func (;1;) (type 0) (param i32) (result i32)
+    (local i32)
+    local.get 1 ;; [l1]
+    call 0 ;; [i2]
+  ))" 1l
+
+  let%test_unit "interprocedural spec analysis works with multiple calls to the same function with different locals" =
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    local.get 0)
+  (func (;1;) (type 0) (param i32) (result i32)
+    (local i32)
+    local.get 1
+    call 0)
+  (func (;2;) (type 0) (param i32) (result i32)
+    (local i32 i32)
+    local.get 2
+    call 0)
+  (func (;3;) (type 0) (param i32) (result i32)
+    i32.const 1
+    call 1
+    call 2))" 3l
+
+  let%test_unit "interprocedural spec analysis works with multiple returns including to a non-analyzed function" =
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    local.get 0
+    call 1
+    call 2)
+  (func (;1;) (type 0) (param i32) (result i32)
+    (local i32)
+    local.get 1
+    call 3)
+  (func (;2;) (type 0) (param i32) (result i32)
+    (local i32)
+    local.get 1
+    call 3)
+  (func (;3;) (type 0) (param i32) (result i32)
+    i32.const 1))" 0l
+
+  let%test_unit "interprocedural spec analysis works with consecutive interleaved function calls" =
+    final_spec_should_be "(module
+  (type (;0;) (func))
+  (func (;0;) (type 0)
+    call 2 ;; []
+    call 1 ;; []
+    call 2) ;; []
+  (func (;1;) (type 0)
+    i32.const 1
+    drop)
+  (func (;2;) (type 0)
+    (local i32)
+    i32.const 2
+    drop))" 0l (Spec_domain.NotBottom {
+        vstack = [];
+        locals = [];
+        globals = [];
+        memory = Var.OffsetMap.empty;
+        stack_size_at_entry = Instr.Label.Map.empty;
+      })
+
+  let%test_unit "interprocedural spec analysis works with interleaved function calls and a block" =
+    final_spec_should_be "(module
+  (type (;0;) (func))
+  (type (;1;) (func (result i32)))
+  (func (;0;) (type 0)
+    block  ;; label = @1
+      call 1 ;; needed
+      drop
+      i32.const 0
+      br_if 0 (;@1;)
+    end)
+  (func (;1;) (type 1) (result i32) i32.const 0))" 0l (Spec_domain.NotBottom {
+        vstack = [];
+        locals = [];
+        globals = [];
+        memory = Var.OffsetMap.empty;
+        stack_size_at_entry = Instr.Label.Map.singleton Instr.Label.{
+            section = Function 0l;
+            id = 0;
+          } 0;
+      })
+
+  let%test_unit "interprocedural spec analysis works with br_if in block and call_indirect" =
+    final_spec_should_be "(module
+  (type (;0;) (func (result i32)))
+  (func (;0;) (type 0) (result i32)
+    block  ;; label = @1
+      i32.const 1
+      call_indirect (type 0)
+      br_if 0 (;@1;)
+    end
+    i32.const 0)
+  (func (;1;) (type 0) (result i32) i32.const 0)
+  (func (;2;) (type 0) (result i32) i32.const 0)
+  (table (;0;) 5 5 funcref)
+  (elem (;0;) (i32.const 1) 1 2))" 0l (Spec_domain.NotBottom {
+        vstack = [Var.Return 0l];
+        locals = [];
+        globals = [];
+        memory = Var.OffsetMap.empty;
+        stack_size_at_entry = Instr.Label.Map.singleton Instr.Label.{
+            section = Function 0l;
+            id = 0;
+          } 0;
+      })
+
+  let%test_unit "interprocedural spec works on benchmarks" =
+    List.iter [
+      ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l);
+      ("../../../benchmarks/benchmarksgame/fankuchredux.wat", 1l);
+      ("../../../benchmarks/benchmarksgame/fasta.wat", 5l);
+      (* disabled because it is huge *) (* ("../../../benchmarks/benchmarksgame/k-nucleotide.wat", 4l);  *)
+      ("../../../benchmarks/benchmarksgame/mandelbrot.wat", 1l);
+      ("../../../benchmarks/benchmarksgame/nbody.wat", 1l);
+      (* disable because it is huge *) (* ("../../../benchmarks/benchmarksgame/reverse-complement.wat", 6l); *)
+      ("../../../benchmarks/benchmarksgame/spectral-norm.wat", 1l);
+      ("../../../benchmarks/polybench-clang/2mm.wat", 5l); (* disabled the other polybench as they are quite big and not so different *)
+    ] ~f:(fun (program, entry) ->
+        try
+          does_not_fail_on_file program entry
+        with e -> failwith (Printf.sprintf "Inter spec failed on %s: %s" program (Exn.to_string e)))
 
 end

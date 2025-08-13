@@ -5,8 +5,7 @@ open Helpers
 type t = {
   ret : Taint_domain.Taint.t option; (** The taint of the (optional) return value *)
   globals : Taint_domain.Taint.t list; (** The taint of the globals after applying the function *)
-  mem: Taint_domain.Taint.t;
-  (* TODO: mem is now a single taint, should be one per var maybe *)
+  mem: Taint_domain.Taint.t; (* XXX: mem is now a single taint, should be one per var maybe *)
 }
 [@@deriving sexp, compare, equal]
 
@@ -91,8 +90,8 @@ let initial_summaries (cfgs : 'a Cfg.t Int32Map.t) (module_ : Wasm_module.t) (ty
         (match typ with
          | `Bottom -> bottom
          | `Top -> top) cfg Var.Set.empty))
-    ~f:(fun summaries (idx, name, (args, ret)) ->
-        Int32Map.set summaries ~key:idx ~data:(of_import name module_.nglobals args ret))
+    ~f:(fun summaries desc ->
+        Int32Map.set summaries ~key:desc.idx ~data:(of_import desc.name module_.nglobals desc.arguments desc.returns))
 
 let make (_cfg : 'a Cfg.t) (state : Taint_domain.t)
     (ret : Var.t option) (globals_post : Var.t list)
@@ -114,13 +113,6 @@ let make (_cfg : 'a Cfg.t) (state : Taint_domain.t)
     The process is similar for globals.
  *)
 let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pre : Var.t list) (globals_post : Var.t list) (mem_post : Var.t list) (ret : Var.t option) : Taint_domain.t =
-  (* Printf.printf "apply summary, args are %s, globals_pre are: %s, globals_post are: %s, ret is: %s\n"
-    (String.concat ~sep:"," (List.map args ~f:Var.to_string))
-    (String.concat ~sep:"," (List.map globals_pre ~f:Var.to_string))
-    (String.concat ~sep:"," (List.map globals_post ~f:Var.to_string))
-    (match ret with
-     | Some v -> Var.to_string v
-     | None -> "__none__"); *)
   (* The arguments of the summary are l0, l1, etc. *)
   let summary_args = List.init (List.length args) ~f:(fun i -> Var.Local i) in
   (* The globals of the summary are g0, g1, etc. *)
@@ -156,3 +148,21 @@ let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pr
     else
       with_globals in
   with_mem
+
+
+let summary_of (cfg : Spec_domain.t Cfg.t) (out_state : Taint_domain.t) : t =
+  let block = Cfg.find_block_exn cfg cfg.exit_block in
+  match block.annotation_after with
+  | Bottom ->
+    (* The function exit is likely unreachable, so we use a bottom summary *)
+      { ret = None;
+        globals = List.init (List.length cfg.global_types) ~f:(fun _ -> Taint_domain.Taint.bottom);
+        mem = Taint_domain.Taint.bottom; }
+    | NotBottom exit_spec ->
+      make cfg out_state
+        (if List.length cfg.return_types = 1 then List.hd exit_spec.vstack else None)
+        exit_spec.globals
+        (List.concat_map (Var.OffsetMap.to_alist exit_spec.memory)
+           ~f:(fun ((a, _), b) ->
+               (* Log.warn (Printf.sprintf "ignoring offset"); *)
+               [a; b]))

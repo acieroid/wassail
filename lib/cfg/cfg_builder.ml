@@ -5,7 +5,7 @@ let compute_block_arities (instrs : unit Instr.t list) : (int * int) Instr.Label
   let rec loop (instrs : unit Instr.t list) (acc : (int * int) Instr.Label.Map.t) =
     match instrs with
     | [] -> acc
-    | (Data _) :: rest -> loop rest acc
+    | (Data _) :: rest | (Call _) :: rest -> loop rest acc
     | (Control i) :: rest -> loop rest (match i.instr with
         | Block (_, arity, body) ->
           loop body (Instr.Label.Map.set acc ~key:i.label ~data:arity)
@@ -25,7 +25,8 @@ let compute_enclosing_blocks (instrs : unit Instr.t list) : Instr.Label.t Instr.
   let rec loop (instrs : unit Instr.t list) (current_block : Instr.Label.t option) (acc : Instr.Label.t Instr.Label.Map.t) =
     match instrs with
     | [] -> acc
-    | (Data i) :: rest -> loop rest current_block (add i.label current_block acc)
+    | (Data { label; _ }) :: rest
+    | (Call { label; _ }) :: rest -> loop rest current_block (add label current_block acc)
     | (Control i) :: rest ->
       let acc = add i.label current_block acc in
       loop rest current_block (match i.instr with
@@ -39,37 +40,49 @@ let compute_enclosing_blocks (instrs : unit Instr.t list) : Instr.Label.t Instr.
   in
   loop instrs None Instr.Label.Map.empty
 
+let compute_enclosing_block_id (basic_blocks : unit Basic_block.t list) : int Instr.Label.Map.t =
+  basic_blocks
+  |> List.concat_map ~f:(fun bb ->
+      Basic_block.all_direct_instruction_labels bb
+      |> Instr.Label.Set.to_list
+      |> List.map ~f:(fun label ->
+          (label, bb.idx)))
+  |> Instr.Label.Map.of_alist_exn
+
 (** Constructs a CFG for function `fid` in a module. *)
-let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
-  (* TODO: this implementation is really not ideal and should be cleaned *)
+let build (module_ : Wasm_module.t) (fidx : Int32.t) : unit Cfg.t =
+  (* XXX: this implementation is really not ideal and should be cleaned *)
   let rec check_no_rest (rest : 'a Instr.t list) : unit = match rest with
     | [] -> ()
     | Control { instr = Unreachable; _ } :: rest -> check_no_rest rest
     | _ -> Log.info (Printf.sprintf "Ignoring unreachable instructions after jump: %s" (Instr.list_to_string rest (fun _ -> "")))
   in
   let simplify = true in
-  let funcinst = Wasm_module.get_funcinst module_ fid in
+  let funcinst = Wasm_module.get_funcinst module_ fidx in
   let cur_idx : int ref = ref 0 in
   let new_idx () : int = let v = !cur_idx in cur_idx := v + 1; v in
   let mk_data_block (reverse_instrs : (Instr.data, unit) Instr.labelled list) : unit Basic_block.t =
     let instrs = List.rev reverse_instrs in
-    Basic_block.{ idx = new_idx (); content = Data instrs; } in
+    Basic_block.{ idx = new_idx (); content = Data instrs; fidx; annotation_before = (); annotation_after = () } in
   let mk_control_block (instr : (unit Instr.control, unit) Instr.labelled) : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Control instr } in
+    Basic_block.{ idx = new_idx (); content = Control instr; fidx; annotation_before = (); annotation_after = () } in
+  let mk_call_block (instr : (Instr.call, unit) Instr.labelled) : unit Basic_block.t =
+    Basic_block.{ idx = new_idx (); content = Call instr; fidx; annotation_before = (); annotation_after = () } in
   let mk_merge_block () =
     let idx = new_idx () in
-    Basic_block.{ idx ; content = Control {
+    Basic_block.{ idx ; fidx; content = Control {
         instr = Merge;
-        label = { section = MergeInFunction fid; id = idx };
+        label = { section = MergeInFunction fidx; id = idx };
         line_number = -1;
         annotation_before = ();
         annotation_after = ();
       };
+        annotation_before = ();
+        annotation_after = ();
     } in
   let mk_empty_block () : unit Basic_block.t =
-    Basic_block.{ idx = new_idx () ; content = Data []; } in
+    Basic_block.{ idx = new_idx () ; content = Data []; fidx; annotation_before = (); annotation_after = () } in
   let loop_heads = ref IntSet.empty in
-  let entry_exit = ref [] in (* TODO: can be removed *)
   let rec helper (instrs : (Instr.data, unit) Instr.labelled list) (remaining : 'a Instr.t list) : (
     (* The blocks created *)
     'a Basic_block.t list *
@@ -91,6 +104,21 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     | Data instr :: rest ->
       (* Instruction instr is part of the block, but not the end of it so we continue *)
       helper (instr :: instrs) rest
+    | Call instr :: rest ->
+      (* Similar to br, but connects the edges differently. Moreover,
+             we don't include the call in this block because it has to be
+             treated differently. *)
+      let block = mk_data_block instrs in
+      let call_block = mk_call_block instr in
+      let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
+      ((* add the current block and the function block *)
+        block :: call_block :: blocks,
+        (* connect current block to function block, and function block to the rest *)
+        (block.idx, call_block.idx, None) :: (call_block.idx, entry', None) :: edges,
+        (* no break and no return*)
+        breaks,
+        returns,
+        block.idx, exit')
     | Control instr :: rest -> begin match instr.instr with
         | Merge -> failwith "cfg_builder: There should be no merge instructions before constructing the CFG"
         | BrIf level ->
@@ -121,7 +149,6 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
           let (blocks', edges', breaks', returns', else_entry, else_exit) = helper [] instrs2 in
           (* Construct the merge block *)
           let merge_block = mk_merge_block () in
-          entry_exit := (if_block.idx, merge_block.idx) :: !entry_exit;
           (* Construct the rest of the CFG *)
           let (blocks'', edges'', breaks'', returns'', entry, exit') = helper [] rest in
           (* Compute the new break levels (just like for Block and Loop)
@@ -166,21 +193,6 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
            (br_block.idx, level, None) :: (List.map table ~f:(fun lvl -> (br_block.idx, lvl, None))) @ breaks (* add all the breaks *),
            returns,
            block.idx, exit')
-        | Call _ | CallIndirect _ ->
-          (* Also similar to br, but connects the edges differently. Moreover,
-             we don't include the call in this block because it has to be
-             treated differently. *)
-          let block = mk_data_block instrs in
-          let call_block = mk_control_block instr in
-          let (blocks, edges, breaks, returns, entry', exit') = helper [] rest in
-          ((* add the current block and the function block *)
-            block :: call_block :: blocks,
-            (* connect current block to function block, and function block to the rest *)
-            (block.idx, call_block.idx, None) :: (call_block.idx, entry', None) :: edges,
-            (* no break and no return*)
-            breaks,
-            returns,
-            block.idx, exit')
         | ((Block (_bt, _arity, instrs')) as b)
         | ((Loop (_bt, _arity, instrs')) as b) ->
           (* Create a new block with all instructions collected, without the current instruction *)
@@ -198,7 +210,6 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
           let (blocks, edges, breaks, returns, entry', exit') = helper [] instrs' in
           (* Create a node for the exit of the block *)
           let block_exit = if is_loop then mk_empty_block () else mk_merge_block () in
-          entry_exit := (block_entry.idx, block_exit.idx) :: !entry_exit;
           (* Recurse after the block *)
           let (blocks', edges', breaks', returns', entry'', exit'') = helper [] rest in
           (* Compute the new break levels:
@@ -262,7 +273,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
   let breaks_to_exit, remaining_breaks = List.partition_tf breaks ~f:(fun (_, lvl, _) -> Int32.(lvl = 0l)) in
   begin if not (List.is_empty remaining_breaks) then
       (* there shouldn't be any breaks outside the function *)
-      Log.warn (Printf.sprintf "There are %d breaks outside of function %ld" (List.length breaks) fid)
+      Log.warn (Printf.sprintf "There are %d breaks outside of function %ld" (List.length breaks) fidx)
   end;
   (* Connect the return block and the remaining breaks to it, and remove all edges that start from a return block (as they are unreachable) *)
   let edges' = (exit_idx, return_block.idx, None) ::
@@ -295,7 +306,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
   (* Create the entry block if needed *)
   let first_block = Option.value_exn (List.min_elt (List.map actual_blocks ~f:(fun b -> b.idx)) ~compare:Stdlib.compare) in
   (* In general, the first block is the entry block. But in some cases, it could be a block with back edges, and we want to avoid that. So we check if there's an edge to the entry block: if there is one, we need an extra entry block *)
-  let entry_block, actual_blocks', actual_edges' = match List.find actual_edges ~f:(fun (_, idx, _) -> idx = first_block) with
+  let entry, actual_blocks', actual_edges' = match List.find actual_edges ~f:(fun (_, idx, _) -> idx = first_block) with
     | None -> first_block, actual_blocks, actual_edges
     | Some _ ->
       let block = mk_empty_block () in
@@ -326,7 +337,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     (* The name itself *)
     name = Option.value funcinst.name ~default:"<unexported>";
     (* The index of this block is the integer that represent the address of this function *)
-    idx = fid;
+    idx = fidx;
     (* The type index of this function *)
     type_idx = funcinst.type_idx;
     (* Global types *)
@@ -344,7 +355,7 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     (* The backward edges *)
     back_edges;
     (* The entry block *)
-    entry_block = entry_block;
+    entry_block = entry;
     (* The exit block is the return block *)
     exit_block = return_block.idx;
     (* The loop heads *)
@@ -357,12 +368,62 @@ let build (module_ : Wasm_module.t) (fid : Int32.t) : unit Cfg.t =
     block_arities = compute_block_arities funcinst.code.body;
     (* Mapping from label to enclosing block *)
     label_to_enclosing_block = compute_enclosing_blocks funcinst.code.body;
+    label_to_enclosing_block_id = compute_enclosing_block_id (List.map ~f:snd (IntMap.to_alist basic_blocks));
+  }
+
+let build_imported (module_ : Wasm_module.t) (desc : Wasm_module.func_desc) : unit Cfg.t =
+  (* An imported function only contains one dummy basic block and a final merge block *)
+  let imported_block = Basic_block.{
+      idx = 0;
+      fidx = desc.idx;
+      content = Imported desc;
+      annotation_before = ();
+      annotation_after = ();
+    } in
+  let last_block = Basic_block.{
+      idx = 1;
+      fidx = desc.idx;
+      content = Control {
+        instr = Merge;
+        label = { section = MergeInFunction desc.idx; id = 1 };
+        line_number = -1;
+        annotation_before = ();
+        annotation_after = ();
+      };
+      annotation_before = ();
+      annotation_after = ();
+    } in
+  Cfg.{
+    exported = false;
+    name = desc.name;
+    idx = desc.idx;
+    local_types = [];
+    type_idx = desc.type_idx;
+    global_types = module_.imported_global_types @ module_.global_types;
+    arg_types = desc.arguments;
+    return_types = desc.returns;
+    basic_blocks = IntMap.of_alist_exn [
+        (imported_block.idx, imported_block);
+        (last_block.idx, last_block);
+      ];
+    edges = IntMap.of_alist_exn [(imported_block.idx, Edge.Set.singleton (last_block.idx, None))];
+    back_edges = IntMap.of_alist_exn [(last_block.idx, Edge.Set.singleton (imported_block.idx, None))];
+    entry_block = imported_block.idx;
+    exit_block = last_block.idx;
+    loop_heads = IntSet.empty;
+    instructions = [];
+    label_to_instr = Instr.Label.Map.empty;
+    block_arities = Instr.Label.Map.empty;
+    label_to_enclosing_block = Instr.Label.Map.empty;
+    label_to_enclosing_block_id = Instr.Label.Map.empty;
   }
 
 let build_all (mod_ : Wasm_module.t) : unit Cfg.t Int32Map.t =
-  Int32Map.of_alist_exn (List.mapi mod_.funcs ~f:(fun i _ ->
+  Int32Map.of_alist_exn
+    ((List.map mod_.imported_funcs ~f:(fun desc -> (desc.idx, build_imported mod_ desc))) @
+      (List.mapi mod_.funcs ~f:(fun i _ ->
       let faddr = Int32.(mod_.nfuncimports + (Int32.of_int_exn i)) in
-      (faddr, build mod_ faddr)))
+      (faddr, build mod_ faddr))))
 
 module Test = struct
   (** Check that building the CFG for each function of a .wat file succeeds.

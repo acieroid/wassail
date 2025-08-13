@@ -121,16 +121,18 @@ let parse_from_lexbuf_textual name lexbuf run =
       Wasm.Valid.check_module m;
       run m
     | _ -> failwith "unsupported format" in
-    input_from (fun _ ->
-        let var_opt, def = Wasm.Parse.parse name lexbuf Wasm.Parse.Module in
-        [(var_opt, def)])
+    input_from (fun _ -> [
+        Wasm.Parse.parse name lexbuf Wasm.Parse.Module (* <- for wasm <=2.0.1 *)
+        (* Wasm.Parse.Module.parse name lexbuf *) (* <- for wasm >=2.0.2 *)
+      ])
       extract
 
 let apply_to_script name lexbuf run =
   let extract (l : Wasm.Script.script) = List.map ~f:run l in
     input_from (fun _ ->
-        let res = Wasm.Parse.parse name lexbuf Wasm.Parse.Script in
-        res)
+      Wasm.Parse.parse name lexbuf Wasm.Parse.Script (* <- for wasm <=2.0.1 *)
+      (* Wasm.Parse.Script.parse name lexbuf *) (* <- for wasm >=2.0.2 *)
+    )
       extract
 
 let apply_to_string str run = parse_from_lexbuf_textual "no-file" (Lexing.from_string str) run
@@ -160,7 +162,7 @@ let apply_to_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
                    | Wasm.Script.Module (_, { it = Wasm.Script.Textual m; _ }) -> Some (f m)
                    | _ -> None)) ~f:(fun x -> x))
   | ext ->
-    Printf.printf "Invalid extension for WebAssembly module: %s. Assuming .wat extension\n" ext;
+    Log.warn (Printf.sprintf "Invalid extension for WebAssembly module: %s. Assuming .wat extension\n" ext);
     apply_to_textual_file filename f
 
 
@@ -168,7 +170,7 @@ let apply_to_string (string : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
   let lexbuf = Lexing.from_string string in
   parse_from_lexbuf_textual "no-file" lexbuf f
 
-module type Abstract_domain = sig
+module type ABSTRACT_DOMAIN = sig
   type t
   val compare : t -> t -> int
   val equal : t -> t -> bool
@@ -178,10 +180,11 @@ module type Abstract_domain = sig
   val bottom : t
   val to_string : t -> string
   val join : t -> t -> t
+  val widen : t -> t -> t
 end
 
 module Product_domain = struct
-  module Make (Domain1 : Abstract_domain) (Domain2 : Abstract_domain) = struct
+  module Make (Domain1 : ABSTRACT_DOMAIN) (Domain2 : ABSTRACT_DOMAIN) = struct
     type t = Domain1.t * Domain2.t
     [@@deriving sexp, compare, equal]
     let bottom : t = (Domain1.bottom, Domain2.bottom)
@@ -192,5 +195,8 @@ module Product_domain = struct
     let join (t1 : t) (t2 : t) : t =
       (Domain1.join (fst t1) (fst t2),
        Domain2.join (snd t1) (snd t2))
+    let widen (t1 : t) (t2 : t) : t =
+      (Domain1.widen (fst t1) (fst t2),
+       Domain2.widen (snd t1) (snd t2))
   end
 end

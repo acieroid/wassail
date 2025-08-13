@@ -1,19 +1,29 @@
 open Core
 open Helpers
 
-module type INTER = sig
-  type annot_expected
-  type state
-  val analyze : Wasm_module.t -> annot_expected Cfg.t IntMap.t -> state Cfg.t IntMap.t
+module type SUMMARY_BASED_INTER = sig
+  module Transfer : Transfer.SUMMARY_TRANSFER
+
+  val analyze
+    : Wasm_module.t (** The module to analyze *)
+    -> cfgs:Transfer.annot_expected Cfg.t Int32Map.t (** The CFGs to analyze *)
+    -> summaries: Transfer.summary Int32Map.t (** The initial summaries (can be empty, or e.g., with summaries for imported functions) *)
+    -> (Transfer.State.t Cfg.t * Transfer.summary) Int32Map.t (** The result of the analysis: annotated CFGs and summaries *)
 end
 
-module Make (Intra : Intra.INTRA) (*: INTER*) = struct
-  type annot_expected = Intra.annot_expected
-  type state = Intra.state
-  type summary = Intra.summary
+(** This constructs a bottom-up inter-procedural summary-based analysis: starting
+   from the leafs of the call graph, it computes summaries for each function,
+   using these summaries in the callers. *)
+module MakeSummaryBased (Transfer : Transfer.SUMMARY_TRANSFER)(Intra : Intra.INTRA_FOR_SUMMARY with module Transfer = Transfer) : SUMMARY_BASED_INTER
+  with module Transfer = Transfer
+= struct
+  module Transfer = Intra.Transfer
 
   (** Analyze multiple CFGs, returns a map of the analyzed CFG and their summary. Relies on summaries produced for the depended-upon functions. *)
-  let analyze (module_ : Wasm_module.t) (cfgs : annot_expected Cfg.t Int32Map.t) (summaries : summary Int32Map.t): (state Cfg.t * summary) Int32Map.t =
+  let analyze (module_ : Wasm_module.t)
+        ~(cfgs : Transfer.annot_expected Cfg.t Int32Map.t)
+        ~(summaries : Transfer.summary Int32Map.t):
+        (Transfer.State.t Cfg.t * Transfer.summary) Int32Map.t =
     let deps : Int32Set.t Int32Map.t =
       (* The dependencies are a map from CFGs indices to the indices of their callers and callees *)
       Int32Map.map cfgs ~f:(fun cfg ->
@@ -23,7 +33,10 @@ module Make (Intra : Intra.INTRA) (*: INTER*) = struct
              This is because the inter analysis runs on an SCC of the call graph: we only need to fixpoint over that SCC *)
           Int32Set.filter (Int32Set.union callees callers) ~f:(fun idx -> Int32Map.mem cfgs idx)) in
     (* The fixpoint loop, using a worklist algorithm, and the different domain values *)
-    let rec fixpoint (worklist : Int32Set.t) (annotated_cfgs : state Cfg.t Int32Map.t) (summaries : summary Int32Map.t) : (state Cfg.t * summary) Int32Map.t =
+    let rec fixpoint (worklist : Int32Set.t)
+              (annotated_cfgs : Transfer.State.t Cfg.t Int32Map.t)
+              (summaries : Transfer.summary Int32Map.t)
+              : (Transfer.State.t Cfg.t * Transfer.summary) Int32Map.t =
       if Int32Set.is_empty worklist then
         (* Worklist is empty, produce the results *)
         Int32Map.merge annotated_cfgs summaries ~f:(fun ~key:_fid -> function
@@ -45,13 +58,14 @@ module Make (Intra : Intra.INTRA) (*: INTER*) = struct
             | Some r -> r
             | None -> failwith "Inter: can't find CFG" in
           Log.info
-            (Printf.sprintf "Analyzing cfg %s (name: %s)\n" (Int32.to_string cfg_idx) cfg.name);
+            (Printf.sprintf "Analyzing cfg %s (name: %s)\n" (Int32.to_string cfg_idx) (Cfg.name cfg));
           (* Perform intra-procedural analysis *)
-          let (results, summary) = Intra.analyze module_ cfg summaries in
+          let analyzed_cfg = Intra.analyze module_ cfg summaries in
+          let summary = Transfer.extract_summary module_ cfg analyzed_cfg in
           (* Check difference with previous state, if there was any *)
           let previous_results = Int32Map.find annotated_cfgs cfg_idx in
           match previous_results with
-          | Some res when Cfg.equal Intra.equal_state results res ->
+          | Some res when Cfg.equal Transfer.State.equal analyzed_cfg res -> (* XXX: CFG equality might be slow *)
             (* Same results as before, we can just recurse without having do anything *)
             fixpoint (Int32Set.remove worklist cfg_idx) annotated_cfgs summaries
           | _ ->
@@ -65,7 +79,7 @@ module Make (Intra : Intra.INTRA) (*: INTER*) = struct
             (* Update data of the analysis and recurse *)
             fixpoint
               (Int32Set.union (Int32Set.remove worklist cfg_idx) to_add)
-              (Int32Map.set annotated_cfgs ~key:cfg_idx ~data:results)
+              (Int32Map.set annotated_cfgs ~key:cfg_idx ~data:analyzed_cfg)
               (Int32Map.set summaries ~key:cfg_idx ~data:summary)
         end
   in

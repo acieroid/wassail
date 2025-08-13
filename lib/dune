@@ -8,14 +8,14 @@
    Helpers Tree Test Log Unsupported
    Wasm_helpers Analysis_helpers
    Type Binop Unop Memoryop Testop Relop Var Instr Memory_inst Module_inst Func Func_inst Ref_type Segment_mode Elem_segment Data_segment Table Table_inst Convertop Wasm_module Segment Import Limits Memory Global Export
-   Basic_block Cfg Cfg_builder Call_graph Codegen Lexical_successor_tree
+   Basic_block Cfg Cfg_builder Icfg Call_graph Codegen Lexical_successor_tree
    Transfer
    Intra Inter
    Prim_value
-   Spec Spec_inference Spec_analysis
+   Spec_domain Spec_inference Spec_analysis
    Var_prop
    Taint Taint_options Taint_domain Taint_transfer Taint_summary
-   Taintcall_domain Taintcall_transfer Taintcall
+   Taintcall Taintcall_domain Taintcall_transfer
    Use_def Dominance Control_deps Memory_deps Slicing
    Instruction_counter Sizes)
  (libraries core_kernel wasm sexplib)

@@ -3,45 +3,46 @@ open Helpers
 
 module Domain = Taintcall_domain
 module Transfer = Taintcall_transfer
-type summary = Transfer.summary
-module Intra = Intra.Make(Transfer)
-module Inter = Inter.Make(Intra)
+module Summary = Transfer.Summary
+module ClassicalInter = Intra.MakeClassicalInter(Transfer)
+module Intra = Intra.MakeSummaryBased(Transfer)
+module Inter = Inter.MakeSummaryBased(Transfer)(Intra)
 
-let initial_summaries (cfgs : 'a Cfg.t Int32Map.t)  (module_ : Wasm_module.t) : summary Int32Map.t =
+let initial_summaries (cfgs : 'a Cfg.t Int32Map.t)  (module_ : Wasm_module.t) : Summary.t Int32Map.t =
   let taint_summaries = Taint_summary.initial_summaries cfgs module_ `Bottom in
   Int32Map.map taint_summaries ~f:(fun sum -> (Taintcall_domain.Call.bottom, sum))
 
-let analyze_intra : Wasm_module.t -> Int32.t list -> (summary * Domain.t Cfg.t option) Int32Map.t =
+let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t option) Int32Map.t =
   Analysis_helpers.mk_intra
-    (fun cfgs wasm_mod ->
-       (Int32Map.map ~f:(fun x -> (x, None)) (initial_summaries cfgs wasm_mod)))
-    (fun data wasm_mod cfg ->
+    (fun cfgs module_ ->
+       (Int32Map.map ~f:(fun x -> (x, None)) (initial_summaries cfgs module_)))
+    (fun data module_ cfg ->
        Log.info
          (Printf.sprintf "---------- Taint analysis of function %s ----------" (Int32.to_string cfg.idx));
        (* Run the taint analysis *)
        let annotated_cfg = (* Relational.Transfer.dummy_annotate *) cfg in
        let summaries = Int32Map.map data ~f:fst in
-       let (result_cfg, taint_summary) = Intra.analyze wasm_mod annotated_cfg summaries in
-       (taint_summary, Some result_cfg))
+       let result_cfg = Intra.analyze module_ annotated_cfg summaries in
+       let summary = Transfer.extract_summary module_ annotated_cfg result_cfg in
+       (summary, Some result_cfg))
 
-let annotate (wasm_mod : Wasm_module.t) (summaries : summary Int32Map.t) (spec_cfg : Spec.t Cfg.t) : Domain.t Cfg.t =
+let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec_domain.t Cfg.t) : Domain.t Cfg.t =
   let rel_cfg = (* Relational.Transfer.dummy_annotate *) spec_cfg in
-  fst (Intra.analyze wasm_mod rel_cfg summaries)
+  Intra.analyze wasm_mod rel_cfg summaries
 
-let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Domain.t Cfg.t * summary) Int32Map.t =
+let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t * Domain.t Cfg.t * Summary.t) Int32Map.t =
   Analysis_helpers.mk_inter
     (fun _cfgs _wasm_mod -> Int32Map.empty)
-    (fun wasm_mod scc cfgs_and_summaries ->
+    (fun module_ ~cfgs:scc ~summaries:cfgs_and_summaries ->
        Log.info
          (Printf.sprintf "---------- CallTaint analysis of SCC {%s} ----------"
             (String.concat ~sep:"," (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
        (* Run the taint analysis *)
        let annotated_scc = scc (* Int32Map.map scc ~f:Relational.Transfer.dummy_annotate *) in
        let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_spec_cfg, _taint_cfg, summary) -> summary) in
-       let results = Inter.analyze wasm_mod annotated_scc summaries in
+       let results = Inter.analyze module_ ~cfgs:annotated_scc ~summaries:summaries in
        Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
            let spec_cfg = Int32Map.find_exn scc idx in
-           Printf.printf "%ld call summary: %s\n" idx (Domain.Call.to_string (fst summary));
            (spec_cfg, taint_cfg, summary)))
 
 (** Detects calls to sinks with data coming from the exported functions' arguments.
@@ -98,7 +99,7 @@ let detect_flows_from_sources_to_sinks (module_ : Wasm_module.t) (sources : Stri
         Log.warn (Printf.sprintf "sink does not exist in binary (this could be perfectly fine): %s" sink_name);
         None (* This sink does not exist in the binary, so we ignore it *)
     )) in
-  Log.warn "TODO: source specification";
+  Log.warn "source specification has been disabled";
   (* Taintcall_transfer.TaintTransfer.return_taint_specifications := sources_specifications; *)
   let results = analyze_inter module_ schedule in
   let found = ref TaintFlowSet.empty in

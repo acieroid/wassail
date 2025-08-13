@@ -7,8 +7,8 @@ let make (cfg : 'a Cfg.t) : t =
   (* Instructions that are load or call depend on all stores/calls that may have been executed before, hence on all stores contained in a predecessor of the current node in the CFG *)
   let loads_and_calls = Instr.Label.Map.keys
       (Instr.Label.Map.filter instrs ~f:(fun i -> match i with
-           | Control { instr = Call _ ; _ } -> true
-           | Control { instr = CallIndirect _ ; _ } -> true
+           | Call { instr = CallDirect _ ; _ } -> true
+           | Call { instr = CallIndirect _ ; _ } -> true
            | Data { instr = Load _ ; _ } -> true
            | _ -> false)) in
   let deps = Instr.Label.Map.of_alist_exn (List.map loads_and_calls ~f:(fun label ->
@@ -17,9 +17,9 @@ let make (cfg : 'a Cfg.t) : t =
       (label, List.fold_left predecessors ~init:Instr.Label.Set.empty ~f:(fun acc block ->
            Instr.Label.Set.union acc
              (match block.content with
-             | Control { instr = Call _; label; _ } -> Instr.Label.Set.singleton label
-             | Control { instr = CallIndirect _; label; _ } -> Instr.Label.Set.singleton label
-             | Control _ -> Instr.Label.Set.empty
+             | Call { instr = CallDirect _; label; _ } -> Instr.Label.Set.singleton label
+             | Call { instr = CallIndirect _; label; _ } -> Instr.Label.Set.singleton label
+             | Control _ | Entry | Return _ | Imported _ -> Instr.Label.Set.empty
              | Data instrs ->
                Instr.Label.Set.of_list (List.filter_map instrs ~f:(function
                    | { instr = Store _; label; _ } -> Some label

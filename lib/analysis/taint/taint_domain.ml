@@ -100,13 +100,44 @@ module Taint = struct
   end
 end
 
-(** The state of the taint analysis is a map from variables to their taint values.
-    If a variable is not bound in the state, it is assumed that its taint is bottom *)
-type t = Taint.t Var.Map.t
-[@@deriving sexp, compare, equal]
+module Make : sig
+  include Helpers.ABSTRACT_DOMAIN with type t = Taint.t Var.Map.t
+  val to_dot_string : t -> string
+end
+= struct
 
-(** The bottom state does not contain any taint *)
-let bottom : t = Var.Map.empty
+  (** The state of the taint analysis is a map from variables to their taint values.
+      If a variable is not bound in the state, it is assumed that its taint is bottom *)
+  type t = Taint.t Var.Map.t
+  [@@deriving sexp, compare, equal]
+
+  (** The bottom state does not contain any taint *)
+  let bottom : t = Var.Map.empty
+
+  (** Convert a taint map to its string representation with all details *)
+  let to_string (s : t) : string =
+    Printf.sprintf "[%s]" (String.concat ~sep:", "
+                             (List.map (Var.Map.to_alist s)
+                                ~f:(fun (k, t) ->
+                                    Printf.sprintf "%s: %s"
+                                      (Var.to_string k)
+                                      (Taint.to_string t))))
+  let to_dot_string (s : t) : string =
+    Printf.sprintf "<tr><td></td><td>%s</td></tr>" (to_string s)
+
+  (** Join two taint maps together *)
+  let join (s1 : t) (s2 : t) : t =
+    Var.Map.merge s1 s2 ~f:(fun ~key:_ v -> match v with
+        | `Both (x, y) -> Some (Taint.join x y)
+        | `Left x | `Right x -> Some x)
+
+
+  let widen (_s1 : t) (s2 : t) : t =
+    s2 (* no widening *)
+
+end
+
+include Make
 
 (** The top state taints all globals and the return value with the top taint *)
 let top (globals : Var.t list) (ret : Var.t option) : t =
@@ -132,31 +163,14 @@ let subsumes (t1 : t) (t2 : t) : bool =
       else
         false)
 
-(** Convert a taint map to its string representation with all details *)
-let full_to_string (s : t) : string =
-  Printf.sprintf "[%s]" (String.concat ~sep:", "
-                           (List.map (Var.Map.to_alist s)
-                              ~f:(fun (k, t) ->
-                                  Printf.sprintf "%s: %s"
-                                    (Var.to_string k)
-                                    (Taint.to_string t))))
-
-
 (** Converts a taint map to its string representation, using only the non-identity taints (e.g., if l0 is tainted by exactly l0, it is not printed *)
 let only_non_id_to_string (s : t) : string =
   let restricted = Var.Map.filteri s ~f:(fun ~key:k ~data:d ->
       match d with
       | Taints taints -> not (Var.Set.equal taints (Var.Set.singleton k))
       | _ -> true) in
-  full_to_string restricted
+  to_string restricted
 
-let to_string = full_to_string
-
-(** Join two taint maps together *)
-let join (s1 : t) (s2 : t) : t =
-  Var.Map.merge s1 s2 ~f:(fun ~key:_ v -> match v with
-      | `Both (x, y) -> Some (Taint.join x y)
-      | `Left x | `Right x -> Some x)
 
 (** Get the taint of a variable in the taint map *)
 let get_taint (s : t) (var : Var.t) : Taint.t =
@@ -214,9 +228,9 @@ module Test = struct
     let l0l1 =  Var.Map.of_alist_exn [(Var.Local 0, Taint.taint (Var.Local 0));
                                       (Var.Local 1, Taint.taint (Var.Local 1));
                                       (Var.Var (lab 0), Taint.taints (Var.Set.of_list [Var.Local 0; Var.Local 1]))] in
-    String.equal (to_string bot) "[i0: _, l0: l0, l1: l1]" &&
-    String.equal (to_string l0) "[i0: l0, l0: l0, l1: l1]" &&
-    String.equal (to_string l0l1) "[i0: l0,l1, l0: l0, l1: l1]"
+    String.equal (to_string bot) "[i0_0: _, l0: l0, l1: l1]" &&
+    String.equal (to_string l0) "[i0_0: l0, l0: l0, l1: l1]" &&
+    String.equal (to_string l0l1) "[i0_0: l0,l1, l0: l0, l1: l1]"
 
   let%test "join produces the expected taint maps" =
     let open Instr.Label.Test in
