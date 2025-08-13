@@ -122,8 +122,7 @@ module Make
       | None -> bottom in
     (* Applies the transfer function to an entire block *)
     let transfer (b : 'a Basic_block.t) (state : Transfer.State.t) : Result.t =
-      Log.debug (Printf.sprintf "Analysis of block %ld_%d from state %s\n" b.fidx b.idx (Transfer.State.to_string state));
-      let result = match b.content with
+      match b.content with
       | Imported _ -> Result.Simple state (* we don't care about imported function for an intra analysis *)
       | Data instrs ->
         Simple (List.fold_left instrs ~init:state ~f:(fun prestate instr ->
@@ -142,8 +141,6 @@ module Make
         in
         analysis_data := { !analysis_data with instrs = Map.set !analysis_data.instrs ~key:instr.label ~data:(state, poststate) };
         poststate in
-      Log.debug (Printf.sprintf "Analysis of block %ld_%d results in state %s\n" b.fidx b.idx (Result.to_string result));
-      result in
 
     (* Analyzes one block, returning the state before and after this block *)
     let analyze_block (block_idx : Cfg.BlockIdx.t) : Transfer.State.t * Result.t =
@@ -250,7 +247,7 @@ module IntraOnlyCallAdapter (Transfer : Transfer.INTRA_ONLY_TRANSFER)
     Transfer.call module_ cfg instr state
 end
 
-(** TODO: this is an exact duplicate of Make, for typing purpose. It should be possible to avoid this *)
+(** XXX: this is an exact duplicate of Make, for typing purpose. It should be possible to avoid this *)
 module MakeSumm
     (Transfer : Transfer.SUMMARY_TRANSFER)
     (CallAdapter : CALL_ADAPTER with module Transfer = Transfer) = struct
@@ -400,7 +397,7 @@ module SummaryCallAdapter (Transfer : Transfer.SUMMARY_TRANSFER)
       (summaries : extra)
     : Transfer.State.t =
     let apply_summary f arity state =
-      match Int32Map.find summaries f with
+      match Map.find summaries f with
       | None ->
         if Int32.(f < module_.nfuncimports) then
           let desc = List32.nth_exn module_.imported_funcs f in
@@ -557,7 +554,7 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
           (* Update the out state in the analysis results.
              We join with the previous results *)
           let new_out_state =
-            (* XXX: Join may not be necessary here, as long as out_state is greater than previous_out_state *)
+            (* XXX: Join may not be necessary here, as long as out_state is greater than previous_out_state. But it is safe and should not change precision (as x \sqsubseteq y => x \join y = y) *)
             if Icfg.is_loop_head icfg block_idx then
               Result.widen previous_out_state (Result.join previous_out_state out_state)
             else begin
@@ -578,16 +575,17 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
           fixpoint (IntSet.union (IntSet.remove worklist block_idx) (Icfg.BlockIdx.Set.of_list successors)) (iteration+1)
     in
     (* Performs narrowing by re-analyzing once each block *)
-    let rec _narrow (blocks : Icfg.BlockIdx.t list) : unit = match blocks with
+    let rec narrow (blocks : Icfg.BlockIdx.t list) : unit = match blocks with
       | [] -> ()
       | block_idx :: blocks ->
         let block = Icfg.find_block_exn icfg block_idx in
         let result = analyze_block block_idx block in
         analysis_data := { !analysis_data with blocks = Map.set !analysis_data.blocks ~key:block_idx ~data:result };
-        _narrow blocks
+        narrow blocks
     in
     fixpoint (Icfg.BlockIdx.Set.singleton (Icfg.entry_block icfg)) 1;
-    (* _narrow (IntMap.keys cfg.basic_blocks); *)
+    ignore narrow;
+    (* narrow (IntMap.keys cfg.basic_blocks); *)
     !analysis_data
 
   let analyze
@@ -598,7 +596,7 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
       (Result.to_state (fst results_pair), Result.to_state (snd results_pair)) in
     let analysis_result = analyze_ module_ icfg in
     let analyzed_cfg = Icfg.map_annotations icfg
-        ~instrs:(fun i -> to_state (match Instr.Label.Map.find analysis_result.instrs { label = Instr.label i; kind = None } with
+        ~instrs:(fun i -> to_state (match Map.find analysis_result.instrs { label = Instr.label i; kind = None } with
             | Some (before, after) -> (Simple before, after)
             | None -> (Uninitialized, Uninitialized)))
         ~blocks:(fun bidx -> to_state (match Map.find analysis_result.blocks bidx with
