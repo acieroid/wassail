@@ -24,6 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           opam install core_unix
+          opam install wasm
           opam install . --deps-only --with-doc --with-test
       - name: Compile binary
         run: make
