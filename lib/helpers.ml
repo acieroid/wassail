@@ -121,16 +121,18 @@ let parse_from_lexbuf_textual name lexbuf run =
       Wasm.Valid.check_module m;
       run m
     | _ -> failwith "unsupported format" in
-    input_from (fun _ ->
-        let var_opt, def = Wasm.Parse.Module.parse name lexbuf in
-        [(var_opt, def)])
+    input_from (fun _ -> [
+        Wasm.Parse.parse name lexbuf Wasm.Parse.Module (* <- for wasm <=2.0.1 *)
+        (* Wasm.Parse.Module.parse name lexbuf *) (* <- for wasm >=2.0.2 *)
+      ])
       extract
 
 let apply_to_script name lexbuf run =
   let extract (l : Wasm.Script.script) = List.map ~f:run l in
     input_from (fun _ ->
-        let res = Wasm.Parse.Script.parse name lexbuf in
-        res)
+      Wasm.Parse.parse name lexbuf Wasm.Parse.Script (* <- for wasm <=2.0.1 *)
+      (* Wasm.Parse.Script.parse name lexbuf *) (* <- for wasm >=2.0.2 *)
+    )
       extract
 
 let apply_to_string str run = parse_from_lexbuf_textual "no-file" (Lexing.from_string str) run
