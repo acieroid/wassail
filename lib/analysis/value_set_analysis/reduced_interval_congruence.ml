@@ -687,6 +687,153 @@ module RIC = struct
     | Some r ->
       let ric_ = remove_relative_offset ric_ in
       plus r ric_
+
+  let ric_and_constant (r : t) (n : int) : t =
+    if n = 0 then 
+      ric (0, Int 0, Int 0, ("", 0))
+    else if n < 0 then
+      Top
+    else
+      let rec aux (acc : t) (i : int) (r : t) : t =
+        begin match i, r with
+        | 0, _ | _, Bottom -> acc
+        | _, Top -> 
+          let acc =
+            if i land n = 0 then
+              acc
+            else
+              join acc (ric (i, Int 0, Int 1, ("", 0)))
+          in
+          aux acc (i - 1) Top
+        | _, RIC {stride = s; lower_bound = NegInfinity; upper_bound = Infinity; offset = ("", o)} ->
+          let acc = join acc (ric (0, Int 0, Int 0, ("", o land n))) in
+          aux acc (i - 1) (ric (s, Int (o + 1), Infinity, ("", 0)))
+        | _, RIC {stride = s; lower_bound = Int l; upper_bound = Infinity; offset = ("", o)} ->
+          let acc = join acc (ric (0, Int 0, Int 0, ("", ((s * l) + o) land n))) in
+          aux acc (i - 1) (ric (s, Int (l + 1), Infinity, ("", o)))
+        | _, RIC {stride = s; lower_bound = NegInfinity; upper_bound = Int u; offset = ("", o)} ->
+          let acc = join acc (ric (0, Int 0, Int 0, ("", ((s * u) + o) land n))) in
+          aux acc (i - 1) (ric (s, NegInfinity, Int (u - 1), ("", o)))
+        | _, RIC {stride = s; lower_bound = Int l; upper_bound = Int u; offset = ("", o)} ->
+          let acc = join acc (ric (0, Int 0, Int 0, ("", ((s * l) + o) land n))) in
+          aux acc (i - 1) (ric (s, Int (l + 1), Int u, ("", o)))
+        | _ -> Top
+        end
+      in
+      aux Bottom n r
+  
+  let bitwise_and (ric1 : t) (ric2 : t) : t =
+    let ric1 = reduce ric1 in
+    let ric2 = reduce ric2 in
+    match ric1, ric2 with
+    (* Two constants: *)
+    | RIC {stride = 0; offset = ("", o1); _}, RIC {stride = 0; offset = ("", o2); _} -> ric (0, Int 0, Int 0, ("", o1 land o2))
+    (* Only one of them is a constant: *)
+    | RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", n)}, r -> ric_and_constant r n
+    | r, RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", n)} -> ric_and_constant r n
+    (* All other cases yield to Top: *)
+    | _ -> Top
+
+  let ric_or_constant (r : t) (n : int) : t =
+    if n = 0 then 
+      r
+    else if n < 0 then
+      Top
+    else
+      let rec aux (acc : t) (i : int) (r : t) : t =
+        begin match i, r with
+        | _, Bottom -> acc
+        | _, Top -> Top
+        (* TODO: deal with infinite cases! *)
+        (* | _, RIC {stride = s; lower_bound = NegInfinity; upper_bound = Infinity; offset = ("", o)} ->
+          let acc = join acc (ric (0, Int 0, Int 0, ("", o lor n))) in
+          aux acc (i - 1) (ric (s, Int (o + 1), Infinity, ("", 0)))
+        | _, RIC {stride = s; lower_bound = Int l; upper_bound = Infinity; offset = ("", o)} ->
+          let acc = join acc (ric (0, Int 0, Int 0, ("", ((s * l) + o) lor n))) in
+          aux acc (i - 1) (ric (s, Int (l + 1), Infinity, ("", o)))
+        | _, RIC {stride = s; lower_bound = NegInfinity; upper_bound = Int u; offset = ("", o)} ->
+          let acc = join acc (ric (0, Int 0, Int 0, ("", ((s * u) + o) lor n))) in
+          aux acc (i - 1) (ric (s, NegInfinity, Int (u - 1), ("", o))) *)
+        | _, RIC {stride = s; lower_bound = Int l; upper_bound = Int u; offset = ("", o)} ->
+          let acc = join acc (ric (0, Int 0, Int 0, ("", ((s * l) + o) lor n))) in
+          aux acc (i - 1) (ric (s, Int (l + 1), Int u, ("", o)))
+        | _ -> Top
+        end
+      in
+      aux Bottom n r
+  
+  let bitwise_or (ric1 : t) (ric2 : t) : t =
+    let ric1 = reduce ric1 in
+    let ric2 = reduce ric2 in
+    match ric1, ric2 with
+    (* Two constants: *)
+    | RIC {stride = 0; offset = ("", o1); _}, RIC {stride = 0; offset = ("", o2); _} -> ric (0, Int 0, Int 0, ("", o1 lor o2))
+    (* Only one of them is a constant: *)
+    | RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", n)}, r -> ric_or_constant r n
+    | r, RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", n)} -> ric_or_constant r n
+    (* All other cases yield to Top: *)
+    | _ -> Top
+
+  let ric_xor_constant (r : t) (n : int) : t = 
+    if n = 0 then 
+      r
+    else if n < 0 then
+      Top
+    else
+      let rec aux (acc : t) (i : int) (r : t) : t =
+        begin match i, r with
+        | _, Bottom -> acc
+        | _, Top -> Top
+        (* TODO: deal with infinite cases! *)
+        (* | _, RIC {stride = s; lower_bound = NegInfinity; upper_bound = Infinity; offset = ("", o)} ->
+          let acc = join acc (ric (0, Int 0, Int 0, ("", o lxor n))) in
+          aux acc (i - 1) (ric (s, Int (o + 1), Infinity, ("", 0)))
+        | _, RIC {stride = s; lower_bound = Int l; upper_bound = Infinity; offset = ("", o)} ->
+          let acc = join acc (ric (0, Int 0, Int 0, ("", ((s * l) + o) lxor n))) in
+          aux acc (i - 1) (ric (s, Int (l + 1), Infinity, ("", o)))
+        | _, RIC {stride = s; lower_bound = NegInfinity; upper_bound = Int u; offset = ("", o)} ->
+          let acc = join acc (ric (0, Int 0, Int 0, ("", ((s * u) + o) lxor n))) in
+          aux acc (i - 1) (ric (s, NegInfinity, Int (u - 1), ("", o))) *)
+        | _, RIC {stride = s; lower_bound = Int l; upper_bound = Int u; offset = ("", o)} ->
+          let acc = join acc (ric (0, Int 0, Int 0, ("", ((s * l) + o) lxor n))) in
+          aux acc (i - 1) (ric (s, Int (l + 1), Int u, ("", o)))
+        | _ -> Top
+        end
+      in
+      aux Bottom n r
+  
+  let bitwise_xor (ric1 : t) (ric2 : t) : t =
+    let ric1 = reduce ric1 in
+    let ric2 = reduce ric2 in
+    match ric1, ric2 with
+    (* Two constants: *)
+    | RIC {stride = 0; offset = ("", o1); _}, RIC {stride = 0; offset = ("", o2); _} -> ric (0, Int 0, Int 0, ("", o1 lxor o2))
+    (* Only one of them is a constant: *)
+    | RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", n)}, r -> ric_xor_constant r n
+    | r, RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", n)} -> ric_xor_constant r n
+    (* All other cases yield to Top: *)
+    | _ -> Top
+
+  let not_ (r : t) : t =
+    let r = reduce r in
+    match r with
+    | Top | Bottom -> ric (1, Int 0, Int 1, ("", 0))
+    | RIC {offset = (o, _); _} when not (String.equal o "") -> ric (1, Int 0, Int 1, ("", 0))
+    | RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", 0)} -> ric (0, Int 0, Int 0, ("", 1))
+    | r when not (is_subset (ric (0, Int 0, Int 0, ("", 0))) ~of_:r) -> ric (0, Int 0, Int 0, ("", 0))
+    | _ -> ric (1, Int 0, Int 1, ("", 0))
+
+  let shift_left (r : t) (n : int) : t =
+    (* TODO: assert not too big! *)
+    match r with
+    | Top -> Top
+    | Bottom -> Bottom
+    | r when not (String.equal "" (extract_relative_offset r)) -> Top
+    | RIC {stride = s; lower_bound = l; offset = ("", o); _} when ExtendedInt.less_than (ExtendedInt.plus (Int o) (ExtendedInt.times (Int s) l)) (Int 0) -> Top
+    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
+      ric (Int32.to_int_exn (Int32.shift_left (Int32.of_int_exn s) n), l, u, ("", Int32.to_int_exn (Int32.shift_left (Int32.of_int_exn o) n)))
+    | _ -> Top
+  
 end
 
 

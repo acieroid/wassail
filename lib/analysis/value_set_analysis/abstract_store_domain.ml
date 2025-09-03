@@ -682,7 +682,7 @@ let store
     | _ -> assert false
   in
   let vs_address = get state ~var:(Variable.Var address) in
-  let () =
+  (* let () =
     match vs_address with
     | ValueSet RIC.Bottom ->
       print_endline "USING BOTTOM AS AN ADDRESS!!!!!!!!! press any key to continue";
@@ -697,7 +697,7 @@ let store
       let _ = In_channel.input_line_exn In_channel.stdin in
       ()
     | _ -> () 
-  in
+  in *)
   log_address_type address vs_address;
   let is_g0 = String.equal "g0" (Value.extract_relative_offset vs_address) in
   let disjoint_stack = !Value_set_options.disjoint_stack in
