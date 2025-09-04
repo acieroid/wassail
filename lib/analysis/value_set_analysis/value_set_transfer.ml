@@ -23,14 +23,14 @@ module Make (*: Transfer.TRANSFER *) = struct
           (List.mapi cfg.arg_types ~f:(fun i _ -> 
             let variable = Var.Local i in
             let var_name = Var.to_string variable in
-            (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0, Int 0, Int 0, (var_name, 0)))))) @
+            (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, (var_name, 0l)))))) @
           (List.mapi cfg.global_types ~f:(fun i _ -> 
             let variable = Var.Global i in
             let var_name = Var.to_string variable in
-            (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0, Int 0, Int 0, (var_name, 0)))))) @
+            (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, (var_name, 0l)))))) @
           (List.mapi cfg.local_types ~f:(fun i _ -> 
             let variable = Var.Local (i + nb_of_arguments) in
-            (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0, Int 0, Int 0, ("", 0)))))) @
+            (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, ("", 0l)))))) @
           [(Variable.Mem RIC.Top), Abstract_store_domain.Value.ValueSet RIC.Top]);
       store_operations = RICSet.empty }
 
@@ -222,9 +222,9 @@ module Make (*: Transfer.TRANSFER *) = struct
         if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string y_value ^ " << " ^ Abstract_store_domain.Value.to_string x_value ^ " -> " ^ Variable.to_string result);
         let result_value =
           begin match x_value, y_value with
-          | ValueSet RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", n)}, ValueSet vs
-          | ValueSet RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", n)}, Boolean {numeric_value = vs; _} ->
-            Abstract_store_domain.Value.ValueSet (RIC.shift_left vs n)
+          | ValueSet RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, ValueSet vs
+          | ValueSet RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, Boolean {numeric_value = vs; _} ->
+            Abstract_store_domain.Value.ValueSet (RIC.shift_left vs (Int32.to_int_exn n))
           | _ -> ValueSet Top
           end in
         (* let () =
@@ -257,68 +257,68 @@ module Make (*: Transfer.TRANSFER *) = struct
             let numeric_value = (RIC.bitwise_and vs1 vs2) in
             begin match vs1, vs2 with
             (* PARITY CHECK *)
-            | RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", 1)}, vs2 ->
-              let true_ = RIC.meet vs2 (RIC.ric (2, NegInfinity, Infinity, ("", 1))) in
-              let false_ = RIC.meet vs2 (RIC.ric (2, NegInfinity, Infinity, ("", 0))) in
+            | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 1l)}, vs2 ->
+              let true_ = RIC.meet vs2 (RIC.ric (2l, NegInfinity, Infinity, ("", 1l))) in
+              let false_ = RIC.meet vs2 (RIC.ric (2l, NegInfinity, Infinity, ("", 0l))) in
               let tf = (Variable.Map.set 
                           Variable.Map.empty 
                           ~key:(Variable.Var y) 
                           ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
               Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            | vs1, RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", 1)} ->
-              let true_ = RIC.meet vs1 (RIC.ric (2, NegInfinity, Infinity, ("", 1))) in
-              let false_ = RIC.meet vs1 (RIC.ric (2, NegInfinity, Infinity, ("", 0))) in
+            | vs1, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 1l)} ->
+              let true_ = RIC.meet vs1 (RIC.ric (2l, NegInfinity, Infinity, ("", 1l))) in
+              let false_ = RIC.meet vs1 (RIC.ric (2l, NegInfinity, Infinity, ("", 0l))) in
               let tf = (Variable.Map.set 
                           Variable.Map.empty 
                           ~key:(Variable.Var x) 
                           ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
               Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
             (* MULTIPLE OF 4 *)
-            | RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", 3)}, vs2 ->
+            | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 3l)}, vs2 ->
               let true_ = vs2 in
-              let false_ = RIC.meet vs2 (RIC.ric (4, NegInfinity, Infinity, ("", 0))) in
+              let false_ = RIC.meet vs2 (RIC.ric (4l, NegInfinity, Infinity, ("", 0l))) in
               let tf = (Variable.Map.set 
                           Variable.Map.empty 
                           ~key:(Variable.Var y) 
                           ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
               Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            | vs1, RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", 3)} ->
+            | vs1, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 3l)} ->
               let true_ = vs1 in
-              let false_ = RIC.meet vs1 (RIC.ric (4, NegInfinity, Infinity, ("", 0))) in
+              let false_ = RIC.meet vs1 (RIC.ric (4l, NegInfinity, Infinity, ("", 0l))) in
               let tf = (Variable.Map.set 
                           Variable.Map.empty 
                           ~key:(Variable.Var x) 
                           ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
               Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
             (* MULTIPLE OF 8 *)
-            | RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", 7)}, vs2 ->
+            | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 7l)}, vs2 ->
               let true_ = vs2 in
-              let false_ = RIC.meet vs2 (RIC.ric (8, NegInfinity, Infinity, ("", 0))) in
+              let false_ = RIC.meet vs2 (RIC.ric (8l, NegInfinity, Infinity, ("", 0l))) in
               let tf = (Variable.Map.set 
                           Variable.Map.empty 
                           ~key:(Variable.Var y) 
                           ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
               Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            | vs1, RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", 7)} ->
+            | vs1, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 7l)} ->
               let true_ = vs1 in
-              let false_ = RIC.meet vs1 (RIC.ric (8, NegInfinity, Infinity, ("", 0))) in
+              let false_ = RIC.meet vs1 (RIC.ric (8l, NegInfinity, Infinity, ("", 0l))) in
               let tf = (Variable.Map.set 
                           Variable.Map.empty 
                           ~key:(Variable.Var x) 
                           ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
               Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
             (* MULTIPLE OF 16 *)
-            | RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", 15)}, vs2 ->
+            | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 15l)}, vs2 ->
               let true_ = vs2 in
-              let false_ = RIC.meet vs2 (RIC.ric (16, NegInfinity, Infinity, ("", 0))) in
+              let false_ = RIC.meet vs2 (RIC.ric (16l, NegInfinity, Infinity, ("", 0l))) in
               let tf = (Variable.Map.set 
                           Variable.Map.empty 
                           ~key:(Variable.Var y) 
                           ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
               Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            | vs1, RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", 15)} ->
+            | vs1, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 15l)} ->
               let true_ = vs1 in
-              let false_ = RIC.meet vs1 (RIC.ric (16, NegInfinity, Infinity, ("", 0))) in
+              let false_ = RIC.meet vs1 (RIC.ric (16l, NegInfinity, Infinity, ("", 0l))) in
               let tf = (Variable.Map.set 
                           Variable.Map.empty 
                           ~key:(Variable.Var x) 
@@ -348,18 +348,18 @@ module Make (*: Transfer.TRANSFER *) = struct
           | Boolean {numeric_value = vs1; _}, ValueSet vs2 -> 
             let numeric_value = (RIC.bitwise_xor vs1 vs2) in
             begin match vs1, vs2 with
-            | RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", n)}, vs2 when n >= 1 -> 
-              let false_ = RIC.meet vs2 (RIC.ric (0, Int 0, Int 0, ("", n))) in
-              let true_ = RIC.remove ~this:(RIC.ric (0, Int 0, Int 0, ("", n))) ~from:vs2 in
+            | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, vs2 when Int32.(n >= 1l) -> 
+              let false_ = RIC.meet vs2 (RIC.ric (0l, Int 0l, Int 0l, ("", n))) in
+              let true_ = RIC.remove ~this:(RIC.ric (0l, Int 0l, Int 0l, ("", n))) ~from:vs2 in
               let true_ = List.fold true_ ~init:RIC.Bottom ~f:(fun acc r -> RIC.join acc r) in
               let tf = (Variable.Map.set 
                           Variable.Map.empty 
                           ~key:(Variable.Var y) 
                           ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
               Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            | vs1, RIC {stride = 0; lower_bound = Int 0; upper_bound = Int 0; offset = ("", n)} when n >= 1 -> 
-              let false_ = RIC.meet vs1 (RIC.ric (0, Int 0, Int 0, ("", n))) in
-              let true_ = RIC.remove ~this:(RIC.ric (0, Int 0, Int 0, ("", n))) ~from:vs1 in
+            | vs1, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)} when Int32.(n >= 1l) -> 
+              let false_ = RIC.meet vs1 (RIC.ric (0l, Int 0l, Int 0l, ("", n))) in
+              let true_ = RIC.remove ~this:(RIC.ric (0l, Int 0l, Int 0l, ("", n))) ~from:vs1 in
               let true_ = List.fold true_ ~init:RIC.Bottom ~f:(fun acc r -> RIC.join acc r) in
               let tf = (Variable.Map.set 
                           Variable.Map.empty 
@@ -388,7 +388,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         Abstract_store_domain.to_top_RIC state result
       end
     | Load load ->
-      let size = Option.value_exn (Int32.to_int (Memoryop.size load)) in
+      let size = Memoryop.size load in
       let address = pop (Spec.get_or_fail i.annotation_before).vstack in
       let vs = Abstract_store_domain.get state ~var:(Variable.Var address) in
       (* Update accessed address *)
@@ -396,6 +396,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         let vs_plus_offset =
           begin match load, vs with
           | { offset = offset; _ }, Abstract_store_domain.Value.ValueSet vs ->
+            let offset = Int32.of_int_exn offset in
             Abstract_store_domain.Value.ValueSet (RIC.add_offset vs offset)
           | _ -> failwith "Trying to use boolean as an address"
           end
@@ -411,7 +412,8 @@ module Make (*: Transfer.TRANSFER *) = struct
         | { typ = F64; _ } -> Abstract_store_domain.to_top_RIC state (ret i)
         | { typ = I64; _ } -> Abstract_store_domain.to_top_RIC state (ret i)
         | { typ = I32; offset = offset; _ } ->
-          if size = 4 then
+          let offset = Int32.of_int_exn offset in
+          if Int32.(size = 4l) then
             let is_stack = !Value_set_options.disjoint_stack
               && String.equal "g0" (Abstract_store_domain.Value.extract_relative_offset vs) in
             match vs with
@@ -495,7 +497,7 @@ module Make (*: Transfer.TRANSFER *) = struct
                                                           Variable.Map.empty 
                                                           ~key:(Variable.Var var1) 
                                                           ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                              numeric_value = RIC.ric (1, Int 0, Int 1, ("", 0)) })
+                              numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
             end in
           (* let () =
             print_endline ("result: " ^ Abstract_store_domain.Value.to_string (Abstract_store_domain.get state ~var:(ret i)));
@@ -505,7 +507,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         | {op = LeU; typ = I32} -> 
           if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " ≤ " ^ RIC.to_string vs2);
           let vs2' = RIC.remove_lower_bound vs2 in
-          let vs2'' = RIC.add_offset (RIC.remove_upper_bound vs2) 1 in
+          let vs2'' = RIC.add_offset (RIC.remove_upper_bound vs2) 1l in
           let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
           let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
           if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
@@ -519,11 +521,11 @@ module Make (*: Transfer.TRANSFER *) = struct
                                                         Variable.Map.empty 
                                                         ~key:(Variable.Var var1) 
                                                         ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                             numeric_value = RIC.ric (1, Int 0, Int 1, ("", 0)) })
+                             numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
           end
         | {op = LtU; typ = I32} ->
           if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " < " ^ RIC.to_string vs2);
-          let vs2' = RIC.add_offset (RIC.remove_lower_bound vs2) (-1) in
+          let vs2' = RIC.add_offset (RIC.remove_lower_bound vs2) (-1l) in
           let vs2'' = RIC.remove_upper_bound vs2 in
           let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
           let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
@@ -538,12 +540,12 @@ module Make (*: Transfer.TRANSFER *) = struct
                                                         Variable.Map.empty 
                                                         ~key:(Variable.Var var1) 
                                                         ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                             numeric_value = RIC.ric (1, Int 0, Int 1, ("", 0)) })
+                             numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
           end
         | {op = GeU; typ = I32} -> 
           if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " ≥ " ^ RIC.to_string vs2);
           let vs2' = RIC.remove_upper_bound vs2 in
-          let vs2'' = RIC.add_offset (RIC.remove_lower_bound vs2) (-1) in
+          let vs2'' = RIC.add_offset (RIC.remove_lower_bound vs2) (-1l) in
           let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
           let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
           if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
@@ -557,11 +559,11 @@ module Make (*: Transfer.TRANSFER *) = struct
                                                         Variable.Map.empty 
                                                         ~key:(Variable.Var var1) 
                                                         ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                             numeric_value = RIC.ric (1, Int 0, Int 1, ("", 0)) })
+                             numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
           end
         | {op = GtU; typ = I32} ->
           if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " > " ^ RIC.to_string vs2);
-          let vs2' = RIC.add_offset (RIC.remove_upper_bound vs2) 1 in
+          let vs2' = RIC.add_offset (RIC.remove_upper_bound vs2) 1l in
           let vs2'' = RIC.remove_lower_bound vs2 in
           let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
           let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
@@ -576,7 +578,7 @@ module Make (*: Transfer.TRANSFER *) = struct
                                                         Variable.Map.empty 
                                                         ~key:(Variable.Var var1) 
                                                         ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                             numeric_value = RIC.ric (1, Int 0, Int 1, ("", 0)) })
+                             numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
           end
         | _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean {Boolean.true_or_false = Variable.Map.empty; numeric_value = RIC.Top})
         end

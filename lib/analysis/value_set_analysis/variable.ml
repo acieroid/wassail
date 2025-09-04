@@ -34,7 +34,7 @@ module T = struct
     (* | Affected -> "Affected_memory" *)
     | Accessed -> "Accessed_memory"
 
-  let mem (ric : int * ExtendedInt.t * ExtendedInt.t * (string * int)) : t =
+  let mem (ric : int32 * ExtendedInt.t * ExtendedInt.t * (string * int32)) : t =
     Mem (RIC.ric ric)
 
   let entire_memory = Mem RIC.Top
@@ -281,7 +281,7 @@ end
 
 let%test_module "Variable tests" = (module struct
   let mem addr lo hi offset =
-    mem (addr, Int lo, Int hi, offset)
+    mem (Int32.of_int_exn addr, Int (Int32.of_int_exn lo), Int (Int32.of_int_exn hi), offset)
 
   let%test "Tests on variable module" =
     print_endline "_______ _______________ _______\n        Variable module        \n------- --------------- -------\n";
@@ -300,85 +300,85 @@ let%test_module "Variable tests" = (module struct
     List.length result = 5 *)
 
   let%test "share_addresses yes" =
-    let v1 = mem 1 0 4 ("", 0) in
-    let v2 = mem 1 2 6 ("", 0) in
+    let v1 = mem 1 0 4 ("", 0l) in
+    let v2 = mem 1 2 6 ("", 0l) in
     let result = share_addresses v1 v2 in
     print_endline ("[Variable.share_addresses]     " ^ to_string v1 ^ ", " ^ to_string v2 ^ " -> " ^ Bool.to_string result);
     result
 
   let%test "share_addresses no" =
-    let v1 = mem 2 0 4 ("", 0) in
-    let v2 = mem 2 0 4 ("", 1) in
+    let v1 = mem 2 0 4 ("", 0l) in
+    let v2 = mem 2 0 4 ("", 1l) in
     let result = share_addresses v1 v2 in
     print_endline ("[Variable.share_addresses]     " ^ to_string v1 ^ ", " ^ to_string v2 ^ " -> " ^ Bool.to_string result);
     not result
 
   let%test "remove full overlap" =
-    let from = mem 1 0 4 ("", 0) in
-    let these = RIC.ric (1, Int (-1), Int 6, ("", 0)) in
+    let from = mem 1 0 4 ("", 0l) in
+    let these = RIC.ric (1l, Int (-1l), Int 6l, ("", 0l)) in
     let result = remove ~these_addresses:these ~from in
     print_endline ("[Variable.remove]     these:" ^ RIC.to_string these ^ " from:" ^ to_string from ^ " -> [" ^ String.concat ~sep:", " (List.map ~f:to_string result) ^ "]");
     List.equal equal result []
 
   let%test "remove some overlap" =
-    let from = mem 1 0 4 ("", 0) in
-    let these = RIC.ric (2, Int (0), Int 1, ("", 0)) in
+    let from = mem 1 0 4 ("", 0l) in
+    let these = RIC.ric (2l, Int (0l), Int 1l, ("", 0l)) in
     let result = remove ~these_addresses:these ~from in
     print_endline ("[Variable.remove]     these:" ^ RIC.to_string these ^ " from:" ^ to_string from ^ " -> [" ^ String.concat ~sep:", " (List.map ~f:to_string result) ^ "]");
-    List.equal equal result [mem 2 0 1 ("", 1); mem 0 0 0 ("", 4)]
+    List.equal equal result [mem 2 0 1 ("", 1l); mem 0 0 0 ("", 4l)]
 
   let%test "remove no overlap" =
-    let from = mem 1 0 4 ("", 0) in
-    let these = RIC.ric (1, Int 5, Int 8, ("", 0)) in
+    let from = mem 1 0 4 ("", 0l) in
+    let these = RIC.ric (1l, Int 5l, Int 8l, ("", 0l)) in
     let result = remove ~these_addresses:these ~from in
     print_endline ("[Variable.remove]     these:" ^ RIC.to_string these ^ " from:" ^ to_string from ^ " -> [" ^ String.concat ~sep:", " (List.map ~f:to_string result) ^ "]");
      List.equal equal result [from]
 
   let%test "remove list of addresses" =
-    let from = mem 1 0 4 ("", 0) in
-    let these = [RIC.ric (2, Int (0), Int 1, ("", 0)); RIC.ric (0, Int 0, Int 0, ("", 3)); RIC.ric (1, Int 0, Int 3, ("", 37))] in
+    let from = mem 1 0 4 ("", 0l) in
+    let these = [RIC.ric (2l, Int (0l), Int 1l, ("", 0l)); RIC.ric (0l, Int 0l, Int 0l, ("", 3l)); RIC.ric (1l, Int 0l, Int 3l, ("", 37l))] in
     let result = remove_all ~these_addresses_list:these ~from in
     print_endline ("[Variable.remove_all]     these: [" ^ String.concat ~sep:"; " (List.map ~f:RIC.to_string these) ^ "] from:" ^ to_string from ^ " -> [" ^ String.concat ~sep:", " (List.map ~f:to_string result) ^ "]");
-    List.equal equal result [mem 0 0 0 ("", 1); mem 0 0 0 ("", 4)]
+    List.equal equal result [mem 0 0 0 ("", 1l); mem 0 0 0 ("", 4l)]
 
   let%test "remove list of incompatible addresses" =
-    let from = mem 1 0 4 ("", 0) in
-    let these = [RIC.ric (2, Int (0), Int 1, ("a", 0)); RIC.ric (0, Int 0, Int 0, ("", 3)); RIC.ric (1, Int 0, Int 3, ("a", 37))] in
+    let from = mem 1 0 4 ("", 0l) in
+    let these = [RIC.ric (2l, Int (0l), Int 1l, ("a", 0l)); RIC.ric (0l, Int 0l, Int 0l, ("", 3l)); RIC.ric (1l, Int 0l, Int 3l, ("a", 37l))] in
     let result = remove_all ~these_addresses_list:these ~from in
     print_endline ("[Variable.remove_all]     these: [" ^ String.concat ~sep:"; " (List.map ~f:RIC.to_string these) ^ "] from:" ^ to_string from ^ " -> [" ^ String.concat ~sep:", " (List.map ~f:to_string result) ^ "]");
     List.equal equal result []
 
   let%test "is_covered fully" =
-    let target = mem 1 0 2 ("", 0) in
-    let cover1 = mem 1 0 1 ("", 0) in
-    let cover2 = mem 1 2 3 ("", 0) in
+    let target = mem 1 0 2 ("", 0l) in
+    let cover1 = mem 1 0 1 ("", 0l) in
+    let cover2 = mem 1 2 3 ("", 0l) in
     let result = is_covered ~by:[cover1; cover2] target in
     print_endline ("[Variable.is_covered]     " ^ to_string target ^ " by:[" ^ List.to_string ~f:to_string [cover1; cover2] ^ "] -> " ^ Bool.to_string result);
     result
 
   let%test "is_covered partially" =
-    let target = mem 1 0 2 ("", 0) in
-    let cover1 = mem 1 0 0 ("", 0) in
-    let cover2 = mem 1 2 3 ("", 20) in
+    let target = mem 1 0 2 ("", 0l) in
+    let cover1 = mem 1 0 0 ("", 0l) in
+    let cover2 = mem 1 2 3 ("", 20l) in
     let result = is_covered ~by:[cover1] target in
     print_endline ("[Variable.is_covered]     " ^ to_string target ^ " by:[" ^ List.to_string ~f:to_string [cover1; cover2] ^ "] -> " ^ Bool.to_string result);
     not result
 
   let%test "update_relative_offset" =
-    let original = mem 1 0 2 ("rel", 1) in
-    let values = String.Map.of_alist_exn [("rel", RIC.ric (1, Int 10, Int 10, ("x", 0)))] in
+    let original = mem 1 0 2 ("rel", 1l) in
+    let values = String.Map.of_alist_exn [("rel", RIC.ric (1l, Int 10l, Int 10l, ("x", 0l)))] in
     let updated = update_relative_offset ~var:original ~actual_values:values in
     print_endline ("[Variable.update_relative_offset]     " ^ to_string original ^ " -> " ^ to_string updated);
     match updated with
-    | Mem RIC { offset = ("x", new_off); _ } -> new_off = 1 + 10
+    | Mem RIC { offset = ("x", new_off); _ } -> Int32.(new_off = 1l + 10l)
     | _ -> false
 
   let%test "update_relative_offset_2" =
-    let original = mem 1 0 2 ("rel", 1) in
-    let values = String.Map.of_alist_exn [("rel", RIC.ric (1, Int 10, Int 11, ("", 0)))] in
+    let original = mem 1 0 2 ("rel", 1l) in
+    let values = String.Map.of_alist_exn [("rel", RIC.ric (1l, Int 10l, Int 11l, ("", 0l)))] in
     let updated = update_relative_offset ~var:original ~actual_values:values in
     print_endline ("[Variable.update_relative_offset]     " ^ to_string original ^ " -> " ^ to_string updated);
     match updated with
-    | Mem RIC { lower_bound = Int 0; upper_bound = Int 3; offset = ("", 11); _ } -> true
+    | Mem RIC { lower_bound = Int 0l; upper_bound = Int 3l; offset = ("", 11l); _ } -> true
     | _ -> false
 end)
