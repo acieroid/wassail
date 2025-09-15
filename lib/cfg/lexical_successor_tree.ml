@@ -36,10 +36,10 @@ let make (instrs : unit Instr.t list) : t =
     Tree.t list * unit Instr.t IntMap.t * int Instr.Label.Map.t =
     match instrs with
     | [] -> roots, indices, entries
-    | Data instr :: rest ->
+    | (Data _ as i) :: rest | (Call _ as i) :: rest ->
       let idx = next_idx () in
       let roots' = [add_parent roots idx] in
-      let indices' = IntMap.add_exn indices ~key:idx ~data:(Data instr) in
+      let indices' = IntMap.add_exn indices ~key:idx ~data:i in
       helper rest roots' indices' entries
     | Control instr :: rest ->
       let idx = next_idx () in
@@ -88,9 +88,9 @@ module Test = struct
 
   let%test "lexical successor tree with blocks" =
     let t = make [data 1 (Instr.Const (Prim_value.of_int 0));
-                  control 2 (Instr.Block (None, (0, 0),
+                  control 2 (Instr.Block (([], []), (0, 0),
                                           [data 3 (Instr.Const (Prim_value.of_int 0));
-                                           control 4 (Instr.Block (None, (0, 0),
+                                           control 4 (Instr.Block (([], []), (0, 0),
                                                                    [control 5 (Instr.Br 0l)]))]));
                   data 6 (Instr.Const (Prim_value.of_int 0))] in
     (* 6 -> 2 -> 1
@@ -101,7 +101,7 @@ module Test = struct
 
   let%test "lexical successor tree with if" =
     let t = make [data 1 (Instr.Const (Prim_value.of_int 0));
-                  control 2 (Instr.If (None, (0, 1),
+                  control 2 (Instr.If (([], [I32]), (0, 1),
                                        [data 3 (Instr.Const (Prim_value.of_int 0))],
                                        [data 4 (Instr.Const (Prim_value.of_int 0))]));
                   data 5 (Instr.Const (Prim_value.of_int 0))] in
@@ -111,7 +111,7 @@ module Test = struct
 
   let%test "lexical successor tree with if without instructions after branches" =
     let t = make [data 1 (Instr.Const (Prim_value.of_int 0));
-                  control 2 (Instr.If (None, (0, 1),
+                  control 2 (Instr.If (([], [I32]), (0, 1),
                                        [data 3 (Instr.Const (Prim_value.of_int 0))],
                                        [data 4 (Instr.Const (Prim_value.of_int 0))]))] in
     (* What we expect is that a dummy node is added to act as the root *)
@@ -122,7 +122,7 @@ module Test = struct
     let t = make [data 1 (Instr.Const (Prim_value.of_int 0));
                   data 2 (Instr.Const (Prim_value.of_int 0));
                   data 3 (Instr.Compare Relop.{ typ = I32; op = Eq });
-                  control 4 (Instr.If (None, (0, 0),
+                  control 4 (Instr.If (([], []), (0, 0),
                                        [data 5 (Instr.Const (Prim_value.of_int 0));
                                         control 6 Instr.Return],
                                        []));

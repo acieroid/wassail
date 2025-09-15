@@ -14,17 +14,22 @@ module SpecWithoutBottom = struct
   [@@deriving compare, equal]
 
   let to_string (s : t) : string =
-    Printf.sprintf "{\nvstack: [%s]\nlocals: [%s]\nglobals: [%s]\nmemory: [%s]\nsize_entry: %s}"
-      (String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string))
-      (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))
-      (String.concat ~sep:", " (List.map s.globals ~f:Var.to_string))
-      (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v))))
-      (String.concat ~sep:", " (List.map ~f:(fun (k, v) -> Printf.sprintf "%s: %d" (Instr.Label.to_string k) v) (Instr.Label.Map.to_alist s.stack_size_at_entry)))
+    String.concat ~sep:";" [
+      (Printf.sprintf "stack:[%s]" (String.concat ~sep:", " (List.map s.vstack ~f:Var.to_string)));
+      (Printf.sprintf "locals:[%s]" (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string)));
+      (Printf.sprintf "globals:[%s]" (String.concat ~sep:", " (List.map s.globals ~f:Var.to_string)));
+      (Printf.sprintf "mem:[%s]" (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v)))));
+      (Printf.sprintf "sizes:[%s]" (String.concat ~sep:", " (List.map ~f:(fun (k, v) -> Printf.sprintf "%s: %d" (Instr.Label.to_string k) v) (Instr.Label.Map.to_alist s.stack_size_at_entry))));
+    ]
 
   let to_dot_string (s : t) : string =
-    (String.concat ~sep:"|" (List.map s.vstack ~f:(fun v ->
-         Printf.sprintf "<%s>%s" (Var.to_string v) (Var.to_string v)))) ^ "|" ^
-    (String.concat ~sep:"|" (List.map s.locals ~f:Var.to_string))
+    let stack = String.concat ~sep:"," (List.map s.vstack ~f:Var.to_string) in
+    let locals =
+    (if List.length s.locals > 0 then
+       String.concat ~sep:"," (List.map s.locals ~f:Var.to_string)
+     else
+       "") in
+    Printf.sprintf "<tr><td>%s</td><td>%s</td></tr>" stack locals
   (* (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))*)
   (* (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v)))) *)
 
@@ -53,7 +58,10 @@ module SpecWithoutBottom = struct
       and the second element is the new variable *)
   let extract_different_vars (s1 : t) (s2 : t) : (Var.t * Var.t) list =
     let f (l1 : Var.t list) (l2 : Var.t list) : (Var.t * Var.t) list =
-      assert (List.length l1 = List.length l2);
+      (* We take the shortest length; as we could have stacks with more elements in case of br that leaves too many values on the stack *)
+      let shortest_length = min (List.length l1) (List.length l2) in
+      let l1 = List.take l1 shortest_length in
+      let l2 = List.take l2 shortest_length in
       List.filter_map (List.map2_exn l1 l2 ~f:(fun v1 v2 -> (v1, v2, Var.equal v1 v2)))
         ~f:(fun (v1, v2, eq) -> if not eq then Some (v1, v2) else None) in
     let fvstack (l1 : Var.t list) (l2 : Var.t list) : (Var.t * Var.t) list =
@@ -82,21 +90,21 @@ module Spec = struct
     | NotBottom of SpecWithoutBottom.t
   [@@deriving compare, equal]
 
-  let lift (f : SpecWithoutBottom.t -> SpecWithoutBottom.t) : t -> t = function
+  let lift ~(f : SpecWithoutBottom.t -> SpecWithoutBottom.t) : t -> t = function
     | Bottom -> Bottom
     | NotBottom s -> NotBottom (f s)
 
-  let bind (f : SpecWithoutBottom.t -> t) : t -> t = function
+  let bind ~(f : SpecWithoutBottom.t -> t) : t -> t = function
     | Bottom -> Bottom
     | NotBottom s -> f s
 
-  let wrap ~(default : 'a) (f : SpecWithoutBottom.t -> 'a) : t -> 'a = function
+  let wrap ~(default : 'a) ~(f : SpecWithoutBottom.t -> 'a) : t -> 'a = function
     | Bottom -> default
     | NotBottom s -> f s
 
   let get_or_fail (s : t) : SpecWithoutBottom.t = match s with
     | NotBottom s -> s
-    | Bottom -> failwith "Spec.get_or_fail called on bottom"
+    | Bottom -> failwith "Spec.get_or_fail called on bottom. If this is a classical interprocedural analysis, it is likely that the analysis didn't start at the entry point."
 
   let to_string (s : t) : string = match s with
     | Bottom -> "bottom"
@@ -134,6 +142,12 @@ module Spec = struct
     | NotBottom s -> match List.hd s.vstack with
       | Some ret -> ret
       | None -> failwith "Spec.ret: no value on the vstack"
+
+
+  let join (_s1 : t) (s2 : t) : t =
+    s2 (* only keep the "most recent" state, this is safe for this analysis *)
+
+  let widen _ s2 = s2 (* No widening *)
 
 end
 

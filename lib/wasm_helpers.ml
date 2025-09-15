@@ -2,19 +2,16 @@ open Core
 open Wasm
 
 (** Returns the (optional) type of a block *)
-let type_of_block (m : Ast.module_) (bt : Ast.block_type) : Type.t option = match bt with
+let type_of_block (m : Ast.module_) (bt : Ast.block_type) : (Type.t list * Type.t list) = match bt with
   | Ast.VarBlockType v -> begin match Ast.func_type_for m v with
-      | Wasm.Types.FuncType ([], []) -> None
-      | Wasm.Types.FuncType ([], [t]) -> Some (Type.of_wasm t)
-      | Wasm.Types.FuncType _ -> failwith "Unsupported block type with parameters or more than one return value"
+      | Wasm.Types.FuncType (in_type, out_type) -> (List.map ~f:Type.of_wasm in_type, List.map ~f:Type.of_wasm out_type)
     end
-  | Ast.ValBlockType None -> None
-  | Ast.ValBlockType (Some t) -> Some (Type.of_wasm t)
+  | Ast.ValBlockType None -> [], []
+  | Ast.ValBlockType (Some t) -> [], [Type.of_wasm t]
 
 (** Returns the arity of a block *)
 let arity_of_block (m : Ast.module_) (bt : Ast.block_type) : int * int = match type_of_block m bt with
-  | Some _ -> (0, 1)
-  | None -> (0, 0)
+  | (in_types, out_types) -> (List.length in_types, List.length out_types)
 
 (** Returns the arity of a function *)
 let arity_and_type_of_fun_type (m : Ast.module_) (ft : Ast.var) : ((int * int) * (Type.t list * Type.t list)) =
@@ -38,7 +35,7 @@ let arity_and_type_of_fun (m : Ast.module_) (f : Ast.var) : ((int * int) * (Type
       | [] -> failwith (Printf.sprintf "Cannot find function %ld" f.it)
       | { it = { idesc = { it = FuncImport v; _ }; _}; _} :: _ when Int32.(count = f.it) -> arity_and_type_of_fun_type m v
       | { it = { idesc = { it = FuncImport _; _}; _}; _} :: rest -> iter Int32.(count + 1l) rest
-      | _ :: rest -> iter count rest (* other imports don't count towards increasing function indice *)in
+      | _ :: rest -> iter count rest (* other imports don't count towards increasing function indices *)in
     iter 0l m.it.imports
   else
     (* defined function, get arity from function list *)

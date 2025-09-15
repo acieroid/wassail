@@ -2,7 +2,7 @@ open Core
 
 (** Check if a variable is considered as being defined at the entry point *)
 let entry_var (v : Var.t) : bool = match v with
-  | Local _ | Global _ | Return | Const _ -> true
+  | Local _ | Global _ | Return _ | Const _ -> true
   | Var _ | Merge (_, _) | Hole | Other _ -> false
 
 
@@ -42,31 +42,30 @@ module VarEq = struct
 end
 
 (** Return the equalities that arise between variable, from a data instruction *)
-let eqs_data_instr (instr : (Instr.data, Spec.t) Instr.labelled) : VarEq.Set.t =
+let eqs_data_instr (instr : (Instr.data, Spec_domain.t) Instr.labelled) : VarEq.Set.t =
   match instr.instr with
   | Nop | Drop | Select _ | MemorySize | MemoryGrow | MemoryCopy | MemoryFill | MemoryInit _
   | Unary _ | Binary _ | Compare _ | Test _ | Convert _ -> VarEq.Set.empty
   | Const n ->
-    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top (Spec.get_or_fail instr.annotation_after).vstack) (Var.Const n))
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top (Spec_domain.get_or_fail instr.annotation_after).vstack) (Var.Const n))
   | LocalGet l ->
-    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top (Spec.get_or_fail instr.annotation_after).vstack) (Spec_inference.get l (Spec.get_or_fail instr.annotation_before).locals))
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top (Spec_domain.get_or_fail instr.annotation_after).vstack) (Spec_inference.get l (Spec_domain.get_or_fail instr.annotation_before).locals))
   | LocalSet l ->
-    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get l (Spec.get_or_fail instr.annotation_after).locals) (Spec_inference.top (Spec.get_or_fail instr.annotation_before).vstack))
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get l (Spec_domain.get_or_fail instr.annotation_after).locals) (Spec_inference.top (Spec_domain.get_or_fail instr.annotation_before).vstack))
   | LocalTee l ->
     VarEq.Set.of_list
-                    [VarEq.of_vars (Spec_inference.get l (Spec.get_or_fail instr.annotation_after).locals) (Spec_inference.top (Spec.get_or_fail instr.annotation_before).vstack);
-                     VarEq.of_vars (Spec_inference.top (Spec.get_or_fail instr.annotation_after).vstack) (Spec_inference.get l (Spec.get_or_fail instr.annotation_before).locals)]
+                    [VarEq.of_vars (Spec_inference.get l (Spec_domain.get_or_fail instr.annotation_after).locals) (Spec_inference.top (Spec_domain.get_or_fail instr.annotation_before).vstack);
+                     VarEq.of_vars (Spec_inference.top (Spec_domain.get_or_fail instr.annotation_after).vstack) (Spec_inference.get l (Spec_domain.get_or_fail instr.annotation_before).locals)]
   | GlobalGet g ->
-    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top (Spec.get_or_fail instr.annotation_after).vstack) (Spec_inference.get g (Spec.get_or_fail instr.annotation_before).globals))
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.top (Spec_domain.get_or_fail instr.annotation_after).vstack) (Spec_inference.get g (Spec_domain.get_or_fail instr.annotation_before).globals))
   | GlobalSet g ->
-    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get g (Spec.get_or_fail instr.annotation_after).globals) (Spec_inference.top (Spec.get_or_fail instr.annotation_before).vstack))
-  | Load _ -> VarEq.Set.empty (* TODO (it is sound to ignore them, but shouldn't be too complicated to deal with this) *)
-  | Store _ -> VarEq.Set.empty (* TODO: same *)
+    VarEq.Set.singleton (VarEq.of_vars (Spec_inference.get g (Spec_domain.get_or_fail instr.annotation_after).globals) (Spec_inference.top (Spec_domain.get_or_fail instr.annotation_before).vstack))
+  | Load _ -> VarEq.Set.empty (* XXX (it is sound to ignore them, but shouldn't be too complicated to deal with this) *)
+  | Store _ -> VarEq.Set.empty (* XXX: same *)
   | RefIsNull | RefNull _ | RefFunc _ -> VarEq.Set.empty
 
 (** Perform variable propagation *)
-let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
-  let init_spec = Spec_inference.init_state cfg in
+let var_prop (_module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) : Spec_domain.t Cfg.t =
   (* Go over each instruction and basic block, record all equality constraints that can be derived *)
   let equalities : VarEq.Set.t = List.fold_left (Cfg.all_blocks cfg)
       ~init:VarEq.Set.empty
@@ -77,12 +76,13 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
             List.fold_left instrs ~init:eqs ~f:(fun eqs instr -> VarEq.Set.union eqs (eqs_data_instr instr))
           | Control { instr = Merge; _ } ->
             (* Equate annotation after each predecessor of this merge block with the annotation after this merge block *)
-            let spec = Cfg.state_after_block cfg block.idx init_spec in
+            let spec = block.annotation_after in
             List.fold_left (Cfg.predecessors cfg block.idx)
               ~init:eqs
-              ~f:(fun eqs pred ->
-                  let pred_spec = Spec.get_or_fail (Cfg.state_after_block cfg pred init_spec) in
-                  let spec = Spec.get_or_fail spec in
+              ~f:(fun eqs (pred, _) ->
+                  let pred_block = Cfg.find_block_exn cfg pred in
+                  let pred_spec = Spec_domain.get_or_fail pred_block.annotation_after in
+                  let spec = Spec_domain.get_or_fail spec in
                   assert (List.length pred_spec.vstack = List.length spec.vstack);
                   assert (List.length pred_spec.locals = List.length spec.locals);
                   assert (List.length pred_spec.globals = List.length spec.globals);
@@ -91,7 +91,7 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
                        ((List.map2_exn ~f:VarEq.of_vars pred_spec.vstack spec.vstack) @
                         (List.map2_exn ~f:VarEq.of_vars pred_spec.locals spec.locals) @
                         (List.map2_exn ~f:VarEq.of_vars pred_spec.globals spec.globals))))
-          | Control _ -> eqs (* No equality arises from other control blocks *)
+          | _ -> eqs (* No equality arises from other blocks *)
         )
   in
   (* Filter out tautologies *)
@@ -142,25 +142,33 @@ let var_prop (cfg : Spec.t Cfg.t) : Spec.t Cfg.t =
   (* All variables that are involved in a single equality can then be propagated:
      they are replaced by the variable they are equal to.
      Precedence is given to variable defined at the entry point (locals, globals, constants, memory vars) *)
-  let fannot (annot : Spec.t) : Spec.t = Spec.map_vars annot ~f:(fun (v : Var.t) ->
+  let fannot (annot : Spec_domain.t) : Spec_domain.t = Spec_domain.map_vars annot ~f:(fun (v : Var.t) ->
       match List.find classes ~f:(fun vs -> Var.Set.mem vs v) with
       | Some class_ ->
         (* Variable is part of an equality class, replace it by its target *)
         rewrite_target class_
       | None -> v) in
   Cfg.map_annotations cfg
-    ~f:(fun i -> (fannot (Instr.annotation_before i), fannot (Instr.annotation_after i)))
+    ~instrs:(fun instr -> (fannot (Instr.annotation_before instr), fannot (Instr.annotation_after instr)))
+    ~blocks:(fun block_idx ->
+        let block = Cfg.find_block_exn cfg block_idx in
+        (fannot block.annotation_before, fannot block.annotation_after))
 
-let all_vars (cfg : Spec.t Cfg.t) : Var.Set.t =
+let all_vars (cfg : Spec_domain.t Cfg.t) : Var.Set.t =
   let vars : Var.Set.t ref = ref Var.Set.empty in
-  let fannot (annot : Spec.t) : Spec.t = Spec.map_vars annot ~f:(fun (v : Var.t) ->
+  let fannot (annot : Spec_domain.t) : Spec_domain.t = Spec_domain.map_vars annot ~f:(fun (v : Var.t) ->
       vars := Var.Set.add !vars v;
       v) in
+  (* Map over the annotations so that we visit everything *)
   let _cfg = Cfg.map_annotations cfg
-      ~f:(fun i -> (fannot (Instr.annotation_before i), fannot (Instr.annotation_after i))) in
+      ~instrs:(fun instr -> (fannot (Instr.annotation_before instr), fannot (Instr.annotation_after instr)))
+      ~blocks:(fun block_idx ->
+          (* Not really needed to do this since we already visit the instructions *)
+          let block = Cfg.find_block_exn cfg block_idx in
+          (fannot block.annotation_before, fannot block.annotation_after)) in
   !vars
 
-let count_vars (cfg : Spec.t Cfg.t) : int =
+let count_vars (cfg : Spec_domain.t Cfg.t) : int =
   Var.Set.length (all_vars cfg)
 
 module Test = struct
@@ -182,9 +190,9 @@ module Test = struct
     Spec_inference.propagate_globals := true;
     Spec_inference.propagate_locals := true;
     Spec_inference.use_const := true;
-    let result = var_prop cfg in
+    let result = var_prop module_ cfg in
     let actual = all_vars result in
-    let expected = Var.Set.of_list [Var.Return; Var.Local 0; Var.Global 0; Var.Const (Prim_value.of_int 0)] in
+    let expected = Var.Set.of_list [Var.Return 0l; Var.Local 0; Var.Global 0; Var.Const (Prim_value.of_int 0)] in
     Var.Set.check_equality ~actual ~expected
 
   let%test "var prop - big program" =
@@ -193,6 +201,6 @@ module Test = struct
     Spec_inference.propagate_locals := false;
     Spec_inference.use_const := false;
     let cfg = Spec_analysis.analyze_intra1 module_ 14l in
-    let actual = var_prop cfg in
+    let actual = var_prop module_ cfg in
     count_vars actual < count_vars cfg
 end

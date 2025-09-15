@@ -3,6 +3,15 @@ open Helpers
 
 module T = struct
   (** A WebAssembly module *)
+  type func_desc = {
+    idx: Int32.t; (* The index of the imported/exported function *)
+    type_idx : Int32.t;
+    name: string;
+    arguments: Type.t list;
+    returns: Type.t list;
+  }
+  [@@deriving sexp, compare, equal]
+
   type t = {
     start : Int32.t option;
     types : (Type.t list * Type.t list) list; (** The types declared in the module *)
@@ -13,9 +22,9 @@ module T = struct
     nglobals : Int32.t; (** The number of globals *)
     nfuncimports : Int32.t; (** The number of functions imported *)
     imports : Import.t list;
-    imported_funcs : (Int32.t * string * (Type.t list * Type.t list)) list; (** The description of the imported function: their id, name, and type *)
+    imported_funcs : func_desc list; (** The description of the imported function: their id, name, and type *)
     exports : Export.t list;
-    exported_funcs : (Int32.t * string * (Type.t list * Type.t list)) list; (** The description of the exported functions: the id, name, and type *)
+    exported_funcs : func_desc list; (** The description of the exported functions: the id, name, and type *)
     funcs : Func_inst.t list; (** The functions defined in the module *)
     memories : Memory.t list; (** The memory types *)
     memory_insts : Memory_inst.t list; (** The memory instances *)
@@ -32,7 +41,14 @@ include T
 let get_funcinst (m : t) (fidx : Int32.t) : Func_inst.t =
   match List32.nth m.funcs Int32.(fidx-(Int32.of_int_exn (List.length m.imported_funcs))) with
   | Some v -> v
-  | None -> failwith "get_funcinst nth exception"
+  | None -> failwith (Printf.sprintf "get_funcinst: no funcinst for function %ld. Is it an imported function?" fidx)
+
+let get_n_locals (m : t) (fidx : Int32.t) : int =
+  let inst = get_funcinst m fidx in
+  List.length inst.code.locals
+
+let get_global_types (m : t) : Type.t list =
+  m.imported_global_types @ m.global_types
 
 (** Get the name of a function, if it has one *)
 let get_funcname (m : t) (fidx : Int32.t) : string option =
@@ -49,6 +65,15 @@ let get_funcnames (m : t) : int32 StringMap.t =
            | _ -> false))
       ~f:(fun idx f -> (f.item_name, (Int32.of_int_exn idx))) in
   StringMap.of_alist_exn (alist @ imported)
+
+(** Checks if a function is present *)
+let is_function (m : t) (fidx : Int32.t) : bool =
+  let nfuncs = Int32.((List32.length m.funcs) + (List32.length m.imported_funcs)) in
+  Int32.(fidx < nfuncs)
+
+(** Checks if a function is an imported function. *)
+let is_imported (m : t) (fidx : Int32.t) : bool =
+  Int32.(fidx < (Int32.of_int_exn (List.length m.imported_funcs)))
 
 (** Checks if a function is exported or not. An exported function has a name. *)
 let is_exported (m : t) (fidx : Int32.t) : bool =
@@ -75,7 +100,7 @@ let get_func_type (m : t) (fidx : Int32.t) : Type.t list * Type.t list =
       | None -> failwith "get_func_type nth exception"
   else
     match List32.nth m.imported_funcs fidx with
-      | Some v -> let (_,_,t)=v in t
+      | Some desc -> (desc.arguments, desc.returns)
       | None -> failwith "get_func_type nth exception"
 
 (** Remove a function from the module *)
@@ -94,12 +119,15 @@ let replace_func (m : t) (fidx : Int32.t) (finst : Func_inst.t) : t =
 let of_wasm (m : Wasm.Ast.module_) : t =
   let imported_funcs = List.filter_mapi m.it.imports ~f:(fun idx import -> match import.it.idesc.it with
       | FuncImport v ->
-        Some (Int32.of_int_exn idx, Wasm.Ast.string_of_name import.it.item_name,
-              let type_idx = v.it in
-              match (List32.nth m.it.types type_idx) with
-              | Some {it = Wasm.Types.FuncType (a, b); _} ->
-                (List.map a ~f:Type.of_wasm, List.map b ~f:Type.of_wasm)
-              | None -> failwith "of_wasm: nth error when looking for imports")
+        let idx = Int32.of_int_exn idx in
+        let name = Wasm.Ast.string_of_name import.it.item_name in
+        let type_idx = v.it in
+        let arguments, returns =
+          match (List32.nth m.it.types type_idx) with
+          | Some {it = Wasm.Types.FuncType (a, b); _} ->
+            (List.map a ~f:Type.of_wasm, List.map b ~f:Type.of_wasm)
+          | None -> failwith "of_wasm: nth error when looking for imports" in
+        Some { idx; type_idx; name; arguments; returns }
       | _ -> None) in
   let nfuncimports = List32.length imported_funcs in
   let imported_globals = List.filter_map m.it.imports ~f:(fun import -> match import.it.idesc.it with
@@ -114,7 +142,7 @@ let of_wasm (m : Wasm.Ast.module_) : t =
   let funcs = List32.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m Int32.(i+nfuncimports) f) in
   let ftype (fidx : Int32.t) : Type.t list * Type.t list = if Int32.(fidx < nfuncimports) then
       match List32.nth imported_funcs fidx with
-      | Some (_, _, typ) -> typ
+      | Some desc -> (desc.arguments, desc.returns)
       | None -> failwith "of_wasm: nth error when looking for imported function type"
     else
       match List32.nth funcs Int32.(fidx-nfuncimports) with
@@ -126,7 +154,17 @@ let of_wasm (m : Wasm.Ast.module_) : t =
   let exported_funcs = List.filter_map m.it.exports ~f:(fun export -> match export.it.edesc.it with
       | FuncExport v ->
         let idx = v.it in
-        Some (idx, (Wasm.Ast.string_of_name export.it.name), ftype idx)
+        let arguments, returns = ftype idx in
+        Some {
+          idx;
+          type_idx = begin match List32.nth funcs Int32.(idx-nfuncimports) with
+            | Some f -> f.type_idx
+            | None -> failwith (Printf.sprintf "of_wasm: nth error when looking for function type (function %ld unfound in type list of length %ld)" Int32.(idx-nfuncimports) (List32.length funcs))
+          end;
+          name = Wasm.Ast.string_of_name export.it.name;
+          arguments;
+          returns;
+        }
       | _ -> None) in
   let memories = List.map m.it.memories ~f:Memory.of_wasm in
   let memory_insts = List.filter_map m.it.imports ~f:(fun import -> match import.it.idesc.it with
@@ -262,14 +300,13 @@ let to_string (m : t) : string =
   let elem (elem : Elem_segment.t) =
     put (Printf.sprintf "(elem (;%ld;) " elem.idx);
     put (Printf.sprintf "(%s)" (Instr.list_to_string (Segment_mode.offset elem.emode) (fun () -> "")));
-    (* TODO: this is not the general case, check that this is enough *)
     put (Printf.sprintf " func %s)\n" (String.concat ~sep:" " (List.map ~f:(fun l -> Instr.list_to_string l (fun () -> "")) elem.einit))) in
   let elems () = List.iter m.elems ~f:elem in
   let data (data : Data_segment.t) =
     put (Printf.sprintf "  (data (;%ld;) " data.idx);
     put (Printf.sprintf "(offset %s)" (Instr.list_to_string (Segment_mode.offset data.dmode) (fun () -> "")));
     put "\"";
-    put (string_to_wasm_string data.dinit); (* TODO: make sure to escape what is needed *)
+    put (string_to_wasm_string data.dinit); (* XXX: make sure to escape what is needed *)
     put "\")\n" in
   let datas () = List.iter m.datas ~f:data in
   let global (i : int) (g : Global.t) =
@@ -297,7 +334,7 @@ let to_string (m : t) : string =
 module Test = struct
   let%test_unit "construct Wasm_module from .wat files without erroring" =
     List.iter [
-      (*    "../../../benchmarks/benchmarksgame/binarytrees.wat"; *)
+      "../../../benchmarks/benchmarksgame/binarytrees.wat";
       "../../../benchmarks/benchmarksgame/fankuchredux.wat";
       "../../../benchmarks/benchmarksgame/fasta.wat";
       "../../../benchmarks/benchmarksgame/k-nucleotide.wat";

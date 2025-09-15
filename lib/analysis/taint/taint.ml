@@ -5,44 +5,46 @@ module Options = Taint_options
 module Domain = Taint_domain
 module Transfer = Taint_transfer.Make
 module Summary = Taint_summary
-module Intra = Intra.Make(Transfer)
-module Inter = Inter.Make(Intra)
+module ClassicalInter = Intra.MakeClassicalInter(Transfer)
+module Intra = Intra.MakeSummaryBased(Transfer)
+module Inter = Inter.MakeSummaryBased(Transfer)(Intra)
 
 let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t option) Int32Map.t =
   Analysis_helpers.mk_intra
-    (fun cfgs wasm_mod ->
-       (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs wasm_mod `Bottom)))
-    (fun data wasm_mod cfg ->
+    (fun cfgs module_ ->
+       (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs module_ `Bottom)))
+    (fun data module_ cfg ->
        Log.info
          (Printf.sprintf "---------- Taint analysis of function %s ----------" (Int32.to_string cfg.idx));
        (* Run the taint analysis *)
        (* Options.use_relational := false; *)
        let annotated_cfg = (* Relational.Transfer.dummy_annotate  *) cfg in
        let summaries = Int32Map.map data ~f:fst in
-       let (result_cfg, taint_summary) = Intra.analyze wasm_mod annotated_cfg summaries in
+       let result_cfg = Intra.analyze module_ annotated_cfg summaries in
+       let taint_summary = Transfer.extract_summary module_ annotated_cfg result_cfg in
        (taint_summary, Some result_cfg))
 
-let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec.t Cfg.t) : Domain.t Cfg.t =
+let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec_domain.t Cfg.t) : Domain.t Cfg.t =
   let rel_cfg = (* Relational.Transfer.dummy_annotate *) spec_cfg in
-  fst (Intra.analyze wasm_mod rel_cfg summaries)
+  Intra.analyze wasm_mod rel_cfg summaries
 
 let check (expected : Summary.t) (actual : Summary.t) : bool =
   if Summary.subsumes actual expected then
     if Summary.equal actual expected then
       true
     else begin
-      Printf.printf "\n[IMPRECISION] summaries not equal:\nexpected: %s\nactual: %s\n" (Summary.to_string expected) (Summary.to_string actual);
+      Log.imprecision (Printf.sprintf "summaries not equal: expected: %s; actual: %s" (Summary.to_string expected) (Summary.to_string actual));
       true (* not equal, but it does subsume so the test does not fail *)
     end
   else begin
-    Printf.printf "\nsummaries does not subsume:\nexpected: %s\nactual: %s\n" (Summary.to_string expected) (Summary.to_string actual);
+    Log.error (Printf.sprintf "summaries does not subsume: expected: %s; actual: %s" (Summary.to_string expected) (Summary.to_string actual));
     false
   end
 
-let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Taint_domain.t Cfg.t * Summary.t) Int32Map.t =
+let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t * Taint_domain.t Cfg.t * Summary.t) Int32Map.t =
   Analysis_helpers.mk_inter
     (fun _cfgs _wasm_mod -> Int32Map.empty)
-    (fun wasm_mod scc cfgs_and_summaries ->
+    (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
        Log.info
          (Printf.sprintf "---------- Taint analysis of SCC {%s} ----------"
             (String.concat ~sep:"," (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
@@ -52,9 +54,9 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Taint_
        let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_spec_cfg, _taint_cfg, summary) -> summary) in
        let summaries' = List.fold_left wasm_mod.imported_funcs
            ~init:summaries
-           ~f:(fun summaries (idx, name, (args, ret)) ->
-               Int32Map.set summaries ~key:idx ~data:(Summary.of_import name wasm_mod.nglobals args ret)) in
-       let results = Inter.analyze wasm_mod annotated_scc summaries' in
+           ~f:(fun summaries desc ->
+               Int32Map.set summaries ~key:desc.idx ~data:(Summary.of_import desc.name wasm_mod.nglobals desc.arguments desc.returns)) in
+       let results = Inter.analyze wasm_mod ~cfgs:annotated_scc ~summaries:summaries' in
        Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
            let spec_cfg = Int32Map.find_exn scc idx in
            (spec_cfg, taint_cfg, summary)))
@@ -67,7 +69,7 @@ let find_sinks_from_names (module_ : Wasm_module.t) (names : StringSet.t) : Int3
       | _ -> None) in
   Int32Set.of_list funs
 
-module Test = struct
+module TestIntra = struct
   let%test "simple function has no taint" =
     let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
@@ -80,21 +82,87 @@ module Test = struct
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
     let actual = fst (Int32Map.find_exn (analyze_intra module_ [0l]) 0l) in
-    let expected = Summary.{ ret = Some Domain.Taint.bottom; mem = Domain.Taint.bottom; globals = [Domain.Taint.taint (Var.Global 0)] } in
+    let expected = Summary.{
+        ret = Some Domain.Taint.bottom;
+        mem = Domain.Taint.bottom;
+        globals = [Domain.Taint.taint (Var.Global 0)] } in
     check expected actual
 
-  let%test "test store" =
+  let%test "store taints the memory" =
     let module_ = Wasm_module.of_string "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
-    global.get 0
-    local.get 0
+    global.get 0 ;; address
+    local.get 0 ;; value to store
     i32.store
     local.get 0)
   (table (;0;) 1 1 funcref)
   (memory (;0;) 2)
   (global (;0;) (mut i32) (i32.const 66560)))" in
     let actual = fst (Int32Map.find_exn (analyze_intra module_ [0l]) 0l) in
-    let expected = Summary.{ ret = Some (Domain.Taint.taint (Var.Local 0)); mem = Domain.Taint.taint (Var.Local 0); globals = [Domain.Taint.taint (Var.Global 0)] } in
+    let expected = Summary.{
+        ret = Some (Domain.Taint.taint (Var.Local 0));
+        mem = Domain.Taint.taint (Var.Local 0); (* memory is tainted *)
+        globals = [Domain.Taint.taint (Var.Global 0)] } in
     check expected actual
+end
+
+let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Domain.t Icfg.t =
+  ClassicalInter.analyze module_ (Analysis_helpers.mk_inter_classical module_ entry)
+
+module TestInter = struct
+  let does_not_fail (module_str : string) (fidx : int32) : unit =
+    let module_ = Wasm_module.of_string module_str in
+    let icfg = analyze_inter_classical module_ fidx in
+    ignore icfg;
+    ()
+
+  let does_not_fail_on_file (path : string) (start : Int32.t) : unit =
+    let module_ = Wasm_module.of_file path in
+    let _ = analyze_inter_classical module_ start in
+    ()
+
+  let%test_unit "interprocedural taint does not fail with function call" =
+    does_not_fail "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;0;) (type 0) (param i32) (result i32)
+    local.get 0
+    i32.const 3
+    i32.mul
+    call 1)
+  (func (;1;) (type 0) (param i32) (result i32)
+    ;; []
+    local.get 0
+    i32.const 0
+    i32.add)
+  )" 0l
+
+  let%test_unit "interprocedural taint does not fail if analyzed function is called from unanalyzed code" =
+    does_not_fail "(module
+  (type (;0;) (func))
+  (type (;1;) (func (result i32)))
+  (func (;0;) (type 0)
+    (local i32)
+    call 1
+    local.set 0)
+  (func (;1;) (type 1) (result i32)
+    i32.const 0))"
+      1l (* analyzing 1, which is called by 0, which depends on its result *)
+
+  let%test_unit "interprocedural taint works on benchmarks" =
+    List.iter [
+      (* disabled because it takes ~15 seconds *) (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *)
+      ("../../../benchmarks/benchmarksgame/fankuchredux.wat", 1l);
+      (* disabled because it takes ~1 minute *) (* ("../../../benchmarks/benchmarksgame/fasta.wat", 5l); *)
+      (* disabled because it is huge *) (* ("../../../benchmarks/benchmarksgame/k-nucleotide.wat", 4l);  *)
+      ("../../../benchmarks/benchmarksgame/mandelbrot.wat", 1l);
+      ("../../../benchmarks/benchmarksgame/nbody.wat", 1l);
+      (* disable because it is huge *) (* ("../../../benchmarks/benchmarksgame/reverse-complement.wat", 6l); *)
+      ("../../../benchmarks/benchmarksgame/spectral-norm.wat", 1l);
+      (* disabled because it takes ~45 seconds *) (* ("../../../benchmarks/polybench-clang/2mm.wat", 5l); *) (* disabled the other polybench as they are quite big and not so different *)
+    ] ~f:(fun (program, entry) ->
+        try
+          does_not_fail_on_file program entry
+        with e -> failwith (Printf.sprintf "Inter taint failed on %s: %s" program (Exn.to_string e)))
+
 end

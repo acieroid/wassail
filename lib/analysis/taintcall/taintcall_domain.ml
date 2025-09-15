@@ -18,6 +18,8 @@ module Call = struct
         | `Right b -> Some b
         | `Both (a, b) -> Some (List.map2_exn a b ~f:Taint_domain.Taint.join))
 
+  let widen (_t1 : t) (t2 : t) : t = t2
+
 end
 
 include Product_domain.Make(Call)(Taint_domain)

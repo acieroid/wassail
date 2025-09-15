@@ -1,8 +1,11 @@
 open Core
 open Helpers
 
-module Spec_inference = struct
-  include Spec
+module Spec_inference
+  (* : Transfer.INTRA_ONLY_TRANSFER with module State = Spec and type annot_expected = unit *)
+  = struct
+
+  module State = Spec_domain
 
   (** Allows the use of variables encoding constants *)
   let use_const : bool ref = ref true
@@ -10,6 +13,24 @@ module Spec_inference = struct
   let propagate_locals : bool ref = ref true
 
   let propagate_globals : bool ref = ref true
+
+  let init (module_ : Wasm_module.t) (funcinst : Func_inst.t) : State.t =
+    let (arg_types, _) = funcinst.typ in
+    let global_types = Wasm_module.get_global_types module_ in
+    let local_types = funcinst.code.locals in
+    State.NotBottom {
+    vstack = []; (* the vstack is initially empty *)
+    locals =
+      if !use_const then
+        (List.mapi arg_types ~f:(fun i _ -> Var.Local i)) @ (List.map local_types ~f:(fun _ -> Var.Const (Prim_value.I32 0l)))
+      else
+        List.mapi (arg_types @ local_types) ~f:(fun i _ -> Var.Local i);
+    globals = List.mapi global_types ~f:(fun i _ -> Var.Global i);
+    memory = Var.OffsetMap.empty;
+    stack_size_at_entry = Instr.Label.Map.empty;
+  }
+
+  let bottom : State.t = State.Bottom
 
   (*---- Types ----*)
   (** Spec inference does not require any annotation *)
@@ -34,48 +55,20 @@ module Spec_inference = struct
 
   let take (l : Var.t list) (n : int) =
     if List.length l < n then
-      failwith "Spec_inference.take: not enough element in var list"
+      failwith "Spec_inference.take: not enough elements in var list"
     else
       List.take l n
 
   let get (n : Int32.t) (l : Var.t list) =
     match List.nth l (Int32.to_int_exn n) with
     | Some v -> v
-    | _ -> failwith "Spec_inference.get: nth exception"
+    | _ -> failwith (Printf.sprintf "Spec_inference.get: nth exception when accessing %ldth element of a list of length %d" n (List.length l))
 
   let set (n : Int32.t) (l : Var.t list) (v : Var.t) = List.mapi l ~f:(fun i v' -> if i = (Int32.to_int_exn n) then v else v')
 
-  (*---- State ----*)
-  type state = Spec.t
-  [@@deriving compare, equal]
-
-  let state_to_string = Spec.to_string
-
-  let init_state (cfg : 'a Cfg.t) : state = Spec.NotBottom {
-    vstack = []; (* the vstack is initially empty *)
-    locals =
-      if !use_const then
-        (List.mapi cfg.arg_types ~f:(fun i _ -> Var.Local i)) @ (List.map cfg.local_types ~f:(fun _ -> Var.Const (Prim_value.I32 0l)))
-      else
-        List.mapi (cfg.arg_types @ cfg.local_types) ~f:(fun i _ -> Var.Local i);
-    globals = List.mapi cfg.global_types ~f:(fun i _ -> Var.Global i);
-    memory = Var.OffsetMap.empty;
-    stack_size_at_entry = Instr.Label.Map.empty;
-  }
-
-  let bottom : state = Spec.Bottom
-
-  let bottom_state _ = bottom
-
-  let join_state (_s1 : state) (s2 : state) : state =
-    s2 (* only keep the "most recent" state, this is safe for this analysis *)
-
-  (* No widening *)
-  let widen_state _ s2 = s2
-
-  let rec compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : SpecWithoutBottom.t) : SpecWithoutBottom.t =
+  let rec compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : State.SpecWithoutBottom.t) : State.SpecWithoutBottom.t =
     match Cfg.find_enclosing_block cfg label with
-    | None -> (* no enclosing block, the stack is initally empty at the beginning of the function, we ignore that *)
+    | None -> (* no enclosing block, the stack is initially empty at the beginning of the function, we ignore that *)
       state
     | Some block_label ->
       begin match Instr.Label.Map.find state.stack_size_at_entry block_label with
@@ -90,13 +83,14 @@ module Spec_inference = struct
           (* we already computed it *)
           state
       end
+
   (*---- Transfer functions ----*)
 
-  let data_instr_transfer
+  let data
       (_module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t)
       (i : annot_expected Instr.labelled_data)
-    : state -> state = Spec.lift (function state ->
+    : State.t -> State.t = State.lift ~f:(function state ->
       let ret = Var.Var i.label in
       let state = compute_stack_size_at_entry cfg i.label state in
       match i.instr with
@@ -128,13 +122,19 @@ module Spec_inference = struct
       | RefFunc _ -> { state with vstack = ret :: state.vstack }
       | RefNull _ -> { state with vstack = ret :: state.vstack })
 
-  let control_instr_transfer (_module_ : Wasm_module.t) _summaries (cfg : 'a Cfg.t) (i : ('a Instr.control, 'a) Instr.labelled) : state -> [`Simple of state | `Branch of state * state ] = Spec.wrap ~default:(`Simple bottom) (function state ->
-      let ret = Var.Var i.label in
+  let control
+      (_module_ : Wasm_module.t)
+      (cfg : 'a Cfg.t)
+      (i : annot_expected Instr.labelled_control)
+    : State.t -> [ `Simple of State.t | `Branch of State.t * State.t ] =
+    State.wrap ~default:(`Simple bottom) ~f:(function state ->
       let state = compute_stack_size_at_entry cfg i.label state in
-      let get_block_return_stack_size n =
+      let get_block_return_stack_size (n : Int32.t) : int =
+        (* The return stack size of a block is its out arity + the stack size at entry *)
         let stack_size_at_entry = match Cfg.find_enclosing_block cfg i.label with
           | None -> 0 (* the stack is initially empty *)
-          | Some block_label -> begin match Instr.Label.Map.find state.stack_size_at_entry block_label with
+          | Some block_label ->
+            begin match Instr.Label.Map.find state.stack_size_at_entry block_label with
               | Some size -> size
               | None -> failwith "Spec inference: no stack size computed at entry of block"
             end in
@@ -146,70 +146,80 @@ module Spec_inference = struct
               fst arity
             else
               snd arity
-          | None -> List.length cfg.return_types in
+          | None -> List.length (Cfg.return_types cfg) in
         stack_size_at_entry + out_arity in
       match i.instr with
-      | Call ((arity_in, arity_out), _, _) ->
-        `Simple (NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) })
-      | CallIndirect (_, (arity_in, arity_out), _, _) ->
-        (* Like call, but reads the function index from the vstack *)
-        `Simple (NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) })
       | Br n ->
-        `Simple (NotBottom ({ state with vstack = take state.vstack (get_block_return_stack_size n) }))
+        `Simple (State.NotBottom ({ state with vstack = take state.vstack (get_block_return_stack_size n) }))
       | BrIf n ->
-        let state' = NotBottom ({ state with vstack = take (drop 1 state.vstack) (get_block_return_stack_size n) }) in
-        `Branch (state', state')
+        let true_state = State.NotBottom ({ state with vstack = take (drop 1 state.vstack) (get_block_return_stack_size n) }) in
+        let false_state = State.NotBottom ({ state with vstack = drop 1 state.vstack }) in
+        `Branch (true_state, false_state)
       | If _ ->
-        let state' = NotBottom ({ state with vstack = drop 1 state.vstack }) in
+        let state' = State.NotBottom ({ state with vstack = drop 1 state.vstack }) in
         `Branch (state', state')
       | BrTable (ns, n) ->
         let arities = List.map (n :: ns) ~f:get_block_return_stack_size in
          (* LIMITATION: we assume all block arities are equal. Not sure this is always the case, but this is a limitation we have *)
         assert (IntSet.length (IntSet.of_list arities) = 1);
         let arity = List.hd_exn arities in
-        `Simple (NotBottom { state with vstack = take (drop 1 state.vstack) arity })
-      | Return -> `Simple (NotBottom ({ state with vstack = take state.vstack (List.length cfg.return_types) }))
+        `Simple (State.NotBottom { state with vstack = take (drop 1 state.vstack) arity })
+      | Return -> `Simple (State.NotBottom ({ state with vstack = take state.vstack (List.length (Cfg.return_types cfg)) }))
       | Unreachable ->
         (* failwith (Printf.sprintf "unsupported: unreachable") (*  in function %ld cfg.idx *) *)
         `Simple bottom
-      | Merge -> `Simple (NotBottom state)
+      | Merge -> `Simple (State.NotBottom state)
       | _ -> failwith (Printf.sprintf "Unsupported control instruction: %s" (Instr.control_to_short_string i.instr)))
 
+  let call
+      (_module : Wasm_module.t)
+      (cfg : annot_expected Cfg.t)
+      (i : annot_expected Instr.labelled_call)
+      : State.t -> State.t =
+    State.wrap ~default:bottom ~f:(function state ->
+      let state = compute_stack_size_at_entry cfg i.label state in
+      let ret = Var.Var i.label in
+      match i.instr with
+      | CallDirect ((arity_in, arity_out), _, _) ->
+        State.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) }
+      | CallIndirect (_, (arity_in, arity_out), _, _) ->
+        (* Like call, but reads the function index from the vstack *)
+        State.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) })
+
   let merge
-      (_module_ : Wasm_module.t)
+      (module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t)
       (block : annot_expected Basic_block.t)
-      (states : state list) : state =
+      (states : State.t list) : State.t =
     let counter = ref 0 in
     let new_var () : Var.t =
       let res = Var.Merge (block.idx, !counter) in
       counter := !counter + 1;
       res in
     let _ : Var.t = new_var() in
-    let rename_exit (s : SpecWithoutBottom.t) =
+    let rename_exit (s : State.SpecWithoutBottom.t) =
       (* If this is the exit block, rename the top of the stack to a new variable *)
-      if cfg.exit_block = block.idx then
-        { s with vstack = List.mapi s.vstack ~f:(fun i v -> if i = 0 then Var.Return else v) }
+      if Cfg.exit_block cfg = block.idx then
+        { s with vstack = List.mapi s.vstack ~f:(fun i v -> if i = 0 then Var.Return cfg.idx else v) }
       else
-        s
-    in
-    match block.content with
-    | Control { instr = Merge; _ } ->
-      (* Multiple cases: either we have no predecessor, we have unanalyzed predecessors, or we have only analyzed predecessors *)
-      (Spec.lift rename_exit) (begin match states with
+        s in
+    let is_entry, is_return = match block.content with
+      | Entry -> true, false
+      | Return _ -> false, true
+      | _ -> false, false in
+    (* Multiple cases: either we have no predecessor, we have unanalyzed predecessors, or we have only analyzed predecessors *)
+    (State.lift ~f:rename_exit) (begin match states with
         | [] ->
-          (* entry node *)
-          init_state cfg
+          bottom
         | s :: [] ->
-          (* single predecessor node?! *)
+          (* single predecessor node, just keep the same state *)
           s
         | _ ->
-          (* multiple predecessors *)
-          let bot = bottom_state cfg in
-          begin match List.filter states ~f:(fun s -> not (equal_state s bot)) with
+          (* multiple predecessors. Usually the case of a merge node, or an entry/return node in case of interprocedural analysis *)
+          begin match List.filter states ~f:(fun s -> not (State.equal s bottom)) with
             | [] ->
-              (* No predecessors have been analyzed. Return bottom. In practice, this should only happen if one of the predecessors is the empty entry block. TODO: it should be cleaned so that this does not arise and we can throw an exception here *)
-              init_state cfg
+              (* No predecessors have been analyzed. Return bottom.  *)
+              bottom
             | s :: [] -> (* only one non-bottom predecessor *) s
             | state :: states ->
               (* multiple predecessors to merge *)
@@ -225,90 +235,175 @@ module Spec_inference = struct
                           | v' when Var.equal v v' -> v'
                           | _ -> Var.Hole (* this is a hole *)
                         in
-                        if (List.length acc.vstack <> List.length s.vstack) then
-                          failwith "unsupported in spec_inference: incompatible stack lengths (probably due to mismatches in br_table branches)";
-                        assert (List.length acc.locals = List.length s.locals);
+                        let merge_vstacks vstack1 vstack2 =
+                          let vstack1, vstack2 =
+                            if is_entry then
+                              (* We only need the arguments to enter the function *)
+                              let (args, _) = Wasm_module.get_func_type module_ block.fidx in
+                              let nargs = List.length args in
+                              assert ((List.length vstack1 >= nargs) && (List.length vstack2 >= nargs));
+                              List.take vstack1 nargs, List.take vstack2 nargs
+                            else
+                              vstack1, vstack2 in
+                          List.map2_exn vstack1 vstack2 ~f in
+                        let merge_locals locals1 locals2 =
+                          (* In case of entry, function [entry] will deal with correctly adding the locals.
+                             In case of return, function [return] will deal with the locals too.
+                             In both case, we therefore just ignore locals completely here *)
+                          if is_entry || is_return then
+                            []
+                          else
+                            merge_vstacks locals1 locals2 in
+                        let shortest_length = min (List.length acc.vstack) (List.length s.vstack) in
+                        assert (is_entry || is_return || (List.length acc.locals = List.length s.locals));
                         assert (List.length acc.globals = List.length s.globals);
-                        NotBottom ({ vstack = List.map2_exn acc.vstack s.vstack ~f:f;
-                                     locals = List.map2_exn acc.locals s.locals ~f:f;
-                                     globals = List.map2_exn acc.globals s.globals ~f:f;
-                                     memory = Var.OffsetMap.merge acc.memory s.memory ~f:(fun ~key:_ v -> match v with
-                                         | `Both (v1, v2) -> Some (f v1 v2)
-                                         | `Left _v | `Right _v ->
-                                           (* If a binding is only present in one branch, then it is lost upon join.
+                        NotBottom ({
+                            (* It can be the case that stacks are different on a
+                               merge point, e.g., with br_table or br_if that
+                               exit a block with some extraneous values on the
+                               stack. These values need to be discarded. A
+                               cleaner approach would be to drop them upon block
+                               exit, but we don't have enough information in the
+                               CFG to do so. So we just take the shortest stack
+                               size. *)
+                            vstack = merge_vstacks (List.take acc.vstack shortest_length) (List.take s.vstack shortest_length);
+                            locals = merge_locals acc.locals s.locals;
+                            globals = List.map2_exn acc.globals s.globals ~f;
+                            memory = Var.OffsetMap.merge acc.memory s.memory ~f:(fun ~key:_ v -> match v with
+                                | `Both (v1, v2) -> Some (f v1 v2)
+                                | `Left _v | `Right _v ->
+                                  (* If a binding is only present in one branch, then it is lost upon join.
                                               This is necessary to preserve soundness.
                                               For example, if one branch has memory [m: v], the other has memory [],
                                               then after the join point of these branches, only [] is a valid memory
                                               (otherwise we could derive information assuming that m is bound to v,
                                               which is not always the case)*)
-                                           None);
-                                     stack_size_at_entry = Instr.Label.Map.merge acc.stack_size_at_entry s.stack_size_at_entry ~f:(fun ~key:_ presence -> match presence with
-                                         | `Both (a, b) ->
-                                           if a <> b then failwith "Cannot merge due to different stack sizes" else Some a
-                                         | `Left a | `Right a -> Some a)
-                                   })) in
+                                  None);
+                            stack_size_at_entry = Instr.Label.Map.merge acc.stack_size_at_entry s.stack_size_at_entry ~f:(fun ~key:_ presence -> match presence with
+                                | `Both (a, b) ->
+                                  if a <> b then failwith "Cannot merge due to different stack sizes" else Some a
+                                | `Left a | `Right a -> Some a)
+                          })) in
               (* Then, add merge variables *)
               let plug_holes = (function
                   | Var.Hole -> (* add a merge variable *) new_var ()
                   | v -> (* no hole, keep the variable *) v) in
-              lift (fun s -> { vstack = List.map s.vstack ~f:plug_holes;
-                               locals = List.map s.locals ~f:plug_holes;
-                               globals = List.map s.globals ~f:plug_holes;
-                               memory = Var.OffsetMap.map s.memory ~f:plug_holes;
-                               stack_size_at_entry = s.stack_size_at_entry;
-                             }) with_holes
+              State.lift ~f:(fun s -> { vstack = List.map s.vstack ~f:plug_holes;
+                                    locals = List.map s.locals ~f:plug_holes;
+                                    globals = List.map s.globals ~f:plug_holes;
+                                    memory = Var.OffsetMap.map s.memory ~f:plug_holes;
+                                    stack_size_at_entry = s.stack_size_at_entry;
+                }) with_holes
           end
       end)
-    | _ ->
-      (* not a control-flow merge, should only be one predecessor (or none if it is the entry point) *)
-      begin match states with
-        | [] -> init_state cfg
-        | s :: [] -> s
-        | _ ->  failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
-      end
 
   let merge_flows
       (module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t)
       (block : annot_expected Basic_block.t)
-      (states : (int * state) list)
-    : state =
-    (* Checks the validity of the merge and dispatches to `merge` *)
-    begin match states with
+      (predecessors : (annot_expected Basic_block.t * State.t) list)
+    : State.t =
+    (* Checks the validity of the merge and dispatches to `merge` We expect to
+       have to merge only merge nodes, or in the case of interprocedural
+       analysis, for entry nodes (multiple calls to the same function) or return
+       nodes (returns for multiple potential functions with call_indirect) *)
+    begin match predecessors with
       | _ :: _ :: _ -> begin match block.content with
           | Control { instr = Merge; _ } -> ()
-          | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
+          | Entry -> ()
+          | Return _ -> ()
+          | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d in %ld, %s" block.idx cfg.idx (Basic_block.to_string block))
         end
       | _ -> ()
     end;
-    merge module_ cfg block (List.map ~f:snd states)
+    merge module_ cfg block (List.map ~f:snd predecessors)
 
+  let call_inter (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (i : annot_expected Instr.labelled_call) : State.t -> State.t =
+    State.lift ~f:(function state ->
+        let state = compute_stack_size_at_entry cfg i.label state in
+        match i.instr with
+        | CallDirect _ -> state
+        | CallIndirect _ ->
+          (* Need to drop the first element of the stack which is the index of the function to call indirectly *)
+          { state with vstack = drop 1 state.vstack })
+
+  let entry (module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) : State.t -> State.t =
+    let funcinst = Wasm_module.get_funcinst module_ cfg.idx in
+    let nargs = List.length (fst funcinst.typ) in
+    let locals = funcinst.code.locals in
+    State.wrap ~default:bottom ~f:(fun state ->
+        let args = List.take state.vstack nargs in
+        let zeroes = List.map locals ~f:(fun t -> Var.Const (Prim_value.zero_of_t t)) in
+        let vstack = [] in
+        let locals = args @ zeroes in
+        State.NotBottom { state with vstack; locals })
+
+  let return (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (instr : annot_expected Instr.labelled_call) (state_before : State.t) (state_after : State.t) : State.t =
+    match state_before, state_after with
+    | Bottom, _ -> Bottom
+    | _, Bottom -> Bottom
+    | NotBottom { vstack = stack_before; locals; stack_size_at_entry = size_before; _ },
+      NotBottom ({ vstack = stack_after; stack_size_at_entry = size_after; _ } as after) ->
+      let args, returns = Instr.call_types instr in
+      let extra_drop = match instr.instr with
+        | CallDirect _ -> 0
+        | CallIndirect _ -> 1 in
+      let vstack = (List.take stack_after (List.length returns)) @ (List.drop stack_before ((List.length args)+extra_drop)) in
+      let stack_size_at_entry =
+        (* We need to merge both, as we might have an empty value from the stack after due to imported functions. (Not sure why though) *)
+        Map.merge size_before size_after ~f:(fun ~key:_ elem ->
+            match elem with
+            | `Left before -> Some before
+            | `Right after -> Some after
+            | `Both (before, _) ->
+              (* should not happen, but if it does, before makes more sense *)
+              Some before)
+      in
+      ignore size_before;
+      State.NotBottom { after with vstack; locals; stack_size_at_entry }
+
+  let imported
+      (_module_ : Wasm_module.t)
+      (desc : Wasm_module.func_desc)
+      (_annot_before : unit)
+      (_annot_after : unit)
+    : State.t -> State.t =
+    assert (List.length desc.returns <= 1); (* we could support more than one return, but I haven't seen it used in practice *)
+    State.lift ~f:(fun state ->
+        (* XXX: unsound, we keep globals / memory from before. We probably shouldn't *)
+        { state with
+          vstack = [Var.Return desc.idx];
+          locals = [];
+        }
+      )
 end
 
-module Intra = Intra.Make(Spec_inference)
+module Inter = Intra.MakeClassicalInter(Spec_inference)
+module Intra = Intra.MakeIntraOnly(Spec_inference)
 include Spec_inference
 
 (** Extract vars that have been redefined in a merge block *)
-let new_merge_variables (cfg : t Cfg.t) (merge_block : t Basic_block.t) : (Var.t * Var.t) list =
+let new_merge_variables (_module_ : Wasm_module.t) (cfg : State.t Cfg.t) (merge_block : State.t Basic_block.t) : (Var.t * Var.t) list =
   (* The predecessors of merge_block *)
   let preds = Cfg.predecessors cfg merge_block.idx in
-  let state_after = Cfg.state_after_block cfg merge_block.idx (init_state cfg) in
-  List.fold_left preds ~init:[] ~f:(fun acc pred_idx ->
-      let state_before = Cfg.state_after_block cfg pred_idx (init_state cfg) in
-      if Spec_inference.equal state_before Spec_inference.bottom then
+  let state_after = merge_block.annotation_after in
+  List.fold_left preds ~init:[] ~f:(fun acc (pred_idx, _) ->
+      let block_before = Cfg.find_block_exn cfg pred_idx in
+      let state_before = block_before.annotation_after in
+      if State.equal state_before Spec_inference.bottom then
         (* Ignore bottom state *)
         acc
       else
-        (extract_different_vars state_before state_after) @ acc)
+        (State.extract_different_vars state_before state_after) @ acc)
 
 (** Return the list of variables defined by an instruction *)
-let instr_def (cfg : t Cfg.t) (instr : t Instr.t) : Var.t list =
+let instr_def (module_ : Wasm_module.t) (cfg : State.t Cfg.t) (instr : State.t Instr.t) : Var.t list =
   let defs = match instr with
     | Instr.Data i ->
       let state_after = match i.annotation_after with
         | Bottom -> failwith "bottom annotation, this an unreachable instruction"
         | NotBottom s -> s in
-      let top_n n = take state_after.vstack n in
+      let top_n n = Spec_inference.take state_after.vstack n in
       begin match i.instr with
         | Nop | Drop | MemoryCopy | MemoryFill | MemoryInit _ -> []
         | Select _ | MemorySize
@@ -316,22 +411,22 @@ let instr_def (cfg : t Cfg.t) (instr : t Instr.t) : Var.t list =
         | Const _ | MemoryGrow
         | RefIsNull | RefNull _ | RefFunc _ -> top_n 1
         | LocalGet _ ->
-          if !propagate_locals then
+          if !Spec_inference.propagate_locals then
             []
           else
             top_n 1
         | GlobalGet _ ->
-          if !propagate_globals then
+          if !Spec_inference.propagate_globals then
             []
           else
             top_n 1
         | LocalSet l | LocalTee l ->
-          if !propagate_locals then
+          if !Spec_inference.propagate_locals then
             []
           else
             [get_nth state_after.locals l]
         | GlobalSet g ->
-          if !propagate_globals then
+          if !Spec_inference.propagate_globals then
             []
           else
             [get_nth state_after.globals g]
@@ -339,19 +434,22 @@ let instr_def (cfg : t Cfg.t) (instr : t Instr.t) : Var.t list =
         | Store _ ->
           []
       end
-    | Instr.Control i ->
+    | Instr.Call i ->
       let top_n n = match i.annotation_after with
         | Bottom -> failwith "bottom annotation"
-        | NotBottom s -> take s.vstack n in
-        begin match i.instr with
+        | NotBottom s -> Spec_inference.take s.vstack n in
+      begin match i.instr with
+        | CallDirect ((_, arity_out), _, _) -> top_n arity_out
+        | CallIndirect (_, (_, arity_out), _, _) -> top_n arity_out
+      end
+    | Instr.Control i ->
+      begin match i.instr with
         | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
         | If _ -> [] (* We could say that if defines its "resulting" value, but that will be handled by the merge node *)
-        | Call ((_, arity_out), _, _) -> top_n arity_out
-        | CallIndirect (_, (_, arity_out), _, _) -> top_n arity_out
         | Merge ->
-          (* Merge instruction defines new variabes *)
+          (* Merge instruction defines new variables *)
           let block = Cfg.find_enclosing_block_exn cfg (Instr.label instr) in
-          let vars = List.map (new_merge_variables cfg block) ~f:snd in
+          let vars = List.map (new_merge_variables module_ cfg block) ~f:snd in
           (* There might be duplicates. For example, i3 becomes m0 from one branch, and i4 becomes m0 from another branch.
              If that is the case, we have two definitions of m0.
              Hence we eliminate duplicates *)
@@ -368,11 +466,12 @@ let instr_def (cfg : t Cfg.t) (instr : t Instr.t) : Var.t list =
 (** Return the list of variables used by an instruction.
     If var is provided, only the use related the computation of this specific var will be return (This is only relevant for mere blocks)
  *)
-let instr_use (cfg : t Cfg.t) ?var:(var : Var.t option) (instr : t Instr.t) : Var.t list = match instr with
+let instr_use (module_ : Wasm_module.t) (cfg : State.t Cfg.t) ?var:(var : Var.t option) (instr : State.t Instr.t) : Var.t list =
+  match instr with
   | Instr.Data i ->
     let top_n n = match i.annotation_before with
       | Bottom -> failwith "bottom annotation"
-      | NotBottom s -> take s.vstack n in
+      | NotBottom s -> Spec_inference.take s.vstack n in
     begin match i.instr with
       | Nop -> []
       | Drop -> top_n 1
@@ -400,32 +499,36 @@ let instr_use (cfg : t Cfg.t) ?var:(var : Var.t option) (instr : t Instr.t) : Va
       | RefIsNull  -> top_n 1
       | RefNull _ | RefFunc _ -> []
     end
+  | Instr.Call i ->
+    let top_n n = match i.annotation_before with
+        | Bottom -> failwith "bottom annotation"
+        | NotBottom s -> Spec_inference.take s.vstack n in
+    begin match i.instr with
+      | CallDirect ((arity_in, _), _, _) -> top_n arity_in (* uses the n arguments from the stack *)
+      | CallIndirect (_, (arity_in, _), _, _) -> top_n (arity_in + 1) (* + 1 because we need to pop the index that will refer to the called function, on top of the arguments *)
+    end
   | Instr.Control i ->
     let top_n n = match i.annotation_before with
         | Bottom -> failwith "bottom annotation"
-        | NotBottom s -> take s.vstack n in
+        | NotBottom s -> Spec_inference.take s.vstack n in
     begin match i.instr with
       | Block _ | Loop _ -> [] (* we handle instruction individually rather than through their block *)
       | If _ -> top_n 1 (* relies on top value to decide the branch taken *)
-      | Call ((arity_in, _), _, _) -> top_n arity_in (* uses the n arguments from the stack *)
-      | CallIndirect (_, (arity_in, _), _, _) -> top_n (arity_in + 1) (* + 1 because we need to pop the index that will refer to the called function, on top of the arguments *)
       | BrIf _ | BrTable _ -> top_n 1
       | Merge ->
         (* Merge instruction uses the variables it redefines *)
         let block = Cfg.find_enclosing_block_exn cfg (Instr.label instr) in
         begin match var with
           | None ->
-            List.map (new_merge_variables cfg block) ~f:fst
+            List.map (new_merge_variables module_ cfg block) ~f:fst
           | Some v ->
-            List.filter_map (new_merge_variables cfg block) ~f:(fun (old, new_) ->
+            List.filter_map (new_merge_variables module_ cfg block) ~f:(fun (old, new_) ->
                 if Var.equal new_ v then
                   Some old
                 else
                   None)
         end
       | Return ->
-        top_n (List.length cfg.return_types)
+        top_n (List.length (Cfg.return_types cfg))
       | Br _ | Unreachable -> []
     end
-
-module Spec_inference_opaque : Transfer.TRANSFER = Spec_inference

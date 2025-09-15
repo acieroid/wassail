@@ -24,6 +24,26 @@ let mk_intra (desc : string) (analysis : Wasm_module.t -> Int32.t list -> 'a Int
       let results = analysis (Wasm_module.of_file filename) funs in
       Int32Map.iteri results ~f:(fun ~key:id ~data:summary -> print id summary))
 
+let mk_summary_inter (desc : string) (analysis : Wasm_module.t -> Int32.t list list -> 'a Int32Map.t) (print : Int32.t -> 'a -> unit) =
+  Command.basic
+    ~summary:desc
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and sccs = anon (sequence ("funs" %: int32_comma_separated_list)) in
+      fun () ->
+        let results = analysis (Wasm_module.of_file filename) sccs in
+        Int32Map.iteri results ~f:(fun ~key:id ~data: summary -> print id summary))
+
+let mk_classical_inter (desc : string) (analysis : Wasm_module.t -> Int32.t -> 'a) (print : string -> 'a -> unit) =
+  Command.basic
+    ~summary:desc
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and fidx = anon ("fidx" %: int32)
+      and file_out = anon ("file_out" %: string) in
+      fun () ->
+        let results = analysis (Wasm_module.of_file filename) fidx in
+        print file_out results)
 
 (** 
   Command that infers variable specifications and annotates the control-flow graph (CFG) 
@@ -36,7 +56,16 @@ let spec_inference =
        let file_out = Printf.sprintf "%ld.dot" fid in
        Out_channel.with_file file_out
          ~f:(fun ch ->
-             Out_channel.output_string ch (Cfg.to_dot annotated_cfg ~annot_str:Spec.to_dot_string)))
+             Out_channel.output_string ch (Cfg.to_dot annotated_cfg ~annot_str:Spec_domain.to_dot_string)))
+
+let spec_inference_inter =
+  mk_classical_inter "Annotate the ICFG with the inferred variables"
+    (fun module_ fidx ->
+       Spec_analysis.analyze_inter_classical module_ fidx)
+    (fun file_out icfg ->
+       Out_channel.with_file file_out
+         ~f:(fun ch ->
+             Out_channel.output_string ch (ICFG.to_dot icfg ~annot_str:Spec_domain.to_dot_string)))
 
 (** 
   Command that runs intra-procedural taint analysis on each specified function and prints 
@@ -118,12 +147,12 @@ let value_set_inter =
           Out_channel.close oc
         in
         let results = Value_set.analyse_inter (Wasm_module.of_file filename) sccs in
-        let function_name (summary : Spec.t Wassail.Cfg.t * Value_set.Domain.t Wassail.Cfg.t * Value_set.Domain.t) : string =
+        let function_name (summary : Spec_domain.t Wassail.Cfg.t * Value_set.Domain.t Wassail.Cfg.t * Value_set.Domain.t) : string =
           let name =
             match summary with
             | (cfg, _, _) -> cfg.name in
           if String.equal "<unexported>" name then "" else "(" ^ name ^ ")" in
-        let get_summary (summary : Spec.t Wassail.Cfg.t * Value_set.Domain.t Wassail.Cfg.t * Value_set.Domain.t) : Value_set.Domain.t =
+        let get_summary (summary : Spec_domain.t Wassail.Cfg.t * Value_set.Domain.t Wassail.Cfg.t * Value_set.Domain.t) : Value_set.Domain.t =
           match summary with
           | (_, _, summary) -> summary in
         let print = (fun fid summary -> Printf.printf "function %ld %s: \n%s\n" fid (function_name summary) (Value_set.Summary.to_string (get_summary summary))) in
@@ -161,7 +190,7 @@ let mk_inter (desc : string) (analysis : Wasm_module.t -> Int32.t list list -> '
   of function groups. Prints a summary of the results for each function.
 *)
 let taint_inter =
-  mk_inter "Performs inter analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target."
+  mk_summary_inter "Performs summary-based interprocedural taint analysis of a set of functions in file [file]. [funs] is a list of comma-separated function ids, e.g., to analyze function 1, then analyze both function 2 and 3 as part of the same fixpoint computation, [funs] is 1 2,3. The full schedule for any file can be computed using the `schedule` target."
     Taint.analyze_inter
     (fun fid (_, _, summary) -> Printf.printf "function %ld: %s\n" fid (Taint.Summary.to_string summary))
 
@@ -169,6 +198,28 @@ let taint_inter =
   Command that detects and reports unsafe information flows from exported functions 
   to imported functions.
 *)
+let taint_inter_classical =
+  mk_classical_inter "Perform classical interprocedural taint analysis from a given entry point"
+    (fun module_ fidx ->
+       Taint.analyze_inter_classical module_ fidx)
+    (fun file_out icfg ->
+       Out_channel.with_file file_out
+         ~f:(fun ch ->
+             Out_channel.output_string ch (ICFG.to_dot icfg ~annot_str:Taint.Domain.to_dot_string)))
+
+let _find_indirect_calls =
+  Command.basic
+    ~summary:"Find call_indirect instructions and shows the function in which they appear as well as their label"
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string) in
+      fun () ->
+        let module_ = Wasm_module.of_file filename in
+        List.iter module_.funcs ~f:(fun finst ->
+            let cfg = Spec_analysis.analyze_intra1 module_ finst.idx in
+            let indirect_calls = Slicing.find_call_indirect_instructions cfg in
+            List.iter indirect_calls ~f:(fun label ->
+                Printf.printf "function %ld, instruction %s\n" finst.idx (Instr.Label.to_string label))))
+
 let taint_flow_from_exported_to_imported =
   Command.basic
     ~summary:"Detects unsafe flows from exported functions to imported functions"
