@@ -12,3 +12,6 @@ let ignore_imports = ref false
 
 (** Set to true to consider different unknown memory offsets as disjoint memory spaces *)
 let disjoint_memory_spaces = ref false
+
+(** Debug mode *)
+let debug = ref false

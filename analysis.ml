@@ -110,6 +110,7 @@ let value_set_cfg =
       and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" 
       and disjoint_stack = flag "--stack" no_arg ~doc:"Consider stack disjoint from rest of linear memory" 
       and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" 
+      and debug = flag "--debug" no_arg ~doc:"Stops the analysis each time Top or Bottom are used as an address"
       and disjoint = flag "--disjoint" no_arg ~doc:"Consider memory spaces accessed via different relative offsets to be disjoint" in
       fun () ->
         Spec_inference.use_const := true;
@@ -118,6 +119,10 @@ let value_set_cfg =
         if trace then Value_set.Options.print_trace := true;
         if disjoint_stack then Value_set.Options.disjoint_stack := true;
         if disjoint then Value_set.Options.disjoint_memory_spaces := true;
+        if debug then 
+          (Value_set.Options.print_trace := true; 
+          Value_set.Options.debug := true; 
+          Value_set.Options.show_intermediates := true);
         let results = Value_set.analyze_intra (Wasm_module.of_file file_in) funs in
         (* We only output the latest analyzed CFG *)
         let annotated_cfg = Option.value_exn (snd (Int32Map.find_exn results (List.last_exn funs))) in

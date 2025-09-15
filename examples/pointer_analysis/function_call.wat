@@ -1,4 +1,5 @@
 (module
+  (memory (export "mem") 1)
   ;; Define a mutable global variable initialized to 0
   (global $g (mut i32) (i32.const 0))
 
@@ -6,7 +7,7 @@
   (func $add42 (param $x i32) (result i32)
     ;; Increment global g by 1
     global.get $g
-    i32.const 1
+    i32.const 166
     i32.add
     global.set $g
 

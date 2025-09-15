@@ -8,10 +8,15 @@ type t = Abstract_store_domain.t
 (* let subsumes = Abstract_store_domain.subsumes *)
 
 let to_string (s : t) : string =
-  let ret = Variable.Map.find s.abstract_store (Variable.Var Var.Return) in
   (* let affected = Variable.Map.find s.abstract_store Variable.Affected in *)
   let affected_memory = s.store_operations in
   let accessed = Variable.Map.find s.abstract_store Variable.Accessed in
+  let returns = 
+    Variable.Map.filter_keys s.abstract_store 
+      ~f:(fun key -> 
+        match key with
+        | Variable.Var Var.Return _ -> true
+        | _ -> false) in
   let globals = 
     Variable.Map.filter_keys s.abstract_store 
       ~f:(fun key -> 
@@ -25,16 +30,21 @@ let to_string (s : t) : string =
     Variable.Map.filter_keys s.abstract_store
       ~f:(fun key -> Variable.is_stack key) in
   let string_list =
-    begin match ret with
+    (* begin match ret with
     | None -> []
     | Some Abstract_store_domain.Value.Boolean _ -> ["RETURN: ⊤"]
     | Some value -> ["RETURN:" ^ Abstract_store_domain.Value.to_string value]
     end
+    @ *)
+    (if Variable.Map.is_empty returns then
+      []
+    else
+      ["RETURNS: " ^ Abstract_store_domain.to_string {abstract_store = globals; store_operations = RICSet.empty}])
     @
     (if Variable.Map.is_empty globals then
       []
     else
-      ["GLOBALS:" ^ Abstract_store_domain.to_string {abstract_store = globals; store_operations = RICSet.empty}])
+      ["GLOBALS: " ^ Abstract_store_domain.to_string {abstract_store = globals; store_operations = RICSet.empty}])
     @
     if Set.is_empty affected_memory then
       []
@@ -45,7 +55,7 @@ let to_string (s : t) : string =
         else 
           affected_memory)]
       @
-      ["LINEAR MEMORY:" 
+      ["LINEAR MEMORY: " 
       ^ Abstract_store_domain.to_string {abstract_store = memory; store_operations = RICSet.empty}])
     @
     if !Value_set_options.disjoint_stack then
@@ -81,7 +91,7 @@ let bottom (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
   let summary =
     match cfg.return_types with
     | [] -> summary
-    | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var Var.Return) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
+    | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
     | _ -> failwith "more than one return value" in
   Abstract_store_domain.set summary ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
 
@@ -98,7 +108,7 @@ let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
   let summary =
     match cfg.return_types with
     | [] -> summary
-    | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var Var.Return) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top)
+    | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top)
     | _ -> failwith "more than one return value" in
   Abstract_store_domain.set summary ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top)
 
@@ -115,7 +125,7 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
     let summary =
       begin match ret with
       | [] -> summary
-      | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var Var.Return) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top)
+      | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top)
       | _ -> failwith "more than one return value"
       end in
     if !Value_set_options.ignore_imports then 
@@ -150,7 +160,7 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
     let summary =
       begin match ret with
       | [] -> summary
-      | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var Var.Return) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top)
+      | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top)
       | _ -> failwith "more than one return value"
       end in
     (* Linear memory is unchanged, but we may have accessed all of it: *)
@@ -174,7 +184,7 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
     let summary =
       begin match ret with
       | [] -> summary
-      | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var Var.Return) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top)
+      | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top)
       | _ -> failwith "more than one return value"
       end in
     if !Value_set_options.ignore_imports then 
@@ -207,8 +217,10 @@ let initial_summaries
         (match typ with
          | `Bottom -> bottom
          | `Top -> top) cfg Var.Set.empty))
-    ~f:(fun summaries (idx, name, (args, ret)) ->
-        Int32Map.set summaries ~key:idx ~data:(of_import name module_.nglobals args ret))
+    (* ~f:(fun summaries (idx, name, (args, ret)) ->
+        Int32Map.set summaries ~key:idx ~data:(of_import name module_.nglobals args ret)) *)
+    ~f:(fun summaries desc ->
+        Int32Map.set summaries ~key:desc.idx ~data:(of_import desc.name module_.nglobals desc.arguments desc.returns))
 
 let make (state : Abstract_store_domain.t) : t =
   { abstract_store =
@@ -216,7 +228,7 @@ let make (state : Abstract_store_domain.t) : t =
         ~f:(fun key -> 
           match key with
           | Variable.Var Var.Global _
-          | Variable.Var Var.Return
+          | Variable.Var Var.Return _
           | Variable.Mem _
           | Variable.Stack _
           | Variable.Accessed -> true
@@ -310,8 +322,9 @@ let apply
         Abstract_store_domain.set acc ~var:key ~vs:data) 
   in
   let state = Abstract_store_domain.remove_pointers_to_top state in
-  (* Set return value: *)
-  match Variable.Map.find summary.abstract_store (Variable.Var Var.Return), return_variable with
+  (* Set return values: *)
+  (* TODO: This next part assumes only one return value is possible: please generalize *)
+  match Variable.Map.find summary.abstract_store (Variable.Var (Var.Return 0l)), return_variable with
   | Some vs, Some return_variable -> Abstract_store_domain.set state ~var:(Variable.Var return_variable) ~vs
   | None, None -> state
   | _ -> assert false (* TODO: error message? *)

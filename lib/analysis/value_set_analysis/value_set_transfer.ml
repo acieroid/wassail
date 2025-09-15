@@ -3,48 +3,58 @@ open Helpers
 open Reduced_interval_congruence
 
 module Make (*: Transfer.TRANSFER *) = struct
+  module State = Abstract_store_domain
 
   module RIC = Reduced_interval_congruence.RIC
 
-  type annot_expected = Spec.t
+  (* We need the variable names as annotations *)
+  type annot_expected = Spec_domain.t
 
-  (** The state *)
-  type state = Abstract_store_domain.t
-  [@@deriving sexp, compare, equal]
 
-  (** [value_set_specification] holds the (currently unused) specification for the value-set analysis. *)
-  (* let value_set_specification = () *)
+  (** The value-set specification for an imported function is an abstract store *)
+  type value_set_specification = Abstract_store_domain.t
 
-  (** [init_state cfg] initializes the abstract state using the function argument and global variables from [cfg]. *)
-  let init_state (cfg : 'a Cfg.t) : state =
-    let nb_of_arguments = List.length cfg.arg_types in
+  (** The value-set specifications as a map from function name to specification.
+      Stored as a reference so that it can be extended *)
+  let value_set_specifications : value_set_specification StringMap.t ref =
+    let _bottom = Abstract_store_domain.bottom in
+    ref (StringMap.of_alist_exn [
+      (* TODO: add specifications for a few common imported functions *)
+    ])
+
+  (** [init cfg] initializes the abstract state using the function argument and global variables from [cfg]. *)
+  (* let init (cfg : 'a Cfg.t) : state = *)
+  let init (module_ : Wasm_module.t) (funcinst : Func_inst.t) : State.t =
+    let arg_types, _ = funcinst.typ in
+    let nb_of_arguments = Func_inst.nargs funcinst in (*List.length arg_types in*)
+    let global_types = Wasm_module.get_global_types module_ in
     { abstract_store =
         Variable.Map.of_alist_exn (
-          (List.mapi cfg.arg_types ~f:(fun i _ -> 
+          (List.mapi arg_types ~f:(fun i _ -> 
             let variable = Var.Local i in
             let var_name = Var.to_string variable in
             (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, (var_name, 0l)))))) @
-          (List.mapi cfg.global_types ~f:(fun i _ -> 
+          (List.mapi global_types ~f:(fun i _ -> 
             let variable = Var.Global i in
             let var_name = Var.to_string variable in
             (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, (var_name, 0l)))))) @
-          (List.mapi cfg.local_types ~f:(fun i _ -> 
+          (List.mapi funcinst.code.locals ~f:(fun i _ -> 
             let variable = Var.Local (i + nb_of_arguments) in
             (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, ("", 0l)))))) @
           [(Variable.Mem RIC.Top), Abstract_store_domain.Value.ValueSet RIC.Top]);
       store_operations = RICSet.empty }
 
   (** [bottom_state cfg] returns the bottom abstract state. *)
-  let bottom_state (_cfg : 'a Cfg.t) : state = Abstract_store_domain.bottom
+  let bottom (*_cfg : 'a Cfg.t*) : State.t = Abstract_store_domain.bottom (* TODO: check that I don't need to add globals *)
 
   (** [state_to_string s] converts an abstract state [s] to its string representation. *)
-  let state_to_string (s : state) : string = Abstract_store_domain.to_string s
+  let state_to_string (s : State.t) : string = Abstract_store_domain.to_string s
 
   (** [join_state s1 s2] joins two abstract states [s1] and [s2]. *)
-  let join_state (s1 : state) (s2 : state) : state = Abstract_store_domain.join s1 s2
+  let join_state (s1 : State.t) (s2 : State.t) : State.t = Abstract_store_domain.join s1 s2
 
   (** [widen_state s1 s2] performs widening between abstract states [s1] and [s2]. *)
-  let widen_state (s1 : state) (s2 : state) : state = 
+  let widen_state (s1 : State.t) (s2 : State.t) : State.t = 
     let widened_state = Abstract_store_domain.widen s1 s2 in
     if !Value_set_options.print_trace then 
       (print_endline "\twidening:";
@@ -57,7 +67,7 @@ module Make (*: Transfer.TRANSFER *) = struct
   type summary = Value_set_summary.t
 
   let is_this_the_value_of 
-      (state : Spec.SpecWithoutBottom.t) 
+      (state : Spec_domain.SpecWithoutBottom.t) 
       ~(value : Variable.t) 
       ~(of_this_variable : Variable.t)
     : bool =
@@ -71,15 +81,15 @@ module Make (*: Transfer.TRANSFER *) = struct
     | _ -> false
 
   (** [data_instr_transfer m cfg i state] performs the abstract transfer function for a data instruction [i] on [state]. *)
-  let data_instr_transfer
+  let data
       (_module_ : Wasm_module.t)
       (_cfg : annot_expected Cfg.t)
       (i : annot_expected Instr.labelled_data)
-      (state : state)
-    : state =
+      (state : State.t)
+    : State.t =
     if !Value_set_options.print_trace then print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.data_to_string i.instr);
     let ret (i : annot_expected Instr.labelled_data) : Variable.t = 
-      match List.hd (Spec.get_or_fail i.annotation_after).vstack with
+      match List.hd (Spec_domain.get_or_fail i.annotation_after).vstack with
       | Some r -> Variable.Var r
       | None -> failwith "nothing on the stack" in
     match i.instr with
@@ -87,8 +97,8 @@ module Make (*: Transfer.TRANSFER *) = struct
     | MemoryCopy | MemoryFill | MemoryInit _ -> state
     | RefIsNull | RefNull _ | RefFunc _ -> state
     | Select _ ->
-      let x, y = (*pop2 (Spec.get_or_fail i.annotation_before).vstack in*)
-        match (Spec.get_or_fail i.annotation_before).vstack with
+      let x, y = (*pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in*)
+        match (Spec_domain.get_or_fail i.annotation_before).vstack with
         | _ :: x :: y :: _ -> x, y
         | _ -> failwith "not enough elements on the stack" in
       let x_vs, y_vs = Abstract_store_domain.get state ~var:(Variable.Var x), Abstract_store_domain.get state ~var:(Variable.Var y) in
@@ -105,7 +115,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       state
     | LocalSet l ->
       let variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
-      let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in
+      let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
         begin match top_of_stack with
         | Var.Const (Prim_value.I32 n) ->
           if !Value_set_options.print_trace then print_endline ("\tassigning constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
@@ -133,7 +143,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         end
     | LocalTee l -> (* TODO: Refactor a common function for LocalSet and LocalTee *)
       let variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
-      let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in
+      let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
       begin match top_of_stack with
       | Var.Const (Prim_value.I32 n) ->
         if !Value_set_options.print_trace then print_endline ("\tadding constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
@@ -170,7 +180,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         state
     | GlobalSet g ->
       let variable = Variable.Var (Var.Global (Int32.to_int_exn g)) in
-      let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in
+      let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
       (* let new_state = *)
         begin match top_of_stack with
         | Var.Const (Prim_value.I32 n) ->
@@ -212,14 +222,15 @@ module Make (*: Transfer.TRANSFER *) = struct
       | _ -> if !Value_set_options.print_trace then print_endline "\tnon i32 constant!"; state
       end
     | Binary binop -> 
-      let x, y = pop2 (Spec.get_or_fail i.annotation_before).vstack in
-      (* let result = pop (Spec.get_or_fail i.annotation_after).vstack in *)
+      let x, y = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
+      (* let result = pop (Spec_domain.get_or_fail i.annotation_after).vstack in *)
       let result = ret i in
       begin match binop with
       | { op = Shl; typ = I32 } ->
         let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
         let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string y_value ^ " << " ^ Abstract_store_domain.Value.to_string x_value ^ " -> " ^ Variable.to_string result);
+        if !Value_set_options.print_trace then 
+          print_endline ("\t" ^ Abstract_store_domain.Value.to_string y_value ^ " << " ^ Abstract_store_domain.Value.to_string x_value ^ " -> " ^ Variable.to_string result);
         let result_value =
           begin match x_value, y_value with
           | ValueSet RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, ValueSet vs
@@ -389,7 +400,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       end
     | Load load ->
       let size = Memoryop.size load in
-      let address = pop (Spec.get_or_fail i.annotation_before).vstack in
+      let address = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
       let vs = Abstract_store_domain.get state ~var:(Variable.Var address) in
       (* Update accessed address *)
         let previously_accessed = Abstract_store_domain.get state ~var:Variable.Accessed in
@@ -451,7 +462,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         () in *)
       store
     | Compare comp ->
-      let var2, var1 = pop2 (Spec.get_or_fail i.annotation_before).vstack in
+      let var2, var1 = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
       let vs1 = 
         begin match var1 with
         | Var.Local _
@@ -584,7 +595,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         end
       end
     | Test test -> 
-      let var = pop (Spec.get_or_fail i.annotation_before).vstack in
+      let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
       let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
       begin match test with
       | I32Eqz -> (* TODO: implement this *)
@@ -605,10 +616,10 @@ module Make (*: Transfer.TRANSFER *) = struct
 
 
   let apply_condition 
-      (state : state) 
+      (state : State.t) 
       ~(condition : Variable.t * Boolean.t)
-      (spec_state : Spec.SpecWithoutBottom.t) 
-      : state * state =
+      (spec_state : Spec_domain.SpecWithoutBottom.t) 
+      : State.t * State.t =
     let state = 
       { Abstract_store_domain.abstract_store = Variable.Map.remove state.abstract_store (fst condition);
         store_operations = state.store_operations } in
@@ -661,15 +672,15 @@ module Make (*: Transfer.TRANSFER *) = struct
 
 
   (** [control_instr_transfer m summaries cfg i state] performs the abstract transfer function for a control instruction [i]. *)
-  let control_instr_transfer
-      (module_ : Wasm_module.t) (* The wasm module (read-only) *)
-      (summaries : summary Int32Map.t)
+  let control
+      (_module_ : Wasm_module.t) (* The wasm module (read-only) *)
+      (* (summaries : summary Int32Map.t) *)
       (_cfg : annot_expected Cfg.t) (* The CFG analized *)
       (i : annot_expected Instr.labelled_control) (* The instruction *)
-      (state : state) (* the pre-state *)
-    : [`Simple of state | `Branch of state * state] =
+      (state : State.t) (* the pre-state *)
+    : [`Simple of State.t | `Branch of State.t * State.t] =
     if !Value_set_options.print_trace then print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.control_to_short_string i.instr);
-    let apply_summary (f : Int32.t) (arity : int * int) (state : state) : state =
+    (* let _apply_summary (f : Int32.t) (arity : int * int) (state : State.t) : State.t =
       if !Value_set_options.print_trace then Log.info (Printf.sprintf "applying summary of function %ld" f);
       if !Value_set_options.print_trace then print_endline ("\tState before the call: " ^ Abstract_store_domain.to_string state);
       match Int32Map.find summaries f with
@@ -682,23 +693,25 @@ module Make (*: Transfer.TRANSFER *) = struct
           state)
       | Some summary ->
         if !Value_set_options.print_trace then print_endline ("\tSummary of function " ^ Int32.to_string f ^ ": " ^ Value_set_summary.to_string summary);
-        let args = List.take (Spec.get_or_fail i.annotation_before).vstack (fst arity) in
-        let return_variable = if snd arity = 1 then List.hd (Spec.get_or_fail i.annotation_after).vstack else None in
+        let args = List.take (Spec_domain.get_or_fail i.annotation_before).vstack (fst arity) in
+        let return_variable = if snd arity = 1 then List.hd (Spec_domain.get_or_fail i.annotation_after).vstack else None in
         let value_set_after_call = Value_set_summary.apply
           ~summary
           ~state
           ~args
           ~return_variable in
-        let export = List.find module_.exported_funcs ~f:(fun (id, _, _) -> Int32.(id = f)) in
+        (* let export = List.find module_.exported_funcs ~f:(fun (id, _, _) -> Int32.(id = f)) in *)
+        let export = List.find module_.exported_funcs ~f:(fun descr -> Int32.(descr.idx = f)) in
         match export with
-        | Some (_, fname, _) ->
-          if !Value_set_options.print_trace then Log.info (Printf.sprintf "function is named %s" fname);
+        (* | Some (_, fname, _) -> *)
+        | Some descr ->
+          if !Value_set_options.print_trace then Log.info (Printf.sprintf "function is named %s" descr.name);
           if !Value_set_options.print_trace then Log.warn "Exports have not been implemented yet!";
           value_set_after_call
-        | None -> value_set_after_call
-    in
+        | None -> value_set_after_call *)
+    (* in *)
     match i.instr with
-    | Call (arity, _, f) -> 
+    (* | Call (arity, _, f) -> 
       if !Value_set_options.print_trace then print_endline ("\t(nb of arguments: " ^ string_of_int (fst arity) ^ ", nb of return values: " ^ string_of_int (snd arity) ^ ")");
       let new_store = apply_summary f arity state in
       let new_store = Abstract_store_domain.remove_pointers_to_top new_store in
@@ -708,64 +721,98 @@ module Make (*: Transfer.TRANSFER *) = struct
       (* Apply the summaries *)
       `Simple (List.fold_left targets
         ~init:Abstract_store_domain.bottom
-        ~f:(fun acc idx -> Abstract_store_domain.join (apply_summary idx arity state) acc))
+        ~f:(fun acc idx -> Abstract_store_domain.join (apply_summary idx arity state) acc)) *)
     | Br _ -> `Simple state
     | BrIf _ | If _ -> 
-      let condition = Variable.Var (pop (Spec.get_or_fail i.annotation_before).vstack) in
+      let condition = Variable.Var (pop (Spec_domain.get_or_fail i.annotation_before).vstack) in
       let boolean_value = Abstract_store_domain.get state ~var:condition in
       begin match boolean_value with
       | ValueSet _ -> `Branch (state, state)
       | Boolean boolean_value -> 
-        let state_if_true, state_if_false = apply_condition state ~condition:(condition, boolean_value) (Spec.get_or_fail i.annotation_after)  in
+        let state_if_true, state_if_false = apply_condition state ~condition:(condition, boolean_value) (Spec_domain.get_or_fail i.annotation_after)  in
         `Branch (state_if_true, state_if_false)
       end
     | Return -> 
-      begin match (Spec.get_or_fail i.annotation_before).vstack with
+      begin match (Spec_domain.get_or_fail i.annotation_before).vstack with
       | [] -> `Simple state
       | top_of_stack :: _ ->
-      (* let top_of_stack = pop (Spec.get_or_fail i.annotation_before).vstack in *)
+      (* let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in *)
         (* if !Value_set_options.print_trace then print_endline "return"; *)
         let vs = Abstract_store_domain.get state ~var:(Variable.Var top_of_stack) in
         if !Value_set_options.print_trace then print_endline ("\treturned value-set: " ^ Abstract_store_domain.Value.to_string vs);
-        `Simple (Abstract_store_domain.set state ~var:(Variable.Var Var.Return) ~vs:vs)
+        `Simple (Abstract_store_domain.set state ~var:(Variable.Var (Var.Return 0l)) ~vs:vs) (* TODO: generalize for more than one return *)
       end
     | Unreachable -> `Simple  Abstract_store_domain.bottom
     | _ -> `Simple state
 
+  let apply_summary 
+      (module_ : Wasm_module.t)
+      (f : Int32.t) 
+      (arity : int * int) 
+      (i : annot_expected Instr.labelled_call)
+      (state : State.t)
+      (summary : summary)
+    : State.t =
+    if !Value_set_options.print_trace then 
+      (Log.info (Printf.sprintf "applying summary of function %ld" f);
+      print_endline ("\tState before the call: " ^ Abstract_store_domain.to_string state);
+      print_endline ("\tSummary of function " ^ Int32.to_string f ^ ": " ^ Value_set_summary.to_string summary));
+    let spec_before = Spec_domain.get_or_fail i.annotation_before in
+    let args = List.take spec_before.vstack (fst arity) in
+    let spec_after = Spec_domain.get_or_fail i.annotation_after in
+    let return_variable = if snd arity = 1 then List.hd spec_after.vstack else None in
+    let value_set_after_call = Value_set_summary.apply
+      ~summary
+      ~state
+      ~args
+      ~return_variable in
+    (* let export = List.find module_.exported_funcs ~f:(fun (id, _, _) -> Int32.(id = f)) in *)
+    let export = List.find module_.exported_funcs ~f:(fun descr -> Int32.(descr.idx = f)) in
+    match export with
+    (* | Some (_, fname, _) -> *)
+    | Some descr ->
+      if !Value_set_options.print_trace then 
+        (Log.info (Printf.sprintf "function is named %s" descr.name); 
+        Log.warn "Exports have not been implemented yet!");
+      value_set_after_call
+    | None -> value_set_after_call
 
   (** [get_predecessors cfg block] returns the list of predecessor blocks for [block] in [cfg]. *)
-  let get_predecessors 
+  let get_direct_predecessors 
       (cfg : annot_expected Cfg.t) 
       (block : annot_expected Basic_block.t) 
     : annot_expected Basic_block.t list =
     let predecessors = Cfg.predecessors cfg block.idx in
+    let predecessors = List.map predecessors ~f:(fun (idx, _) -> idx) in
     List.filter ~f:(fun blk -> List.mem predecessors blk.idx ~equal:Int.equal) 
                          (Cfg.all_predecessors cfg block)
 
   (** [get_previous_stacks cfg predecessors] returns the annotated stacks for a list of predecessor blocks. *)
   let get_previous_stacks
-      (cfg : annot_expected Cfg.t)
+      (_cfg : annot_expected Cfg.t)
       (predecessors : annot_expected Basic_block.t list)
     : (int * Var.t list) list =
     let previous_annotations = 
       List.fold ~init:[] 
                 ~f:(fun acc blk ->
-                  (blk.idx, Cfg.state_after_block cfg blk.idx (Spec_inference.init_state cfg)) :: acc)
+                  (* (blk.idx, Cfg.state_after_block cfg blk.idx (Spec_inference.init_state cfg)) :: acc) *)
+                  (blk.idx, blk.annotation_after) :: acc)
                 predecessors
     in
     List.map 
       ~f:(fun x ->
         match x with
-        | idx, Spec.Bottom -> idx, []
+        | idx, Spec_domain.Bottom -> idx, []
         | idx, NotBottom x -> idx, x.vstack)
       previous_annotations
 
   let merge_variables
+      (_module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t) 
       (block : annot_expected Basic_block.t)
-      (state : state)
-      : state =
-    let merged_variables = List.rev (List.sort ~compare:(fun (v1, w1) (v2, w2) -> if Var.equal w1 w2 then Var.compare v1 v2 else Var.compare w1 w2) (Spec_inference.new_merge_variables cfg block)) in
+      (state : State.t)
+      : State.t =
+    let merged_variables = List.rev (List.sort ~compare:(fun (v1, w1) (v2, w2) -> if Var.equal w1 w2 then Var.compare v1 v2 else Var.compare w1 w2) (Spec_inference.new_merge_variables _module_ cfg block)) in
     let merged_variables = List.map ~f:(fun (a, b) -> (Variable.Var b, Abstract_store_domain.get state ~var:(Variable.Var a))) merged_variables in
     let merged_variables =
       List.fold merged_variables ~init:[] ~f:(fun acc (v, vs) -> 
@@ -782,32 +829,38 @@ module Make (*: Transfer.TRANSFER *) = struct
 
   (** [merge_flows m cfg block states] merges incoming flows into [block], handling stack merging at control points. *)
   let merge_flows 
-      (_module_ : Wasm_module.t) 
+      (module_ : Wasm_module.t) 
       (cfg : annot_expected Cfg.t) 
       (block : annot_expected Basic_block.t)
-      (states : (int * state) list) 
-    : state =
-    match states with
+      (* (states : (int * State.t) list)  *)
+      (predecessors : ('a Basic_block.t * State.t) list)
+    : State.t =
+    let current_function = 
+      match (List.filter module_.funcs ~f:(fun func -> Int32.(func.idx = block.fidx))) with
+      | [f] -> f
+      | _ -> assert false in
+    match predecessors with
     | [] -> 
       if !Value_set_options.print_trace then print_endline ("================ START OF FUNCTION ==================== DATA BLOCK #" ^ string_of_int block.idx);
-      init_state cfg
+      (* init_state cfg *)
+      init module_ current_function
     | _ ->
       begin match block.content with
       | Control { instr = Merge; _ } ->
         if !Value_set_options.print_trace then print_endline ("======================================================= " ^ (if IntSet.mem cfg.loop_heads block.idx then "LOOP HEAD" else "MERGE") ^ ": Control block #" ^ string_of_int block.idx);
-        let states' = List.map ~f:(fun (_, s) -> s) states in
+        let states' = List.map ~f:(fun (_, s) -> s) predecessors in
         (* Join all previous states: *)
         let new_state_without_merges = List.reduce_exn states' ~f:join_state in 
-        merge_variables cfg block new_state_without_merges
+        merge_variables module_ cfg block new_state_without_merges
       | Control _ ->
         if !Value_set_options.print_trace then print_endline ("======================================================= CONTROL BLOCK #" ^ string_of_int block.idx);
-        begin match states with
+        begin match predecessors with
         | (_, s) :: [] -> s
         | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
         end
       | _ -> 
         if !Value_set_options.print_trace then print_endline ("======================================================= DATA BLOCK #" ^ string_of_int block.idx);
-        begin match states with
+        begin match predecessors with
         | (_, s) :: [] -> s
         | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
         end
@@ -816,12 +869,14 @@ module Make (*: Transfer.TRANSFER *) = struct
 
 
   (** [summary cfg out_state] computes the value-set summary for a function using its [cfg] and final [out_state]. *)
-  let summary (cfg : annot_expected Cfg.t) (out_state : state) : summary =
+  (* TODO: refactor this into value_set_summary *)
+  let summary (cfg : annot_expected Cfg.t) (out_state : State.t) : summary =
     if !Value_set_options.print_trace then print_endline "======================================================= SUMMARY";
     if !Value_set_options.print_trace then print_endline ("END STATE:\t" ^ Abstract_store_domain.to_string out_state);
-    let init_spec = (Spec_inference.init_state cfg) in
+    (* let init_spec = (Spec_inference.init_state cfg) in *)
     let function_summary =
-      match Cfg.state_after_block cfg cfg.exit_block init_spec with
+      (* match Cfg.state_after_block cfg cfg.exit_block init_spec with *)
+      match (Cfg.find_block_exn cfg cfg.exit_block).annotation_after with
       | Bottom ->
         (* The function exit is likely unreachable, so we use a bottom summary *)
         Value_set_summary.bottom cfg Var.Set.empty
@@ -832,9 +887,50 @@ module Make (*: Transfer.TRANSFER *) = struct
     function_summary
 
   (** [extract_summary cfg analyzed_cfg] extracts a value-set summary from the final result of the analysis. *)
-  let extract_summary (cfg : annot_expected Cfg.t) (analyzed_cfg : state Cfg.t) : summary =
-    let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block (init_state cfg) in
+  let extract_summary 
+      (_module_ : Wasm_module.t)
+      (cfg : annot_expected Cfg.t)
+      (analyzed_cfg : State.t Cfg.t)
+    : summary =
+    (* let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block (init_state cfg) in *)
+    let out_state = (Cfg.find_block_exn analyzed_cfg cfg.exit_block).annotation_after in
     summary cfg out_state
+
+  (** This is only used in a classical inter analysis. The state doesn't change upon calling a function. *)
+  let call_inter
+      (_module_ : Wasm_module.t)
+      (_cfg : annot_expected Cfg.t)
+      (instr : annot_expected Instr.labelled_call)
+      (state : State.t)
+    : State.t =
+    let instr_string = Instr.call_to_string instr.instr in
+    if !Value_set_options.print_trace then print_endline (string_of_int instr.line_number ^ ":\t" ^ instr_string);
+    state
   
+  let entry (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (state : State.t) : State.t =
+    state (* Everything is actually already done by spec analysis! We can just propagate the state *)
+
+  let return (_module : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (state_after_call : State.t) : State.t =
+    state_after_call
+
+  let imported
+      (_module : Wasm_module.t)
+      (desc : Wasm_module.func_desc)
+      (annot_before : annot_expected)
+      (annot_after : annot_expected)
+      (state : State.t)
+    : State.t =
+    Spec_domain.wrap annot_before ~default:State.bottom ~f:(fun _annotation_before ->
+      Spec_domain.wrap annot_after ~default:State.bottom ~f:(fun _annotation_after ->
+        match StringMap.find !value_set_specifications desc.name with
+        | None ->
+          Log.warn (Printf.sprintf "No specification found for imported function %s (index: %ld): assuming abstract store is preserved" desc.name desc.idx);
+          state
+        | Some _spec ->
+          (* TODO: implement this! *)
+          Log.warn "Imported functions have not been implemented yet! It is assumed that the abstract store remains unchanged by the function call.";
+          state
+      )
+    )
 
 end

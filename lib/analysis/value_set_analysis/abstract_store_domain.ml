@@ -194,7 +194,7 @@ let to_string (vs : t) : string =
       Variable.Map.filter_keys vs.abstract_store 
         ~f:(fun var ->
           match var with
-          | Stack _ | Mem _ | Var Var.Global _ | Var Var.Local _ | Var Var.Return -> true
+          | Stack _ | Mem _ | Var Var.Global _ | Var Var.Local _ | Var Var.Return _ -> true
           | _ -> false) in
     _to_string vs
 
@@ -205,6 +205,9 @@ let to_string_without_bottoms (vs : t) : string =
     | Boolean _ -> true
     | ValueSet d -> not (RIC.equal RIC.Bottom d)) in
   to_string { abstract_store = restricted; store_operations = vs.store_operations }
+
+let to_dot_string (s : t) : string =
+    Printf.sprintf "<tr><td></td><td>%s</td></tr>" (to_string s)
 
 (** [update_all store vars ric] sets [ric] for each variable in [vars] within [store]. *)
 let update_all (store : t) (vars : Variable.Set.t) (new_value : Value.t) : t =
@@ -662,34 +665,36 @@ let log_address_type (address : Var.t) (vs_address : Value.t) : unit =
 let store 
     ~(state : t) 
     ~(instruction : Memoryop.t) 
-    ~(annotation_before : Spec.t option) 
+    ~(annotation_before : Spec_domain.t option) 
     ~(value : Var.t option)
     ~(address : Var.t option)
   : t =
   let value, address = 
     match annotation_before, value, address with
     | Some annotation_before, None, None ->
-      pop2 (Spec.get_or_fail annotation_before).vstack 
+      pop2 (Spec_domain.get_or_fail annotation_before).vstack 
     | None, Some value, Some address -> value, address
     | _ -> assert false
   in
   let vs_address = get state ~var:(Variable.Var address) in
-  (* let () =
-    match vs_address with
-    | ValueSet RIC.Bottom ->
-      print_endline "USING BOTTOM AS AN ADDRESS!!!!!!!!! press any key to continue";
-      let _ = In_channel.input_line_exn In_channel.stdin in
-      ()
-    | ValueSet r when RIC.equal RIC.Bottom r -> 
-       print_endline "USING BOTTOM-ish AS AN ADDRESS!!!!!!!!! press any key to continue";
-      let _ = In_channel.input_line_exn In_channel.stdin in
-      ()
-    | ValueSet r when RIC.equal r RIC.Top ->
-      print_endline "USING TOP AS AN ADDRESS!!!!!!!!! press any key to continue";
-      let _ = In_channel.input_line_exn In_channel.stdin in
-      ()
-    | _ -> () 
-  in *)
+  let () =
+    if !Value_set_options.debug then
+      match vs_address with
+      | ValueSet RIC.Bottom ->
+        print_endline "USING BOTTOM AS AN ADDRESS!!!!!!!!! press any key to continue";
+        let _ = In_channel.input_line_exn In_channel.stdin in
+        ()
+      | ValueSet r when RIC.equal RIC.Bottom r -> 
+        print_endline "USING BOTTOM-ish AS AN ADDRESS!!!!!!!!! press any key to continue";
+        let _ = In_channel.input_line_exn In_channel.stdin in
+        ()
+      | ValueSet r when RIC.equal r RIC.Top ->
+        print_endline "USING TOP AS AN ADDRESS!!!!!!!!! press any key to continue";
+        let _ = In_channel.input_line_exn In_channel.stdin in
+        ()
+      | _ -> () 
+    else ()
+  in
   log_address_type address vs_address;
   let is_g0 = String.equal "g0" (Value.extract_relative_offset vs_address) in
   let disjoint_stack = !Value_set_options.disjoint_stack in

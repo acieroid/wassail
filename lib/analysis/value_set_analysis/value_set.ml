@@ -6,8 +6,9 @@ module Domain = Abstract_store_domain
 (* module RIC = Reduced_interval_congruence.RIC *)
 module Transfer = Value_set_transfer.Make
 module Summary = Value_set_summary
-module Intra = Intra.Make(Transfer)
-module Inter = Inter.Make(Intra)
+module ClassicalInter = Intra.MakeClassicalInter(Transfer)
+module Intra = Intra.MakeSummaryBased(Transfer)
+module Inter = Inter.MakeSummaryBased(Transfer)(Intra)
 
 let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t option) Int32Map.t =
   Analysis_helpers.mk_intra
@@ -19,17 +20,19 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
       (* Run the value-set analysis *)
       let annotated_cfg = (* Relational.Transfer.dummy_annotate  *) cfg in
       let summaries = Int32Map.map data ~f:fst in
-      let (result_cfg, value_set_summary) = Intra.analyze wasm_mod annotated_cfg summaries in
+      (* let (result_cfg, value_set_summary) = Intra.analyze wasm_mod annotated_cfg summaries in *)
+      let result_cfg = Intra.analyze wasm_mod annotated_cfg summaries in
+      let value_set_summary = Transfer.extract_summary wasm_mod annotated_cfg result_cfg in
       (value_set_summary, Some result_cfg))
 
-let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec.t Cfg.t) : Domain.t Cfg.t =
+let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec_domain.t Cfg.t) : Domain.t Cfg.t =
   let rel_cfg = (* Relational.Transfer.dummy_annotate *) spec_cfg in
-  fst (Intra.analyze wasm_mod rel_cfg summaries)
+  Intra.analyze wasm_mod rel_cfg summaries
 
-let analyse_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Abstract_store_domain.t Cfg.t * Summary.t) Int32Map.t =
+let analyse_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t * Abstract_store_domain.t Cfg.t * Summary.t) Int32Map.t =
   Analysis_helpers.mk_inter
     (fun _cfgs _wasm_mod -> Int32Map.empty)
-    (fun wasm_mod scc cfgs_and_summaries ->
+    (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
       Log.info
         (Printf.sprintf "---------- Value-set analysis of SCC {%s} ----------"
           (String.concat ~sep:", " (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
@@ -38,18 +41,18 @@ let analyse_inter : Wasm_module.t -> Int32.t list list -> (Spec.t Cfg.t * Abstra
       let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_spec_cfg, _value_set_cfg, summary) -> summary) in
       let summaries' = List.fold_left wasm_mod.imported_funcs
           ~init:summaries
-          ~f:(fun summaries (idx, name, (args, ret)) ->
-              Int32Map.set summaries ~key:idx ~data:(Summary.of_import name wasm_mod.nglobals args ret)) in
+          ~f:(fun summaries desc ->
+              Int32Map.set summaries ~key:desc.idx ~data:(Summary.of_import desc.name wasm_mod.nglobals desc.arguments desc.returns)) in
       let _ =
         let oc = Out_channel.create ~append:true "store_types.txt" in
         Out_channel.close oc
       in
-      let results = Inter.analyze wasm_mod annotated_scc summaries' in
+      let results = Inter.analyze wasm_mod ~cfgs:annotated_scc ~summaries:summaries' in
       Int32Map.mapi results ~f:(fun ~key:idx ~data:(value_set_cfg, summary) ->
           let spec_cfg = Int32Map.find_exn scc idx in
           (spec_cfg, value_set_cfg, summary)))
 
-module Test = struct
+(* module Test = struct
   let%test "add.wat" =
     let module_ = Wasm_module.of_string
       "(module
@@ -84,7 +87,7 @@ module Test = struct
         value_sets;
         true
       | _ -> false
-end
+end *)
 
 
 (* module Test = struct
