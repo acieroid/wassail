@@ -696,15 +696,16 @@ let store
     | None, Some value, Some address -> value, address
     | _ -> assert false
   in
+  let vs_address = get state ~var:(Variable.Var address) in
   if !Value_set_options.print_trace then
     print_endline ("\tAddress(" ^ Var.to_string address ^ ")\tValue(" ^ Var.to_string value ^ ")");
-  let vs_address = get state ~var:(Variable.Var address) in
+  (* let vs_address = get state ~var:(Variable.Var address) in *)
   let () =
     if !Value_set_options.debug then
       match vs_address with
       | ValueSet RIC.Bottom ->
-        print_endline "USING BOTTOM AS AN ADDRESS!!!!!!!!! press enter to continue";
-        let _ = In_channel.input_line_exn In_channel.stdin in
+        (* print_endline "USING BOTTOM AS AN ADDRESS!!!!!!!!! press enter to continue";
+        let _ = In_channel.input_line_exn In_channel.stdin in *)
         ()
       | ValueSet r when RIC.equal RIC.Bottom r -> 
         print_endline "USING BOTTOM-ish AS AN ADDRESS!!!!!!!!! press enter to continue";

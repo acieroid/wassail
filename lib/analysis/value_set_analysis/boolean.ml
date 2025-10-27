@@ -18,7 +18,17 @@ module True_or_false = struct
     | Some tf -> tf
 
   let true_or_false_to_string (tf : true_or_false) : string =
-    "true(" ^ RIC.to_string tf.true_ ^ "), false(" ^ RIC.to_string tf.false_ ^ ")"
+    "T(" ^ RIC.to_string tf.true_ ^ "), F(" ^ RIC.to_string tf.false_ ^ ")"
+
+  let to_string (tf : t) : string =
+    "[" ^
+    String.concat ~sep:"; "
+      (List.map (Variable.Map.to_alist tf)
+        ~f:(fun (k, t) ->
+            Printf.sprintf "%s : %s"
+              (Variable.to_string k)
+              (true_or_false_to_string t)))
+    ^ "]"
 end
 
 type t = {
@@ -28,12 +38,15 @@ type t = {
 [@@deriving sexp, compare, equal]
 
 let to_string (boolean : t) : string =
-  Printf.sprintf "(%s)--[%s]" (RIC.to_string boolean.numeric_value) (String.concat ~sep:"; "
+  Printf.sprintf "(%s)--%s" 
+    (RIC.to_string boolean.numeric_value) 
+    (True_or_false.to_string boolean.true_or_false)
+  (* (String.concat ~sep:"; "
                           (List.map (Variable.Map.to_alist boolean.true_or_false)
                             ~f:(fun (k, t) ->
                                 Printf.sprintf "%s : %s"
                                   (Variable.to_string k)
-                                  (True_or_false.true_or_false_to_string t))))
+                                  (True_or_false.true_or_false_to_string t)))) *)
 
 let remove_non_memory_variable (boolean : t) ~(var : Variable.t) : t =
   assert (not (Variable.is_linear_memory var));
@@ -49,7 +62,7 @@ let get_true (boolean : t) ~(var : Variable.t) : RIC.t =
 let get_false (boolean : t) ~(var : Variable.t) : RIC.t =
   (get boolean ~var).false_
 
-let remove_memory_variables (boolean : t) ~(accessed : RIC.accessed) : t =
+(* let remove_memory_variables (boolean : t) ~(accessed : RIC.accessed) : t =
   let accessed = accessed.fully :: accessed.partially in
   let vars = Variable.Map.keys boolean.true_or_false in
   let value_sets = List.map vars ~f:(fun var -> Option.value_exn (Variable.Map.find boolean.true_or_false var)) in
@@ -61,44 +74,38 @@ let remove_memory_variables (boolean : t) ~(accessed : RIC.accessed) : t =
         ~f:(fun acc vars vs -> Variable.Map.update_all acc (Variable.Set.of_list vars) vs) 
         truncated_variables 
         value_sets;
-    numeric_value = boolean.numeric_value }
+    numeric_value = boolean.numeric_value } *)
 
 let and_ (boolean1 : t) (boolean2 : t) : t =
-  let boolean1 = { true_or_false = Variable.Map.make_compatible ~this:boolean1.true_or_false ~relative_to:boolean2.true_or_false ~get:True_or_false.get;
-                   numeric_value = boolean1.numeric_value } in
-  let boolean2 = { true_or_false = Variable.Map.make_compatible ~this:boolean2.true_or_false ~relative_to:boolean1.true_or_false ~get:True_or_false.get;
-                   numeric_value = boolean2.numeric_value } in
   { true_or_false =
       Variable.Map.merge boolean1.true_or_false boolean2.true_or_false ~f:(fun ~key:k v ->
         match k, v with
         | _, `Both (x, y) -> 
           Some {True_or_false.true_ = RIC.meet x.true_ y.true_; false_ = RIC.join (RIC.join y.false_ y.true_) (RIC.join x.false_ x.true_)}
-        | _, `Right _ | _, `Left _ -> None); (* If one of them is absent, it might have been deleted by a new variable assignment in one of the branches *)
+        | _, `Right {true_ = t; false_ = f} | _, `Left {true_ = t; false_ = f} -> 
+          Some {true_ = t; false_ = RIC.join t f});
     numeric_value = RIC.bitwise_and boolean1.numeric_value boolean2.numeric_value }
 
 let xor_ (boolean1 : t) (boolean2 : t) : t =
-  let boolean1 = { true_or_false = Variable.Map.make_compatible ~this:boolean1.true_or_false ~relative_to:boolean2.true_or_false ~get:True_or_false.get;
-                   numeric_value = boolean1.numeric_value } in
-  let boolean2 = { true_or_false = Variable.Map.make_compatible ~this:boolean2.true_or_false ~relative_to:boolean1.true_or_false ~get:True_or_false.get;
-                   numeric_value = boolean2.numeric_value } in
+  print_endline ("XOR");
   { true_or_false =
       Variable.Map.merge boolean1.true_or_false boolean2.true_or_false ~f:(fun ~key:k v ->
         match k, v with
         | _, `Both (x, y) -> Some {True_or_false.true_ = RIC.join (RIC.meet x.false_ y.true_) (RIC.meet x.true_ y.false_); 
                                   false_ = RIC.join (RIC.meet x.true_ y.true_) (RIC.meet x.false_ y.false_)}
-        | _, `Right _ | _, `Left _ -> None); (* Nothing can be inferred from this condition *)
+        | _, `Right {true_ = t; false_ = f} | _, `Left {true_ = t; false_ = f} -> 
+          let vs = RIC.join t f in
+          Some {true_ = vs; false_ = vs});
     numeric_value = RIC.bitwise_xor boolean1.numeric_value boolean2.numeric_value }
 
 let or_ (boolean1 : t) (boolean2 : t) : t =
-  let boolean1 = { true_or_false = Variable.Map.make_compatible ~this:boolean1.true_or_false ~relative_to:boolean2.true_or_false ~get:True_or_false.get;
-                   numeric_value = boolean1.numeric_value } in
-  let boolean2 = { true_or_false = Variable.Map.make_compatible ~this:boolean2.true_or_false ~relative_to:boolean1.true_or_false ~get:True_or_false.get;
-                   numeric_value = boolean2.numeric_value } in
   { true_or_false =
       Variable.Map.merge boolean1.true_or_false boolean2.true_or_false ~f:(fun ~key:k v ->
         match k, v with
-        | _, `Both (x, y) -> Some {True_or_false.true_ = RIC.join (RIC.join y.false_ y.true_) (RIC.join x.false_ x.true_); false_ = RIC.meet x.false_ y.false_}
-        | _, `Right _ | _, `Left _ -> None); (* Nothing can be inferred from this condition *)
+        | _, `Both (x, y) -> Some {True_or_false.true_ = RIC.join (RIC.join y.false_ y.true_) (RIC.join x.false_ x.true_); 
+                                   false_ = RIC.meet x.false_ y.false_}
+        | _, `Right {true_ = t; false_ = f} | _, `Left {true_ = t; false_ = f} -> 
+          Some {true_ = RIC.join t f; false_ = f});
     numeric_value = RIC.bitwise_or boolean1.numeric_value boolean2.numeric_value }
 
 (** i32.eqz *)
@@ -127,6 +134,15 @@ let meet (boolean1 : t) (boolean2 : t) : t = Log.warn "I'm not sure about the me
   {true_or_false = meet.true_or_false; numeric_value = RIC.meet boolean1.numeric_value boolean2.numeric_value}
 
 
+let can_be_true (boolean : t) : bool =
+  match boolean with
+  | {true_or_false = tf; _} ->
+    not (Variable.Map.exists tf ~f:(fun {true_ = x; _} -> RIC.equal x RIC.Bottom))
+
+let can_be_false (boolean : t) : bool =
+  match boolean with
+  | {true_or_false = tf; _} ->
+    not (Variable.Map.exists tf ~f:(fun {false_ = x; _} -> RIC.equal x RIC.Bottom))
 
 
 

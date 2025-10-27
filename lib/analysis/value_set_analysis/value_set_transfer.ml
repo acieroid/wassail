@@ -416,7 +416,7 @@ module Make (*: Transfer.TRANSFER *) = struct
               Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
             | _ -> ValueSet numeric_value
             end
-          | Boolean v1, Boolean v2 -> Boolean (Boolean.and_ v1 v2)
+          | Boolean v1, Boolean v2 -> Boolean (Boolean.xor_ v1 v2)
           end
         in
         if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string result_value);
@@ -537,7 +537,7 @@ module Make (*: Transfer.TRANSFER *) = struct
           in
           let state =
             begin match var1 with
-            | Var.Const _ -> state (* TODO: numeric value (0,1) *)
+            (* | Var.Const _ -> state TODO: numeric value (0,1) *)
             | _ ->
               Abstract_store_domain.set 
                 state 
@@ -561,7 +561,7 @@ module Make (*: Transfer.TRANSFER *) = struct
           let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
           if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
           begin match var1 with
-          | Var.Const _ -> state (* TODO: numeric value (0,1) *)
+          (* | Var.Const _ -> state TODO: numeric value (0,1) *)
           | _ ->
             Abstract_store_domain.set 
               state 
@@ -580,7 +580,7 @@ module Make (*: Transfer.TRANSFER *) = struct
           let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
           if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ ",  false: " ^ RIC.to_string vs1_false);
           begin match var1 with
-          | Var.Const _ -> state
+          (* | Var.Const _ -> state *)
           | _ ->
             Abstract_store_domain.set 
               state 
@@ -599,7 +599,7 @@ module Make (*: Transfer.TRANSFER *) = struct
           let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
           if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
           begin match var1 with
-          | Var.Const _ -> state
+          (* | Var.Const _ -> state *)
           | _ ->
             Abstract_store_domain.set 
               state 
@@ -618,7 +618,7 @@ module Make (*: Transfer.TRANSFER *) = struct
           let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
           if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
           begin match var1 with
-          | Var.Const _ -> state
+          (* | Var.Const _ -> state *)
           | _ ->
             Abstract_store_domain.set 
               state 
@@ -658,55 +658,64 @@ module Make (*: Transfer.TRANSFER *) = struct
       ~(condition : Variable.t * Boolean.t)
       (spec_state : Spec_domain.SpecWithoutBottom.t) 
       : State.t * State.t =
+    let var, boolean = condition in
     let state = 
-      { Abstract_store_domain.abstract_store = Variable.Map.remove state.abstract_store (fst condition);
+      { Abstract_store_domain.abstract_store = Variable.Map.remove state.abstract_store var;
         store_operations = state.store_operations } in
     let locals_and_globals = Abstract_store_domain.extract_locals_and_globals state in
     (* print_endline ("locals: " ^ List.to_string ~f:Var.to_string spec_state.locals);
     print_endline ("globals: " ^ List.to_string ~f:Var.to_string spec_state.globals);
     print_endline ("locals&globals: " ^ List.to_string ~f:Variable.to_string locals_and_globals); *)
     let true_ = 
-      Abstract_store_domain.make_compatible 
-        ~this_store:
-          { Abstract_store_domain.abstract_store = (Variable.Map.map ~f:(fun x -> (Abstract_store_domain.Value.ValueSet x.true_)) (snd condition).true_or_false);
+      if Boolean.can_be_true boolean then
+        let true_ =
+          Abstract_store_domain.make_compatible 
+            ~this_store:
+              { Abstract_store_domain.abstract_store = (Variable.Map.map ~f:(fun x -> (Abstract_store_domain.Value.ValueSet x.true_)) boolean.true_or_false);
+                store_operations = state.store_operations }
+            ~relative_to:state in
+        (* let true_ = *)
+          { Abstract_store_domain.abstract_store =
+              Variable.Map.fold true_.abstract_store
+                ~init:state.abstract_store 
+                ~f:(fun ~key ~data acc -> 
+                  let acc = Variable.Map.set ~key ~data acc in
+                  List.fold locals_and_globals
+                    ~init:acc
+                    ~f:(fun acc v -> 
+                      (* print_endline ("v: " ^ Variable.to_string v); *)
+                      if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
+                        Variable.Map.set ~key:v ~data acc
+                      else
+                        acc));
             store_operations = state.store_operations }
-        ~relative_to:state in
-    let true_ =
-      { Abstract_store_domain.abstract_store =
-          Variable.Map.fold true_.abstract_store
-            ~init:state.abstract_store 
-            ~f:(fun ~key ~data acc -> 
-              let acc = Variable.Map.set ~key ~data acc in
-              List.fold locals_and_globals
-                ~init:acc
-                ~f:(fun acc v -> 
-                  (* print_endline ("v: " ^ Variable.to_string v); *)
-                  if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
-                    Variable.Map.set ~key:v ~data acc
-                  else
-                    acc));
-        store_operations = state.store_operations }
+      else
+        Abstract_store_domain.bottom
     in
     let false_ = 
-      Abstract_store_domain.make_compatible 
-        ~this_store:
-          { Abstract_store_domain.abstract_store = (Variable.Map.map ~f:(fun x -> (Abstract_store_domain.Value.ValueSet x.false_)) (snd condition).true_or_false);
+      if Boolean.can_be_false boolean then
+        let false_ =
+          Abstract_store_domain.make_compatible 
+            ~this_store:
+              { Abstract_store_domain.abstract_store = (Variable.Map.map ~f:(fun x -> (Abstract_store_domain.Value.ValueSet x.false_)) boolean.true_or_false);
+                store_operations = state.store_operations }
+            ~relative_to:state in
+        (* let false_ = *)
+          { Abstract_store_domain.abstract_store =
+              Variable.Map.fold false_.abstract_store
+                ~init:state.abstract_store 
+                ~f:(fun ~key ~data acc -> 
+                  let acc = Variable.Map.set ~key ~data acc in
+                  List.fold locals_and_globals
+                    ~init:acc
+                    ~f:(fun acc v -> 
+                      if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
+                        Variable.Map.set ~key:v ~data acc
+                      else
+                        acc));
             store_operations = state.store_operations }
-        ~relative_to:state in
-    let false_ =
-      { Abstract_store_domain.abstract_store =
-          Variable.Map.fold false_.abstract_store
-            ~init:state.abstract_store 
-            ~f:(fun ~key ~data acc -> 
-              let acc = Variable.Map.set ~key ~data acc in
-              List.fold locals_and_globals
-                ~init:acc
-                ~f:(fun acc v -> 
-                  if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
-                    Variable.Map.set ~key:v ~data acc
-                  else
-                    acc));
-        store_operations = state.store_operations }
+      else
+        Abstract_store_domain.bottom
     in
     true_, false_
 
@@ -772,6 +781,7 @@ module Make (*: Transfer.TRANSFER *) = struct
     | BrIf _ | If _ -> 
       let condition = Variable.Var (pop (Spec_domain.get_or_fail i.annotation_before).vstack) in
       let boolean_value = Abstract_store_domain.get state ~var:condition in
+      print_endline ("boolean value: " ^ State.Value.to_string boolean_value);
       begin match boolean_value with
       | ValueSet _ -> `Branch (state, state)
       | Boolean boolean_value -> 
