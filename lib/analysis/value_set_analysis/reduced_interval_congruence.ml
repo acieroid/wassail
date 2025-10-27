@@ -1,5 +1,6 @@
 open Core 
 open Maths
+open Bitfield
 
 (** The Reduced Interval Congruence (RIC) domain for pointer analysis.
 
@@ -78,10 +79,14 @@ module RIC = struct
       match c1, c2 with 
       | Top, _ | _, Top -> Top 
       | Bottom, c | c, Bottom -> c 
+      | Congruence { offset = (_, o1); _ }, Congruence { offset = (_, o2); _ } 
+        when Int32.(o1 = (-2147483648l)) || Int32.(o2 = (-2147483648l)) -> Top
       | Congruence { stride = s1; offset = (v1, o1) }, Congruence { stride = s2; offset = (v2, o2) } ->
         if String.equal v1 v2 then
           let new_offset = (v1, Int32.min o1 o2) in
-          let stride_difference = Int32.abs (Int32.(-) o1 o2) in
+          (* print_endline(Int32.to_string o1 ^ " - " ^ Int32.to_string o2 ^ " = " ^ Int32.to_string Int32.(o1 - o2)); *)
+          let stride_difference = Int32.abs (Int32.(o1 - o2)) in
+          (* print_endline ("calculating new stride: s1=" ^ Int32.to_string s1 ^ " s2=" ^ Int32.to_string s2 ^ " stride difference=" ^ Int32.to_string stride_difference); *)
           let new_stride = gcd (gcd s1 s2) stride_difference in
           Congruence { stride = new_stride; offset = new_offset }
         else
@@ -239,10 +244,14 @@ module RIC = struct
   [@@deriving sexp, compare, equal]
 
   (** [reduce r] normalizes the RIC [r] by shifting the offset and resetting the lower bound to 0. *)
-  let reduce (r : t) : t =
+  let rec reduce (r : t) : t =
     match r with 
     | Top -> Top 
     | Bottom -> Bottom 
+    | RIC {stride = s; lower_bound = Int l; upper_bound = u; offset = ("", o)} when Int32.(s*l+o < 0b11000000000000000000000000000000l) ->
+      reduce (RIC {stride = s; lower_bound = NegInfinity; upper_bound = u; offset = ("", o)})
+    | RIC {stride = s; lower_bound = l; upper_bound = Int u; offset = ("", o)} when Int32.(s*u+o > 0b01100000000000000000000000000000l) ->
+      reduce (RIC {stride = s; lower_bound = l; upper_bound = Infinity; offset = ("", o)})
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = o} ->
       if ExtendedInt.less_than u l then Bottom else 
       if (Int32.equal s 1l && ExtendedInt.equal NegInfinity l && ExtendedInt.equal Infinity u) then 
@@ -267,8 +276,7 @@ module RIC = struct
           | _, _, Infinity -> ExtendedInt.Infinity
           | _, Int l, Int u -> Int (Int32.(u - l))
           | (_, o), NegInfinity, u -> 
-            (* ExtendedInt.plus u (ExtendedInt.divide (ExtendedInt.Int o) (ExtendedInt.Int s)) this causes problems when offset is negative! *)
-            ExtendedInt.plus u (ExtendedInt.Int Int32.(o / s - if o < 0l then 1l else 0l))
+            ExtendedInt.plus u (ExtendedInt.Int Int32.(o / s - if (o % s <> 0l) && o < 0l then 1l else 0l))
           | _ -> assert false
         in
         let new_stride = 
@@ -285,6 +293,10 @@ module RIC = struct
       match r with 
       | s, l, u, o -> RIC {stride = s; lower_bound = l; upper_bound = u; offset = o}
     )
+
+  let negative_integers = ric (1l, NegInfinity, Int (-1l), ("", 0l))
+
+  let positive_integers = ric (1l, Int 0l, Infinity, ("", 0l))
 
   (** [relative_ric var] returns a RIC with zero stride and offset set to the variable [var]. *)
   let relative_ric (var : string) : t =
@@ -361,7 +373,7 @@ module RIC = struct
           let lower = 
             ExtendedInt.divide_ceiling (ExtendedInt.minus l (ExtendedInt.Int o)) (ExtendedInt.Int s) in
           let upper = 
-            ExtendedInt.divide (ExtendedInt.minus u (ExtendedInt.Int o)) (ExtendedInt.Int s) in
+            ExtendedInt.divide_floor (ExtendedInt.minus u (ExtendedInt.Int o)) (ExtendedInt.Int s) in
           ric (s, lower, upper, (var, o))
       end
 
@@ -409,9 +421,9 @@ module RIC = struct
           if Int32.equal i 0l then
             (if not (String.equal var "") then "+" else "") ^ var
           else if String.equal var "" then
-            (if Int32.compare i 0l > 0 then "+" else "-") ^ Int32.to_string (Int32.abs i)
+            (if Int32.compare i 0l > 0 then "+" else "") ^ Int32.to_string (Int32.abs i)
           else
-            "+(" ^ var ^ ((if Int32.compare i 0l > 0 then "+" else "-") ^ Int32.to_string (Int32.abs i)) ^ ")"
+            "+(" ^ var ^ ((if Int32.compare i 0l > 0 then "+" else "") ^ Int32.to_string i) ^ ")"
       in
       let interval = Interval.to_string (Interval.Interval {lower_bound = l; upper_bound = u}) in
       let stride = if Int32.equal s 1l then "" else Int32.to_string s in
@@ -420,21 +432,6 @@ module RIC = struct
       | "0", _, o -> if String.equal "+" (String.sub o ~pos:0 ~len:1) then String.sub o ~pos:1 ~len:(String.length o - 1) else o
       | "", "]-∞,∞[", _ | "", "ℤ", _ -> "⊤"
       | _ -> stride ^ interval ^ offset
-
-  (* [of_list l] constructs a RIC value that represents exactly the integers in [l]. *)
-  (* let of_list (l : int list) : t =
-    let l = List.dedup_and_sort ~compare:Int.compare l in
-    match l with
-    | [] -> Bottom
-    | x1 :: rest ->
-      let stride = List.fold ~init:0 ~f:(fun acc x -> gcd acc (abs (x - x1))) rest in
-      let list_minimum = List.fold ~init:x1 ~f:min rest in
-      let offset = ("", list_minimum) in
-      let congruence = Congruence.Congruence {stride = stride; offset = offset} in
-      let lower = ExtendedInt.Int list_minimum in 
-      let upper = ExtendedInt.Int (List.fold ~init:x1 ~f:max rest) in
-      let interval = Interval.Interval {lower_bound = lower; upper_bound = upper} in
-      of_congruence_and_interval congruence interval *)
 
   (** [meet r1 r2] returns the intersection of [r1] and [r2]. *)
   let meet (ric1 : t) (ric2 : t) : t =
@@ -449,13 +446,19 @@ module RIC = struct
       let (c1, i1) = to_congruence_and_interval ric1 in
       let (c2, i2) = to_congruence_and_interval ric2 in
       let c = Congruence.meet c1 c2 in
-      let i = Interval.meet i1 i2 in 
+      let i = Interval.meet i1 i2 in
       let m = of_congruence_and_interval c i in
       match m with
       | Top | Bottom -> m
       | _ -> set_relative_offset m relative_offset
     else
       Bottom
+
+  let negative_part (r : t) : t =
+    meet r negative_integers
+
+  let positive_part (r : t) : t =
+    meet r positive_integers
   
   (** [disjoint r1 r2] returns [true] if [r1] and [r2] have no values in common. *)
   let disjoint (ric1 : t) (ric2 : t) : bool =
@@ -696,152 +699,204 @@ module RIC = struct
       let ric_ = remove_relative_offset ric_ in
       plus r ric_
 
-  let ric_and_constant (r : t) (n : int32) : t =
-    if Int32.(n = 0l) then 
-      ric (0l, Int 0l, Int 0l, ("", 0l))
-    else if Int32.(n < 0l) then
-      Top
-    else
-      let rec aux (acc : t) (i : int32) (r : t) : t =
-        begin match i, r with
-        | 0l, _ | _, Bottom -> acc
-        | _, Top -> 
-          let acc =
-            (* if i land n = 0 then *)
-            if Int32.(Int32.( land ) i n = 0l) then
-              acc
-            else
-              join acc (ric (i, Int 0l, Int 1l, ("", 0l)))
-          in
-          aux acc Int32.(i - 1l) Top
-        | _, RIC {stride = s; lower_bound = NegInfinity; upper_bound = Infinity; offset = ("", o)} ->
-          let acc = join acc (ric (0l, Int 0l, Int 0l, ("", Int32.(o land n)))) in
-          aux acc Int32.(i - 1l) (ric (s, Int Int32.(o + 1l), Infinity, ("", 0l)))
-        | _, RIC {stride = s; lower_bound = Int l; upper_bound = Infinity; offset = ("", o)} ->
-          let acc = join acc (ric (0l, Int 0l, Int 0l, ("", Int32.(((s * l) + o) land n)))) in
-          aux acc Int32.(i - 1l) (ric (s, Int Int32.(l + 1l), Infinity, ("", o)))
-        | _, RIC {stride = s; lower_bound = NegInfinity; upper_bound = Int u; offset = ("", o)} ->
-          let acc = join acc (ric (0l, Int 0l, Int 0l, ("", Int32.(((s * u) + o) land n)))) in
-          aux acc Int32.(i - 1l) (ric (s, NegInfinity, Int Int32.(u - 1l), ("", o)))
-        | _, RIC {stride = s; lower_bound = Int l; upper_bound = Int u; offset = ("", o)} ->
-          let acc = join acc (ric (0l, Int 0l, Int 0l, ("", Int32.(((s * l) + o) land n)))) in
-          aux acc Int32.(i - 1l) (ric (s, Int Int32.(l + 1l), Int u, ("", o)))
-        | _ -> Top
-        end
-      in
-      aux Bottom n r
-  
-  let bitwise_and (ric1 : t) (ric2 : t) : t =
-    let ric1 = reduce ric1 in
-    let ric2 = reduce ric2 in
-    match ric1, ric2 with
-    (* Two constants: *)
-    | RIC {stride = 0l; offset = ("", o1); _}, RIC {stride = 0l; offset = ("", o2); _} -> ric (0l, Int 0l, Int 0l, ("", Int32.(o1 land o2)))
-    (* Only one of them is a constant: *)
-    | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, r -> ric_and_constant r n
-    | r, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)} -> ric_and_constant r n
-    (* All other cases yield to Top: *)
-    | _ -> Top
 
-  let ric_or_constant (r : t) (n : int32) : t =
-    if Int32.(n = 0l) then 
-      r
-    else if Int32.(n < 0l) then
-      Top
-    else
-      let rec aux (acc : t) (i : int32) (r : t) : t =
-        begin match i, r with
-        | _, Bottom -> acc
-        | _, Top -> Top
-        (* TODO: deal with infinite cases! *)
-        (* | _, RIC {stride = s; lower_bound = NegInfinity; upper_bound = Infinity; offset = ("", o)} ->
-          let acc = join acc (ric (0, Int 0, Int 0, ("", o lor n))) in
-          aux acc (i - 1) (ric (s, Int (o + 1), Infinity, ("", 0)))
-        | _, RIC {stride = s; lower_bound = Int l; upper_bound = Infinity; offset = ("", o)} ->
-          let acc = join acc (ric (0, Int 0, Int 0, ("", ((s * l) + o) lor n))) in
-          aux acc (i - 1) (ric (s, Int (l + 1), Infinity, ("", o)))
-        | _, RIC {stride = s; lower_bound = NegInfinity; upper_bound = Int u; offset = ("", o)} ->
-          let acc = join acc (ric (0, Int 0, Int 0, ("", ((s * u) + o) lor n))) in
-          aux acc (i - 1) (ric (s, NegInfinity, Int (u - 1), ("", o))) *)
-        | _, RIC {stride = s; lower_bound = Int l; upper_bound = Int u; offset = ("", o)} ->
-          let acc = join acc (ric (0l, Int 0l, Int 0l, ("", Int32.(((s * l) + o) lor n)))) in
-          aux acc Int32.(i - 1l) (ric (s, Int Int32.(l + 1l), Int u, ("", o)))
-        | _ -> Top
-        end
-      in
-      aux Bottom n r
-  
-  let bitwise_or (ric1 : t) (ric2 : t) : t =
-    let ric1 = reduce ric1 in
-    let ric2 = reduce ric2 in
-    match ric1, ric2 with
-    (* Two constants: *)
-    | RIC {stride = 0l; offset = ("", o1); _}, RIC {stride = 0l; offset = ("", o2); _} -> ric (0l, Int 0l, Int 0l, ("", Int32.(o1 lor o2)))
-    (* Only one of them is a constant: *)
-    | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, r -> ric_or_constant r n
-    | r, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)} -> ric_or_constant r n
-    (* All other cases yield to Top: *)
-    | _ -> Top
+  let is_power_of_two (x : int32) : bool =
+    Int32.(x > 0l && (x land (x - 1l)) = 0l)
 
-  let ric_xor_constant (r : t) (n : int32) : t = 
-    if Int32.(n = 0l) then 
-      r
-    else if Int32.(n < 0l) then
-      Top
-    else
-      let rec aux (acc : t) (i : int32) (r : t) : t =
-        begin match i, r with
-        | _, Bottom -> acc
-        | _, Top -> Top
-        (* TODO: deal with infinite cases! *)
-        (* | _, RIC {stride = s; lower_bound = NegInfinity; upper_bound = Infinity; offset = ("", o)} ->
-          let acc = join acc (ric (0, Int 0, Int 0, ("", o lxor n))) in
-          aux acc (i - 1) (ric (s, Int (o + 1), Infinity, ("", 0)))
-        | _, RIC {stride = s; lower_bound = Int l; upper_bound = Infinity; offset = ("", o)} ->
-          let acc = join acc (ric (0, Int 0, Int 0, ("", ((s * l) + o) lxor n))) in
-          aux acc (i - 1) (ric (s, Int (l + 1), Infinity, ("", o)))
-        | _, RIC {stride = s; lower_bound = NegInfinity; upper_bound = Int u; offset = ("", o)} ->
-          let acc = join acc (ric (0, Int 0, Int 0, ("", ((s * u) + o) lxor n))) in
-          aux acc (i - 1) (ric (s, NegInfinity, Int (u - 1), ("", o))) *)
-        | _, RIC {stride = s; lower_bound = Int l; upper_bound = Int u; offset = ("", o)} ->
-          let acc = join acc (ric (0l, Int 0l, Int 0l, ("", Int32.(((s * l) + o) lxor n)))) in
-          aux acc Int32.(i - 1l) (ric (s, Int Int32.(l + 1l), Int u, ("", o)))
-        | _ -> Top
-        end
-      in
-      aux Bottom n r
-  
-  let bitwise_xor (ric1 : t) (ric2 : t) : t =
-    let ric1 = reduce ric1 in
-    let ric2 = reduce ric2 in
-    match ric1, ric2 with
-    (* Two constants: *)
-    | RIC {stride = 0l; offset = ("", o1); _}, RIC {stride = 0l; offset = ("", o2); _} -> ric (0l, Int 0l, Int 0l, ("", Int32.(o1 lxor o2)))
-    (* Only one of them is a constant: *)
-    | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, r -> ric_xor_constant r n
-    | r, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)} -> ric_xor_constant r n
-    (* All other cases yield to Top: *)
-    | _ -> Top
 
-  let not_ (r : t) : t =
+  let common_msb (x : int32) (y : int32) : Bitfield.t * int = 
+    let bf = Bitfield.of_set (Set.of_list (module Int32) [x; y]) in
+    let rec aux (bf : Bitfield.t) (n : int) : Bitfield.t * int =
+      if Bitfield.is_singleton bf then
+        bf, n
+      else
+        let bf = Bitfield.shift_right_unsigned bf Bitfield.one in
+        aux bf (n + 1)
+    in
+    aux bf 0
+
+  let rec nth_bit (x : int32) (n : int32) : int32 =
+    if Int32.(n = 0l) then
+      Int32.(x % 2l)
+    else
+      nth_bit Int32.(shift_left x 1) Int32.(n - 1l)
+
+
+  let to_bitfield (r : t) : Bitfield.t =
+    assert (equal (negative_part r) Bottom || equal (positive_part r) Bottom); (* We assume all values are of the same sign *)
     let r = reduce r in
     match r with
-    | Top | Bottom -> ric (1l, Int 0l, Int 1l, ("", 0l))
-    | RIC {offset = (o, _); _} when not (String.equal o "") -> ric (1l, Int 0l, Int 1l, ("", 0l))
-    | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 0l)} -> ric (0l, Int 0l, Int 0l, ("", 1l))
-    | r when not (is_subset (ric (0l, Int 0l, Int 0l, ("", 0l))) ~of_:r) -> ric (0l, Int 0l, Int 0l, ("", 0l))
-    | _ -> ric (1l, Int 0l, Int 1l, ("", 0l))
+    | Bottom -> Bottom
+    | Top -> Top
+    | RIC {lower_bound = NegInfinity; upper_bound = Infinity; _} -> assert false (* We need to avoid this situation at all cost *)
+    | RIC {lower_bound = NegInfinity; stride = s; offset = ("", o); _} -> 
+      if is_power_of_two s then
+        let ones = Int32.(-s lor o)
+        and zeros = Int32.(shift_right_logical (shift_left (-s lor (lnot o)) 1) 1) in (* TODO: instead of lor, define addition of bitfields*)
+        Bitfield.Bit {zeros; ones}
+      else
+        Top
+    | RIC {upper_bound = Infinity; stride = s; offset = ("", o); _} -> 
+      if is_power_of_two s then
+        let ones = Int32.(shift_right_logical (shift_left (-s lor o) 1) 1)
+        and zeros = Int32.(-s lor (lnot o)) in
+        Bitfield.Bit {zeros; ones}
+      else
+        Top
+    | RIC {offset = (o, _); _} when not (String.equal "" o) -> Bitfield.Top
+    | RIC {stride = s; lower_bound = Int l; upper_bound = Int u; offset = (_, o)} -> 
+      (* let integers = 
+        Set.of_list
+          (module Int32)
+          (List.init  
+            (Int32.to_int_exn (Int32.(u - l + 1l))) 
+            ~f:(fun n -> Int32.(s * (Int32.of_int_exn n) + o))) in
+        Bitfield.of_set integers *)
+      let number_of_steps = Int32.to_int_exn Int32.(u - l) in
+      let lowest_value = Int32.(s * l + o) in
+      let bit_flips = Maths.Binary.bitFlips lowest_value s in
+      let bit_flips = List.map bit_flips ~f:(fun n -> n <> 0 && n <= number_of_steps) in
+      let powers_of_two = List.init 32 ~f:(fun n -> Int32.shift_left 1l n) in
+      let ones = 
+        List.fold2_exn 
+          bit_flips 
+          powers_of_two 
+          ~init:0l 
+          ~f:(fun acc flip bit -> 
+            if flip then 
+              Int32.(acc + bit) 
+            else 
+              let initial_bit = Int32.(bit land lowest_value) in
+              Int32.(acc + initial_bit))
+      and zeros =
+        List.fold2_exn 
+          bit_flips 
+          powers_of_two 
+          ~init:0l 
+          ~f:(fun acc flip bit -> 
+            if flip then 
+              Int32.(acc + bit) 
+            else 
+              let initial_bit = Int32.(bit land (lnot lowest_value)) in
+              Int32.(acc + initial_bit))
+      in
+      Bitfield.Bit {ones; zeros}
+    | _ -> assert false
 
-  let shift_left (r : t) (n : int) : t =
-    (* TODO: assert not too big! *)
-    match r with
+  
+  let of_bitfield (bf : Bitfield.t) : t =
+    match bf with
     | Top -> Top
     | Bottom -> Bottom
-    | r when not (String.equal "" (extract_relative_offset r)) -> Top
-    | RIC {stride = s; lower_bound = l; offset = ("", o); _} when ExtendedInt.less_than (ExtendedInt.plus (Int o) (ExtendedInt.times (Int s) l)) (Int 0l) -> Top
-    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
-      ric (Int32.shift_left s n, l, u, ("", Int32.shift_left o n))
-    | _ -> Top
+    | bf ->
+      let offset = Bitfield.constant_value bf in
+      let power_of_two, lower_bound, upper_bound = Bitfield.variable_values bf in
+      ric(Int32.of_int_exn (Int.pow 2 power_of_two), Int lower_bound, Int upper_bound, ("", offset))
+
+  let bitwise_and (ric1 : t) (ric2 : t) : t =
+    let pos1 = meet ric1 positive_integers
+    and neg1 = meet ric1 negative_integers
+    and pos2 = meet ric2 positive_integers
+    and neg2 = meet ric2 negative_integers in
+    let bf_neg1 = to_bitfield neg1
+    and bf_pos1 = to_bitfield pos1
+    and bf_pos2 = to_bitfield pos2
+    and bf_neg2 = to_bitfield neg2 in
+    (* print_endline ("neg1: " ^ Bitfield.to_string bf_neg1);
+    print_endline ("pos1: " ^ Bitfield.to_string bf_pos1);
+    print_endline ("neg2: " ^ Bitfield.to_string bf_neg2);
+    print_endline ("pos1: " ^ Bitfield.to_string bf_pos1); *)
+    let bf_pp = Bitfield.and_ bf_pos1 bf_pos2
+    and bf_pn = Bitfield.and_ bf_pos1 bf_neg2
+    and bf_nn = Bitfield.and_ bf_neg1 bf_neg2
+    and bf_np = Bitfield.and_ bf_neg1 bf_pos2 in
+    let pos_pos = of_bitfield bf_pp
+    and pos_neg = of_bitfield bf_pn
+    and neg_neg = of_bitfield bf_nn
+    and neg_pos = of_bitfield bf_np in
+    join (join pos_pos pos_neg) (join neg_neg neg_pos)
+
+  let bitwise_or (ric1 : t) (ric2 : t) : t =
+    let pos1 = meet ric1 positive_integers
+    and neg1 = meet ric1 negative_integers
+    and pos2 = meet ric2 positive_integers
+    and neg2 = meet ric2 negative_integers in
+    let bf_neg1 = to_bitfield neg1
+    and bf_pos1 = to_bitfield pos1
+    and bf_pos2 = to_bitfield pos2
+    and bf_neg2 = to_bitfield neg2 in
+    let bf_pp = Bitfield.or_ bf_pos1 bf_pos2
+    and bf_pn = Bitfield.or_ bf_pos1 bf_neg2
+    and bf_nn = Bitfield.or_ bf_neg1 bf_neg2
+    and bf_np = Bitfield.or_ bf_neg1 bf_pos2 in
+    let pos_pos = of_bitfield bf_pp
+    and pos_neg = of_bitfield bf_pn
+    and neg_neg = of_bitfield bf_nn
+    and neg_pos = of_bitfield bf_np in
+    join (join pos_pos pos_neg) (join neg_neg neg_pos)
+
+  let bitwise_xor (ric1 : t) (ric2 : t) : t =
+    let pos1 = meet ric1 positive_integers
+    and neg1 = meet ric1 negative_integers
+    and pos2 = meet ric2 positive_integers
+    and neg2 = meet ric2 negative_integers in
+    let bf_neg1 = to_bitfield neg1
+    and bf_pos1 = to_bitfield pos1
+    and bf_pos2 = to_bitfield pos2
+    and bf_neg2 = to_bitfield neg2 in
+    let bf_pp = Bitfield.xor_ bf_pos1 bf_pos2
+    and bf_pn = Bitfield.xor_ bf_pos1 bf_neg2
+    and bf_nn = Bitfield.xor_ bf_neg1 bf_neg2
+    and bf_np = Bitfield.xor_ bf_neg1 bf_pos2 in
+    let pos_pos = of_bitfield bf_pp
+    and pos_neg = of_bitfield bf_pn
+    and neg_neg = of_bitfield bf_nn
+    and neg_pos = of_bitfield bf_np in
+    join (join pos_pos pos_neg) (join neg_neg neg_pos)
+
+  let not_ (r : t) : t =
+    let pos = meet r positive_integers
+    and neg = meet r negative_integers in
+    let bf_pos = to_bitfield pos 
+    and bf_neg = to_bitfield neg in
+    let not_pos = Bitfield.not_ bf_pos
+    and not_neg = Bitfield.not_ bf_neg in
+    join (of_bitfield not_pos) (of_bitfield not_neg)
+
+  let shift_left (ric1 : t) (ric2 : t) : t =
+    let pos = meet ric1 positive_integers
+    and neg = meet ric1 negative_integers in
+    let bf1_pos = to_bitfield pos
+    and bf1_neg = to_bitfield neg
+    and bf2 = to_bitfield (meet ric2 positive_integers) in
+    let bf_pos = Bitfield.shift_left bf1_pos bf2
+    and bf_neg = Bitfield.shift_left bf1_neg bf2 in
+    join (of_bitfield bf_pos) (of_bitfield bf_neg)
+
+  let shift_right_u (ric1 : t) (ric2 : t) : t =
+    let pos = meet ric1 positive_integers
+    and neg = meet ric1 negative_integers in
+    let bf1_pos = to_bitfield pos
+    and bf1_neg = to_bitfield neg
+    and bf2 = to_bitfield (meet ric2 positive_integers) in
+    (* print_endline ("pos: " ^ Bitfield.to_string bf1_pos);
+    print_endline ("neg: " ^ Bitfield.to_string bf1_neg); *)
+    let bf_pos = Bitfield.shift_right_unsigned bf1_pos bf2
+    and bf_neg = Bitfield.shift_right_unsigned bf1_neg bf2 in
+    (* print_endline ("shr_pos: " ^ Bitfield.to_string bf_pos);
+    print_endline ("shr_neg: " ^ Bitfield.to_string bf_neg); *)
+    join (of_bitfield bf_pos) (of_bitfield bf_neg)
+
+  let shift_right_s (ric1 : t) (ric2 : t) : t =
+    let pos = meet ric1 positive_integers
+    and neg = meet ric1 negative_integers in
+    let bf1_pos = to_bitfield pos
+    and bf1_neg = to_bitfield neg
+    and bf2 = to_bitfield (meet ric2 positive_integers) in
+    let bf_pos = Bitfield.shift_right_signed bf1_pos bf2
+    and bf_neg = Bitfield.shift_right_signed bf1_neg bf2 in
+    join (of_bitfield bf_pos) (of_bitfield bf_neg)
+
   
 end
 
@@ -1394,6 +1449,11 @@ let%test_module "RIC tests" = (module struct
       print_endline ("[RIC.reduce]     ⊤ → " ^ to_string (reduce Top));
       RIC.equal (reduce Top) Top
 
+    let%test "reduce 2[-inf, -40]-11" = 
+      let r = ric (2l, NegInfinity, Int (-40l), ("", -9l)) in
+      print_endline (to_string r);
+      true
+
     let%test "reduce_bottom" =
       print_endline ("[RIC.reduce]     ⊥ → " ^ to_string (reduce Bottom));
       RIC.equal (reduce Bottom) Bottom
@@ -1630,6 +1690,12 @@ let%test_module "RIC tests" = (module struct
       let j = join Top r in
       print_endline ("[JOIN of RICs]     ⊤ ⊔ " ^ to_string r ^ " → " ^ to_string j);
       RIC.equal j Top
+
+    let%test "join 2[0,1]-4 and 2[0,3]" =
+      let r1 = ric (2l, Int 0l, Int 1l, ("", -4l)) 
+      and r2 = ric (2l, Int 0l, Int 3l, ("", 0l)) in
+      let j = join r1 r2 in
+      RIC.equal j (ric (2l, Int 0l, Int 5l, ("", -4l)))
 
     let%test "join_bottom_and_r" =
       let r = ric (2l, Int 0l, Int 4l, ("", 5l)) in
@@ -2505,6 +2571,144 @@ let%test_module "RIC tests" = (module struct
       let expected = [ric(0l,Int 0l, Int 0l, ("", 0l)); ric (2l, Int 0l, Int 1l, ("", 6l))] in
       print_endline ("[RIC.remove]     " ^ to_string from ^ " \\ " ^ to_string this ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
       List.equal equal result expected
+
+    let%test "2[0,2]+1024 to bitfield" =
+      let r = ric(2l, Int 0l, Int 2l, ("", 1024l)) in
+      let bf = to_bitfield r in
+      let bf_string = Bitfield.to_string bf in
+      print_endline ("[2[0,2]+1024 to bitfield]\t" ^ bf_string);
+      String.equal "00000000000000000000010000000::0" bf_string
+
+    let%test "3[0,2]+32 to bitfield" =
+      let r = ric(3l, Int 0l, Int 2l, ("", 32l)) in
+      let bf = to_bitfield r in
+      let bf_string = Bitfield.to_string bf in
+      print_endline bf_string;
+      String.equal "00000000000000000000000000100:::" bf_string
+
+    let%test "2[0,2]+2 to bitfield" =
+      let r = ric(2l, Int 0l, Int 2l, ("", 2l)) in
+      let bf = to_bitfield r in
+      let bf_string = Bitfield.to_string bf in
+      String.equal "00000000000000000000000000000::0" bf_string
+
+    let%test "2[0,3]+2 to bitfield" =
+      let r = ric(2l, Int 0l, Int 3l, ("", 2l)) in
+      let bf = to_bitfield r in
+      let bf_string = Bitfield.to_string bf in
+      String.equal "0000000000000000000000000000:::0" bf_string
+
+
+    let%test "to_bitfield then of_bitfield 2[0,2] + 1024 = 2[0,3] + 1024" =
+      let r = ric(2l, Int 0l, Int 2l, ("", 1024l)) in
+      let bf = to_bitfield r in
+      let result = of_bitfield bf in
+      equal result (ric (2l, Int 0l, Int 3l, ("", 1024l)))
+
+    let%test "to_bitfield then of_bitfield 3[0,2] + 32 = [0,7] + 32" =
+      let r = ric(3l, Int 0l, Int 2l, ("", 32l)) in
+      let bf = to_bitfield r in
+      let result = of_bitfield bf in
+      equal result (ric (1l, Int 0l, Int 7l, ("", 32l)))
+
+    let%test "to_bitfield then of_bitfield 2[0,2] + 2 = 2[0,3]" =
+      let r = ric(2l, Int 0l, Int 2l, ("", 2l)) in
+      let bf = to_bitfield r in
+      let result = of_bitfield bf in
+      equal result (ric (2l, Int 0l, Int 3l, ("", 0l)))
+
+    let%test "to_bitfield then of_bitfield 2[0,3] + 2 = 2[0,7]" =
+      let r = ric(2l, Int 0l, Int 3l, ("", 2l)) in
+      let bf = to_bitfield r in
+      let result = of_bitfield bf in
+      equal result (ric (2l, Int 0l, Int 7l, ("", 0l)))
+
+    let%test "meet negative_integers" =
+      let ric1 = ric (2l, Int (-10l), Int 10l, ("", 0l)) in
+      let m = meet negative_integers ric1 in
+      print_endline ("negative_integers: " ^ to_string negative_integers ^ " meet: " ^ to_string m);
+      equal m (ric (2l, Int (-10l), Int (-1l), ("", 0l)))
+
+    let%test "16 and Top" =
+      let ric16 = ric(0l, Int 0l, Int 0l, ("", 16l)) in
+      let a = bitwise_and ric16 RIC.Top in
+      equal a (ric(16l, Int 0l, Int 1l, ("", 0l)))
+
+    let%test "negative part of 16Z" =
+      let ric16Z = ric(16l, NegInfinity, Infinity, ("", 0l)) in
+      let n = negative_part ric16Z in
+      print_endline (to_string n);
+      let bf = to_bitfield n in
+      print_endline (Bitfield.to_string bf);
+      match bf with
+      | Bit {zeros = 0b1111111111111111111111111111111l; ones = 0b11111111111111111111111111110000l} -> true
+      | _ -> false
+
+
+    let%test "common_msb" =
+      let x = 0b00100110110011001100l 
+      and y = 0b00100110110101001100l in
+      let result, n = common_msb x y in
+      print_endline (string_of_int n ^ "    " ^ Bitfield.to_string result);
+      match result, n with
+      | Bit {zeros = 0b11111111111111111111111011001001l; ones = 0b00100110110l}, 9 -> true
+      | _ -> false
+
+
+    let%test "big RIC conversion" =
+      let r = ric (4l, Int 0l, Int 134217727l, ("", 3l)) in
+      let bf = to_bitfield r in
+      print_endline (to_string r ^ "   ---to-bitfield--->   " ^ Bitfield.to_string bf);
+      let bf2 = Bitfield.shift_right_unsigned bf Bitfield.one in
+      print_endline ("\t>> 1 :\t" ^ Bitfield.to_string bf2);
+      let ric2 = of_bitfield bf2 in
+      print_endline ("\tBack to RIC: " ^ to_string ric2);
+      true
+
+    let%test "big RIC conversion 2" =
+      let r = ric (1l, Int 0l, Int 268435485l, ("", 1l)) in
+      let bf = to_bitfield r in
+      print_endline (to_string r ^ "   ---to-bitfield--->   " ^ Bitfield.to_string bf);
+      let bf2 = Bitfield.shift_left bf Bitfield.one in
+      let bf2 = Bitfield.shift_left bf2 Bitfield.one in
+      let bf2 = Bitfield.shift_left bf2 Bitfield.one in
+      print_endline ("\t<< 3 :\t" ^ Bitfield.to_string bf2);
+      let ric2 = of_bitfield bf2 in
+      print_endline ("\tBack to RIC: " ^ to_string ric2);
+      true
+
+    let%test "Top and Top" =
+      let top_and_top = bitwise_and Top Top in
+      print_endline ("Top & Top = " ^ to_string top_and_top);
+      let bf_top_pos = to_bitfield (meet Top positive_integers) in
+      print_endline ("Top+   ---to-bitfield--->   " ^ Bitfield.to_string bf_top_pos);
+      let bf_top_neg = to_bitfield (meet Top negative_integers) in
+      print_endline ("Top-   ---to-bitfield--->   " ^ Bitfield.to_string bf_top_neg);
+      let and1 = Bitfield.and_ bf_top_pos bf_top_pos
+      and and2 = Bitfield.and_ bf_top_pos bf_top_neg
+      and and3 = Bitfield.and_ bf_top_neg bf_top_neg
+      in
+      print_endline (Bitfield.to_string and1);
+      print_endline (Bitfield.to_string and2);
+      print_endline (Bitfield.to_string and3);
+      let and1 = of_bitfield and1
+      and and2 = of_bitfield and2
+      and and3 = of_bitfield and3
+      in
+      print_endline ("and1 = " ^ to_string and1 ^ "\tand2 = " ^ to_string and2 ^ "\tand3 = " ^ to_string and3);
+      let and_result = join (join and1 and2) and3 in
+      let _ = (match and3 with
+      | RIC {offset = ("", o); _} -> print_endline ("offset= " ^ Int32.to_string o);
+      | _ -> ();) in
+      print_endline ("Top and Top = " ^ to_string and_result);
+      true
+
+    let%test "of_bitfield 1:::::::::::::::::::::::::::::::" =
+      let bf = Bitfield.Bit {zeros = 0b1111111111111111111111111111111l; ones = 0b11111111111111111111111111111111l} in
+      print_endline ("bitfield = " ^ Bitfield.to_string bf);
+      let r = of_bitfield bf in
+      print_endline ("---to-RIC--->   " ^ to_string r);
+      equal r (ric (1l, NegInfinity, Int (-1l), ("", 0l)))
   end)
 end)
 

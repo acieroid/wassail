@@ -523,25 +523,35 @@ let i32_add (store : t) ~(x : Variable.t) ~(y : Variable.t) ~(result : Variable.
     Value.ValueSet (
       match x, y with
       | Var Var.Const Prim_value.I32 x, Var Var.Const Prim_value.I32 y -> 
+        if !Value_set_options.print_trace then 
+          print_endline ("\t" ^ Int32.to_string x ^ " + " ^ Int32.to_string y ^ " -> " ^ Variable.to_string result);
         RIC.ric (0l, Int 0l, Int 0l, ("", Int32.(x + y)))
       | Var Var.Const Prim_value.I32 x, Var y -> 
         (let vs_y = get store ~var:(Variable.Var y) in
+        if !Value_set_options.print_trace then 
+          print_endline ("\t" ^ Int32.to_string x ^ " + " ^ Var.to_string y ^ "(" ^ Value.to_string vs_y ^ ") -> " ^ Variable.to_string result);
         match vs_y with
         | ValueSet vs_y -> RIC.add_offset vs_y x
         | Boolean _ -> RIC.Top)
       | Var x, Var Var.Const Prim_value.I32 y -> 
         (let vs_x = get store ~var:(Variable.Var x) in
+        if !Value_set_options.print_trace then 
+          print_endline ("\t" ^ Var.to_string x ^ "(" ^ Value.to_string vs_x ^ ") + " ^ Int32.to_string y ^ " -> " ^ Variable.to_string result);
         match vs_x with
         | ValueSet vs_x -> RIC.add_offset vs_x y
         | Boolean _ -> RIC.Top)
       | Var x, Var y ->
         (let vs_x = get store ~var:(Variable.Var x) in
         let vs_y = get store ~var:(Variable.Var y) in
+        if !Value_set_options.print_trace then 
+          print_endline ("\t" ^ Var.to_string x ^ "(" ^ Value.to_string vs_x ^ ") + " ^ Var.to_string y ^ "(" ^ Value.to_string vs_y ^ ") -> " ^ Variable.to_string result);
         match vs_x, vs_y with
         | ValueSet vs_x, ValueSet vs_y -> RIC.plus vs_x vs_y
         | _ -> RIC.Top)
       | _ -> failwith "error")
   in
+  if !Value_set_options.print_trace then 
+    print_endline ("\tResult: " ^ Value.to_string vs);
   set store ~var:result ~vs:vs
 
 (** [i32_sub store ~x ~y ~result] performs subtraction [y - x], stores result in [result]. *)
@@ -550,35 +560,45 @@ let i32_sub (store : t) ~(x : Variable.t) ~(y : Variable.t) ~(result : Variable.
     Value.ValueSet (
       match x, y with
       | Var Var.Const Prim_value.I32 x, Var Var.Const Prim_value.I32 y -> 
+        if !Value_set_options.print_trace then 
+          print_endline ("\t" ^ Int32.to_string x ^ " + " ^ Int32.to_string y ^ " -> " ^ Variable.to_string result);
         RIC.ric (0l, Int 0l, Int 0l, ("", Int32.(y - x)))
       | Var Var.Const Prim_value.I32 x, Var y -> 
         (let vs_y = get store ~var:(Variable.Var y) in
+        if !Value_set_options.print_trace then 
+          print_endline ("\t" ^ Int32.to_string x ^ " + " ^ Var.to_string y ^ "(" ^ Value.to_string vs_y ^ ") -> " ^ Variable.to_string result);
         match vs_y with
         | ValueSet vs_y -> RIC.add_offset vs_y x
         | _ -> RIC.Top)
       | Var x, Var Var.Const Prim_value.I32 y -> 
         (let vs_x = get store ~var:(Variable.Var x) in
+        if !Value_set_options.print_trace then 
+          print_endline ("\t" ^ Var.to_string x ^ "(" ^ Value.to_string vs_x ^ ") + " ^ Int32.to_string y ^ " -> " ^ Variable.to_string result);
         match vs_x with
         | ValueSet vs_x -> RIC.add_offset (RIC.negative vs_x) y
         | _ -> RIC.Top)
       | Var x, Var y ->
         (let vs_x = get store ~var:(Variable.Var x) in
         let vs_y = get store ~var:(Variable.Var y) in
+        if !Value_set_options.print_trace then 
+          print_endline ("\t" ^ Var.to_string x ^ "(" ^ Value.to_string vs_x ^ ") + " ^ Var.to_string y ^ "(" ^ Value.to_string vs_y ^ ") -> " ^ Variable.to_string result);
         match vs_x, vs_y with
         | ValueSet vs_x, ValueSet vs_y ->RIC.plus (RIC.negative vs_x) vs_y
         | _ -> RIC.Top)
       | _ -> failwith "error")
   in
+  if !Value_set_options.print_trace then 
+    print_endline ("\tResult: " ^ Value.to_string vs);
   set store ~var:result ~vs:vs
 
 (** [v1_equals_v2_plus_c store ~v1 ~v2 ~c] sets [v1] to [v2 + c] in the abstract store. *)
-let v1_equals_v2_plus_c (store : t) ~(v1 : Variable.t) ~(v2 : Variable.t) ~(c : int32) : t =
+(* let v1_equals_v2_plus_c (store : t) ~(v1 : Variable.t) ~(v2 : Variable.t) ~(c : int32) : t =
   let vs2 = get store ~var:v2 in
   let vs1 = 
     match vs2 with
     | ValueSet vs2 -> Value.ValueSet (RIC.add_offset vs2 c)
     | _ -> if Int32.(c = 0l) then vs2 else ValueSet RIC.Top in
-  set store ~var:v1 ~vs:vs1
+  set store ~var:v1 ~vs:vs1 *)
 
 
 (* let affect_memory (store : t) ~(addresses : Value.t) : t =
@@ -676,20 +696,22 @@ let store
     | None, Some value, Some address -> value, address
     | _ -> assert false
   in
+  if !Value_set_options.print_trace then
+    print_endline ("\tAddress(" ^ Var.to_string address ^ ")\tValue(" ^ Var.to_string value ^ ")");
   let vs_address = get state ~var:(Variable.Var address) in
   let () =
     if !Value_set_options.debug then
       match vs_address with
       | ValueSet RIC.Bottom ->
-        print_endline "USING BOTTOM AS AN ADDRESS!!!!!!!!! press any key to continue";
+        print_endline "USING BOTTOM AS AN ADDRESS!!!!!!!!! press enter to continue";
         let _ = In_channel.input_line_exn In_channel.stdin in
         ()
       | ValueSet r when RIC.equal RIC.Bottom r -> 
-        print_endline "USING BOTTOM-ish AS AN ADDRESS!!!!!!!!! press any key to continue";
+        print_endline "USING BOTTOM-ish AS AN ADDRESS!!!!!!!!! press enter to continue";
         let _ = In_channel.input_line_exn In_channel.stdin in
         ()
       | ValueSet r when RIC.equal r RIC.Top ->
-        print_endline "USING TOP AS AN ADDRESS!!!!!!!!! press any key to continue";
+        print_endline "USING TOP AS AN ADDRESS!!!!!!!!! press enter to continue";
         let _ = In_channel.input_line_exn In_channel.stdin in
         ()
       | _ -> () 

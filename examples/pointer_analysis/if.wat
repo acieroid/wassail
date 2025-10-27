@@ -11,10 +11,27 @@
     local.set $l0
     i32.const 124
     global.set $g0
-    i32.const 42
     local.get $l0
+    i32.const 42
     i32.lt_u
-    if (result i32)
+    if (result i32 i32)
+      i32.const 15
+      local.set $l0
+      i32.const 72 ;; then-branch result
+      i32.const 7
+      ;;global.set $g0
+    else
+      i32.const 132
+      i32.const 13 ;; else-branch result
+      ;;global.set $g0
+    end
+    global.set $g0
+    global.set $g0
+    global.get $g0
+    local.get $l0
+    i32.const 15
+    i32.lt_u
+    if (result i32 i32)
       i32.const 15
       local.set $l0
       i32.const 72 ;; then-branch result

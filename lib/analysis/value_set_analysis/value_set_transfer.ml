@@ -71,13 +71,20 @@ module Make (*: Transfer.TRANSFER *) = struct
       ~(value : Variable.t) 
       ~(of_this_variable : Variable.t)
     : bool =
+    (* print_endline ("is " ^ Variable.to_string value ^ " the value of " ^ Variable.to_string of_this_variable ^ " ?"); *)
     match of_this_variable with
     | Var Var.Local l ->
-      let value' = Variable.Var (Spec_inference.get (Option.value_exn (Int32.of_int l)) state.locals) in
-      Variable.equal value value'
+      if l < List.length state.locals then
+        let value' = Variable.Var (Spec_inference.get (Option.value_exn (Int32.of_int l)) state.locals) in
+        Variable.equal value value'
+      else
+        false
     | Var Var.Global g ->
-      let value' = Variable.Var (Spec_inference.get (Option.value_exn (Int32.of_int g)) state.globals) in
-      Variable.equal value value'
+      if g < List.length state.globals then
+        let value' = Variable.Var (Spec_inference.get (Option.value_exn (Int32.of_int g)) state.globals) in
+        Variable.equal value value'
+      else
+        false
     | _ -> false
 
   (** [data_instr_transfer m cfg i state] performs the abstract transfer function for a data instruction [i] on [state]. *)
@@ -87,7 +94,13 @@ module Make (*: Transfer.TRANSFER *) = struct
       (i : annot_expected Instr.labelled_data)
       (state : State.t)
     : State.t =
-    if !Value_set_options.print_trace then print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.data_to_string i.instr);
+    if !Value_set_options.print_trace then (
+      print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.data_to_string i.instr);
+      (* if i.line_number = 172 then
+        (print_endline "-------------------------------------------------------------------------------------------------------";
+        let _ = In_channel.input_line_exn In_channel.stdin in
+        ();) *)
+    );
     let ret (i : annot_expected Instr.labelled_data) : Variable.t = 
       match List.hd (Spec_domain.get_or_fail i.annotation_after).vstack with
       | Some r -> Variable.Var r
@@ -224,20 +237,44 @@ module Make (*: Transfer.TRANSFER *) = struct
     | Binary binop -> 
       let x, y = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
       (* let result = pop (Spec_domain.get_or_fail i.annotation_after).vstack in *)
+
       let result = ret i in
       begin match binop with
+      | { op = ShrU; typ = I32 } ->
+        let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
+        let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
+        let result_value =
+          begin match x_value, y_value with
+          (* | ValueSet RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, ValueSet vs
+          | ValueSet RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, Boolean {numeric_value = vs; _} -> *)
+          | ValueSet vs2, ValueSet vs1
+          | ValueSet vs2, Boolean {numeric_value = vs1; _} 
+          | Boolean {numeric_value = vs2; _}, ValueSet vs1 
+          | Boolean {numeric_value = vs2; _}, Boolean {numeric_value = vs1; _} ->
+            Abstract_store_domain.Value.ValueSet (RIC.shift_right_u vs1 vs2)
+          end in
+        (* let () =
+          print_endline ("result: " ^ Abstract_store_domain.Value.to_string result_value);
+          let _ = In_channel.input_line_exn In_channel.stdin in
+          () in *)
+        if !Value_set_options.print_trace then 
+          print_endline ("\t" ^ Var.to_string y ^ "(" ^ Abstract_store_domain.Value.to_string y_value ^ ") >> " ^ Var.to_string x ^ "(" ^ Abstract_store_domain.Value.to_string x_value ^ ") -> " ^ Variable.to_string result
+            ^ "(" ^ State.Value.to_string result_value ^ ")");
+        Abstract_store_domain.set state ~var:result ~vs:result_value
       | { op = Shl; typ = I32 } ->
         let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
         let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
-        if !Value_set_options.print_trace then 
-          print_endline ("\t" ^ Abstract_store_domain.Value.to_string y_value ^ " << " ^ Abstract_store_domain.Value.to_string x_value ^ " -> " ^ Variable.to_string result);
         let result_value =
           begin match x_value, y_value with
-          | ValueSet RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, ValueSet vs
-          | ValueSet RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, Boolean {numeric_value = vs; _} ->
-            Abstract_store_domain.Value.ValueSet (RIC.shift_left vs (Int32.to_int_exn n))
-          | _ -> ValueSet Top
+          | ValueSet vs2, ValueSet vs1
+          | ValueSet vs2, Boolean {numeric_value = vs1; _} 
+          | Boolean {numeric_value = vs2; _}, ValueSet vs1 
+          | Boolean {numeric_value = vs2; _}, Boolean {numeric_value = vs1; _} ->
+            Abstract_store_domain.Value.ValueSet (RIC.shift_left vs1 vs2)
           end in
+        if !Value_set_options.print_trace then 
+          print_endline ("\t" ^ Var.to_string y ^ "(" ^ Abstract_store_domain.Value.to_string y_value ^ ") << " ^ Var.to_string x ^ "(" ^ Abstract_store_domain.Value.to_string x_value ^ ") -> " ^ Variable.to_string result
+            ^ "(" ^ State.Value.to_string result_value ^ ")");
         (* let () =
           print_endline ("result: " ^ Abstract_store_domain.Value.to_string result_value);
           let _ = In_channel.input_line_exn In_channel.stdin in
@@ -246,7 +283,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       | { op = Or; typ = I32 } ->
         let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
         let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string x_value ^ " || " ^ Abstract_store_domain.Value.to_string y_value ^ " -> " ^ Variable.to_string result);
+        if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string x_value ^ " or " ^ Abstract_store_domain.Value.to_string y_value ^ " -> " ^ Variable.to_string result);
         let result_value =
           begin match x_value, y_value with
           | ValueSet vs1, ValueSet vs2
@@ -259,7 +296,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       | { op = And; typ = I32 } -> (* TODO: refactor function to Abstract_store_domain *)
         let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
         let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Var.to_string x ^ "(" ^ Abstract_store_domain.Value.to_string x_value ^ ") && " ^ Var.to_string y ^ "(" ^ Abstract_store_domain.Value.to_string y_value ^ ") -> " ^ Variable.to_string result);
+        if !Value_set_options.print_trace then print_endline ("\t" ^ Var.to_string x ^ "(" ^ Abstract_store_domain.Value.to_string x_value ^ ") & " ^ Var.to_string y ^ "(" ^ Abstract_store_domain.Value.to_string y_value ^ ") -> " ^ Variable.to_string result);
         let result_value =
           begin match x_value, y_value with
           | ValueSet vs1, ValueSet vs2
@@ -351,7 +388,7 @@ module Make (*: Transfer.TRANSFER *) = struct
             int_of_float (2. ** (Float.round_up log2)) in *)
         let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
         let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string x_value ^ " && " ^ Abstract_store_domain.Value.to_string y_value ^ " -> " ^ Variable.to_string result);
+        if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string x_value ^ " xor " ^ Abstract_store_domain.Value.to_string y_value ^ " -> " ^ Variable.to_string result);
         let result_value =
           begin match x_value, y_value with
           | ValueSet vs1, ValueSet vs2
@@ -388,10 +425,8 @@ module Make (*: Transfer.TRANSFER *) = struct
           () in *)
         Abstract_store_domain.set state ~var:result ~vs:result_value
       | { op = Add; typ = I32 } -> (* i32 addition *) 
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Var.to_string x ^ " + " ^ Var.to_string y ^ " -> " ^ Variable.to_string result);
         Abstract_store_domain.i32_add state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result
       | { op = Sub; typ = I32 } -> (* i32 subtraction *) 
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Var.to_string y ^ " - " ^ Var.to_string x ^ " -> " ^ Variable.to_string result);
         Abstract_store_domain.i32_sub state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result
       | { typ = I32; _ } 
       | _ -> (* other operations result in a pointer that can point anywhere *)
@@ -401,6 +436,8 @@ module Make (*: Transfer.TRANSFER *) = struct
     | Load load ->
       let size = Memoryop.size load in
       let address = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
+      if !Value_set_options.print_trace then
+        print_endline ("\tAddress(" ^ Var.to_string address ^ ")");
       let vs = Abstract_store_domain.get state ~var:(Variable.Var address) in
       (* Update accessed address *)
         let previously_accessed = Abstract_store_domain.get state ~var:Variable.Accessed in
@@ -463,6 +500,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       store
     | Compare comp ->
       let var2, var1 = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
+      (* print_endline ("var1: " ^ Var.to_string var1 ^ ", var2: " ^ Var.to_string var2); *)
       let vs1 = 
         begin match var1 with
         | Var.Local _
@@ -540,7 +578,7 @@ module Make (*: Transfer.TRANSFER *) = struct
           let vs2'' = RIC.remove_upper_bound vs2 in
           let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
           let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
-          if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
+          if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ ",  false: " ^ RIC.to_string vs1_false);
           begin match var1 with
           | Var.Const _ -> state
           | _ ->
@@ -624,6 +662,9 @@ module Make (*: Transfer.TRANSFER *) = struct
       { Abstract_store_domain.abstract_store = Variable.Map.remove state.abstract_store (fst condition);
         store_operations = state.store_operations } in
     let locals_and_globals = Abstract_store_domain.extract_locals_and_globals state in
+    (* print_endline ("locals: " ^ List.to_string ~f:Var.to_string spec_state.locals);
+    print_endline ("globals: " ^ List.to_string ~f:Var.to_string spec_state.globals);
+    print_endline ("locals&globals: " ^ List.to_string ~f:Variable.to_string locals_and_globals); *)
     let true_ = 
       Abstract_store_domain.make_compatible 
         ~this_store:
@@ -639,6 +680,7 @@ module Make (*: Transfer.TRANSFER *) = struct
               List.fold locals_and_globals
                 ~init:acc
                 ~f:(fun acc v -> 
+                  (* print_endline ("v: " ^ Variable.to_string v); *)
                   if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
                     Variable.Map.set ~key:v ~data acc
                   else
@@ -679,7 +721,11 @@ module Make (*: Transfer.TRANSFER *) = struct
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : State.t) (* the pre-state *)
     : [`Simple of State.t | `Branch of State.t * State.t] =
-    if !Value_set_options.print_trace then print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.control_to_short_string i.instr);
+    if !Value_set_options.print_trace then (
+      print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.control_to_short_string i.instr);
+      if i.line_number = 172 then
+        print_endline "-------------------------------------------------------------------------------------------------------"
+    );
     (* let _apply_summary (f : Int32.t) (arity : int * int) (state : State.t) : State.t =
       if !Value_set_options.print_trace then Log.info (Printf.sprintf "applying summary of function %ld" f);
       if !Value_set_options.print_trace then print_endline ("\tState before the call: " ^ Abstract_store_domain.to_string state);
@@ -835,18 +881,19 @@ module Make (*: Transfer.TRANSFER *) = struct
       (* (states : (int * State.t) list)  *)
       (predecessors : ('a Basic_block.t * State.t) list)
     : State.t =
-    let current_function = 
+    (* let current_function = 
       match (List.filter module_.funcs ~f:(fun func -> Int32.(func.idx = block.fidx))) with
       | [f] -> f
-      | _ -> assert false in
+      | _ -> assert false in *)
     match predecessors with
     | [] -> 
       if !Value_set_options.print_trace then print_endline ("================ START OF FUNCTION ==================== DATA BLOCK #" ^ string_of_int block.idx);
       (* init_state cfg *)
-      init module_ current_function
+      (* init module_ current_function *) bottom
     | _ ->
       begin match block.content with
-      | Control { instr = Merge; _ } ->
+      | Control { instr = Merge; _ }
+      | Entry | Return _ ->
         if !Value_set_options.print_trace then print_endline ("======================================================= " ^ (if IntSet.mem cfg.loop_heads block.idx then "LOOP HEAD" else "MERGE") ^ ": Control block #" ^ string_of_int block.idx);
         let states' = List.map ~f:(fun (_, s) -> s) predecessors in
         (* Join all previous states: *)

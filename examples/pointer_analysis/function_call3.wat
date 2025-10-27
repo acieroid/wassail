@@ -4,9 +4,10 @@
   (memory (export "memory") 1)
 
   ;; Function that adds 42 to its argument
-  (func $store42
+  (func $load42
     i32.const 42
-    i32.const 422
+    i32.load
+    i32.const 20
     i32.store)
 
   ;; Main function that increments global g and calls add42(10)
@@ -15,11 +16,11 @@
     i32.const 14
     i32.store
 
-    i32.const 10
-    i32.const 36
-    i32.store
-
-    call $store42)
+    call $load42
+    
+    i32.const 42
+    i32.const 26
+    i32.store)
 
   ;; Export the main function
   (export "main" (func $main))

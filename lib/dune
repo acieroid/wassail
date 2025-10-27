@@ -22,6 +22,7 @@
    Variable
    Value_set 
    Boolean
+   Bitfield
    Abstract_store_domain Reduced_interval_congruence Value_set_transfer Value_set_summary Value_set_options
    )
  (libraries core_kernel wasm sexplib)

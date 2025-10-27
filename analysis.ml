@@ -165,6 +165,45 @@ let value_set_inter =
         IntMap.iteri results ~f:(fun ~key:id ~data:summary -> print id summary)
   )
 
+let value_set_inter_classical =
+  (* let mk_classical_inter (desc : string) (analysis : Wasm_module.t -> Int32.t -> 'a) (print : string -> 'a -> unit) = *)
+  Command.basic
+    ~summary:"Performs classical interprocedural value-set analysis."
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and fidx = anon ("fidx" %: int32)
+      and file_out = anon ("file_out" %: string)
+      and show_intermediates = flag "--all" no_arg ~doc:"Show all intermediate variables" 
+      and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" 
+      and disjoint_stack = flag "--stack" no_arg ~doc:"Consider stack disjoint from rest of linear memory" 
+      and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" 
+      and debug = flag "--debug" no_arg ~doc:"Stops the analysis each time Top or Bottom are used as an address"
+      and disjoint = flag "--disjoint" no_arg ~doc:"Consider memory spaces accessed via different relative offsets to be disjoint" in
+      fun () ->
+        if show_intermediates then Value_set.Options.show_intermediates := true;
+        if narrow then Intra.narrow_option := true;
+        if trace then Value_set.Options.print_trace := true;
+        if disjoint_stack then Value_set.Options.disjoint_stack := true;
+        if disjoint then Value_set.Options.disjoint_memory_spaces := true;
+        if debug then 
+          (Value_set.Options.print_trace := true; 
+          Value_set.Options.debug := true; 
+          Value_set.Options.show_intermediates := true);
+        let results = 
+          (fun module_ fidx -> Value_set.analyze_inter_classical module_ fidx)
+          (Wasm_module.of_file filename) fidx in
+        (fun file_out icfg ->
+       Out_channel.with_file file_out
+         ~f:(fun ch ->
+             Out_channel.output_string ch (ICFG.to_dot icfg ~annot_str:Value_set.Domain.to_dot_string))) file_out results)
+  (* mk_classical_inter "Perform classical interprocedural value-set analysis from a given entry point"
+    (fun module_ fidx ->
+      Value_set.analyze_inter_classical module_ fidx)
+    (fun file_out icfg ->
+       Out_channel.with_file file_out
+         ~f:(fun ch ->
+             Out_channel.output_string ch (ICFG.to_dot icfg ~annot_str:Value_set.Domain.to_dot_string))) *)
+
 (* let relational_intra =
   mk_intra "Perform intra-procedural analyses of functions defined in the wat file [file]. The functions analyzed correspond to the sequence of arguments [funs], for example intra foo.wat 1 2 1 analyzes function 1, followed by 2, and then re-analyzes 1 (which can produce different result, if 1 depends on 2)" Relational.analyze_intra
     (fun fid summary ->

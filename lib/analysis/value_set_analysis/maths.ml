@@ -82,23 +82,35 @@ module ExtendedInt = struct
     | Int _, Infinity | Int _, NegInfinity -> Int 0l
     | Infinity, i -> if less_than (Int 0l) i then Infinity else NegInfinity
     | NegInfinity, i -> if less_than (Int 0l) i then NegInfinity else Infinity
-    | Int x, Int y -> Int (Int32.(/) x  y)
+    | Int x, Int y -> Int (Int32.(x / y))
 
   (** Divide two extended integers and round up to the nearest integer. *)
   let divide_ceiling (x : t) (y : t) : t =
     match x, y with
-    (* | Int a, Int b when not ((Int32.to_int_exn a) mod (Int32.to_int_exn b) = 0) -> *)
     | Int a, Int b when not (Int32.(a % b = 0l)) ->
-      plus (divide x y) (Int 1l)
+      if less_than (times x y) (Int 0l) then
+        divide x y
+      else
+        plus (divide x y) (Int 1l)
+    | _ -> divide x y
+
+  let divide_floor (x : t) (y : t) : t =
+    match x, y with
+    | Int a, Int b when not (Int32.(a % b = 0l)) ->
+      if less_than (times x y) (Int 0l) then
+        minus (divide x y) (Int 1l)
+      else
+        divide x y
     | _ -> divide x y
 end
 
 (** Compute the greatest common divisor (GCD) of two integers. *)
 let rec gcd (a : int32) (b : int32) : int32 =
-    if Int32.equal b 0l then 
-      a
-    else 
-      gcd b (Int32.(%) a b)
+  (* print_endline ("a % b:" ^ Int32.to_string a ^ "  " ^Int32.to_string b); *)
+  if Int32.equal b 0l then 
+    a
+  else 
+    gcd b (Int32.(a % b))
 
 (** Compute the least common multiple (LCM) of two integers. *)
 let lcm (a : int32) (b : int32) : int32 =
@@ -152,48 +164,250 @@ let remove_first_occurence ~(of_ : string) ~(in_ : string list) : string list =
     in
     aux [] in_
 
-  let rec cancel_negation ~(pos : string list) ~(neg : string list) : string list =
-    match pos with
-    | [] -> neg
-    | x :: xs ->
-      let neg_x = "neg" ^ x in
-      if List.mem neg neg_x ~equal:String.equal then
-        cancel_negation ~pos:xs ~neg:(remove_first_occurence ~of_:neg_x ~in_:neg)
-      else
-        cancel_negation ~pos:xs ~neg:(x :: neg)
-
-  let add_relative_offsets (o1 : string) (o2 : string) : string =
-    if String.equal o1 "" then
-      o2
-    else if String.equal o2 "" then
-      o1
+let rec cancel_negation ~(pos : string list) ~(neg : string list) : string list =
+  match pos with
+  | [] -> neg
+  | x :: xs ->
+    let neg_x = "neg" ^ x in
+    if List.mem neg neg_x ~equal:String.equal then
+      cancel_negation ~pos:xs ~neg:(remove_first_occurence ~of_:neg_x ~in_:neg)
     else
-      let o1_list = String.split_on_chars o1 ~on:['+'] in
-      let o2_list = String.split_on_chars o2 ~on:['+'] in
-      let o_list = o1_list @ o2_list in
-      let pos = 
-        List.rev 
-          (List.sort ~compare:String.compare (List.fold o_list ~init:[] ~f:(fun acc o -> 
-            if String.is_prefix o ~prefix:"neg" then
-              acc
-            else
-              o :: acc)))
-      in
-      let neg = 
-        List.sort ~compare:String.compare (List.fold o_list ~init:[] ~f:(fun acc o -> 
+      cancel_negation ~pos:xs ~neg:(x :: neg)
+
+let add_relative_offsets (o1 : string) (o2 : string) : string =
+  if String.equal o1 "" then
+    o2
+  else if String.equal o2 "" then
+    o1
+  else
+    let o1_list = String.split_on_chars o1 ~on:['+'] in
+    let o2_list = String.split_on_chars o2 ~on:['+'] in
+    let o_list = o1_list @ o2_list in
+    let pos = 
+      List.rev 
+        (List.sort ~compare:String.compare (List.fold o_list ~init:[] ~f:(fun acc o -> 
           if String.is_prefix o ~prefix:"neg" then
-            o ::acc
+            acc
           else
-            acc))
+            o :: acc)))
+    in
+    let neg = 
+      List.sort ~compare:String.compare (List.fold o_list ~init:[] ~f:(fun acc o -> 
+        if String.is_prefix o ~prefix:"neg" then
+          o ::acc
+        else
+          acc))
+    in
+    let offsets = cancel_negation ~pos ~neg in
+    String.concat ~sep:"+" offsets 
+
+
+
+    (* let%test "add_relative_offsets cancels negation" =
+    let result = add_relative_offsets "a+negb+negd" "c+b+d+b" in
+    print_endline "Test: add_relative_offsets \"a+negb\" \"b+b+c\"";
+    print_endline ("Result: " ^ result);
+    print_endline "Expected: a+b+c";
+    String.equal result "a+b+c" *)
+
+
+module Binary = struct
+
+  let number_of_trailing_zeros (x : int32) : int =
+      let rec aux x n =
+        if Int32.(x % 2l = 1l) then
+          n
+        else
+          aux (Int32.(shift_right x 1)) (n + 1) 
       in
-      let offsets = cancel_negation ~pos ~neg in
-      String.concat ~sep:"+" offsets 
+      aux x 0
+
+  (* returns 0 if bit never flips *)
+  let rec bitFlip (x : int32) (y : int32) (i : int) : int =
+    assert (i < 32 && i >= 0);
+    assert Int32.(y >= 0l);
+    if Int32.(y = 0l) then
+      0
+    else
+      let t = number_of_trailing_zeros y in
+      if t > 0 then
+        if i < t then
+          0
+        else
+          bitFlip (Int32.shift_right x t) (Int32.shift_right y t) (i - t)
+      else
+        let m = Int.pow 2 (i + 1)
+        and h = Int.pow 2 i in
+        let r = Int32.to_int_exn x % m
+        and s = Int32.to_int_exn y % m in
+        if s <= h then
+          let distance_to_next_flip = if r < h then h - r else m - r in
+          (distance_to_next_flip / s) + if (distance_to_next_flip % s) = 0 then 0 else 1
+        else (* s > h *)
+          let distance_to_next_flip = if r < h then r + 1 else r - (h - 1) in
+          let s' = m - s in
+          (distance_to_next_flip / s') + if (distance_to_next_flip % s') = 0 then 0 else 1
+
+  let bitFlips (x : int32) (y : int32) : int list =
+    let idx = List.init 32 ~f:(fun n -> n) in
+    List.map idx ~f:(fun i -> bitFlip x y i)
 
 
 
-      (* let%test "add_relative_offsets cancels negation" =
-      let result = add_relative_offsets "a+negb+negd" "c+b+d+b" in
-      print_endline "Test: add_relative_offsets \"a+negb\" \"b+b+c\"";
-      print_endline ("Result: " ^ result);
-      print_endline "Expected: a+b+c";
-      String.equal result "a+b+c" *)
+
+end
+
+
+(*
+TTTTTTTTTTTTTTTTTTTTTTTEEEEEEEEEEEEEEEEEEEEEE   SSSSSSSSSSSSSSS TTTTTTTTTTTTTTTTTTTTTTT   SSSSSSSSSSSSSSS 
+T:::::::::::::::::::::TE::::::::::::::::::::E SS:::::::::::::::ST:::::::::::::::::::::T SS:::::::::::::::S
+T:::::::::::::::::::::TE::::::::::::::::::::ES:::::SSSSSS::::::ST:::::::::::::::::::::TS:::::SSSSSS::::::S
+T:::::TT:::::::TT:::::TEE::::::EEEEEEEEE::::ES:::::S     SSSSSSST:::::TT:::::::TT:::::TS:::::S     SSSSSSS
+TTTTTT  T:::::T  TTTTTT  E:::::E       EEEEEES:::::S            TTTTTT  T:::::T  TTTTTTS:::::S            
+        T:::::T          E:::::E             S:::::S                    T:::::T        S:::::S            
+        T:::::T          E::::::EEEEEEEEEE    S::::SSSS                 T:::::T         S::::SSSS         
+        T:::::T          E:::::::::::::::E     SS::::::SSSSS            T:::::T          SS::::::SSSSS    
+        T:::::T          E:::::::::::::::E       SSS::::::::SS          T:::::T            SSS::::::::SS  
+        T:::::T          E::::::EEEEEEEEEE          SSSSSS::::S         T:::::T               SSSSSS::::S 
+        T:::::T          E:::::E                         S:::::S        T:::::T                    S:::::S
+        T:::::T          E:::::E       EEEEEE            S:::::S        T:::::T                    S:::::S
+      TT:::::::TT      EE::::::EEEEEEEE:::::ESSSSSSS     S:::::S      TT:::::::TT      SSSSSSS     S:::::S
+      T:::::::::T      E::::::::::::::::::::ES::::::SSSSSS:::::S      T:::::::::T      S::::::SSSSSS:::::S
+      T:::::::::T      E::::::::::::::::::::ES:::::::::::::::SS       T:::::::::T      S:::::::::::::::SS 
+      TTTTTTTTTTT      EEEEEEEEEEEEEEEEEEEEEE SSSSSSSSSSSSSSS         TTTTTTTTTTT       SSSSSSSSSSSSSSS   
+*)
+
+let%test_module "Binary tests" = (module struct
+  open Binary
+
+  let%test "Bitfield_tests" =
+    print_endline "\n_______ ____________________________ _______\n        Maths.Binary Module        \n------- ---------------------------- -------\n"; true
+  let%test "bitFlip test no 1" =
+    let x = 5l
+    and y = 3l in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlip x y 1 in
+    k = 2
+
+  let%test "bitFlip test no 2" =
+    let x = 5l 
+    and y = 1l in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlip x y 1 in
+    k = 1
+
+  let%test "bitFlip test no 3" =
+    let x = 5l
+    and y = 3l in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlip x y 2 in
+    k = 1
+
+  let%test "bitFlip test no 4" =
+    let x = 0l
+    and y = 3l in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlip x y 2 in
+    k = 2
+
+  let%test "bitFlip test no 5" =
+    let x = 0l
+    and y = 5l in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlip x y 2 in
+    k = 1
+
+  let%test "bitFlip test no 6" =
+    let x = 3l
+    and y = 5l in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlip x y 2 in
+    k = 2
+
+  let%test "bitFlip test no 7" =
+    let x = 3l
+    and y = 7l in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlip x y 2 in
+    k = 4
+
+  let%test "bitFlip test no 8" =
+    let x = 2l
+    and y = 7l in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlip x y 2 in
+    k = 3
+
+  let%test "bitFlip test no 9" =
+    let x = 4l
+    and y = 7l in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlip x y 2 in
+    k = 1
+
+  let%test "bitFlip test no 10" =
+    let x = 5l
+    and y = 7l in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlip x y 2 in
+    k = 2
+
+  let%test "bitFlip test no 11" =
+    let x = 5l
+    and y = 3l in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlip x y 1 in
+    k = 2
+
+  let%test "bitFlip test no 12" =
+    let x = 4l
+    and y = 3l in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlip x y 2 in
+    k = 2
+
+  let%test "bitFlip test no 13" =
+    let x = 5l
+    and y = 3l in
+    let k = bitFlip x y 4 in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ " 4" ^  "]\t" ^ string_of_int k);
+    k = 4
+
+  let%test "bitFlip test no 14" =
+    let x = 5l
+    and y = 3l in
+    let k = bitFlip x y 0 in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ " 0" ^  "]\t" ^ string_of_int k);
+    k = 1
+
+  let%test "bitFlip test no 15" =
+    let x = 5l
+    and y = 4l in
+    let k = bitFlip x y 4 in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ " 4" ^  "]\t" ^ string_of_int k);
+    k = 3
+
+  let%test "bitFlip test no 16" =
+    let x = 1l
+    and y = 1l in
+    let k = bitFlip x y 1 in
+    print_endline ("[bitFlip " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ " 1" ^  "]\t" ^ string_of_int k);
+    k = 1
+
+  let%test "bitFlips 1" =
+    let x = 5l 
+    and y = 3l in
+    print_endline ("[bitFlips " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlips x y in
+    print_endline (List.to_string ~f:string_of_int k);
+    true
+
+  let%test "bitFlips 2" =
+    let x = 5l 
+    and y = 4l in
+    print_endline ("[bitFlips " ^ Int32.to_string x ^ " " ^ Int32.to_string y ^ "]");
+    let k = bitFlips x y in
+    print_endline (List.to_string ~f:string_of_int k);
+    true
+
+end)

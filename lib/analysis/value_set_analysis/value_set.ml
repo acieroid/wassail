@@ -51,6 +51,9 @@ let analyse_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
       Int32Map.mapi results ~f:(fun ~key:idx ~data:(value_set_cfg, summary) ->
           let spec_cfg = Int32Map.find_exn scc idx in
           (spec_cfg, value_set_cfg, summary)))
+      
+let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Domain.t Icfg.t =
+  ClassicalInter.analyze module_ (Analysis_helpers.mk_inter_classical module_ entry)
 
 (* module Test = struct
   let%test "add.wat" =
