@@ -365,7 +365,7 @@ let%test_module "Variable tests" = (module struct
 
   let%test "Tests on variable module" =
     print_endline "_______ _______________ _______\n        Variable module        \n------- --------------- -------\n";
-    false
+    true
 
   let%test "share_addresses yes" =
     let v1 = mem 1 0 4 ("", 0l) in
