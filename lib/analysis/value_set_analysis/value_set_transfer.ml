@@ -781,9 +781,21 @@ module Make (*: Transfer.TRANSFER *) = struct
     | BrIf _ | If _ -> 
       let condition = Variable.Var (pop (Spec_domain.get_or_fail i.annotation_before).vstack) in
       let boolean_value = Abstract_store_domain.get state ~var:condition in
-      print_endline ("boolean value: " ^ State.Value.to_string boolean_value);
+      (* print_endline ("boolean value: " ^ State.Value.to_string boolean_value); *)
       begin match boolean_value with
-      | ValueSet _ -> `Branch (state, state)
+      | ValueSet vs -> 
+        let false_ = 
+          if RIC.is_false vs then
+            state
+          else
+            Abstract_store_domain.bottom
+        and true_ = 
+          if RIC.is_true vs then
+            state
+          else
+            Abstract_store_domain.bottom
+        in
+        `Branch (true_, false_)
       | Boolean boolean_value -> 
         let state_if_true, state_if_false = apply_condition state ~condition:(condition, boolean_value) (Spec_domain.get_or_fail i.annotation_after)  in
         `Branch (state_if_true, state_if_false)

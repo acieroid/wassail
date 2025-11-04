@@ -897,6 +897,23 @@ module RIC = struct
     and bf_neg = Bitfield.shift_right_signed bf1_neg bf2 in
     join (of_bitfield bf_pos) (of_bitfield bf_neg)
 
+
+  let is_false (r : t) : bool =
+    match r with
+    | Bottom -> false
+    | _ -> not (disjoint r (ric (1l, Int 0l, Int 0l, ("", 0l))))
+  
+  let is_true (r : t) : bool =
+    let r = reduce r in
+    match r with
+    | Top -> true
+    | Bottom -> false
+    | _ ->
+      if is_singleton r then
+        disjoint r (ric (1l, Int 0l, Int 0l, ("", 0l)))
+      else
+        true
+
   
 end
 
@@ -2577,26 +2594,26 @@ let%test_module "RIC tests" = (module struct
       let bf = to_bitfield r in
       let bf_string = Bitfield.to_string bf in
       print_endline ("[2[0,2]+1024 to bitfield]\t" ^ bf_string);
-      String.equal "00000000000000000000010000000::0" bf_string
+      String.equal "010000000::0" bf_string
 
     let%test "3[0,2]+32 to bitfield" =
       let r = ric(3l, Int 0l, Int 2l, ("", 32l)) in
       let bf = to_bitfield r in
       let bf_string = Bitfield.to_string bf in
       print_endline bf_string;
-      String.equal "00000000000000000000000000100:::" bf_string
+      String.equal "0100:::" bf_string
 
     let%test "2[0,2]+2 to bitfield" =
       let r = ric(2l, Int 0l, Int 2l, ("", 2l)) in
       let bf = to_bitfield r in
       let bf_string = Bitfield.to_string bf in
-      String.equal "00000000000000000000000000000::0" bf_string
+      String.equal "0::0" bf_string
 
     let%test "2[0,3]+2 to bitfield" =
       let r = ric(2l, Int 0l, Int 3l, ("", 2l)) in
       let bf = to_bitfield r in
       let bf_string = Bitfield.to_string bf in
-      String.equal "0000000000000000000000000000:::0" bf_string
+      String.equal "0:::0" bf_string
 
 
     let%test "to_bitfield then of_bitfield 2[0,2] + 1024 = 2[0,3] + 1024" =
