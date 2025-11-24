@@ -6,31 +6,39 @@
     widening, weak updates, and memory truncation.
 *)
 open Core
-open Reduced_interval_congruence 
+(* open Reduced_interval_congruence  *)
+module RIC_module = Reduced_interval_congruence
+open RIC_module
+module Boolean = Boolean
+module Bitfield = Bitfield
 open Helpers
 
-module Value = struct
+module Value = struct (* TODO: extract into its own module: AbstractValue*)
   type t =
     | ValueSet of RIC.t
     | Boolean of Boolean.t
+    | Bitfield of Bitfield.t
   [@@deriving sexp, compare, equal]
 
   let to_string (value : t) : string =
     match value with
     | ValueSet vs -> RIC.to_string vs
     | Boolean b -> Boolean.to_string b
+    | Bitfield bf -> Bitfield.to_string bf
 
   let join (value1 : t) (value2 : t) : t =
     match value1, value2 with
-    | ValueSet vs1, ValueSet vs2 -> ValueSet (RIC.join vs1 vs2)
+    | ValueSet vs1, ValueSet vs2 
+    | Boolean {numeric_value = vs1; _}, ValueSet vs2
+    | ValueSet vs1, Boolean {numeric_value = vs2; _} -> ValueSet (RIC.join vs1 vs2)
     | Boolean b1, Boolean b2 -> Boolean (Boolean.join b1 b2)
-    | _ -> ValueSet RIC.Top (* TODO: check that a boolean can only take two values [0,1] and join accordingly *)
-
-  let meet (value1 : t) (value2 : t) : t =
-    match value1, value2 with
-    | ValueSet vs1, ValueSet vs2 -> ValueSet (RIC.meet vs1 vs2)
-    | Boolean b1, Boolean b2 -> Boolean (Boolean.meet b1 b2)
-    | _ -> assert false
+    | Bitfield bf1, Bitfield bf2 -> Bitfield (Bitfield.join bf1 bf2)
+    | Bitfield bf, ValueSet vs
+    | Bitfield bf, Boolean {numeric_value = vs; _}
+    | ValueSet vs, Bitfield bf
+    | Boolean {numeric_value = vs; _}, Bitfield bf ->
+      let bf = RIC.of_bitfield bf in
+      ValueSet (RIC.join vs bf)
 
   let extract_relative_offset (v : t) : string =
     match v with
@@ -39,8 +47,8 @@ module Value = struct
 
   let update_relative_offset (v : t) (actual_values : RIC.t String.Map.t) : t =
     match v with
-    | Boolean _ -> v
     | ValueSet vs -> ValueSet (RIC.update_relative_offset ~ric_:vs ~actual_values)
+    | _ -> v
 end
 
 (** Type [t] is the abstract store: a map from variables to their abstract values. *)
@@ -97,7 +105,9 @@ let get (store : t) ~(var : Variable.t) : Value.t =
                 if Variable.share_addresses m var then
                   match (Option.value_exn (Variable.Map.find store.abstract_store m)) with
                   | ValueSet vs -> RIC.join acc vs
-                  | Boolean _ -> RIC.Top (* TODO: Assert false? *)
+                  (* | Boolean _ -> RIC.Top TODO: Assert false? *)
+                  | Boolean b -> RIC.join acc (b.numeric_value)
+                  | Bitfield bf -> RIC.join acc (RIC.of_bitfield bf)
                 else if Variable.comparable_offsets m var then
                   acc
                 else
@@ -114,7 +124,9 @@ let get (store : t) ~(var : Variable.t) : Value.t =
                 if Variable.share_addresses m var then
                   match (Option.value_exn (Variable.Map.find store.abstract_store m)) with
                   | ValueSet vs -> RIC.join acc vs
-                  | Boolean _ -> RIC.Top (* TODO: Assert false? *)
+                  (* | Boolean _ -> RIC.Top TODO: Assert false? *)
+                  | Boolean b -> RIC.join acc (b.numeric_value)
+                  | Bitfield bf -> RIC.join acc (RIC.of_bitfield bf)
                 else if Variable.comparable_offsets m var then
                   acc
                 else
@@ -135,8 +147,10 @@ let extract_global_values (store : t) : RIC.t String.Map.t =
     List.map globals ~f:(fun var -> 
       Variable.to_string var,
       match get store ~var with
-      | Value.ValueSet vs -> vs
-      | Value.Boolean _ -> RIC.Top) in (* TODO: if not i32, shouldn't it be Top? *)
+      | ValueSet vs -> vs
+      (* | Boolean _ -> RIC.Top) in TODO: if not i32, shouldn't it be Top? *)
+      | Boolean b -> b.numeric_value
+      | Bitfield bf -> RIC.of_bitfield bf) in
   List.fold
     global_values
     ~init:String.Map.empty
@@ -149,7 +163,9 @@ let extract_argument_values (store : t) ~(args : Var.t list) : RIC.t String.Map.
       ~f:(fun var -> 
         match get store ~var:(Variable.Var var) with
         | Value.ValueSet vs -> vs
-        | Value.Boolean _ -> RIC.Top) in
+        (* | Value.Boolean _ -> RIC.Top) in *)
+        | Boolean b -> b.numeric_value
+        | Bitfield bf -> RIC.of_bitfield bf) in
   List.fold2_exn
     (List.init (List.length args) ~f:(fun i -> Var.to_string (Var.Local i)))
     values
@@ -203,7 +219,8 @@ let to_string_without_bottoms (vs : t) : string =
   let restricted = Variable.Map.filter vs.abstract_store ~f:(fun d ->
     match d with
     | Boolean _ -> true
-    | ValueSet d -> not (RIC.equal RIC.Bottom d)) in
+    | ValueSet d -> not (RIC.equal RIC.Bottom d)
+    | Bitfield bf -> not (Bitfield.equal Bitfield.Bottom bf)) in
   to_string { abstract_store = restricted; store_operations = vs.store_operations }
 
 let to_dot_string (s : t) : string =
@@ -269,7 +286,7 @@ let filter_relative_offsets (store : t) (rel_offset : string) : t =
 
 (** [truncate_memory_var store ~var ~accessed_addresses] removes accessed addresses from [var]'s region. 
     The untouched portion is preserved in the store. *)
-let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : RIC.accessed) : t =
+let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : RIC.accessed_memory) : t =
   (* let disjoint_memory = !Value_set_options.disjoint_memory_spaces in *)
   let vs = get store ~var:var in
   let abstract_store = Variable.Map.remove store.abstract_store var in
@@ -417,8 +434,9 @@ let join (store1 : t) (store2 : t) : t =
       Variable.Map.merge store1.abstract_store store2.abstract_store ~f:(fun ~key:var v -> 
           match v with
           | `Both (ValueSet x, ValueSet y) -> Some (Value.ValueSet (RIC.join x y))
-          | `Both (Boolean x, Boolean y) -> Some (Value.Boolean (Boolean.join x y))
-          | `Both _ | `Left Boolean _ | `Right Boolean _ -> Some (Value.ValueSet RIC.Top)
+          | `Both (Boolean x, Boolean y) -> Some (Boolean (Boolean.join x y))
+          | `Both (Bitfield x, Bitfield y) -> Some (Bitfield (Bitfield.join x y))
+          | `Both _ | `Left Boolean _ | `Right Boolean _ | `Left Bitfield _ | `Right Bitfield _ -> Some (Value.ValueSet RIC.Top)
           | `Left ValueSet _ | `Right ValueSet _ ->
             Some (
               match (get store1 ~var), (get store2 ~var) with
@@ -431,7 +449,7 @@ let join (store1 : t) (store2 : t) : t =
   store
 
 (** [update_accessed_vars store accessed_addresses] applies [truncate_memory_var] to all memory variables. *)
-let update_accessed_vars (store : t) (accessed_addresses : RIC.accessed) : t =
+let update_accessed_vars (store : t) (accessed_addresses : RIC.accessed_memory) : t =
   let memory_vars = extract_memory_variables store in
   let new_store =
     match memory_vars with
@@ -486,8 +504,10 @@ let weak_update (store : t) ~(previous_state : t) ~(var : Variable.t) ~(vs : RIC
             ~f:(fun store (v, prev_vs) -> 
               let vs = 
                 match prev_vs with
-                | Boolean _ -> Value.ValueSet RIC.Top
+                (* | Boolean _ -> Value.ValueSet RIC.Top *)
+                | Boolean b -> Value.ValueSet (RIC.join b.numeric_value vs)
                 | ValueSet prev_vs -> ValueSet (RIC.join prev_vs vs)
+                | Bitfield bf -> ValueSet (RIC.join (RIC.of_bitfield bf) vs)
               in
               set store ~var:v ~vs)
             affected_variables
@@ -532,14 +552,18 @@ let i32_add (store : t) ~(x : Variable.t) ~(y : Variable.t) ~(result : Variable.
           print_endline ("\t" ^ Int32.to_string x ^ " + " ^ Var.to_string y ^ "(" ^ Value.to_string vs_y ^ ") -> " ^ Variable.to_string result);
         match vs_y with
         | ValueSet vs_y -> RIC.add_offset vs_y x
-        | Boolean _ -> RIC.Top)
+        (* | Boolean _ -> RIC.Top) *)
+        | Boolean b -> RIC.add_offset b.numeric_value x
+        | Bitfield bf -> RIC.add_offset (RIC.of_bitfield bf) x)
       | Var x, Var Var.Const Prim_value.I32 y -> 
         (let vs_x = get store ~var:(Variable.Var x) in
         if !Value_set_options.print_trace then 
           print_endline ("\t" ^ Var.to_string x ^ "(" ^ Value.to_string vs_x ^ ") + " ^ Int32.to_string y ^ " -> " ^ Variable.to_string result);
         match vs_x with
         | ValueSet vs_x -> RIC.add_offset vs_x y
-        | Boolean _ -> RIC.Top)
+        (* | Boolean _ -> RIC.Top) *)
+        | Boolean b -> RIC.add_offset b.numeric_value y
+        | Bitfield bf -> RIC.add_offset (RIC.of_bitfield bf) y)
       | Var x, Var y ->
         (let vs_x = get store ~var:(Variable.Var x) in
         let vs_y = get store ~var:(Variable.Var y) in
@@ -561,19 +585,19 @@ let i32_sub (store : t) ~(x : Variable.t) ~(y : Variable.t) ~(result : Variable.
       match x, y with
       | Var Var.Const Prim_value.I32 x, Var Var.Const Prim_value.I32 y -> 
         if !Value_set_options.print_trace then 
-          print_endline ("\t" ^ Int32.to_string x ^ " + " ^ Int32.to_string y ^ " -> " ^ Variable.to_string result);
+          print_endline ("\t" ^ Int32.to_string y ^ " - " ^ Int32.to_string x ^ " -> " ^ Variable.to_string result);
         RIC.ric (0l, Int 0l, Int 0l, ("", Int32.(y - x)))
       | Var Var.Const Prim_value.I32 x, Var y -> 
         (let vs_y = get store ~var:(Variable.Var y) in
         if !Value_set_options.print_trace then 
-          print_endline ("\t" ^ Int32.to_string x ^ " + " ^ Var.to_string y ^ "(" ^ Value.to_string vs_y ^ ") -> " ^ Variable.to_string result);
+          print_endline ("\t" ^ Var.to_string y ^ "(" ^ Value.to_string vs_y ^ ") - " ^ Int32.to_string x ^ " -> " ^ Variable.to_string result);
         match vs_y with
         | ValueSet vs_y -> RIC.add_offset vs_y x
         | _ -> RIC.Top)
       | Var x, Var Var.Const Prim_value.I32 y -> 
         (let vs_x = get store ~var:(Variable.Var x) in
         if !Value_set_options.print_trace then 
-          print_endline ("\t" ^ Var.to_string x ^ "(" ^ Value.to_string vs_x ^ ") + " ^ Int32.to_string y ^ " -> " ^ Variable.to_string result);
+          print_endline ("\t" ^ Int32.to_string y ^ " - " ^ Var.to_string x ^ "(" ^ Value.to_string vs_x ^ " -> " ^ Variable.to_string result);
         match vs_x with
         | ValueSet vs_x -> RIC.add_offset (RIC.negative vs_x) y
         | _ -> RIC.Top)
@@ -581,7 +605,7 @@ let i32_sub (store : t) ~(x : Variable.t) ~(y : Variable.t) ~(result : Variable.
         (let vs_x = get store ~var:(Variable.Var x) in
         let vs_y = get store ~var:(Variable.Var y) in
         if !Value_set_options.print_trace then 
-          print_endline ("\t" ^ Var.to_string x ^ "(" ^ Value.to_string vs_x ^ ") + " ^ Var.to_string y ^ "(" ^ Value.to_string vs_y ^ ") -> " ^ Variable.to_string result);
+          print_endline ("\t" ^ Var.to_string y ^ "(" ^ Value.to_string vs_y ^ ") - " ^ Var.to_string x ^ "(" ^ Value.to_string vs_x ^ ") -> " ^ Variable.to_string result);
         match vs_x, vs_y with
         | ValueSet vs_x, ValueSet vs_y ->RIC.plus (RIC.negative vs_x) vs_y
         | _ -> RIC.Top)
@@ -651,6 +675,8 @@ let log_address_type (address : Var.t) (vs_address : Value.t) : unit =
       Out_channel.output_string oc ("[BOTTOM]\n");
     | Value.Boolean _ -> 
       Out_channel.output_string oc ("[BOOLEAN]\n");
+    | Bitfield _ ->
+      Out_channel.output_string oc ("[BITFIELD]\n");
     end
   | Var.Merge _ -> 
     Out_channel.output_string oc ("[MERGE]" ^ (Var.to_string address));
@@ -672,6 +698,8 @@ let log_address_type (address : Var.t) (vs_address : Value.t) : unit =
       Out_channel.output_string oc (" [BOTTOM]\n");
     | Value.Boolean _ -> 
       Out_channel.output_string oc (" [BOOLEAN]\n");
+    | Bitfield _ ->
+      Out_channel.output_string oc ("[BITFIELD]\n");
     end
   | Var.Const _ -> 
     Out_channel.output_string oc ("[CONSTANT] " ^ (Var.to_string address) ^ "\n");
@@ -725,8 +753,14 @@ let store
   let vs_value = get state ~var:(Variable.Var value) in
   let size = Memoryop.size instruction in
   let new_state =
-    begin match vs_address with
-    | Value.ValueSet vs_address ->
+    let vs_address =
+      match vs_address with
+      | ValueSet vs -> vs
+      | Boolean b -> b.numeric_value
+      | Bitfield bf -> RIC.of_bitfield bf
+    in
+    (* begin match vs_address with
+    | Value.ValueSet vs_address -> *)
       begin match instruction with
       | { typ = I32; offset = offset; _ } ->
         let offset = Int32.of_int_exn offset in
@@ -804,7 +838,7 @@ let store
           print_endline ("\tpartially accessed memory: " ^ String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially)););
         update_accessed_vars state accessed
       end
-    | Value.Boolean _ ->
+    (* | Value.Boolean _ ->
       (Log.warn "Using a boolean value as an address!";
       let accessed = RIC.accessed ~value_set:(RIC.ric (1l, Int 0l, Int 1l, ("", 0l))) ~size:4l in
       let added_store_operations = 
@@ -814,7 +848,7 @@ let store
       let state = {abstract_store = state.abstract_store; store_operations = RICSet.union added_store_operations state.store_operations} in
       let state = {abstract_store = state.abstract_store; store_operations = RICSet.union (RICSet.of_list (accessed.fully :: accessed.partially)) state.store_operations} in
       update_accessed_vars state accessed)
-    end
+    end *)
   in
   remove_pointers_to_top new_state
 

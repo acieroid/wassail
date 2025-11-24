@@ -245,13 +245,16 @@ module Make (*: Transfer.TRANSFER *) = struct
         let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
         let result_value =
           begin match x_value, y_value with
-          (* | ValueSet RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, ValueSet vs
-          | ValueSet RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, Boolean {numeric_value = vs; _} -> *)
           | ValueSet vs2, ValueSet vs1
           | ValueSet vs2, Boolean {numeric_value = vs1; _} 
           | Boolean {numeric_value = vs2; _}, ValueSet vs1 
           | Boolean {numeric_value = vs2; _}, Boolean {numeric_value = vs1; _} ->
             Abstract_store_domain.Value.ValueSet (RIC.shift_right_u vs1 vs2)
+          | Boolean {numeric_value = vs2; _}, Bitfield bf1
+          | ValueSet vs2, Bitfield bf1 -> ValueSet (RIC.of_bitfield (Bitfield.shift_right_unsigned bf1 (RIC.to_bitfield vs2)))
+          | Bitfield bf2, ValueSet vs1
+          | Bitfield bf2, Boolean {numeric_value = vs1; _} -> ValueSet (RIC.of_bitfield (Bitfield.shift_right_unsigned (RIC.to_bitfield vs1) bf2)) (* TODO : keep bitfield *)
+          | Bitfield bf2, Bitfield bf1 -> Bitfield (Bitfield.shift_right_unsigned bf1 bf2)
           end in
         (* let () =
           print_endline ("result: " ^ Abstract_store_domain.Value.to_string result_value);
@@ -271,6 +274,11 @@ module Make (*: Transfer.TRANSFER *) = struct
           | Boolean {numeric_value = vs2; _}, ValueSet vs1 
           | Boolean {numeric_value = vs2; _}, Boolean {numeric_value = vs1; _} ->
             Abstract_store_domain.Value.ValueSet (RIC.shift_left vs1 vs2)
+          | Boolean {numeric_value = vs2; _}, Bitfield bf1
+          | ValueSet vs2, Bitfield bf1 -> ValueSet (RIC.of_bitfield (Bitfield.shift_left bf1 (RIC.to_bitfield vs2)))
+          | Bitfield bf2, ValueSet vs1
+          | Bitfield bf2, Boolean {numeric_value = vs1; _} -> ValueSet (RIC.of_bitfield (Bitfield.shift_left (RIC.to_bitfield vs1) bf2)) (* TODO : keep bitfield *)
+          | Bitfield bf2, Bitfield bf1 -> Bitfield (Bitfield.shift_left bf1 bf2)
           end in
         if !Value_set_options.print_trace then 
           print_endline ("\t" ^ Var.to_string y ^ "(" ^ Abstract_store_domain.Value.to_string y_value ^ ") << " ^ Var.to_string x ^ "(" ^ Abstract_store_domain.Value.to_string x_value ^ ") -> " ^ Variable.to_string result
@@ -289,8 +297,14 @@ module Make (*: Transfer.TRANSFER *) = struct
           | ValueSet vs1, ValueSet vs2
           | ValueSet vs1, Boolean {numeric_value = vs2; _}
           | Boolean {numeric_value = vs1; _}, ValueSet vs2 -> 
-            Abstract_store_domain.Value.ValueSet (RIC.bitwise_or vs1 vs2)
+            (* Abstract_store_domain.Value.ValueSet (RIC.or_ vs1 vs2) *)
+            Abstract_store_domain.Value.ValueSet (RIC.or_ vs1 vs2)
           | Boolean v1, Boolean v2 -> Boolean (Boolean.or_ v1 v2)
+          | Bitfield bf, ValueSet vs
+          | Bitfield bf, Boolean {numeric_value = vs; _}
+          | ValueSet vs, Bitfield bf
+          | Boolean {numeric_value = vs; _}, Bitfield bf -> ValueSet (RIC.of_bitfield (Bitfield.or_ (RIC.to_bitfield vs) bf))
+          | Bitfield bf1, Bitfield bf2 -> Bitfield (Bitfield.or_ bf1 bf2)
           end in
         Abstract_store_domain.set state ~var:result ~vs:result_value
       | { op = And; typ = I32 } -> (* TODO: refactor function to Abstract_store_domain *)
@@ -302,7 +316,14 @@ module Make (*: Transfer.TRANSFER *) = struct
           | ValueSet vs1, ValueSet vs2
           | ValueSet vs1, Boolean {numeric_value = vs2; _}
           | Boolean {numeric_value = vs1; _}, ValueSet vs2 -> 
-            let numeric_value = (RIC.bitwise_and vs1 vs2) in
+            (* Abstract_store_domain.Value.ValueSet (RIC.and_ vs1 vs2) *)
+            Abstract_store_domain.Value.ValueSet (RIC.and_ vs1 vs2)
+          | Bitfield bf, ValueSet vs
+          | Bitfield bf, Boolean {numeric_value = vs; _}
+          | ValueSet vs, Bitfield bf
+          | Boolean {numeric_value = vs; _}, Bitfield bf -> ValueSet (RIC.of_bitfield (Bitfield.and_ bf (RIC.to_bitfield vs)))
+          | Bitfield bf1, Bitfield bf2 -> Bitfield (Bitfield.and_ bf1 bf2)
+            (* let numeric_value = (RIC.and_ vs1 vs2) in
             begin match vs1, vs2 with
             (* PARITY CHECK *)
             | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 1l)}, vs2 ->
@@ -373,7 +394,7 @@ module Make (*: Transfer.TRANSFER *) = struct
                           ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
               Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
             | _ -> ValueSet numeric_value
-            end
+            end *)
           | Boolean v1, Boolean v2 -> Boolean (Boolean.and_ v1 v2)
           end
         in
@@ -394,7 +415,14 @@ module Make (*: Transfer.TRANSFER *) = struct
           | ValueSet vs1, ValueSet vs2
           | ValueSet vs1, Boolean {numeric_value = vs2; _}
           | Boolean {numeric_value = vs1; _}, ValueSet vs2 -> 
-            let numeric_value = (RIC.bitwise_xor vs1 vs2) in
+            (* Abstract_store_domain.Value.ValueSet (RIC.xor_ vs1 vs2) *)
+            Abstract_store_domain.Value.ValueSet (RIC.xor_ vs1 vs2)
+          | Bitfield bf, ValueSet vs
+          | Bitfield bf, Boolean {numeric_value = vs; _}
+          | ValueSet vs, Bitfield bf
+          | Boolean {numeric_value = vs; _}, Bitfield bf -> ValueSet (RIC.of_bitfield (Bitfield.xor_ bf (RIC.to_bitfield vs)))
+          | Bitfield bf1, Bitfield bf2 -> Bitfield (Bitfield.xor_ bf1 bf2)
+            (* let numeric_value = (RIC.xor_ vs1 vs2) in
             begin match vs1, vs2 with
             | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, vs2 when Int32.(n >= 1l) -> 
               let false_ = RIC.meet vs2 (RIC.ric (0l, Int 0l, Int 0l, ("", n))) in
@@ -415,7 +443,7 @@ module Make (*: Transfer.TRANSFER *) = struct
                           ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
               Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
             | _ -> ValueSet numeric_value
-            end
+            end *)
           | Boolean v1, Boolean v2 -> Boolean (Boolean.xor_ v1 v2)
           end
         in
@@ -465,7 +493,7 @@ module Make (*: Transfer.TRANSFER *) = struct
             let is_stack = !Value_set_options.disjoint_stack
               && String.equal "g0" (Abstract_store_domain.Value.extract_relative_offset vs) in
             match vs with
-            | Abstract_store_domain.Value.ValueSet vs ->
+            | Abstract_store_domain.Value.ValueSet vs -> (* TODO: factoriser ce qui suit:*)
               let vs_plus_offset = RIC.add_offset vs offset in
               if !Value_set_options.print_trace then print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into variable " ^ Variable.to_string (ret i));
               let target_variable = 
@@ -482,9 +510,41 @@ module Make (*: Transfer.TRANSFER *) = struct
                   print_endline ("\tall stack variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_stack_vars));
                 );
               Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:target_variable)
-            | Abstract_store_domain.Value.Boolean _ -> 
-              (Log.warn "Using a boolean value as an address: loaded value is undefined";
-              Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:Variable.entire_memory))
+            | Abstract_store_domain.Value.Boolean {numeric_value = vs; _} -> 
+              let vs_plus_offset = RIC.add_offset vs offset in
+              if !Value_set_options.print_trace then print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into variable " ^ Variable.to_string (ret i));
+              let target_variable = 
+                if is_stack then
+                  Variable.Stack vs_plus_offset
+                else
+                  Variable.Mem vs_plus_offset in
+              if !Value_set_options.print_trace then print_endline ("\ttarget variable: " ^ Variable.to_string target_variable);
+              let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
+              let all_stack_vars = Abstract_store_domain.extract_stack_variables state in
+              if !Value_set_options.print_trace then 
+                (print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars));
+                if !Value_set_options.disjoint_stack then 
+                  print_endline ("\tall stack variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_stack_vars));
+                );
+              Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:target_variable)
+            | Bitfield bf ->
+              let vs = RIC.of_bitfield bf in
+              let vs_plus_offset = RIC.add_offset vs offset in
+              if !Value_set_options.print_trace then print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into variable " ^ Variable.to_string (ret i));
+              let target_variable = 
+                if is_stack then
+                  Variable.Stack vs_plus_offset
+                else
+                  Variable.Mem vs_plus_offset in
+              if !Value_set_options.print_trace then print_endline ("\ttarget variable: " ^ Variable.to_string target_variable);
+              let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
+              let all_stack_vars = Abstract_store_domain.extract_stack_variables state in
+              if !Value_set_options.print_trace then 
+                (print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars));
+                if !Value_set_options.disjoint_stack then 
+                  print_endline ("\tall stack variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_stack_vars));
+                );
+              Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:target_variable)
           else
             Abstract_store_domain.to_top_RIC state (ret i)
         end
@@ -513,12 +573,24 @@ module Make (*: Transfer.TRANSFER *) = struct
         | Var.Global _ -> Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string var2))
         | _ -> Abstract_store_domain.get state ~var:(Variable.Var var2) 
         end in
-      begin match vs1, vs2 with
-      (* | Boolean _, _ | _, Boolean _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean Variable.Map.empty) TODO: numeric values *)
+      let vs1, vs2 =
+        begin match vs1, vs2 with
+        | Boolean {numeric_value = vs1; _}, Boolean {numeric_value = vs2; _}
+        | Boolean {numeric_value = vs1; _}, ValueSet vs2
+        | ValueSet vs1, Boolean {numeric_value = vs2; _}
+        | ValueSet vs1, ValueSet vs2 -> vs1, vs2
+        | Bitfield bf, ValueSet vs2
+        | Bitfield bf, Boolean {numeric_value = vs2; _} -> (RIC.of_bitfield bf), vs2
+        | ValueSet vs1, Bitfield bf
+        | Boolean {numeric_value = vs1; _}, Bitfield bf -> vs1, (RIC.of_bitfield bf)
+        | Bitfield bf1, Bitfield bf2 -> RIC.of_bitfield bf1, RIC.of_bitfield bf2
+        end
+      in
+      (* begin match vs1, vs2 with
       | Boolean {numeric_value = vs1; _}, Boolean {numeric_value = vs2; _}
       | Boolean {numeric_value = vs1; _}, ValueSet vs2
       | ValueSet vs1, Boolean {numeric_value = vs2; _}
-      | ValueSet vs1, ValueSet vs2 ->
+      | ValueSet vs1, ValueSet vs2 -> *)
         begin match comp with
         | {op = Eq; typ = I32} ->
           if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " == " ^ RIC.to_string vs2);
@@ -630,7 +702,7 @@ module Make (*: Transfer.TRANSFER *) = struct
                              numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
           end
         | _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean {Boolean.true_or_false = Variable.Map.empty; numeric_value = RIC.Top})
-        end
+        (* end *)
       end
     | Test test -> 
       let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
@@ -644,7 +716,13 @@ module Make (*: Transfer.TRANSFER *) = struct
                   Variable.Map.remove state.abstract_store (Variable.Var var);
                 store_operations = state.store_operations } in (* TODO: check that this is sound *)
             Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.Value.Boolean (Boolean.not_ b))
-          | ValueSet _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean {Boolean.true_or_false = Variable.Map.empty; numeric_value = RIC.Top})
+          (* | ValueSet _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean {Boolean.true_or_false = Variable.Map.empty; numeric_value = RIC.Top}) *)
+          | ValueSet vs -> 
+            let vs = Abstract_store_domain.Value.ValueSet (RIC.of_bitfield (Bitfield.not_ (RIC.to_bitfield vs))) in
+            Abstract_store_domain.set state ~var:(ret i) ~vs
+          | Bitfield bf -> 
+            let vs = Abstract_store_domain.Value.Bitfield (Bitfield.not_ bf) in
+            Abstract_store_domain.set state ~var:(ret i) ~vs
         end
       | _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean {Boolean.true_or_false = Variable.Map.empty; numeric_value = RIC.Top})
       end
@@ -799,6 +877,19 @@ module Make (*: Transfer.TRANSFER *) = struct
       | Boolean boolean_value -> 
         let state_if_true, state_if_false = apply_condition state ~condition:(condition, boolean_value) (Spec_domain.get_or_fail i.annotation_after)  in
         `Branch (state_if_true, state_if_false)
+      | Bitfield bf ->
+        let false_ = 
+          if Bitfield.is_false bf then
+            state
+          else
+            Abstract_store_domain.bottom
+        and true_ = 
+          if Bitfield.is_true bf then
+            state
+          else
+            Abstract_store_domain.bottom
+        in
+        `Branch (true_, false_)
       end
     | Return -> 
       begin match (Spec_domain.get_or_fail i.annotation_before).vstack with

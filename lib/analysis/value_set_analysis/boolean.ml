@@ -84,7 +84,7 @@ let and_ (boolean1 : t) (boolean2 : t) : t =
           Some {True_or_false.true_ = RIC.meet x.true_ y.true_; false_ = RIC.join (RIC.join y.false_ y.true_) (RIC.join x.false_ x.true_)}
         | _, `Right {true_ = t; false_ = f} | _, `Left {true_ = t; false_ = f} -> 
           Some {true_ = t; false_ = RIC.join t f});
-    numeric_value = RIC.bitwise_and boolean1.numeric_value boolean2.numeric_value }
+    numeric_value = RIC.and_ boolean1.numeric_value boolean2.numeric_value}
 
 let xor_ (boolean1 : t) (boolean2 : t) : t =
   print_endline ("XOR");
@@ -96,7 +96,7 @@ let xor_ (boolean1 : t) (boolean2 : t) : t =
         | _, `Right {true_ = t; false_ = f} | _, `Left {true_ = t; false_ = f} -> 
           let vs = RIC.join t f in
           Some {true_ = vs; false_ = vs});
-    numeric_value = RIC.bitwise_xor boolean1.numeric_value boolean2.numeric_value }
+    numeric_value = RIC.xor_ boolean1.numeric_value boolean2.numeric_value}
 
 let or_ (boolean1 : t) (boolean2 : t) : t =
   { true_or_false =
@@ -106,7 +106,7 @@ let or_ (boolean1 : t) (boolean2 : t) : t =
                                    false_ = RIC.meet x.false_ y.false_}
         | _, `Right {true_ = t; false_ = f} | _, `Left {true_ = t; false_ = f} -> 
           Some {true_ = RIC.join t f; false_ = f});
-    numeric_value = RIC.bitwise_or boolean1.numeric_value boolean2.numeric_value }
+    numeric_value = RIC.or_ boolean1.numeric_value boolean2.numeric_value}
 
 (** i32.eqz *)
 let not_ (boolean : t) : t =

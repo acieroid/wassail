@@ -1,23 +1,51 @@
 open Core 
 open Maths
-open Bitfield
 
-(** The Reduced Interval Congruence (RIC) domain for pointer analysis.
+module Bitfield = Bitfield
+type bitfield = Bitfield.t
 
-    This module defines an abstract domain used to represent possible integer values in
-    pointer analysis. It combines:
-    - A congruence domain for arithmetic progressions of the form [stride * ℤ + offset].
-    - An interval domain for bounding integer ranges.
+(** {1 Reduced Interval–Congruence (RIC)}
 
-    RIC values are reduced for precision and support standard abstract operations such as
-    join, meet, widening, addition, and subtraction.
+    <p><b>Purpose.</b> An abstract domain for machine integers and pointers that
+    combines a <i>congruence</i> component (arithmetic progressions of the form
+    [stride * ℤ + offset]) with an <i>interval</i> component (closed range of steps).
+    Values are kept in a <i>reduced</i> normal form so that standard lattice laws hold
+    by construction.</p>
+
+    {b Universe and notation}
+    - [⊤] (Top) is the set of all signed 32‑bit integers; [⊥] (Bottom) is the empty set.
+    - A concrete RIC is written [s[l,u]+o] and denotes { [o + s·k | k ∈ [l..u]] } with
+      [l], [u] in extended integers (±∞). Offsets may be absolute [("", c)] or
+      relative [(var, c)] to a base symbol (e.g., ["g0"]).
+
+    {b Lattice}
+    - Order: [x ≤ y] iff [x ⊓ y = x] (equivalently [x ⊔ y = y]).
+    - [⊓] is intersection; [⊔] is union over‑approximation.
+    - Widening [▽] follows the componentwise widenings of congruences and intervals.
+
+    {b Reduction invariant}
+    - Finite lower bounds are shifted so that the step interval starts at 0.
+    - [s = 0] represents a singleton (exact value).
+    - [s = 1 ∧ l = −∞ ∧ u = +∞] is canonical [⊤].
+
+    {b Relative offsets}
+    - RICs may carry a symbolic base in the offset. Binary operators first drop the
+      base (operate absolutely), then reattach the base when both sides are comparable.
+    - When bases are incomparable, operations conservatively return [⊤] (join) or [⊥]
+      (meet) as appropriate.
 *)
 module RIC = struct
 
-  (** The congruence domain for arithmetic progressions of the form [stride * ℤ + offset].
+  (** {2 Congruence}
 
-      Offsets may be absolute or relative. Provides standard abstract operations and
-      equality up to congruence equivalence.
+      <p>Congruences model arithmetic progressions [stride * ℤ + offset]. Offsets are
+      either absolute [("", c)] or relative [(var, c)]. We use [⊤] to denote all
+      integers and [⊥] for the empty set.</p>
+
+      {b Normal forms}
+      - [Top] ≡ [1ℤ + o] for any [o].
+      - [Bottom] ≡ ∅.
+      - [stride = 0] encodes a singleton with the given offset.</p>
   *)
   module Congruence = struct
     type congruence = {
@@ -25,12 +53,19 @@ module RIC = struct
       offset : string * int32
     }
 
+    (** Abstract values for congruences.
+        - [Top] : all integers (ℤ)
+        - [Bottom] : empty set (∅)
+        - [Congruence {stride; offset}] : the set [stride * ℤ + offset] *)
     type t =
-      | Top (* ℤ *)
-      | Bottom (* ∅ *)
+      | Top
+      | Bottom
       | Congruence of congruence
 
-    (** [equal c1 c2] returns [true] if congruences [c1] and [c2] are equivalent. *)
+    (** [equal c1 c2]
+        Set equivalence modulo standard congruence identities.
+        Recognizes, e.g., [Top ≡ 1ℤ+o], singleton equality for [stride=0], and
+        equivalence of offsets modulo the stride when bases match. *)
     let equal (c1 : t) (c2 : t) : bool =
       match c1, c2 with 
       | Top, Top | Bottom, Bottom -> true
@@ -40,10 +75,11 @@ module RIC = struct
       | Congruence { stride = 0l; offset = (v1, o1) }, Congruence { stride = 0l; offset = (v2, o2) } ->
         String.equal v1 v2 && Int32.equal o1 o2
       | Congruence { stride = s1; offset = (v1, o1) }, Congruence { stride = s2; offset = (v2, o2) } ->
-        (* Int32.equal s1 s2 && String.equal v1 v2 && (o1 - o2) mod s1 = 0 *)
-        Int32.equal s1 s2 && String.equal v1 v2 && Int32.(Int32.(%) (Int32.(-) o1  o2) s1 = 0l)
+        Int32.equal s1 s2 && String.equal v1 v2 && Int32.((o1 - o2) % s1 = 0l)
       | _ -> false
 
+    (** [to_string c]
+        Pretty‑prints in compact math style, e.g. ["4ℤ+(x+1)"] or ["ℤ"/"∅"]. *)
     let to_string (c : t) : string =
       match c with 
       | Top -> "ℤ" 
@@ -74,7 +110,11 @@ module RIC = struct
         | stride, "" -> stride 
         | stride, offset -> stride ^ "+" ^ offset
 
-    (** [join c1 c2] returns the least upper bound (union) of [c1] and [c2]. *)
+    (** [join c1 c2]
+        Least upper bound (over‑approximate union).
+        - [Top] absorbs; [Bottom] is neutral.
+        - If bases match, uses gcd(strides, offset diff) to compute the resulting stride
+          and keeps the smaller offset representative; otherwise returns [Top]. *)
     let join (c1 : t) (c2 : t) : t =
       match c1, c2 with 
       | Top, _ | _, Top -> Top 
@@ -84,15 +124,18 @@ module RIC = struct
       | Congruence { stride = s1; offset = (v1, o1) }, Congruence { stride = s2; offset = (v2, o2) } ->
         if String.equal v1 v2 then
           let new_offset = (v1, Int32.min o1 o2) in
-          (* print_endline(Int32.to_string o1 ^ " - " ^ Int32.to_string o2 ^ " = " ^ Int32.to_string Int32.(o1 - o2)); *)
           let stride_difference = Int32.abs (Int32.(o1 - o2)) in
-          (* print_endline ("calculating new stride: s1=" ^ Int32.to_string s1 ^ " s2=" ^ Int32.to_string s2 ^ " stride difference=" ^ Int32.to_string stride_difference); *)
           let new_stride = gcd (gcd s1 s2) stride_difference in
           Congruence { stride = new_stride; offset = new_offset }
         else
           Top
 
-    (** [meet c1 c2] returns the greatest lower bound (intersection) of [c1] and [c2]. *)
+    (** [meet c1 c2]
+        Greatest lower bound (intersection).
+        - Handles singleton/constant cases directly.
+        - If bases match and CRT side‑conditions hold, uses lcm for the stride and the
+          Chinese Remainder Theorem to select a consistent offset; returns [Bottom]
+          when no solution exists. *)
     let meet (c1 : t) (c2 : t) : t =
       match c1, c2 with
       | Top, c | c, Top -> c 
@@ -113,21 +156,27 @@ module RIC = struct
         else
           Bottom
     
+    (** [widen c1 c2]
+        Widening for congruences. Here identical to [join]. *)
     let widen (c1 :t) (c2 : t) : t = join c1 c2
 
-    (** [sum c1 c2] returns the over-approximation of the sum [c1 + c2]. *)
+    (** [sum c1 c2]
+        Abstract addition of progressions: gcd of strides, offsets added.
+        Relative bases are combined using [add_relative_offsets]. *)
     let sum (c1 : t) (c2 : t) : t =
       match c1, c2 with
       | Top, _ | _, Top -> Top
       | Bottom, c | c, Bottom -> c
       | Congruence {stride = s1; offset = (v1, o1)},
         Congruence {stride = s2; offset = (v2, o2)} ->
-          Congruence {stride = gcd s1 s2; offset = add_relative_offsets v1 v2, Int32.(+) o1 o2}
+          Congruence {stride = gcd s1 s2; offset = add_relative_offsets v1 v2, Int32.(o1 + o2)}
   end
 
-  (** The integer interval domain, representing bounded or unbounded intervals using extended integers.
+  (** {2 Interval}
 
-      Supports standard abstract operations such as join, meet, and widening.
+      <p>Intervals use extended integers for bounds: [−∞], finite [Int n], and [∞].
+      [Top] is the whole line (]−∞,∞[), [Bottom] is ∅. Operators implement the usual
+      lattice on intervals.</p>
   *)
   module Interval = struct
     type interval = {
@@ -135,18 +184,24 @@ module RIC = struct
       upper_bound : ExtendedInt.t
     }
 
+    (** Abstract values for intervals.
+        - [Top] : ]−∞,∞[
+        - [Bottom] : ∅
+        - [Interval {lower_bound; upper_bound}] : closed interval with possibly
+          unbounded endpoints. *)
     type t =
-      | Top (* ℤ *)
-      | Bottom (* ∅ *)
+      | Top
+      | Bottom
       | Interval of interval
 
+    (** [equal i1 i2]
+        Set equality, collapsing canonical Top/Bottom normalizations. *)
     let equal (i1 : t) (i2 : t) : bool =
       match i1, i2 with 
       | Top, Top | Bottom, Bottom -> true  
       | Top, Interval {lower_bound = NegInfinity; upper_bound = Infinity}
       | Interval {lower_bound = NegInfinity; upper_bound = Infinity}, Top -> true
       | Bottom, Interval {lower_bound = l; upper_bound = u} 
-        when ExtendedInt.less_than u l -> true
       | Interval {lower_bound = l; upper_bound = u}, Bottom 
         when ExtendedInt.less_than u l -> true
       | Interval {lower_bound = l1; upper_bound = u1},
@@ -157,6 +212,8 @@ module RIC = struct
         && ExtendedInt.equal i1.upper_bound i2.upper_bound)
       | _ -> false
 
+    (** [to_string i]
+        Math‑style printer: "[a,b]", "]−∞,b]", "[a,∞[", or "ℤ"/"∅" as canonical cases. *)
     let to_string (i : t) : string =
       match i with 
       | Top -> "ℤ"
@@ -169,12 +226,12 @@ module RIC = struct
             "[" ^ Int32.to_string l ^ "," ^ ExtendedInt.to_string Infinity ^ "["
           | NegInfinity, Int u -> 
             "]" ^ ExtendedInt.to_string NegInfinity ^ "," ^ Int32.to_string u ^ "]"
-          (* | Int l, Int u when l <= u -> "[" ^ string_of_int l ^ "," ^ string_of_int u ^ "]" *)
           | Int l, Int u when Int32.compare l u <= 0 -> "[" ^ Int32.to_string l ^ "," ^ Int32.to_string u ^ "]"
           | _ -> assert false
         end
 
-    (** [join i1 i2] returns the least upper bound (union) of [i1] and [i2]. *)
+    (** [join i1 i2]
+        Least upper bound (hull) with Top/Bottom neutral/absorbing behavior. *)
     let join (i1 : t) (i2 : t) : t =
       let join =
         match i1, i2 with 
@@ -189,7 +246,8 @@ module RIC = struct
       in
       if equal join Top then Top else if equal Bottom join then Bottom else join
 
-    (** [meet i1 i2] returns the greatest lower bound (intersection) of [i1] and [i2]. *)
+    (** [meet i1 i2]
+        Greatest lower bound (intersection) with empty‑set detection. *)
     let meet (i1 : t) (i2 : t) : t =
       let meet =
         match i1, i2 with 
@@ -203,6 +261,9 @@ module RIC = struct
           Interval {lower_bound = lower; upper_bound = upper}
       in if equal meet Top then Top else if equal Bottom meet then Bottom else meet
 
+    (** [widen i1 i2]
+        Standard widening: when a bound moves outward, drop it to the corresponding
+        infinity; otherwise keep the previous bound. *)
     let widen (i1 : t) (i2 : t) : t =
       match i1, i2 with 
       | Top, _ | _, Top -> Top
@@ -215,7 +276,8 @@ module RIC = struct
           let upper = if ExtendedInt.less_than u1 u2 then ExtendedInt.Infinity else u1 in
           Interval {lower_bound = lower; upper_bound = upper}
 
-    (** [sum i1 i2] returns the over-approximation of the sum [i1 + i2]. *)
+    (** [sum i1 i2]
+        Minkowski sum of intervals on extended integers. *)
     let sum (i1 : t) (i2 : t) : t =
       match i1, i2 with
       | Top, _ | _, Top -> Top
@@ -227,7 +289,13 @@ module RIC = struct
           Interval {lower_bound = new_lower; upper_bound = new_upper}
   end
 
-  (** A reduced interval congruence value: [stride * {lower_bound..upper_bound} + offset]. *)
+  type congruence = Congruence.t
+  type interval = Interval.t
+
+  (** {2 RIC values}
+      A reduced value [stride * [lower_bound..upper_bound] + offset]. The reduction
+      invariant maintains [lower_bound = 0] when finite, and folds special cases into
+      canonical [⊤]/[⊥]/singleton forms. *)
   type ric = {
     stride : int32;
     lower_bound : ExtendedInt.t;
@@ -236,14 +304,22 @@ module RIC = struct
   }
   [@@deriving sexp, compare, equal]
 
-  (** An abstract value in the RIC domain. *)
+  (** Abstract values in the RIC domain.
+      - [Top] : all 32‑bit integers
+      - [Bottom] : empty set
+      - [RIC r] : concrete reduced interval‑congruence *)
   type t =
     | Top
     | Bottom
     | RIC of ric
   [@@deriving sexp, compare, equal]
 
-  (** [reduce r] normalizes the RIC [r] by shifting the offset and resetting the lower bound to 0. *)
+  (** [reduce r]
+      Normalize a RIC:
+      1) shift offsets so a finite lower bound becomes 0;
+      2) collapse [⊤]/[⊥]/singleton cases;
+      3) tighten bounds when stride/offset imply overflow toward ±∞.
+      Idempotent. *)
   let rec reduce (r : t) : t =
     match r with 
     | Top -> Top 
@@ -261,8 +337,8 @@ module RIC = struct
       else
         let new_offset =
           match o, l with 
-          | (var, o), Int l -> (var, Int32.(o + s * l))
-          | (var, o), NegInfinity -> (var, Int32.(%) o s)
+          | (var, o), Int l -> var, Int32.(o + s * l)
+          | (var, o), NegInfinity -> var, Int32.(o % s)
           | _ -> assert false
         in
         let new_lower =
@@ -274,7 +350,7 @@ module RIC = struct
         let new_upper =
           match o, l, u with
           | _, _, Infinity -> ExtendedInt.Infinity
-          | _, Int l, Int u -> Int (Int32.(u - l))
+          | _, Int l, Int u -> Int Int32.(u - l)
           | (_, o), NegInfinity, u -> 
             ExtendedInt.plus u (ExtendedInt.Int Int32.(o / s - if (o % s <> 0l) && o < 0l then 1l else 0l))
           | _ -> assert false
@@ -287,53 +363,65 @@ module RIC = struct
         in
         RIC {stride = new_stride; lower_bound = new_lower; upper_bound = new_upper; offset = new_offset}
 
-  (** [ric (s, l, u, o)] constructs and reduces a RIC from stride [s], bounds [l] and [u], and offset [o]. *)
+  (** [ric (s,l,u,o)]
+      Smart constructor that builds then immediately reduces the RIC. *)
   let ric (r : int32 * ExtendedInt.t * ExtendedInt.t * (string * int32)) : t =
     reduce (
       match r with 
       | s, l, u, o -> RIC {stride = s; lower_bound = l; upper_bound = u; offset = o}
     )
 
+  (** All negative integers. *)
   let negative_integers = ric (1l, NegInfinity, Int (-1l), ("", 0l))
 
+  (** All non‑negative integers. *)
   let positive_integers = ric (1l, Int 0l, Infinity, ("", 0l))
 
-  (** [relative_ric var] returns a RIC with zero stride and offset set to the variable [var]. *)
+  (** [relative_ric var]
+      Singleton [0] expressed relative to base symbol [var]. *)
   let relative_ric (var : string) : t =
     ric (0l, Int 0l, Int 0l, (var, 0l))
 
+  (** [spans_neg_inf_to_pos_inf r]
+      [true] iff [r] covers ]−∞,∞[ (or is [Top]). *)
   let spans_neg_inf_to_pos_inf (r : t) : bool =
     match r with
     | Top
     | RIC {lower_bound = NegInfinity; upper_bound = Infinity; _} -> true
     | _ -> false
 
-  (** [is_singleton r] returns [true] if [r] contains exactly one value. *)
+  (** [is_singleton r]
+      [true] iff [r] denotes exactly one value (i.e., reduced stride = 0). *)
   let is_singleton (r : t) : bool =
     let r = reduce r in
     match r with
     | RIC {stride = 0l; _} -> true
     | _ -> false
 
-  (** [extract_relative_offset r] returns the variable name used in the offset of [r]. *)
+  (** [extract_relative_offset r]
+      Returns the base symbol used in [r]'s offset (or ["" ] if absolute). *)
   let extract_relative_offset (r : t) : string =
     match r with
     | Bottom | Top -> ""
     | RIC {offset = (relative, _); _} -> relative
 
+  (** [is_stack r]
+      Heuristic predicate: [true] when the base symbol is ["g0"]. *)
   let is_stack (r : t) : bool =
     match r with
     | RIC {offset = (relative, _); _} -> String.equal relative "g0"
     | _ -> false
   
-  (** [set_relative_offset r offset] sets the variable name in the offset of [r] to [offset]. *)
+  (** [set_relative_offset r name]
+      Attach base symbol [name] to an absolute RIC. *)
   let set_relative_offset (r : t) (offset : string) : t =
     match r with
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
       ric (s, l, u, (offset, o))
-    | _ -> r
+    | _ -> assert false
 
-  (** [remove_relative_offset r] returns [r] with its relative variable removed (set to ""). *)
+  (** [remove_relative_offset r]
+      Drop the base symbol, making the offset absolute. *)
   let remove_relative_offset (r : t) : t =
     match r with
     | Top -> Top
@@ -341,54 +429,38 @@ module RIC = struct
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (_, o)} -> 
       ric (s, l, u, ("", o))
 
-  (** [of_congruence_and_interval c i] constructs a RIC value from congruence [c] and interval [i],
-      and reduces the result for consistency. *)
-  let of_congruence_and_interval (c : Congruence.t) (i : Interval.t) : t =
-    match c with
-    | Top ->
-      begin match i with 
-        | Top -> Top
-        | Bottom -> Bottom
-        | Interval {lower_bound = l; upper_bound = u} ->
-          ric (1l, l, u, ("", 0l))
-      end
-    | c when Congruence.equal Top c ->
-      begin match i with 
-        | Top -> Top
-        | Bottom -> Bottom
-        | Interval {lower_bound = l; upper_bound = u} ->
-          ric (1l, l, u, ("", 0l))
-      end
-    | Bottom -> Bottom
-    | Congruence {stride = 0l; offset = o} ->
-      begin match i with
-        | Bottom -> Bottom
-        | _ -> ric (0l, Int 0l, Int 0l, o)
-      end
-    | Congruence {stride = s; offset = (var, o)} ->
-      begin match i with 
-        | Top -> reduce (ric (s, ExtendedInt.NegInfinity, ExtendedInt.Infinity, (var, o)))
-        | Bottom -> Bottom
-        | Interval {lower_bound = l; upper_bound = u} ->
-          let lower = 
-            ExtendedInt.divide_ceiling (ExtendedInt.minus l (ExtendedInt.Int o)) (ExtendedInt.Int s) in
-          let upper = 
-            ExtendedInt.divide_floor (ExtendedInt.minus u (ExtendedInt.Int o)) (ExtendedInt.Int s) in
-          ric (s, lower, upper, (var, o))
-      end
+  (** [of_congruence_and_interval c i]
+      Combine components into a (reduced) RIC. Relative offsets are preserved; [⊤]/[⊥]
+      propagate naturally. [stride=0] produces a singleton. *)
+  let of_congruence_and_interval (c : congruence) (i : interval) : t =
+    let c = if Congruence.equal Top c then Congruence.Top else if Congruence.equal Bottom c then Bottom else c in
+    match c, i with
+    | Top, Top -> Top
+    | Top, Interval {lower_bound = l; upper_bound = u} -> ric (1l, l, u, ("", 0l))
+    | Bottom, _ | _, Bottom -> Bottom
+    | Congruence {stride = 0l; offset = o; _}, _ -> ric (0l, Int 0l, Int 0l, o)
+    | Congruence {stride = s; offset = (var, o)}, Top -> ric (s, ExtendedInt.NegInfinity, ExtendedInt.Infinity, (var, o))
+    | Congruence {stride = s; offset = (var, o)}, Interval {lower_bound = l; upper_bound = u} ->
+      let lower = 
+        ExtendedInt.divide_ceiling (ExtendedInt.minus l (ExtendedInt.Int o)) (ExtendedInt.Int s) in
+      let upper = 
+        ExtendedInt.divide_floor (ExtendedInt.minus u (ExtendedInt.Int o)) (ExtendedInt.Int s) in
+      ric (s, lower, upper, (var, o))
 
-  (** [to_congruence_and_interval r] decomposes [r] into its congruence and interval components. *)
-  let to_congruence_and_interval (r : t) : Congruence.t * Interval.t =
-    (* let r = reduce r in *)
+  (** [to_congruence_and_interval r]
+      Decompose a (possibly reduced) RIC back to its components. The congruence
+      offset is normalized modulo [stride] when [stride≠0]. *)
+  let to_congruence_and_interval (r : t) : congruence * interval =
     match r with 
     | Top -> Top, Top
     | Bottom -> Bottom, Bottom 
     | RIC {stride = s; offset = (var, o); lower_bound = l; upper_bound = u} ->
-      Congruence {stride = s; offset = (var, if Int32.equal s 0l then o else Int32.(%) o s)},
+      Congruence {stride = s; offset = (var, if Int32.equal s 0l then o else Int32.(o % s))},
       Interval {lower_bound = ExtendedInt.plus (ExtendedInt.Int o) (ExtendedInt.times (ExtendedInt.Int s) l); 
                 upper_bound = ExtendedInt.plus (ExtendedInt.Int o) (ExtendedInt.times (ExtendedInt.Int s) u)}
       
-  (** [equal r1 r2] returns [true] if [r1] and [r2] represent the same set. *)
+  (** [equal r1 r2]
+      Canonical equality after [reduce]. *)
   let equal (ric1 : t) (ric2 : t) : bool =
     let ric1, ric2 = reduce ric1, reduce ric2 in
     match ric1, ric2 with 
@@ -401,14 +473,16 @@ module RIC = struct
         && String.equal v1 v2 && Int32.equal o1 o2
     | _ -> false
 
-  (** [comparable_offsets r1 r2] returns true if two RICs can be compared, i.e., they have matching base variables. *)
+  (** [comparable_offsets r1 r2]
+      [true] iff base symbols match (or both are absolute). *)
   let comparable_offsets (ric1 : t) (ric2 : t) : bool =
     match ric1, ric2 with
     | RIC {offset = (v1, _); _},
       RIC {offset = (v2, _); _} -> String.equal v1 v2 
     | _ -> true
 
-  (** [to_string r] returns a human-readable string representation of RIC [r]. *)
+  (** [to_string r]
+      Normalized math‑style printer: e.g. ["2[0,3]+(x+1)"] or ["⊤"/"⊥"]. *)
   let to_string (r : t) : string =
     let r = reduce r in
     match r with
@@ -433,7 +507,9 @@ module RIC = struct
       | "", "]-∞,∞[", _ | "", "ℤ", _ -> "⊤"
       | _ -> stride ^ interval ^ offset
 
-  (** [meet r1 r2] returns the intersection of [r1] and [r2]. *)
+  (** [meet r1 r2]
+      Intersection. If bases differ, returns [⊥]. Otherwise intersects components after
+      temporarily dropping the base symbol, then re‑attaches it. *)
   let meet (ric1 : t) (ric2 : t) : t =
     if comparable_offsets ric1 ric2 then
       let relative_offset = 
@@ -441,12 +517,12 @@ module RIC = struct
         | RIC _, _ -> extract_relative_offset ric1
         | _, RIC _ -> extract_relative_offset ric2
         | _ -> "" in
-      let ric1 = remove_relative_offset ric1 in
-      let ric2 = remove_relative_offset ric2 in
-      let (c1, i1) = to_congruence_and_interval ric1 in
-      let (c2, i2) = to_congruence_and_interval ric2 in
-      let c = Congruence.meet c1 c2 in
-      let i = Interval.meet i1 i2 in
+      let ric1 = remove_relative_offset ric1
+      and ric2 = remove_relative_offset ric2 in
+      let (c1, i1) = to_congruence_and_interval ric1
+      and (c2, i2) = to_congruence_and_interval ric2 in
+      let c = Congruence.meet c1 c2
+      and i = Interval.meet i1 i2 in
       let m = of_congruence_and_interval c i in
       match m with
       | Top | Bottom -> m
@@ -454,17 +530,24 @@ module RIC = struct
     else
       Bottom
 
+  (** [negative_part r]
+      Intersection of [r] with negative integers. *)
   let negative_part (r : t) : t =
     meet r negative_integers
 
+  (** [positive_part r]
+      Intersection of [r] with non‑negative integers. *)
   let positive_part (r : t) : t =
     meet r positive_integers
   
-  (** [disjoint r1 r2] returns [true] if [r1] and [r2] have no values in common. *)
-  let disjoint (ric1 : t) (ric2 : t) : bool =
+  (** [are_disjoint r1 r2]
+      [true] iff [r1 ⊓ r2 = ⊥]. *)
+  let are_disjoint (ric1 : t) (ric2 : t) : bool =
     equal Bottom (meet ric1 ric2)
 
-  (** [join r1 r2] returns the union (over-approximation) of [r1] and [r2]. *)
+  (** [join r1 r2]
+      Least upper bound. Requires comparable bases; otherwise [⊤]. Joins components
+      then reinstates the base symbol. *)
   let join (ric1 : t) (ric2 : t) : t =
     if comparable_offsets ric1 ric2 then
       let relative_offset = 
@@ -472,12 +555,12 @@ module RIC = struct
         | RIC _, _ -> extract_relative_offset ric1
         | _, RIC _ -> extract_relative_offset ric2
         | _ -> "" in
-      let ric1 = remove_relative_offset ric1 in
-      let ric2 = remove_relative_offset ric2 in
-      let (c1, i1) = to_congruence_and_interval ric1 in
-      let (c2, i2) = to_congruence_and_interval ric2 in
-      let c = Congruence.join c1 c2 in
-      let i = Interval.join i1 i2 in 
+      let ric1 = remove_relative_offset ric1
+      and ric2 = remove_relative_offset ric2 in
+      let (c1, i1) = to_congruence_and_interval ric1
+      and (c2, i2) = to_congruence_and_interval ric2 in
+      let c = Congruence.join c1 c2
+      and i = Interval.join i1 i2 in 
       let j = of_congruence_and_interval c i in
       match j with
       | Top | Bottom -> j
@@ -485,7 +568,8 @@ module RIC = struct
     else
       Top
 
-  (** [is_subset r1 ~of_:r2] returns [true] if [r1] is a subset of [r2]. *)
+  (** [is_subset r1 ~of_:r2]
+      Subset check using the standard meet/join characterizations. *)
   let is_subset (ric1 : t) ~(of_ : t) : bool =
     let m = meet ric1 of_ in
     let j = join ric1 of_ in 
@@ -495,11 +579,15 @@ module RIC = struct
     | _, j when equal j of_ -> assert false
     | _ -> false
 
-  (** [subsumes r1 r2] returns [true] if [r1] over-approximates [r2]. *)
+  (** [subsumes r1 r2]
+      Synonym for [is_subset r2 ~of_:r1]. *)
   let subsumes (ric1 : t) (ric2 : t) : bool = 
     is_subset ric2 ~of_:ric1
 
-  (** [complement r] returns a list of RICs representing the complement of [r]. *)
+  (** [complement r]
+      Set‑theoretic complement returned as a small list of RICs. For bounded
+      progressions, includes the exterior ranges and (when [stride>0]) the interleaving
+      gaps between consecutive addresses. [⊤] → [[⊥]]; [⊥] → [[⊤]]. *)
   let complement (r : t) : t list =
     match reduce r with
     | Top -> [Bottom]
@@ -518,11 +606,12 @@ module RIC = struct
       in
       let overlapping_complement =
         if Int32.equal s 0l then []
-        else List.init (Int32.to_int_exn s - 1) ~f:(fun i -> ric (s, l, u, (v, Int32.(+) (Int32.(+) o (Int32.of_int_exn i)) 1l)))
+        else List.init (Int32.to_int_exn s - 1) ~f:(fun i -> ric (s, l, u, (v, Int32.(o + (Int32.of_int_exn i) + 1l))))
       in
       inferior_RIC @ overlapping_complement @ superior_RIC
 
-  (** [add_offset r c] returns [r] with its offset increased by [c]. *)
+  (** [add_offset r c]
+      Shift the offset by a constant [c]. *)
   let add_offset (r : t) (c : int32) : t =
     match r with
     | Top -> Top 
@@ -530,7 +619,8 @@ module RIC = struct
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (v,o)} -> 
       ric (s, l, u, (v, Int32.(o + c)))
 
-  (** [remove_lower_bound r] returns [r] with its lower bound removed (set to -∞). *)
+  (** [remove_lower_bound r]
+      Drop the lower bound (→ −∞) while preserving stride/offset. *)
   let remove_lower_bound (r : t) : t =
     let r = reduce r in
     match r with 
@@ -538,12 +628,9 @@ module RIC = struct
     | Bottom -> Bottom 
     | RIC {stride = s; lower_bound = _; upper_bound = u; offset = o} -> 
       ric (1l, NegInfinity, ExtendedInt.times (Int s) u, o)
-        (* if s = 0 then 
-          ric (1, NegInfinity, u, o) 
-        else
-          ric (s, NegInfinity, u, o) *)
 
-  (** [remove_upper_bound r] returns [r] with its upper bound removed (set to ∞). *)
+  (** [remove_upper_bound r]
+      Drop the upper bound (→ +∞) while preserving stride/offset. *)
   let remove_upper_bound (r : t) : t =
     let r = reduce r in
     match r with 
@@ -551,14 +638,10 @@ module RIC = struct
     | Bottom -> Bottom 
     | RIC {stride = s; lower_bound = l; upper_bound = _; offset = o} -> 
       ric (1l, ExtendedInt.times (Int s) l, Infinity, o)
-      (* reduce (
-        if s = 0 then
-          ric (1, l, Infinity, o)
-        else
-          ric (s, l, Infinity, o)
-      ) *)
 
-  (** [widen r ~relative_to] returns the widening of [r] with respect to [relative_to]. *)
+  (** [widen r ~relative_to]
+      Componentwise widening after removing relative bases; the base is reattached when
+      present and comparable. Incomparable bases yield [⊤]. *)
   let widen (ric1 : t) ~(relative_to : t) : t =
     if comparable_offsets ric1 relative_to then
       let relative_offset = 
@@ -573,22 +656,25 @@ module RIC = struct
       let widened_c = Congruence.widen c1 c2 in
       let widened_i = Interval.widen i1 i2 in 
       let w = of_congruence_and_interval widened_c widened_i in
-       match w with
+      match w with
       | Top | Bottom -> w
       | _ -> set_relative_offset w relative_offset
     else
       Top
 
-  (** [partially_accessed ~by ~size] returns RICs that may be partially accessed by a memory access of [size] bytes. *)
+  (** [partially_accessed ~by ~size]
+      Addresses within [by] that may be {i partially} touched by a memory access of
+      [size] bytes. Returns a finite list of RICs; may include [⊤] when unavoidable
+      imprecision arises (e.g., dense progressions spanning both sides of the origin). *)
   let partially_accessed ~(by : t) ~(size : int32) : t list =
     let r = reduce by in
     if equal Top r then 
       [Top]
-    else if spans_neg_inf_to_pos_inf r then (* TODO: Test this case! *)
+    else if spans_neg_inf_to_pos_inf r then
       match r with
       | RIC {stride = s; _} when Int32.(s <= size) -> [Top]
       | RIC _ -> 
-        List.fold (List.init (2 * (Int32.to_int_exn size) - 1) ~f:(fun i -> Int32.neg (Int32.(+) size (Int32.(+) 1l (Int32.of_int_exn i)))))
+        List.fold (List.init (2 * (Int32.to_int_exn size) - 1) ~f:(fun i -> Int32.neg Int32.(size + 1l + (Int32.of_int_exn i))))
           ~init:[]
           ~f:(fun acc i -> (add_offset r i) :: acc)
       | _ -> assert false
@@ -600,77 +686,72 @@ module RIC = struct
         | i, RIC {stride = s; lower_bound = Int _; _} when Int32.(i = (if Int32.(s = 0l) then size else Int32.min size (Int32.(s - 3l)))) -> acc
         | i, RIC {stride = s; lower_bound = NegInfinity; _} when Int32.(i + 3l + size - 1l = max (-4l) (size - s - 1l)) -> acc
         | i, RIC {stride = s; lower_bound = Int l; upper_bound = Int u; offset = (v, o)} ->
-          aux Int32.(i + 1l) (ric (s, Int l, (if Int32.(s <> 0l) then Int Int32.(l + ((u - l + 1l) * s - i + size - 1l) / s - 1l) else Int 0l), (v, Int32.(+) o i)) :: acc)
+          aux Int32.(i + 1l) (ric (s, Int l, (if Int32.(s <> 0l) then Int Int32.(l + ((u - l + 1l) * s - i + size - 1l) / s - 1l) else Int 0l), (v, Int32.(o + i))) :: acc)
         | i, RIC {upper_bound = Infinity; _} ->
           aux Int32.(i + 1l) (add_offset r i :: acc)
-        | i, RIC {lower_bound = NegInfinity; _} -> 
-          (* print_endline (Int32.to_string i); *)
+        | i, RIC {lower_bound = NegInfinity; _} ->
           let offset = Int32.(i + 3l + size - 1l) in
-          (* print_endline ("new: " ^ Int32.to_string offset); *)
           aux Int32.(i - 1l) (add_offset r offset :: acc)
         | _ -> assert false
       in
       let accessed = aux (-3l) []
       in
-      (* if Int32.(size <> 4l) || (not (is_singleton r)) && (match r with | RIC {stride = s; _} when Int32.(s < 4l) -> true | _ -> false) then *)
       if Int32.(size <> 4l) || (not (is_singleton r)) && (match r with | RIC {stride = s; _} -> Int32.(s < 4l) | _ -> false) then
         List.dedup_and_sort ~compare:compare accessed
       else
         List.dedup_and_sort ~compare:compare (List.filter ~f:(fun x -> not (equal x r)) accessed)
 
   
-  (** The result of a memory access: fully and partially accessed RICs. *)
-  type accessed = {
+  (** Result of a memory access: fully touched region and partially touched regions. *)
+  type accessed_memory = {
     fully : t;
     partially : t list
   }
   
-  (** [accessed ~value_set ~size] returns the fully and partially accessed RICs for a memory access 
-      of [size] bytes from [value_set]. *)
-  let accessed ~(value_set : t) ~(size : int32) : accessed =
+  (** [accessed ~value_set ~size]
+      Split a memory access into fully vs partially accessed RICs. For 32‑bit loads,
+      [fully] is kept when stride ≥ 4 (or the set is a singleton); the remainder is
+      reported in [partially]. *)
+  let accessed ~(value_set : t) ~(size : int32) : accessed_memory =
     let stride = match value_set with | RIC {stride = s; _} -> s | Top -> 1l | Bottom -> 0l in
-    let f = if Int32.(size = 4l) && (Int32.(stride >= 4l) || is_singleton value_set) then value_set else Bottom in
-    let p = partially_accessed ~by:value_set ~size:size in
-    {fully = f; partially = p}
+    let fully = if Int32.(size = 4l) && (Int32.(stride >= 4l) || is_singleton value_set) then value_set else Bottom in
+    let partially = partially_accessed ~by:value_set ~size:size in
+    {fully; partially}
 
-  (** [plus r1 r2] returns the over-approximation of the sum [r1] + [r2]. *)
+  (** [plus r1 r2]
+      Abstract addition with base‑symbol composition. Components use [sum], then the
+      resulting base is reattached via [add_relative_offsets]. *)
   let plus (ric1 : t) (ric2 : t) : t =
     match ric1, ric2 with
     | Top, _ | _, Top -> Top
     | Bottom, Bottom -> Bottom
-    | Bottom, _ ->
-      Log.warn ("Adding Bottom state to an RIC - result will return the RIC unchanged: " ^ to_string ric2);
-      ric2
-    | _, Bottom -> 
-      Log.warn ("Adding Bottom state to an RIC - result will return the RIC unchanged: " ^ to_string ric1);
-      ric1
+    | Bottom, _ -> ric2
+    | _, Bottom -> ric1
     | _ ->
-      let offset1 = extract_relative_offset ric1 in
-      let offset2 = extract_relative_offset ric2 in
+      let offset1 = extract_relative_offset ric1
+      and offset2 = extract_relative_offset ric2 in
       let relative_offset = add_relative_offsets offset1 offset2 in
-      let ric1 = remove_relative_offset ric1 in
-      let ric2 = remove_relative_offset ric2 in
-      let c1, i1 = to_congruence_and_interval ric1 and
-      c2, i2 = to_congruence_and_interval ric2 in
-      let new_congruence = Congruence.sum c1 c2 and
-      new_interval = Interval.sum i1 i2 in
+      let ric1 = remove_relative_offset ric1
+      and ric2 = remove_relative_offset ric2 in
+      let c1, i1 = to_congruence_and_interval ric1
+      and c2, i2 = to_congruence_and_interval ric2 in
+      let new_congruence = Congruence.sum c1 c2
+      and new_interval = Interval.sum i1 i2 in
       let result = of_congruence_and_interval new_congruence new_interval in
       set_relative_offset result relative_offset
 
-  (** [negative r] returns the RIC representing the negation [-r]. *)
+  (** [negative r]
+      Pointwise negation: flip bounds and offset; preserve (transformed) relativeness. *)
   let negative (r : t) : t =
     match r with
     | Top -> Top
     | Bottom -> Bottom
-    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
-      ric (s, ExtendedInt.times (Int (-1l)) u, ExtendedInt.times (Int (-1l)) l, ("", Int32.(- o)))
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (v, o)} ->
-      if String.is_prefix v ~prefix:"neg" then
-        ric (s, ExtendedInt.times (Int (-1l)) u, ExtendedInt.times (Int (-1l)) l, (String.drop_prefix v 3, Int32.(- o)))
-      else
-        ric (s, ExtendedInt.times (Int (-1l)) u, ExtendedInt.times (Int (-1l)) l, ("neg" ^ v, Int32.(- o)))
+      let new_offset = negate_relative_offset v in
+      ric (s, ExtendedInt.times (Int (-1l)) u, ExtendedInt.times (Int (-1l)) l, (new_offset, Int32.(- o)))
 
-  (** [minus r1 r2] returns the over-approximation of the difference [r1] - [r2]. *)
+  (** [minus r1 r2]
+      Compute [r1 + (−r2)]. If bases are incompatible, returns [⊤]. *)
   let minus (ric1 : t) (ric2 : t) : t =
     if not (comparable_offsets ric1 ric2) then
       Top
@@ -680,7 +761,9 @@ module RIC = struct
       let negative_ric2 = negative ric2 in
       plus ric1 negative_ric2
 
-  (** [remove ~this ~from] returns the parts of [from] that are not in [this]. *)
+  (** [remove ~this ~from]
+      Set difference returned as a small list of RICs. When the global option
+      [disjoint_memory_spaces] is enabled and bases differ, the removal is a no‑op. *)
   let remove ~(this : t) ~(from : t) : t list =
     let disjoint_memory = !Value_set_options.disjoint_memory_spaces in
     if disjoint_memory && not (comparable_offsets this from) then
@@ -691,67 +774,58 @@ module RIC = struct
     else
       []
 
+  (** [update_relative_offset ~ric_ ~actual_values]
+      Resolve symbolic base names by substituting concrete RICs from [actual_values].
+      Concatenated bases like ["negx+y"] are interpreted as signed components. *)
   let update_relative_offset ~(ric_ : t) ~(actual_values : t String.Map.t) : t =
     let offset = extract_relative_offset ric_ in
-    match Map.find actual_values offset with
-    | None -> ric_
-    | Some r ->
-      let ric_ = remove_relative_offset ric_ in
-      plus r ric_
+    let offsets = String.split_on_chars ~on:['+'] offset in
+    List.fold
+      ~init:(remove_relative_offset ric_)
+      ~f:(fun acc offset ->
+        let is_negative = String.is_prefix offset ~prefix:"neg" in
+        let var = if is_negative then String.drop_prefix offset 3 else offset in
+        match Map.find actual_values var with
+        | None -> plus acc (relative_ric offset)
+        | Some r -> 
+          if is_negative then
+            plus acc (negative r)
+          else
+            plus acc r)
+      offsets
 
-
-  let is_power_of_two (x : int32) : bool =
-    Int32.(x > 0l && (x land (x - 1l)) = 0l)
-
-
-  let common_msb (x : int32) (y : int32) : Bitfield.t * int = 
-    let bf = Bitfield.of_set (Set.of_list (module Int32) [x; y]) in
-    let rec aux (bf : Bitfield.t) (n : int) : Bitfield.t * int =
-      if Bitfield.is_singleton bf then
-        bf, n
-      else
-        let bf = Bitfield.shift_right_unsigned bf Bitfield.one in
-        aux bf (n + 1)
-    in
-    aux bf 0
-
-  let rec nth_bit (x : int32) (n : int32) : int32 =
-    if Int32.(n = 0l) then
-      Int32.(x % 2l)
-    else
-      nth_bit Int32.(shift_left x 1) Int32.(n - 1l)
-
-
-  let to_bitfield (r : t) : Bitfield.t =
+  (** [to_bitfield r]
+      Sound conversion from a sign‑uniform RIC to the bitfield abstraction. May yield
+      [Top] when information is insufficient (e.g., non power‑of‑two stride with
+      unbounded side). Precondition: all values share the same sign. *)
+  let to_bitfield (r : t) : bitfield =
     assert (equal (negative_part r) Bottom || equal (positive_part r) Bottom); (* We assume all values are of the same sign *)
     let r = reduce r in
     match r with
     | Bottom -> Bottom
     | Top -> Top
     | RIC {lower_bound = NegInfinity; upper_bound = Infinity; _} -> assert false (* We need to avoid this situation at all cost *)
-    | RIC {lower_bound = NegInfinity; stride = s; offset = ("", o); _} -> 
-      if is_power_of_two s then
-        let ones = Int32.(-s lor o)
-        and zeros = Int32.(shift_right_logical (shift_left (-s lor (lnot o)) 1) 1) in (* TODO: instead of lor, define addition of bitfields*)
-        Bitfield.Bit {zeros; ones}
-      else
-        Top
-    | RIC {upper_bound = Infinity; stride = s; offset = ("", o); _} -> 
-      if is_power_of_two s then
+    | RIC {lower_bound = NegInfinity; upper_bound = Int u; stride = s; offset = ("", o); _} -> (* CHATGPT: please make tests for this *)
+      let n = Binary.number_of_trailing_zeros Int32.(-s) in
+      let increment_ones = Int32.shift_left (-1l) n in
+      let increment_zeros = Int32.shift_right_logical (-1l) 1 in
+      let increment_mask = Bitfield.Bit {zeros = increment_zeros; ones = increment_ones} in
+      let constant = Bitfield.of_integer (Int32.shift_right_logical (Int32.shift_left Int32.(s * u + o) 1) 1) in
+      Bitfield.xor_ increment_mask constant
+    | RIC {lower_bound = Int l; upper_bound = Infinity; stride = s; offset = ("", o); _} -> (* CHATGPT: please make tests for this *)
+      (* if is_power_of_two s then
         let ones = Int32.(shift_right_logical (shift_left (-s lor o) 1) 1)
         and zeros = Int32.(-s lor (lnot o)) in
         Bitfield.Bit {zeros; ones}
       else
-        Top
+        Top *)
+      let constant = Bitfield.of_integer Int32.(l * s + o) in
+      let n = Binary.number_of_trailing_zeros s in
+      let increment_ones = Int32.shift_right_logical (Int32.shift_left (-1l) (n + 1)) 1 in
+      let increment_mask = Bitfield.Bit {zeros = (-1l); ones = increment_ones} in
+      Bitfield.xor_ increment_mask constant
     | RIC {offset = (o, _); _} when not (String.equal "" o) -> Bitfield.Top
     | RIC {stride = s; lower_bound = Int l; upper_bound = Int u; offset = (_, o)} -> 
-      (* let integers = 
-        Set.of_list
-          (module Int32)
-          (List.init  
-            (Int32.to_int_exn (Int32.(u - l + 1l))) 
-            ~f:(fun n -> Int32.(s * (Int32.of_int_exn n) + o))) in
-        Bitfield.of_set integers *)
       let number_of_steps = Int32.to_int_exn Int32.(u - l) in
       let lowest_value = Int32.(s * l + o) in
       let bit_flips = Maths.Binary.bitFlips lowest_value s in
@@ -784,7 +858,10 @@ module RIC = struct
     | _ -> assert false
 
   
-  let of_bitfield (bf : Bitfield.t) : t =
+  (** [of_bitfield bf]
+      Over‑approximating conversion from bitfield to RIC: uses the constant part as an
+      offset and the number of trailing variable bits to recover a stride and step range. *)
+  let of_bitfield (bf : bitfield) : t =
     match bf with
     | Top -> Top
     | Bottom -> Bottom
@@ -793,7 +870,10 @@ module RIC = struct
       let power_of_two, lower_bound, upper_bound = Bitfield.variable_values bf in
       ric(Int32.of_int_exn (Int.pow 2 power_of_two), Int lower_bound, Int upper_bound, ("", offset))
 
-  let bitwise_and (ric1 : t) (ric2 : t) : t =
+  (** [binop_logical op r1 r2]
+      Helper: split each operand by sign, convert to bitfields, apply [op], then join
+      the four quadrants back in RIC space. *)
+  let binop_logical (binop : bitfield -> bitfield -> bitfield) (ric1 : t) (ric2 : t) : t =
     let pos1 = meet ric1 positive_integers
     and neg1 = meet ric1 negative_integers
     and pos2 = meet ric2 positive_integers
@@ -802,58 +882,27 @@ module RIC = struct
     and bf_pos1 = to_bitfield pos1
     and bf_pos2 = to_bitfield pos2
     and bf_neg2 = to_bitfield neg2 in
-    (* print_endline ("neg1: " ^ Bitfield.to_string bf_neg1);
-    print_endline ("pos1: " ^ Bitfield.to_string bf_pos1);
-    print_endline ("neg2: " ^ Bitfield.to_string bf_neg2);
-    print_endline ("pos1: " ^ Bitfield.to_string bf_pos1); *)
-    let bf_pp = Bitfield.and_ bf_pos1 bf_pos2
-    and bf_pn = Bitfield.and_ bf_pos1 bf_neg2
-    and bf_nn = Bitfield.and_ bf_neg1 bf_neg2
-    and bf_np = Bitfield.and_ bf_neg1 bf_pos2 in
+    let bf_pp = binop bf_pos1 bf_pos2
+    and bf_pn = binop bf_pos1 bf_neg2
+    and bf_nn = binop bf_neg1 bf_neg2
+    and bf_np = binop bf_neg1 bf_pos2 in
     let pos_pos = of_bitfield bf_pp
     and pos_neg = of_bitfield bf_pn
     and neg_neg = of_bitfield bf_nn
     and neg_pos = of_bitfield bf_np in
     join (join pos_pos pos_neg) (join neg_neg neg_pos)
 
-  let bitwise_or (ric1 : t) (ric2 : t) : t =
-    let pos1 = meet ric1 positive_integers
-    and neg1 = meet ric1 negative_integers
-    and pos2 = meet ric2 positive_integers
-    and neg2 = meet ric2 negative_integers in
-    let bf_neg1 = to_bitfield neg1
-    and bf_pos1 = to_bitfield pos1
-    and bf_pos2 = to_bitfield pos2
-    and bf_neg2 = to_bitfield neg2 in
-    let bf_pp = Bitfield.or_ bf_pos1 bf_pos2
-    and bf_pn = Bitfield.or_ bf_pos1 bf_neg2
-    and bf_nn = Bitfield.or_ bf_neg1 bf_neg2
-    and bf_np = Bitfield.or_ bf_neg1 bf_pos2 in
-    let pos_pos = of_bitfield bf_pp
-    and pos_neg = of_bitfield bf_pn
-    and neg_neg = of_bitfield bf_nn
-    and neg_pos = of_bitfield bf_np in
-    join (join pos_pos pos_neg) (join neg_neg neg_pos)
+  (** [and_ r1 r2] — bitwise AND via bitfield composition over sign splits. *)
+  let and_ = binop_logical Bitfield.and_
 
-  let bitwise_xor (ric1 : t) (ric2 : t) : t =
-    let pos1 = meet ric1 positive_integers
-    and neg1 = meet ric1 negative_integers
-    and pos2 = meet ric2 positive_integers
-    and neg2 = meet ric2 negative_integers in
-    let bf_neg1 = to_bitfield neg1
-    and bf_pos1 = to_bitfield pos1
-    and bf_pos2 = to_bitfield pos2
-    and bf_neg2 = to_bitfield neg2 in
-    let bf_pp = Bitfield.xor_ bf_pos1 bf_pos2
-    and bf_pn = Bitfield.xor_ bf_pos1 bf_neg2
-    and bf_nn = Bitfield.xor_ bf_neg1 bf_neg2
-    and bf_np = Bitfield.xor_ bf_neg1 bf_pos2 in
-    let pos_pos = of_bitfield bf_pp
-    and pos_neg = of_bitfield bf_pn
-    and neg_neg = of_bitfield bf_nn
-    and neg_pos = of_bitfield bf_np in
-    join (join pos_pos pos_neg) (join neg_neg neg_pos)
+  (** [or_ r1 r2] — bitwise OR via bitfield composition over sign splits. *)
+  let or_ = binop_logical Bitfield.or_
 
+  (** [xor_ r1 r2] — bitwise XOR via bitfield composition over sign splits. *)
+  let xor_ = binop_logical Bitfield.xor_
+
+  (** [not_ r]
+      Bitwise NOT via bitfield conversion on positive/negative parts, then join. *)
   let not_ (r : t) : t =
     let pos = meet r positive_integers
     and neg = meet r negative_integers in
@@ -863,46 +912,38 @@ module RIC = struct
     and not_neg = Bitfield.not_ bf_neg in
     join (of_bitfield not_pos) (of_bitfield not_neg)
 
-  let shift_left (ric1 : t) (ric2 : t) : t =
+  (** [shift shift_op r1 r2]
+      Generic shifter: split by sign, convert to bitfields, apply [shift_op] with a
+      non‑negative shift amount, then join. *)
+  let shift (shift_op : bitfield -> bitfield -> bitfield) (ric1 : t) (ric2 : t) : t =
     let pos = meet ric1 positive_integers
     and neg = meet ric1 negative_integers in
     let bf1_pos = to_bitfield pos
     and bf1_neg = to_bitfield neg
     and bf2 = to_bitfield (meet ric2 positive_integers) in
-    let bf_pos = Bitfield.shift_left bf1_pos bf2
-    and bf_neg = Bitfield.shift_left bf1_neg bf2 in
+    let bf_pos = shift_op bf1_pos bf2
+    and bf_neg = shift_op bf1_neg bf2 in
     join (of_bitfield bf_pos) (of_bitfield bf_neg)
 
-  let shift_right_u (ric1 : t) (ric2 : t) : t =
-    let pos = meet ric1 positive_integers
-    and neg = meet ric1 negative_integers in
-    let bf1_pos = to_bitfield pos
-    and bf1_neg = to_bitfield neg
-    and bf2 = to_bitfield (meet ric2 positive_integers) in
-    (* print_endline ("pos: " ^ Bitfield.to_string bf1_pos);
-    print_endline ("neg: " ^ Bitfield.to_string bf1_neg); *)
-    let bf_pos = Bitfield.shift_right_unsigned bf1_pos bf2
-    and bf_neg = Bitfield.shift_right_unsigned bf1_neg bf2 in
-    (* print_endline ("shr_pos: " ^ Bitfield.to_string bf_pos);
-    print_endline ("shr_neg: " ^ Bitfield.to_string bf_neg); *)
-    join (of_bitfield bf_pos) (of_bitfield bf_neg)
+  (** [shift_left r1 r2] — arithmetic left shift (join over allowed amounts). *)
+  let shift_left = shift Bitfield.shift_left
 
-  let shift_right_s (ric1 : t) (ric2 : t) : t =
-    let pos = meet ric1 positive_integers
-    and neg = meet ric1 negative_integers in
-    let bf1_pos = to_bitfield pos
-    and bf1_neg = to_bitfield neg
-    and bf2 = to_bitfield (meet ric2 positive_integers) in
-    let bf_pos = Bitfield.shift_right_signed bf1_pos bf2
-    and bf_neg = Bitfield.shift_right_signed bf1_neg bf2 in
-    join (of_bitfield bf_pos) (of_bitfield bf_neg)
+  (** [shift_right_u r1 r2] — logical right shift (join over allowed amounts). *)
+  let shift_right_u = shift Bitfield.shift_right_unsigned
 
+  (** [shift_right_s r1 r2] — arithmetic (sign‑extending) right shift (join over amounts). *)
+  let shift_right_s = shift Bitfield.shift_right_signed
 
+  (** [is_false r]
+      Interprets [r] as a boolean: [true] iff 0 is compatible with [r]. *)
   let is_false (r : t) : bool =
     match r with
     | Bottom -> false
-    | _ -> not (disjoint r (ric (1l, Int 0l, Int 0l, ("", 0l))))
+    | _ -> not (are_disjoint r (ric (1l, Int 0l, Int 0l, ("", 0l))))
   
+  (** [is_true r]
+      Interprets [r] as a boolean: [true] iff some non‑zero value is compatible with [r]
+      (or [Top]). *)
   let is_true (r : t) : bool =
     let r = reduce r in
     match r with
@@ -910,11 +951,9 @@ module RIC = struct
     | Bottom -> false
     | _ ->
       if is_singleton r then
-        disjoint r (ric (1l, Int 0l, Int 0l, ("", 0l)))
+        are_disjoint r (ric (1l, Int 0l, Int 0l, ("", 0l)))
       else
         true
-
-  
 end
 
 
@@ -924,9 +963,6 @@ module RICSet = struct
     include Set.Make(RIC)
     let to_string (r : t) : string =
       String.concat ~sep:"; " (List.map ~f:RIC.to_string (Set.to_list r))
-
-
-    (* TODO: RICSET.union that checks for included RICs... *)
   end
   include Set
   include S
@@ -1660,6 +1696,39 @@ let%test_module "RIC tests" = (module struct
       let s = to_string (ric (1l, Int 0l, Int 3l, ("", 0l))) in
       print_endline ("[RIC.to_string]     1[0,3]+0 → " ^ s);
       String.equal s "[0,3]"
+
+    (* ---- RIC.to_bitfield tests for semi-infinite progressions ---- *)
+    let%test "to_bitfield_neg_infinity_power_of_two_stride" =
+      let s = 8l and o = -5l in
+      let r = ric (s, NegInfinity, Int 0l, ("", o)) in
+      let expected = Bitfield.join (Bit {ones = (-8l); zeros = (Int32.shift_right_logical (Int32.shift_left (-8l) 1)1)}) (Bitfield.of_integer (-5l)) in
+      let result = to_bitfield r in
+      print_endline ("[RIC.to_bitfield]     " ^ to_string r ^ " ---to-bitfield---> " ^ Bitfield.to_string result);
+      Bitfield.equal result expected
+
+    let%test "to_bitfield_neg_infinity_not_power_of_two_stride" =
+      let s = 12l and o = -7l in
+      let r = ric (s, NegInfinity, Int 0l, ("", o)) in
+      let expected = Bitfield.Bit {zeros = 0b01111111111111111111111111111110l; ones = 0b11111111111111111111111111111101l} in
+      let result = to_bitfield r in
+      print_endline ("[RIC.to_bitfield]     " ^ to_string r ^ " ---to-bitfield---> " ^ Bitfield.to_string result);
+      Bitfield.equal result expected
+
+    let%test "to_bitfield_pos_infinity_power_of_two_stride" =
+      let s = 8l and o = 3l in
+      let r = ric (s, Int 0l, Infinity, ("", o)) in
+      let expected = Bitfield.Bit {zeros = 0b11111111111111111111111111111100l; ones = 0b01111111111111111111111111111011l} in
+      let result = to_bitfield r in
+      print_endline ("[RIC.to_bitfield]     " ^ to_string r ^ " ---to-bitfield---> " ^ Bitfield.to_string result);
+      Bitfield.equal result expected
+
+    let%test "to_bitfield_pos_infinity_not_power_of_two_stride" =
+      let s = 10l and o = 5l in
+      let r = ric (s, Int 0l, Infinity, ("", o)) in
+      let expected = Bitfield.Bit {zeros = 0b11111111111111111111111111111110l; ones = 0b01111111111111111111111111111111l} in
+      let result = to_bitfield r in
+      print_endline ("[RIC.to_bitfield]     " ^ to_string r ^ " ---to-bitfield---> " ^ Bitfield.to_string result);
+      Bitfield.equal result expected
 
     let%test "meet {1,2,3,4} with {2,4,6,8}" =
       let r1 = ric (1l, Int 1l, Int 4l, ("", 0l)) in
@@ -2410,6 +2479,22 @@ let%test_module "RIC tests" = (module struct
       print_endline ("[(size 4 stride 7  -inf) partially_accessed]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map p_accessed ~f:to_string) ^ "  ]");
       List.equal RIC.equal p_accessed expected
 
+    (* Partially accessed: infinite span, stride=4, size=2
+      Expect the band of 2*size-1 = 3 neighboring residue classes: -1, 0, +1. *)
+    let%test "partially_accessed_infinite_stride4_size2" =
+      let by = ric (4l, NegInfinity, Infinity, ("", 0l)) in
+      let got = partially_accessed ~by ~size:2l in
+      let expected = [
+        ric (4l, NegInfinity, Infinity, ("", -1l));
+        ric (4l, NegInfinity, Infinity, ("", 0l));
+        ric (4l, NegInfinity, Infinity, ("", 1l));
+      ] in
+      (* let sort = List.sort ~compare:compare in *)
+      (* let got_s = sort got and exp_s = sort expected in *)
+      print_endline ("[(size 2 stride 4  -inf..+inf) partially_accessed]     " ^ to_string by ^
+                     " → [  " ^ String.concat ~sep:"; " (List.map ~f:to_string got) ^ "  ]");
+      List.equal equal got expected
+
     let%test "RIC.plus: absolute + absolute" =
       let r1 = ric (4l, Int 0l, Int 2l, ("", 1l)) in
       let r2 = ric (2l, Int 1l, Int 3l, ("", 3l)) in
@@ -2648,7 +2733,7 @@ let%test_module "RIC tests" = (module struct
 
     let%test "16 and Top" =
       let ric16 = ric(0l, Int 0l, Int 0l, ("", 16l)) in
-      let a = bitwise_and ric16 RIC.Top in
+      let a = and_ ric16 RIC.Top in
       equal a (ric(16l, Int 0l, Int 1l, ("", 0l)))
 
     let%test "negative part of 16Z" =
@@ -2662,14 +2747,14 @@ let%test_module "RIC tests" = (module struct
       | _ -> false
 
 
-    let%test "common_msb" =
+    (* let%test "common_msb" =
       let x = 0b00100110110011001100l 
       and y = 0b00100110110101001100l in
       let result, n = common_msb x y in
       print_endline (string_of_int n ^ "    " ^ Bitfield.to_string result);
       match result, n with
       | Bit {zeros = 0b11111111111111111111111011001001l; ones = 0b00100110110l}, 9 -> true
-      | _ -> false
+      | _ -> false *)
 
 
     let%test "big RIC conversion" =
@@ -2695,7 +2780,7 @@ let%test_module "RIC tests" = (module struct
       true
 
     let%test "Top and Top" =
-      let top_and_top = bitwise_and Top Top in
+      let top_and_top = and_ Top Top in
       print_endline ("Top & Top = " ^ to_string top_and_top);
       let bf_top_pos = to_bitfield (meet Top positive_integers) in
       print_endline ("Top+   ---to-bitfield--->   " ^ Bitfield.to_string bf_top_pos);

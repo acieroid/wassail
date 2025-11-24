@@ -267,7 +267,19 @@ let add_relative_offsets (o1 : string) (o2 : string) : string =
           acc))
     in
     let offsets = cancel_negation ~pos ~neg in
-    String.concat ~sep:"+" offsets 
+    String.concat ~sep:"+" (List.sort ~compare:String.compare offsets)
+
+let negate_relative_offset (offset : string) : string =
+  if String.equal offset "" then
+    ""
+  else
+    let offsets = String.split_on_chars offset ~on:['+'] in
+    let offsets = List.map ~f:(fun s -> if String.is_prefix s ~prefix:"neg" then String.drop_prefix s 3 else "neg" ^ s) offsets in
+    String.concat ~sep:"+" (List.sort ~compare:String.compare offsets)
+
+(** [is_power_of_two x] — helper used by [to_bitfield]. *)
+  let is_power_of_two (x : int32) : bool =
+    Int32.(x > 0l && (x land (x - 1l)) = 0l)
 
 (** {1:binary Binary helpers}
     Utilities for reasoning about bit patterns on [int32].  These functions

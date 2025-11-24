@@ -71,7 +71,8 @@ let to_string (s : t) : string =
     @ 
     begin match accessed with
     | None | Some (Abstract_store_domain.Value.ValueSet RIC.Bottom) -> []
-    | Some Abstract_store_domain.Value.Boolean _ -> assert false
+    | Some Abstract_store_domain.Value.Boolean _ 
+    | Some Abstract_store_domain.Value.Bitfield _ -> assert false
     | Some (Abstract_store_domain.Value.ValueSet addresses) ->
       ["ACCESSED MEMORY:" ^ RIC.to_string addresses]
     end
