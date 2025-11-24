@@ -11,45 +11,8 @@ module RIC_module = Reduced_interval_congruence
 open RIC_module
 module Boolean = Boolean
 module Bitfield = Bitfield
+module Value = Abstract_integers
 open Helpers
-
-module Value = struct (* TODO: extract into its own module: AbstractValue*)
-  type t =
-    | ValueSet of RIC.t
-    | Boolean of Boolean.t
-    | Bitfield of Bitfield.t
-  [@@deriving sexp, compare, equal]
-
-  let to_string (value : t) : string =
-    match value with
-    | ValueSet vs -> RIC.to_string vs
-    | Boolean b -> Boolean.to_string b
-    | Bitfield bf -> Bitfield.to_string bf
-
-  let join (value1 : t) (value2 : t) : t =
-    match value1, value2 with
-    | ValueSet vs1, ValueSet vs2 
-    | Boolean {numeric_value = vs1; _}, ValueSet vs2
-    | ValueSet vs1, Boolean {numeric_value = vs2; _} -> ValueSet (RIC.join vs1 vs2)
-    | Boolean b1, Boolean b2 -> Boolean (Boolean.join b1 b2)
-    | Bitfield bf1, Bitfield bf2 -> Bitfield (Bitfield.join bf1 bf2)
-    | Bitfield bf, ValueSet vs
-    | Bitfield bf, Boolean {numeric_value = vs; _}
-    | ValueSet vs, Bitfield bf
-    | Boolean {numeric_value = vs; _}, Bitfield bf ->
-      let bf = RIC.of_bitfield bf in
-      ValueSet (RIC.join vs bf)
-
-  let extract_relative_offset (v : t) : string =
-    match v with
-    | ValueSet RIC {offset = (o, _); _} -> o
-    | _ -> ""
-
-  let update_relative_offset (v : t) (actual_values : RIC.t String.Map.t) : t =
-    match v with
-    | ValueSet vs -> ValueSet (RIC.update_relative_offset ~ric_:vs ~actual_values)
-    | _ -> v
-end
 
 (** Type [t] is the abstract store: a map from variables to their abstract values. *)
 (* type t = RIC.t Variable.Map.t *)
