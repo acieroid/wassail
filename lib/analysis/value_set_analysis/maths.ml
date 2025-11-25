@@ -360,8 +360,6 @@ TTTTTT  T:::::T  TTTTTT  E:::::E       EEEEEES:::::S            TTTTTT  T:::::T 
 let%test_module "Binary tests" = (module struct
   open Binary
 
-  (*ChatGPT, please add tests for all functions of module ExtendedInt. Can you follow the same print logic as the following tests?*)
-
   let%test "Bitfield_tests" =
     print_endline "\n_______ ____________________________ _______\n        Maths.Binary Module        \n------- ---------------------------- -------\n"; true
   let%test "bitFlip test no 1" =

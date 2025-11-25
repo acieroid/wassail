@@ -365,18 +365,18 @@ let to_top_RIC (store : t) (var : Variable.t) : t =
       store_operations = store.store_operations }
 
 (** [to_top_RICs store vars] sets each variable in [vars] to [RIC.Top] in [store]. *)
-let to_top_RICs (store : t) (vars : Variable.Set.t) : t =
+(* let to_top_RICs (store : t) (vars : Variable.Set.t) : t =
   remove_pointers_to_top
-    (Variable.Set.fold vars ~init:store ~f:to_top_RIC)
+    (Variable.Set.fold vars ~init:store ~f:to_top_RIC) *)
 
 (** [to_bottom_RIC store var] sets [var] to [RIC.Bottom] in [store]. *)
-let to_bottom_RIC (store : t) (var : Variable.t) : t =
+(* let to_bottom_RIC (store : t) (var : Variable.t) : t =
   { abstract_store = (Variable.Map.set store.abstract_store ~key:var ~data:(Value.ValueSet RIC.Bottom));
-    store_operations = store.store_operations }
+    store_operations = store.store_operations } *)
 
 (** [to_bottom_RICs store vars] sets each variable in [vars] to [RIC.Bottom] in [store]. *)
-let to_bottom_RICs (store : t) (vars : Variable.Set.t) : t =
-  Variable.Set.fold vars ~init:store ~f:to_bottom_RIC
+(* let to_bottom_RICs (store : t) (vars : Variable.Set.t) : t =
+  Variable.Set.fold vars ~init:store ~f:to_bottom_RIC *)
 
 (** [join store1 store2] computes the least upper bound of two stores. 
     Missing memory variables are treated as [RIC.Top]. *)
@@ -495,6 +495,7 @@ let copy_value_set (store : t) ~(from : Variable.t) ~(to_ : Variable.t) : t =
     let vs = get store ~var:from in
     set store ~var:to_ ~vs:vs
 
+(* TODO: rendu ici: faire une fonction d'addition dans value_set_abstractions *)
 (** [i32_add store ~x ~y ~result] performs addition of [x] and [y], stores result in [result]. *)
 let i32_add (store : t) ~(x : Variable.t) ~(y : Variable.t) ~(result : Variable.t) : t =
   let vs =
