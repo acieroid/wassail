@@ -19,6 +19,15 @@ type t =
   | Bitfield of Bitfield.t
 [@@deriving sexp, compare, equal]
 
+let equal (x : t) (y : t) : bool =
+  match x, y with
+  | ValueSet x, ValueSet y -> RIC.equal x y
+  | Boolean x, Boolean y -> Boolean.equal x y
+  | Bitfield x, Bitfield y -> Bitfield.equal x y
+  | ValueSet x, Bitfield y 
+  | Bitfield y, ValueSet x -> (Bitfield.equal (RIC.to_bitfield x) y) && (RIC.equal x (RIC.of_bitfield y))
+  | _ -> false
+  
 (** [to_string x] returns a human‑readable representation of [x],
     delegating to the corresponding sub‑domain printer. *)
 let to_string (x : t) : string =

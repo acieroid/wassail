@@ -6,11 +6,11 @@ type bitfield = Bitfield.t
 
 (** {1 Reduced Interval–Congruence (RIC)}
 
-    <p><b>Purpose.</b> An abstract domain for machine integers and pointers that
-    combines a <i>congruence</i> component (arithmetic progressions of the form
-    [stride * ℤ + offset]) with an <i>interval</i> component (closed range of steps).
-    Values are kept in a <i>reduced</i> normal form so that standard lattice laws hold
-    by construction.</p>
+    {b Purpose.} An abstract domain for machine integers and pointers that
+    combines a {i congruence} component (arithmetic progressions of the form
+    [stride * ℤ + offset]) with an {i interval} component (closed range of steps).
+    Values are kept in a {i reduced} normal form so that standard lattice laws hold
+    by construction.
 
     {b Universe and notation}
     - [⊤] (Top) is the set of all signed 32‑bit integers; [⊥] (Bottom) is the empty set.
@@ -38,14 +38,14 @@ module RIC = struct
 
   (** {2 Congruence}
 
-      <p>Congruences model arithmetic progressions [stride * ℤ + offset]. Offsets are
+      Congruences model arithmetic progressions [stride * ℤ + offset]. Offsets are
       either absolute [("", c)] or relative [(var, c)]. We use [⊤] to denote all
-      integers and [⊥] for the empty set.</p>
+      integers and [⊥] for the empty set.
 
       {b Normal forms}
       - [Top] ≡ [1ℤ + o] for any [o].
       - [Bottom] ≡ ∅.
-      - [stride = 0] encodes a singleton with the given offset.</p>
+      - [stride = 0] encodes a singleton with the given offset.
   *)
   module Congruence = struct
     type congruence = {
@@ -174,9 +174,9 @@ module RIC = struct
 
   (** {2 Interval}
 
-      <p>Intervals use extended integers for bounds: [−∞], finite [Int n], and [∞].
+      Intervals use extended integers for bounds: [−∞], finite [Int n], and [∞].
       [Top] is the whole line (]−∞,∞[), [Bottom] is ∅. Operators implement the usual
-      lattice on intervals.</p>
+      lattice on intervals.
   *)
   module Interval = struct
     type interval = {
@@ -805,14 +805,14 @@ module RIC = struct
     | Bottom -> Bottom
     | Top -> Top
     | RIC {lower_bound = NegInfinity; upper_bound = Infinity; _} -> assert false (* We need to avoid this situation at all cost *)
-    | RIC {lower_bound = NegInfinity; upper_bound = Int u; stride = s; offset = ("", o); _} -> (* CHATGPT: please make tests for this *)
+    | RIC {lower_bound = NegInfinity; upper_bound = Int u; stride = s; offset = ("", o); _} ->
       let n = Binary.number_of_trailing_zeros Int32.(-s) in
       let increment_ones = Int32.shift_left (-1l) n in
       let increment_zeros = Int32.shift_right_logical (-1l) 1 in
       let increment_mask = Bitfield.Bit {zeros = increment_zeros; ones = increment_ones} in
       let constant = Bitfield.of_integer (Int32.shift_right_logical (Int32.shift_left Int32.(s * u + o) 1) 1) in
       Bitfield.xor_ increment_mask constant
-    | RIC {lower_bound = Int l; upper_bound = Infinity; stride = s; offset = ("", o); _} -> (* CHATGPT: please make tests for this *)
+    | RIC {lower_bound = Int l; upper_bound = Infinity; stride = s; offset = ("", o); _} -> 
       (* if is_power_of_two s then
         let ones = Int32.(shift_right_logical (shift_left (-s lor o) 1) 1)
         and zeros = Int32.(-s lor (lnot o)) in

@@ -14,7 +14,6 @@ module Value = Value_set_abstractions
 open Helpers
 
 (** Type [t] is the abstract store: a map from variables to their abstract values. *)
-(* type t = RIC.t Variable.Map.t *)
 type t = {
   abstract_store : Value.t Variable.Map.t;
   store_operations : RICSet.t
@@ -24,9 +23,6 @@ type t = {
 let equal (store1 : t) (store2 : t) : bool =
   Variable.Map.equal Value.equal store1.abstract_store store2.abstract_store 
   && RICSet.equal store1.store_operations store2.store_operations
-
-(** [top] is a placeholder for the top store. Currently modeled as an empty map. *)
-let top : t = { abstract_store = Variable.Map.empty; store_operations = RICSet.empty } (* TODO: better definition of TOP *)
 
 (** [extract_memory_variables store] returns all memory-related variables in [store]. *)
 let extract_memory_variables (store : t) : Variable.t list =
@@ -1078,8 +1074,9 @@ let%test_module "abstract store tests" = (module struct
     let vs1 = RIC.ric (0l, Int 0l, Int 0l, ("", 42l)) in
     let m2 = Variable.Mem (RIC.ric (2l, Int 0l, Int 4l, ("", 0l))) in
     let vs2 = RIC.ric (0l, Int 0l, Int 0l, ("", 36l)) in
-    let store1 = set top ~var:m1 ~vs:(Value.ValueSet vs1) in
-    let store2 = set top ~var:m2 ~vs:(Value.ValueSet vs2) in
+    let empty_store = { abstract_store = Variable.Map.empty; store_operations = RICSet.empty } in
+    let store1 = set empty_store ~var:m1 ~vs:(Value.ValueSet vs1) in
+    let store2 = set empty_store ~var:m2 ~vs:(Value.ValueSet vs2) in
     print_endline "[make_compatible]";
     print_endline ("\tstore1: " ^ to_string store1);
     print_endline ("\tstore2: " ^ to_string store2);
