@@ -6,12 +6,11 @@
     widening, weak updates, and memory truncation.
 *)
 open Core
-(* open Reduced_interval_congruence  *)
 module RIC_module = Reduced_interval_congruence
 open RIC_module
 module Boolean = Boolean
 module Bitfield = Bitfield
-module Value = Abstract_integers
+module Value = Value_set_abstractions
 open Helpers
 
 (** Type [t] is the abstract store: a map from variables to their abstract values. *)
