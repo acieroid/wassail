@@ -495,7 +495,7 @@ module RIC = struct
           if Int32.equal i 0l then
             (if not (String.equal var "") then "+" else "") ^ var
           else if String.equal var "" then
-            (if Int32.compare i 0l > 0 then "+" else "") ^ Int32.to_string (Int32.abs i)
+            (if Int32.compare i 0l > 0 then "+" else if Int32.compare i 0l < 0 then "-" else "") ^ Int32.to_string (Int32.abs i)
           else
             "+(" ^ var ^ ((if Int32.compare i 0l > 0 then "+" else "") ^ Int32.to_string i) ^ ")"
       in
@@ -718,6 +718,22 @@ module RIC = struct
     let partially = partially_accessed ~by:value_set ~size:size in
     {fully; partially}
 
+let list_to_string f lst =
+  "[" ^ String.concat ~sep:"; " (List.map ~f lst) ^ "]"
+  
+  let may_overlap ?(size1 = 4l) ?(size2 = 4l) (store_ric : t) (load_ric : t) =
+    let accessed_by_store = accessed ~value_set:store_ric ~size:size1 in
+    let touched_by_store = accessed_by_store.fully :: accessed_by_store.partially
+    and touched_by_load = List.init (Int32.to_int_exn size2) ~f:(fun i -> add_offset load_ric (Int32.of_int_exn i)) in
+    List.exists touched_by_store ~f:(fun r1 ->
+      List.exists touched_by_load ~f:(fun r2 ->
+        if equal r1 Bottom || equal r2 Bottom then
+          false
+        else if comparable_offsets r1 r2 then
+          not (are_disjoint r1 r2)
+        else
+          true))
+
   (** [plus r1 r2]
       Abstract addition with base‑symbol composition. Components use [sum], then the
       resulting base is reattached via [add_relative_offsets]. *)
@@ -799,13 +815,13 @@ module RIC = struct
       [Top] when information is insufficient (e.g., non power‑of‑two stride with
       unbounded side). Precondition: all values share the same sign. *)
   let to_bitfield (r : t) : bitfield =
-    assert (equal (negative_part r) Bottom || equal (positive_part r) Bottom); (* We assume all values are of the same sign *)
     let r = reduce r in
     match r with
     | Bottom -> Bottom
     | Top -> Top
     | RIC {lower_bound = NegInfinity; upper_bound = Infinity; _} -> assert false (* We need to avoid this situation at all cost *)
     | RIC {lower_bound = NegInfinity; upper_bound = Int u; stride = s; offset = ("", o); _} ->
+      assert (equal (negative_part r) Bottom || equal (positive_part r) Bottom); (* We assume all values are of the same sign *)
       let n = Binary.number_of_trailing_zeros Int32.(-s) in
       let increment_ones = Int32.shift_left (-1l) n in
       let increment_zeros = Int32.shift_right_logical (-1l) 1 in
@@ -938,7 +954,9 @@ module RIC = struct
       Interprets [r] as a boolean: [true] iff 0 is compatible with [r]. *)
   let is_false (r : t) : bool =
     match r with
+    | Top -> true
     | Bottom -> false
+    | RIC {offset = (s, _); _} when not (String.is_empty s) -> true
     | _ -> not (are_disjoint r (ric (1l, Int 0l, Int 0l, ("", 0l))))
   
   (** [is_true r]
@@ -949,11 +967,12 @@ module RIC = struct
     match r with
     | Top -> true
     | Bottom -> false
-    | _ ->
-      if is_singleton r then
+    | RIC {offset = (s, _); _} when not (String.is_empty s) -> true
+    | r -> not (equal r (ric (1l, Int 0l, Int 0l, ("", 0l))))
+      (* if is_singleton r then
         are_disjoint r (ric (1l, Int 0l, Int 0l, ("", 0l)))
       else
-        true
+        true *)
 end
 
 

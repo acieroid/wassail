@@ -39,26 +39,26 @@ let to_string (s : t) : string =
     (if Variable.Map.is_empty returns then
       []
     else
-      ["RETURNS: " ^ Abstract_store_domain.to_string {abstract_store = globals; store_operations = RICSet.empty}])
+      ["RETURNS: " ^ Abstract_store_domain.to_string {abstract_store = returns; store_operations = RICSet.empty}])
     @
     (if Variable.Map.is_empty globals then
       []
     else
       ["GLOBALS: " ^ Abstract_store_domain.to_string {abstract_store = globals; store_operations = RICSet.empty}])
     @
-    if Set.is_empty affected_memory then
+    (if Set.is_empty affected_memory then
       []
     else
       (["AFFECTED MEMORY: " ^ RICSet.to_string (
         if !Value_set_options.disjoint_stack then 
           RICSet.filter ~f:(fun r -> not (RIC.is_stack r)) affected_memory
         else 
-          affected_memory)]
-      @
-      ["LINEAR MEMORY: " 
-      ^ Abstract_store_domain.to_string {abstract_store = memory; store_operations = RICSet.empty}])
+          affected_memory)]))
     @
-    if !Value_set_options.disjoint_stack then
+    (["LINEAR MEMORY: " 
+    ^ Abstract_store_domain.to_string {abstract_store = memory; store_operations = RICSet.empty}])
+    @
+    (if !Value_set_options.disjoint_stack then
       let affected_stack = RICSet.filter ~f:(fun r -> RIC.is_stack r) affected_memory in
       if RICSet.is_empty affected_stack then
         []
@@ -67,16 +67,15 @@ let to_string (s : t) : string =
         @
         ["STACK: " ^ Abstract_store_domain.to_string {abstract_store = stack; store_operations = RICSet.empty}])
     else
-      []
+      [])
     @ 
-    begin match accessed with
-    | None | Some (Abstract_store_domain.Value.ValueSet RIC.Bottom) -> []
-    | Some Abstract_store_domain.Value.Boolean _ 
-    | Some Abstract_store_domain.Value.Bitfield _ -> assert false
-    | Some (Abstract_store_domain.Value.ValueSet addresses) ->
-      ["ACCESSED MEMORY:" ^ RIC.to_string addresses]
-    end
-  in "\t" ^ String.concat ~sep:"\n\t" string_list
+    (begin match accessed with
+    | None | Some (Abstract_store_domain.Value.ValueSet RIC.Bottom) -> 
+      let () = print_endline "nothing accessed" in []
+    | Some addresses ->
+      ["ACCESSED MEMORY:" ^ Value_set_abstractions.to_string addresses]
+    end)
+  in "\t\t" ^ String.concat ~sep:"\n\t\t" string_list
   
 
 (* TODO: do I need to mention stack and memory? *)
@@ -246,6 +245,20 @@ let update_relative_offsets (summary : t) ~(actual_values : RIC.t String.Map.t) 
             ~data:(Abstract_store_domain.Value.update_relative_offset vs actual_values));
     store_operations = RICSet.map ~f:(fun ric_ -> RIC.update_relative_offset ~ric_ ~actual_values) summary.store_operations}
 
+
+let extract_return_value 
+    (store : Value_set_abstractions.t Variable.Map.t)
+  : Value_set_abstractions.t option =
+  let vars = Map.keys store in 
+  let ret_vars = List.filter vars 
+    ~f:(function
+        | Variable.Var Var.Return _ -> true
+        | _ -> false) in
+  match ret_vars with
+  | [] -> None
+  | [ret] -> Variable.Map.find store ret
+  | _ -> Log.error "Functions fith multiple returns not yet implemented"; failwith ""
+
 let apply 
     ~(summary : t) 
     ~(state : Abstract_store_domain.t) 
@@ -325,7 +338,11 @@ let apply
   let state = Abstract_store_domain.remove_pointers_to_top state in
   (* Set return values: *)
   (* TODO: This next part assumes only one return value is possible: please generalize *)
-  match Variable.Map.find summary.abstract_store (Variable.Var (Var.Return 0l)), return_variable with
+  (* let () = print_endline ("variable de retour?" ^ Variable.to_string fff) in *)
+  (* match Variable.Map.find summary.abstract_store (Variable.Var (Var.Return 0l)), return_variable with *)
+  match extract_return_value summary.abstract_store, return_variable with
   | Some vs, Some return_variable -> Abstract_store_domain.set state ~var:(Variable.Var return_variable) ~vs
   | None, None -> state
-  | _ -> assert false (* TODO: error message? *)
+  | None, Some ret -> (print_endline ("return variable: " ^ Var.to_string ret); assert false)
+  | Some _, None -> (print_endline "some none"; assert false)
+  (* | _ -> assert false TODO: error message? *)

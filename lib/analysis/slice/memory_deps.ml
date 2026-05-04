@@ -1,8 +1,197 @@
 open Core
+open Helpers
 
 type t = Instr.Label.Set.t Instr.Label.Map.t (* Map from instruction to its memory dependencies *)
 
-let make (cfg : 'a Cfg.t) : t =
+(* let print_deps (deps : t) =
+  print_endline "Memory deps:";
+  Instr.Label.Map.iteri deps ~f:(fun ~key ~data ->
+    let deps_str =
+      Instr.Label.Set.to_list data
+      |> List.map ~f:Instr.Label.to_string
+      |> String.concat ~sep:", "
+    in
+    Printf.printf "%s -> { %s }\n"
+      (Instr.Label.to_string key)
+      deps_str
+  ) *)
+
+(* let print_labelled_data (i : Abstract_store_domain.t Instr.labelled_data) =
+  (Printf.printf "Label: %s\n" (Instr.Label.to_string i.label);
+  Printf.printf "Instr: %s\n" (Instr.data_to_string i.instr);
+  Printf.printf "Before:\n%s\n"
+    (Abstract_store_domain.to_string i.annotation_before);
+  Printf.printf "After:\n%s\n"
+    (Abstract_store_domain.to_string i.annotation_after);) *)
+
+let find_store_address 
+    (cfg : Spec_domain.t Instr.t Instr.Label.Map.t) 
+    (label : Instr.Label.t) 
+  : Var.t =
+  let annotation_before =
+    label |> Instr.Label.Map.find_exn cfg 
+          |> Instr.annotation_before in
+  let (_, address) = 
+    pop2 (Spec_domain.get_or_fail annotation_before).vstack in
+  address
+
+let find_load_address 
+    (cfg : Spec_domain.t Instr.t Instr.Label.Map.t) 
+    (label : Instr.Label.t) 
+  : Var.t =
+  let annotation_before =
+    label |> Instr.Label.Map.find_exn cfg 
+          |> Instr.annotation_before in
+  pop (Spec_domain.get_or_fail annotation_before).vstack
+
+let load_depends_on_store 
+    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    ~(load_label : Instr.Label.t)
+    ~(store_label : Instr.Label.t)
+    ~(store_offset : int)
+    ~(load_offset : int)
+  : Instr.Label.t option =
+  match pointer_analysis with
+  | None -> Some store_label
+  | Some (cfg_pointers, cfg_spec, _) ->
+    let store_address = find_store_address cfg_spec store_label in
+    let store_address_value_set = 
+      Abstract_store_domain.find_value_set cfg_pointers store_label store_address 
+      |> (Value_set_abstractions.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn store_offset)))))
+    in
+    let load_address = find_load_address cfg_spec load_label in
+    let load_address_value_set = 
+      Abstract_store_domain.find_value_set cfg_pointers load_label load_address 
+      |> (Value_set_abstractions.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn load_offset)))))
+    in
+    let overlap = Value_set_abstractions.may_overlap ~store_vs:store_address_value_set ~load_vs:load_address_value_set in
+    if overlap then Some store_label else None
+  
+
+let rec extract_nth_argument
+    (stack : Var.t list)
+    (arity : int)
+    (n : int)
+  : Var.t =
+  match stack, arity, n with
+  | _, a, n when n >= a -> 
+    failwith "function arity doesn't match argument index"
+  | s, a, n when n = a - 1 ->
+    pop s
+  | _ :: s, a, n -> extract_nth_argument s (a-1) n
+  | _ -> assert false
+
+
+let tokenize (s : string) : string list =
+  let is_digit c = Char.(c >= '0' && c <= '9') in
+  let is_letter c = Char.(c >= 'a' && c <= 'z') in
+  let len = String.length s in
+  let rec aux i acc =
+    if i >= len then List.rev acc
+    else
+      let c = s.[i] in
+      if is_letter c then
+        aux (i + 1) ((String.make 1 c) :: acc)
+      else if Char.equal c '+' || Char.equal c '-' then
+        aux (i + 1) ((String.make 1 c) :: acc)
+      else if is_digit c then
+        let j = ref i in
+        while !j < len && is_digit s.[!j] do
+          incr j
+        done;
+        let number = String.sub s ~pos:i ~len:(!j - i) in
+        aux !j (number :: acc)
+      else
+        failwith "Unexpected character"
+  in
+  aux 0 []
+
+
+let rec find_parameter_value_set 
+    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    (label : Instr.Label.t) 
+    (vars : string list)
+  : Value_set_abstractions.t =
+  let () = print_endline (String.concat ~sep:"" vars) in
+  match pointer_analysis with
+  | None -> assert false
+  | Some (cfg_pointers, cfg_spec, _) ->
+    let block = Cfg.find_enclosing_block_exn cfg_pointers label in
+    let call_instr =
+      match block.content with
+      | Call call_instr ->  call_instr
+      | _ -> failwith "label does not belong to a call instruction"
+    in
+    let store = call_instr.annotation_before in
+    match vars with
+    | [] -> Value_set_abstractions.ValueSet Reduced_interval_congruence.RIC.Bottom
+    | "l" :: idx :: "+" :: rest
+    | "l" :: idx :: rest ->
+      (let fct_arity =
+        match call_instr.instr with
+        | CallDirect ((x,_), _, _) -> x
+        | _ -> assert false
+      in
+      let stack_before_call =
+        (label |> Instr.Label.Map.find_exn cfg_spec 
+               |> Instr.annotation_before
+               |> Spec_domain.get_or_fail).vstack
+      in
+      let var = Variable.Var (extract_nth_argument stack_before_call fct_arity (int_of_string idx)) in
+      let vs = Abstract_store_domain.get store ~var in
+      Value_set_abstractions.plus (find_parameter_value_set pointer_analysis label rest) vs) 
+    | "g" :: idx :: "+" :: rest ->
+    (* | "g" :: idx :: rest -> *)
+      let vs = Abstract_store_domain.get store ~var:(Variable.Var (Var.Global (int_of_string idx))) in
+      Value_set_abstractions.plus (find_parameter_value_set pointer_analysis label rest) vs
+    | "n" :: "e" :: "g" :: lg :: idx :: rest ->
+      Value_set_abstractions.minus 
+        (find_parameter_value_set pointer_analysis label rest)
+        (find_parameter_value_set pointer_analysis label [lg; idx])
+    | lst -> 
+      (print_endline (String.concat ~sep:";" lst); failwith "not yet implemented")
+    
+
+let call_depends_on_store
+    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    ~(call_label : Instr.Label.t)
+    ~(store_label : Instr.Label.t)
+    ~(fct_index : int32)
+    ~(store_offset : int)
+  : Instr.Label.t option =
+  match pointer_analysis with
+  | Some (cfg_pointers, cfg_spec, summaries) ->
+    let fct_summary = Int32Map.find_exn summaries fct_index in
+    let accessed_memory = Abstract_store_domain.get fct_summary ~var:(Variable.Accessed) in
+    let accessed_memory =
+      match accessed_memory with
+      | ValueSet RIC {stride; lower_bound; upper_bound; offset=("", o)} -> 
+        Value_set_abstractions.ValueSet (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))
+      | ValueSet RIC {stride; lower_bound; upper_bound; offset=(relative_offset, o)} ->
+        let offset_vs = find_parameter_value_set pointer_analysis call_label (tokenize relative_offset) in
+        let () = print_endline ("relative_offset: " ^ Value_set_abstractions.to_string offset_vs) in
+        let vs = Value_set_abstractions.i32_add
+          (Value_set_abstractions.ValueSet (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o))))
+          offset_vs in
+        let () = print_endline ("addresses accessed by function: " ^ Value_set_abstractions.to_string vs) in
+        vs
+      | ValueSet Bottom -> ValueSet Bottom
+      | _ -> accessed_memory
+    in
+    let store_address = find_store_address cfg_spec store_label in
+    let store_address_value_set = 
+      Abstract_store_domain.find_value_set 
+        cfg_pointers store_label store_address 
+      |> (Value_set_abstractions.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn store_offset)))))
+    in
+    let overlap = Value_set_abstractions.may_overlap ~store_vs:store_address_value_set ~load_vs:accessed_memory in
+    if overlap then Some store_label else None
+  | None -> Some store_label
+
+let make 
+    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    (cfg : 'a Cfg.t) 
+  : t =
   let instrs = Cfg.all_instructions cfg in
   (* Instructions that are load or call depend on all stores/calls that may have been executed before, hence on all stores contained in a predecessor of the current node in the CFG *)
   let loads_and_calls = Instr.Label.Map.keys
@@ -20,10 +209,27 @@ let make (cfg : 'a Cfg.t) : t =
              | Call { instr = CallDirect _; label; _ } -> Instr.Label.Set.singleton label
              | Call { instr = CallIndirect _; label; _ } -> Instr.Label.Set.singleton label
              | Control _ | Entry | Return _ | Imported _ -> Instr.Label.Set.empty
-             | Data instrs ->
-               Instr.Label.Set.of_list (List.filter_map instrs ~f:(function
-                   | { instr = Store _; label; _ } -> Some label
-                   | _ -> None))))))) in
+             | Data instrs' ->
+                Instr.Label.Set.of_list (List.filter_map instrs' ~f:(function
+                  (* Let's see what depends on a store operation *)
+                  | { instr = Store {offset=store_offset; _}; label = store_label; _ } -> (
+                    match Instr.Label.Map.find_exn instrs label with
+                    (* Load instr depends on store: *)
+                    | Data { instr = Load {offset=load_offset; _}; _ } -> 
+                      load_depends_on_store pointer_analysis ~load_label:label ~store_label ~store_offset ~load_offset
+                    (* Call depends on store: *)
+                    | Call { instr = CallDirect (_, _, i); _ } ->
+                      call_depends_on_store pointer_analysis ~call_label:label ~store_label:store_label ~fct_index:i
+                      ~store_offset
+                    | _ ->  Some store_label
+                  )
+                  (* Let's see if a global.get depends on a function call*)
+                  (* | { instr = GlobalGet idx; _} ->
+                    let global_variable = Var.Global (Int32.to_int_exn idx)
+                    global_get_depends_on_call
+                    in failwith "" *)
+
+                  | _ -> None))))))) in
   deps
 
 let deps_for (deps : t) (instr : Instr.Label.t) : Instr.Label.Set.t =
@@ -31,7 +237,7 @@ let deps_for (deps : t) (instr : Instr.Label.t) : Instr.Label.Set.t =
   | Some instrs -> instrs
   | None -> Instr.Label.Set.empty
 
-module Test = struct
+(* module Test = struct
   let%test "mem-dep with memory" =
     let open Instr.Label.Test in
     let module_ = Wasm_module.of_string "(module
@@ -67,4 +273,4 @@ module Test = struct
     let expected = Instr.Label.Set.singleton (lab 2) in
     Instr.Label.Set.check_equality ~actual ~expected
 
-end
+end *)

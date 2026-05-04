@@ -62,6 +62,11 @@ let get_true (boolean : t) ~(var : Variable.t) : RIC.t =
 let get_false (boolean : t) ~(var : Variable.t) : RIC.t =
   (get boolean ~var).false_
 
+
+let is_singleton (b : t) : bool =
+  match b with
+  | {numeric_value; _} -> RIC.is_singleton numeric_value
+
 (* let remove_memory_variables (boolean : t) ~(accessed : RIC.accessed) : t =
   let accessed = accessed.fully :: accessed.partially in
   let vars = Variable.Map.keys boolean.true_or_false in

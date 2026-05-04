@@ -27,6 +27,30 @@ let equal (x : t) (y : t) : bool =
   | ValueSet x, Bitfield y 
   | Bitfield y, ValueSet x -> (RIC.equal x (RIC.of_bitfield y)) && (Bitfield.equal (RIC.to_bitfield x) y)
   | _ -> false
+
+
+let is_singleton (x : t) : bool =
+  match x with
+  | ValueSet x -> RIC.is_singleton x
+  | Boolean x -> Boolean.is_singleton x
+  | Bitfield x -> Bitfield.is_singleton x
+
+let rec plus (x : t) (y : t) : t =
+  match x, y with
+  | ValueSet x, ValueSet y -> ValueSet (RIC.plus x y)
+  | Boolean {numeric_value = x; _}, y -> plus (ValueSet x) y
+  | x, Boolean {numeric_value = y; _} -> plus x (ValueSet y)
+  | Bitfield x, y -> plus (ValueSet (RIC.of_bitfield x)) y
+  | x, Bitfield y -> plus x (ValueSet (RIC.of_bitfield y))
+
+
+let rec minus (x : t) (y : t) : t =
+  match x, y with
+  | ValueSet x, ValueSet y -> ValueSet (RIC.minus x y)
+  | Boolean {numeric_value = x; _}, y -> minus (ValueSet x) y
+  | x, Boolean {numeric_value = y; _} -> minus x (ValueSet y)
+  | Bitfield x, y -> minus (ValueSet (RIC.of_bitfield x)) y
+  | x, Bitfield y -> minus x (ValueSet (RIC.of_bitfield y))
   
 (** [to_string x] returns a human‑readable representation of [x],
     delegating to the corresponding sub‑domain printer. *)
@@ -186,3 +210,50 @@ let update_relative_offset (x : t) (actual_values : RIC.t String.Map.t) : t =
   match x with
   | ValueSet ric_ -> ValueSet (RIC.update_relative_offset ~ric_ ~actual_values)
   | _ -> x
+
+let negative (x : t) : t =
+  match x with
+  | ValueSet x
+  | Boolean {numeric_value = x; _} -> ValueSet (RIC.negative x)
+  | Bitfield x -> ValueSet (RIC.negative (RIC.of_bitfield x))
+
+let add_consts (x : int32) (y : int32) : t =
+  ValueSet (RIC.ric (0l, Int 0l, Int 0l, ("", Int32.(x + y))))
+
+let sub_consts (x : int32) (y : int32) : t=
+  add_consts y Int32.(-x)
+
+let add_const (x : t) (y : int32) : t =
+  match x with
+  | ValueSet x 
+  | Boolean {numeric_value = x; _} -> ValueSet (RIC.add_offset x y)
+  | Bitfield x -> ValueSet (RIC.add_offset (RIC.of_bitfield x) y)
+
+let sub_const (x : int32) (y : t) : t =
+  add_const y Int32.(-x)
+
+let i32_add (x : t) (y : t) : t =
+  match x, y with
+  | ValueSet x, ValueSet y
+  | ValueSet x, Boolean {numeric_value = y; _}
+  | Boolean {numeric_value = x; _}, ValueSet y 
+  | Boolean {numeric_value = x; _}, Boolean {numeric_value = y; _} ->
+    ValueSet (RIC.plus x y)
+  | Bitfield x, ValueSet y
+  | ValueSet y, Bitfield x
+  | Bitfield x, Boolean {numeric_value = y; _}
+  | Boolean {numeric_value = y; _}, Bitfield x ->
+    ValueSet (RIC.plus (RIC.of_bitfield x) y)
+  | Bitfield x, Bitfield y -> ValueSet (RIC.plus (RIC.of_bitfield x) (RIC.of_bitfield y))
+
+let i32_sub (x : t) (y : t) : t =
+  i32_add (negative x) y
+
+
+let rec may_overlap ~(store_vs : t) ~(load_vs : t) : bool =
+  match store_vs, load_vs with
+  | Bitfield vs1, _ -> may_overlap ~store_vs:(ValueSet (RIC.of_bitfield vs1)) ~load_vs
+  | _, Bitfield vs2 -> may_overlap ~store_vs ~load_vs:(ValueSet (RIC.of_bitfield vs2))
+  | Boolean {numeric_value; _}, _ -> may_overlap ~store_vs:(ValueSet numeric_value) ~load_vs
+  | _, Boolean {numeric_value; _} -> may_overlap ~store_vs ~load_vs:(ValueSet numeric_value)
+  | ValueSet vs1, ValueSet vs2 -> RIC.may_overlap vs1 vs2

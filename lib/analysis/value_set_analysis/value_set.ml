@@ -29,7 +29,7 @@ let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec
   let rel_cfg = (* Relational.Transfer.dummy_annotate *) spec_cfg in
   Intra.analyze wasm_mod rel_cfg summaries
 
-let analyse_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t * Abstract_store_domain.t Cfg.t * Summary.t) Int32Map.t =
+let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t * Abstract_store_domain.t Cfg.t * Summary.t) Int32Map.t =
   Analysis_helpers.mk_inter
     (fun _cfgs _wasm_mod -> Int32Map.empty)
     (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->

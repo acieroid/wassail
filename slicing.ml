@@ -63,7 +63,7 @@ let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
     ~f:(fun acc instr ->
         Instr.Label.Set.union acc (Instr.all_labels_no_merge instr))
 
-let slice =
+(* let slice =
   Command.basic
     ~summary:"Produce an executable program after slicing the given function at the given slicing criterion"
     Command.Let_syntax.(
@@ -75,19 +75,19 @@ let slice =
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
         Spec_inference.use_const := false;
-        Log.info "Loading module";
+        if !Slicing.Options.print_trace then Log.info "Loading module";
         let module_ = Wasm_module.of_file filename in
-        Log.info "Constructing CFG";
+        if !Slicing.Options.print_trace then Log.info "Constructing CFG";
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
-        Log.info "Slicing";
-        Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
-        let funcinst = Slicing.slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) in
-        Log.info "done";
+        if !Slicing.Options.print_trace then Log.info "Slicing";
+        if !Slicing.Options.print_trace then Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
+        let funcinst = Slicing.slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) None in
+        if !Slicing.Options.print_trace then Log.info "done";
         (* let sliced_labels = all_labels funcinst.code.body in *)
         let module_ = Wasm_module.replace_func module_ funidx funcinst in
         Out_channel.with_file outfile
-          ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_)))
+          ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_))) *)
 
 let slice_line_number =
   Command.basic
@@ -96,23 +96,53 @@ let slice_line_number =
       let%map_open filename = anon ("file" %: string)
       and funidx = anon ("fun" %: int32)
       and line_number = anon ("line-number" %: int)
-      and outfile = anon ("output" %: string) in
+      and outfile = anon ("output" %: string) 
+      and pointer_analysis = flag "--pointers" no_arg ~doc:" Run pointer analysis before slicing to improve precision" 
+      and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
+      if trace then Slicing.Options.print_trace := true;
       fun () ->
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
         Spec_inference.use_const := false;
-        Log.info "Loading module";
+        if !Slicing.Options.print_trace then Log.info "Loading module";
         let module_ = Wasm_module.of_file filename in
-        Log.info "Constructing CFG";
+        if !Slicing.Options.print_trace then Log.info "Constructing CFG";
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
+        let pointer_analysis = (* TODO: turn pointer analysis on by default *)
+          if pointer_analysis then
+            (if trace then Value_set.Options.print_trace := true;
+            Spec_inference.use_const := true;
+            Spec_inference.propagate_globals := true;
+            Spec_inference.propagate_locals := true;
+            let cfg_spec_with_propagation = Spec_analysis.analyze_intra1 module_ funidx in
+            let instructions_from_pointer_cfg = Cfg.all_instructions cfg_spec_with_propagation in
+            (* Value_set_options.print_trace := true; *)
+            let cg = Call_graph.make module_ in
+            let schedule = Call_graph.analysis_schedule cg module_.nfuncimports |> List.concat in
+            let cfg_pointers_map = Value_set.analyze_intra module_ schedule in
+            let cfg_pointers =
+              match Int32Map.find cfg_pointers_map funidx with
+              | None -> failwith ("No entry for function " ^ Int32.to_string funidx)
+              | Some (_summary, None) -> failwith ("Function" ^ Int32.to_string funidx ^ "has no CFG")
+              | Some (_summary, Some cfg) -> cfg in
+            let cfgdot = Cfg.to_dot cfg_pointers ~annot_str:Value_set.Domain.to_string in
+            let () = Out_channel.write_all (filename ^ ".pointers.dot") ~data:cfgdot in
+            let summaries = Int32Map.map cfg_pointers_map ~f:(fun (summary, _) -> summary) in
+            Some (cfg_pointers, instructions_from_pointer_cfg, summaries))
+          else
+            None
+        in
+        Spec_inference.use_const := false;
+        Spec_inference.propagate_globals := false;
+        Spec_inference.propagate_locals := false;
         let instr = match List.find (Cfg.all_instructions_list cfg) ~f:(fun instr -> (Instr.line_number instr) = line_number) with
              | None -> failwith "No instruction found at this line"
              | Some instr -> instr in
         let slicing_criterion = Instr.label instr in
-        Log.info "Slicing";
-        Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
-        let funcinst = Slicing.slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) in
-        Log.info "done";
+        Log.info ("---------- Slicing of function " ^ (Int32.to_string funidx) ^ " ----------");
+        if !Slicing.Options.print_trace then Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
+        let funcinst = Slicing.slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) pointer_analysis in
+        if !Slicing.Options.print_trace then Log.info "done";
         (* let sliced_labels = all_labels funcinst.code.body in *)
         let module_ = Wasm_module.replace_func module_ funidx funcinst in
         Out_channel.with_file outfile

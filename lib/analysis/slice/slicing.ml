@@ -1,6 +1,8 @@
 open Core
 open Helpers
 
+module Options = Slicing_options
+
 (* module Time = Time_float (* Time is deprecated in Core, we should use Time_float instead *) *)
 
 module InSlice = struct
@@ -41,22 +43,93 @@ type preanalysis_results = {
   mem_dependencies : Memory_deps.t;
   mem_time : Time_float.Span.t;
   global_set_instructions : InSlice.Set.t;
+  global_dependencies : Instr.Label.Set.t Instr.Label.Map.t; (* global.get instructions depend on fct calls *)
   global_time : Time_float.Span.t;
 }
 
+
+(** Return all global.get instructions in the current function, together with the global index they read. *)
+let find_global_get_instructions
+    (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) 
+  : (Instr.Label.t * int32) list =
+  Instr.Label.Map.to_alist cfg_instructions
+  |> List.filter_map ~f:(fun (label, instr) ->
+      match instr with
+      | Data { instr = GlobalGet global_idx; _ } -> Some (label, global_idx)
+      | _ -> None)
+
+(** Return all direct call instructions in the current function, together with the index of the function they call. *)
+let find_call_instructions
+    (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t)
+  : (Instr.Label.t * int32) list =
+  Instr.Label.Map.to_alist cfg_instructions
+  |> List.filter_map ~f:(fun (label, instr) ->
+      match instr with
+      | Call { instr = CallDirect (_, _, func_idx); _ } -> Some (label, func_idx)
+      | _ -> None)
+
+let function_may_affect_global_variable
+    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    ~(global_var : Var.t)
+    ~(fct_index : int32)
+  : bool =
+  match pointer_analysis with
+  | None -> true
+  | Some (_, _, summaries) ->
+    let fct_summary = 
+      Int32Map.find_exn summaries fct_index in
+    let global_value_after_call = 
+      Abstract_store_domain.get fct_summary ~var:(Variable.Var global_var) in
+    not (Value_set_abstractions.equal global_value_after_call (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, (Var.to_string global_var,0l)))))
+    
+
 (** Performs the pre-analysis phase in order to slice a function, according to any slicing criterion *)
-let preanalysis (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) : preanalysis_results =
+let preanalysis 
+    (module_ : Wasm_module.t) 
+    (cfg : Spec_domain.t Cfg.t) 
+    (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) 
+    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+  : preanalysis_results =
   let t0 = Time_float.now () in
   let control_dependencies = Control_deps.control_deps_exact_instrs cfg in
   let t1 = Time_float.now () in
   let (_, _, data_dependencies) = Use_def.make module_ cfg in
   let t2 = Time_float.now () in
-  let mem_dependencies = Memory_deps.make cfg in
+  let mem_dependencies = Memory_deps.make pointer_analysis cfg in
+  (
   let t3 = Time_float.now () in
   let global_set_instructions = InSlice.Set.of_list (List.map ~f:(fun label -> InSlice.{ label; reason = None })
                                                        (Instr.Label.Map.keys (Instr.Label.Map.filter cfg_instructions ~f:(function
                                                            | Data { instr = GlobalSet _; _ } -> true
                                                            | _ -> false)))) in
+  let global_dependencies =
+    let global_gets = find_global_get_instructions cfg_instructions in
+    let call_instructions = find_call_instructions cfg_instructions in
+    List.fold global_gets 
+      ~init:Instr.Label.Map.empty
+      ~f:(fun dependencies g ->
+        match g with
+        | global_var_label, idx -> 
+          let global_var = Var.Global (Int32.to_int_exn idx) in
+          let deps = 
+            List.fold call_instructions
+              ~init:Instr.Label.Set.empty
+              ~f:(fun acc (call_label, fct_index) ->
+                if function_may_affect_global_variable
+                     pointer_analysis
+                     (* ~call_label *)
+                     ~global_var
+                     ~fct_index
+                then
+                  let () = print_endline ("fct " ^ Int32.to_string fct_index ^ " may affect global variable " ^ Var.to_string global_var) in
+                  Instr.Label.Set.add acc call_label
+                else
+                  let () = print_endline ("fct " ^ Int32.to_string fct_index ^ " does not affect global variable " ^ Var.to_string global_var) in
+                  acc)
+          in
+          Instr.Label.Map.add_exn dependencies ~key:global_var_label ~data:deps
+      )
+  in
   let t4 = Time_float.now () in
   let control_time = Time_float.diff t1 t0 in
   let data_time = Time_float.diff t2 t1 in
@@ -65,7 +138,9 @@ let preanalysis (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (cfg_instr
   { control_dependencies; control_time;
     data_dependencies; data_time;
     mem_dependencies; mem_time;
-    global_set_instructions; global_time }
+    global_set_instructions; global_time;
+    global_dependencies}
+  )
 
 
 (** Identify instructions to keep in a backwards slice on `cfg`, using the
@@ -73,7 +148,7 @@ let preanalysis (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (cfg_instr
     set of instructions that are part of the slice, as a set of instruction
     labels. *)
 let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) (preanalysis : preanalysis_results) (criteria : Instr.Label.Set.t) : (Instr.Label.Set.t * (Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t)) =
-  Log.info (Printf.sprintf "Slicing with criteria %s" (Instr.Label.Set.to_string criteria));
+  if !Options.print_trace then Log.info (Printf.sprintf "Slicing with criteria %s" (Instr.Label.Set.to_string criteria));
   let t0 = Time_float.now () in
   let rec loop (worklist : InSlice.Set.t) (slice : Instr.Label.Set.t) (visited : InSlice.Set.t) : Instr.Label.Set.t =
     (* Perform backward slicing as follows:
@@ -95,7 +170,7 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
       (* Already seen this slice part, no need to process it again *)
       loop (InSlice.Set.remove worklist slicepart) slice visited
     | Some slicepart ->
-      Log.info (Printf.sprintf "Looking at instruction %s" (InSlice.to_string slicepart));
+      (* if !Options.print_trace then Log.info (Printf.sprintf "Looking at instruction %s" (InSlice.to_string slicepart)); *)
       (* Add instr to the current slice *)
       let slice' = Instr.Label.Set.add slice slicepart.label in
       let visited' = InSlice.Set.add visited slicepart in
@@ -111,7 +186,7 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
               (* For def in usedef(use): if def contains an instruction, add def.instr to W *)
               let data_deps : InSlice.Set.t = match def with
                 | Use_def.Def.Instruction (instr', var) ->
-                  Log.info
+                  if !Options.print_trace then Log.info
                     (Printf.sprintf "Instruction %s (%s) is part of the slice due to its data dependence on %s"
                        (Instr.Label.to_string instr') (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions instr')) (Var.to_string var));
                   InSlice.Set.singleton (InSlice.make instr' (Some var) cfg_instructions)
@@ -123,7 +198,7 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
         | None -> InSlice.Set.empty
         | Some deps -> InSlice.Set.of_list (List.map (Instr.Label.Set.to_list deps)
                                               ~f:(fun label ->
-                                                  Log.info
+                                                  if !Options.print_trace then Log.info
                                                     (Printf.sprintf "Instruction %s (%s) is part of the slice due to control dependences"
                                                        (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
                                                   InSlice.make label None cfg_instructions)) in
@@ -132,12 +207,24 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
       let worklist''' = InSlice.Set.union worklist''
           (InSlice.Set.of_list
              (List.map ~f:(fun label ->
-                  Log.info
+                  if !Options.print_trace then Log.info
                     (Printf.sprintf "Instruction %s (%s) is part of the slice due to memory dependences"
                        (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
                   InSlice.make label None cfg_instructions)
                 (Instr.Label.Set.to_list (Memory_deps.deps_for preanalysis.mem_dependencies slicepart.label)))) in
-      loop (InSlice.Set.remove worklist''' slicepart) slice' visited' in
+      (* Add all global side-effect dependencies of instr to W.
+         For example, a global.get may depend on a call instruction if the
+         called function may execute a global.set on the same global. *)
+      let global_deps : InSlice.Set.t = match Instr.Label.Map.find preanalysis.global_dependencies slicepart.label with
+        | None -> InSlice.Set.empty
+        | Some deps -> InSlice.Set.of_list (List.map (Instr.Label.Set.to_list deps)
+                                              ~f:(fun label ->
+                                                  if !Options.print_trace then Log.info
+                                                    (Printf.sprintf "Instruction %s (%s) is part of the slice due to global dependences"
+                                                       (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
+                                                  InSlice.make label None cfg_instructions)) in
+      let worklist'''' = InSlice.Set.union worklist''' global_deps in
+      loop (InSlice.Set.remove worklist'''' slicepart) slice' visited' in
   let agrawal (slice : Instr.Label.Set.t) : Instr.Label.Set.t =
     (* For each br instruction of the function, we add them to the slice if they are control-dependent on an instruction in the slice *)
     (* For each instruction in the slice, we add all br instructions that are control-dependent on it *)
@@ -150,7 +237,7 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
               | Some instrs -> begin match Instr.Label.Set.find_map instrs
                                              ~f:(fun i -> if Instr.Label.Set.mem slice i then Some i else None) with
                 | Some label' ->
-                    Log.info (Printf.sprintf "Agrawal tells us to add %s to the slice because there is a dependency to %s\n" (Instr.Label.to_string label) (Instr.Label.to_string label'));
+                    if !Options.print_trace then Log.info (Printf.sprintf "Agrawal tells us to add %s to the slice because there is a dependency to %s\n" (Instr.Label.to_string label) (Instr.Label.to_string label'));
                     Instr.Label.Set.add slice label
                   | None -> slice
                 end
@@ -340,7 +427,7 @@ let replace_with_equivalent_instructions (instrs : unit Instr.t list) (cfg : 'a 
   if List.is_empty instrs then instrs else
     let t = instrs_type instrs cfg instructions_map in
     let replaced = List.map (dummy_instrs t next_label) ~f:(fun i -> Instr.Data i) in
-   Log.info (Printf.sprintf "Replacing instructions %s of type %s -> %s with %s"
+   if !Options.print_trace then Log.info (Printf.sprintf "Replacing instructions %s of type %s -> %s with %s"
                 (String.concat ~sep:"," (List.map ~f:Instr.to_string instrs))
                 (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (fst t)))
                 (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (snd t)))
@@ -389,16 +476,23 @@ let rec slice (cfg : 'a Cfg.t) (cfg_instructions : Spec_domain.t Instr.t Instr.L
       loop rest (instr :: to_remove_rev) in
   loop original_instructions []
 
-let slice_to_funcinst (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) (slicing_criteria : Instr.Label.Set.t) : Func_inst.t =
+let slice_to_funcinst 
+    (module_ : Wasm_module.t) 
+    (cfg : Spec_domain.t Cfg.t) 
+    (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) 
+    ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) 
+    (slicing_criteria : Instr.Label.Set.t) 
+    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option) 
+  : Func_inst.t =
   let instructions_in_slice = match instructions_in_slice with
     | Some instrs -> instrs
     | None ->
-      Log.info "Computing instructions part of the slice";
-      let instrs, _ = instructions_to_keep module_ cfg cfg_instructions (preanalysis module_ cfg cfg_instructions) slicing_criteria in
+      if !Options.print_trace then Log.info "Computing instructions part of the slice";
+      let instrs, _ = instructions_to_keep module_ cfg cfg_instructions (preanalysis module_ cfg cfg_instructions pointer_analysis) slicing_criteria in
       instrs in
-  Log.info "Clearing annotations";
+  if !Options.print_trace then Log.info "Clearing annotations";
   let unit_cfg = Cfg.clear_annotations cfg in
-  Log.info "Constructing a valid slice";
+  if !Options.print_trace then Log.info "Constructing a valid slice";
   let instructions = slice unit_cfg cfg_instructions (Cfg.body unit_cfg) instructions_in_slice  in
   { idx = cfg.idx;
     name = Some cfg.name;
@@ -435,7 +529,7 @@ module Test = struct
     i32.add)    ;; Instr 6
    (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
-    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs) (Instr.Label.Set.singleton (lab 2)) in
+    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs None) (Instr.Label.Set.singleton (lab 2)) in
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -455,7 +549,7 @@ module Test = struct
     i32.add)    ;; Instr 6 -- slicing criterion
   (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
-    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs) (Instr.Label.Set.singleton (lab 6)) in
+    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs None) (Instr.Label.Set.singleton (lab 6)) in
     let expected = Instr.Label.Set.of_list [lab 4; lab 5; lab 6] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -475,7 +569,7 @@ module Test = struct
     local.get 0)  ;; Instr 5
   (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
-    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs) (Instr.Label.Set.singleton (lab 3)) in
+    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs None) (Instr.Label.Set.singleton (lab 3)) in
     let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -495,7 +589,7 @@ module Test = struct
     local.get 0)  ;; Instr 5
   (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
-    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs) (Instr.Label.Set.singleton (lab 4)) in
+    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs None) (Instr.Label.Set.singleton (lab 4)) in
     let expected = Instr.Label.Set.of_list [lab 1; lab 2; lab 3; lab 4] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
 
@@ -523,7 +617,7 @@ module Test = struct
     i32.add)        ;; Instr 9 -- slicing criterion
   (memory (;0;) 2))" in
     let all_instrs = Cfg.all_instructions cfg in
-    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs) (Instr.Label.Set.singleton (lab 9)) in
+    let actual, _ = instructions_to_keep module_ cfg all_instrs (preanalysis module_ cfg all_instrs None) (Instr.Label.Set.singleton (lab 9)) in
     (* Merge blocks do not need to be in the slice *)
     let expected = Instr.Label.Set.of_list [lab 0; lab 1; lab 2; lab 3; lab 8; lab 9] in
     Instr.Label.Set.check_equality ~actual:actual ~expected:expected
@@ -603,7 +697,7 @@ module Test = struct
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
      let module_, cfg = build_cfg ~fidx original in
-     let actual = (slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab ~fidx criterion))).code.body in
+     let actual = (slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab ~fidx criterion)) None).code.body in
      let _, expected_cfg = build_cfg ~fidx sliced in
      let expected = Cfg.body expected_cfg in
      if List.length expected <> List.length actual then begin
@@ -1122,7 +1216,7 @@ module Test = struct
         Spec_inference.propagate_locals := false;
         Spec_inference.propagate_globals := false;
         Spec_inference.use_const := false;
-        let funcinst = slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) in
+        let funcinst = slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) None in
         let module_ = Wasm_module.replace_func module_ 14l funcinst in
         (* We should be able to re-annotate the graph *)
         let _new_cfg = Spec_analysis.analyze_intra1 module_ 14l in
@@ -1139,7 +1233,7 @@ module Test = struct
          Spec_inference.propagate_locals := false;
          Spec_inference.propagate_globals := false;
          Spec_inference.use_const := false;
-         let funcinst = slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) in
+         let funcinst = slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton instr_idx) None in
          let module_ = Wasm_module.replace_func module_ 22l funcinst in
          (* We should be able to re-annotate the graph *)
          Spec_inference.propagate_locals := true;

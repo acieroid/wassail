@@ -151,7 +151,7 @@ let value_set_inter =
         let oc = Out_channel.create ~append:false "store_types.txt" in
           Out_channel.close oc
         in
-        let results = Value_set.analyse_inter (Wasm_module.of_file filename) sccs in
+        let results = Value_set.analyze_inter (Wasm_module.of_file filename) sccs in
         let function_name (summary : Spec_domain.t Wassail.Cfg.t * Value_set.Domain.t Wassail.Cfg.t * Value_set.Domain.t) : string =
           let name =
             match summary with

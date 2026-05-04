@@ -106,7 +106,9 @@ module Make (*: Transfer.TRANSFER *) = struct
       | Some r -> Variable.Var r
       | None -> failwith "nothing on the stack" in
     match i.instr with
-    | Nop | MemorySize | Drop | MemoryGrow -> state
+    (* TODO: is there a way to know the memory size? *)
+    | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstractions.ValueSet Top)
+    | Nop | Drop | MemoryGrow -> state
     | MemoryCopy | MemoryFill | MemoryInit _ -> state
     | RefIsNull | RefNull _ | RefFunc _ -> state
     | Select _ ->
@@ -895,11 +897,11 @@ module Make (*: Transfer.TRANSFER *) = struct
       begin match (Spec_domain.get_or_fail i.annotation_before).vstack with
       | [] -> `Simple state
       | top_of_stack :: _ ->
-      (* let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in *)
-        (* if !Value_set_options.print_trace then print_endline "return"; *)
+        let ret_var = Variable.Var ((Spec_domain.get_or_fail i.annotation_after).vstack |> pop) in
         let vs = Abstract_store_domain.get state ~var:(Variable.Var top_of_stack) in
         if !Value_set_options.print_trace then print_endline ("\treturned value-set: " ^ Abstract_store_domain.Value.to_string vs);
-        `Simple (Abstract_store_domain.set state ~var:(Variable.Var (Var.Return 0l)) ~vs:vs) (* TODO: generalize for more than one return *)
+        `Simple (Abstract_store_domain.set state ~var:ret_var ~vs:vs)
+        (* TODO: generalize for more than one return *)
       end
     | Unreachable -> `Simple  Abstract_store_domain.bottom
     | _ -> `Simple state
@@ -915,7 +917,7 @@ module Make (*: Transfer.TRANSFER *) = struct
     if !Value_set_options.print_trace then 
       (Log.info (Printf.sprintf "applying summary of function %ld" f);
       print_endline ("\tState before the call: " ^ Abstract_store_domain.to_string state);
-      print_endline ("\tSummary of function " ^ Int32.to_string f ^ ": " ^ Value_set_summary.to_string summary));
+      print_endline ("\tSummary of function " ^ Int32.to_string f ^ ":\n" ^ Value_set_summary.to_string summary));
     let spec_before = Spec_domain.get_or_fail i.annotation_before in
     let args = List.take spec_before.vstack (fst arity) in
     let spec_after = Spec_domain.get_or_fail i.annotation_after in
