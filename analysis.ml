@@ -328,3 +328,32 @@ let find_indirect_calls =
             let indirect_calls = Slicing.find_call_indirect_instructions cfg in
             List.iter indirect_calls ~f:(fun label ->
                 Printf.printf "function %ld, instruction %s\n" finst.idx (Instr.Label.to_string label))))
+
+
+
+
+
+let globals_usage =
+  Command.basic
+    ~summary:"Performs interprocedural analysis of global variables usage."
+    Command.Let_syntax.(
+      let%map_open filename = anon ("file" %: string)
+      and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)"  in
+      fun () ->
+        if trace then Global_read.Options.print_trace := true;
+        let module_ = filename |> Wasm_module.of_file in
+        let cg = module_ |> Call_graph.make in
+        let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
+        let globals_usage = Global_read.analyze_inter (Wasm_module.of_file filename) schedule in
+        let function_name (summary : Spec_domain.t Wassail.Cfg.t * Global_read.Domain.t Wassail.Cfg.t * Global_read.Summary.t) : string =
+          let name =
+            match summary with
+            | (cfg, _, _) -> cfg.name in
+          if String.equal "<unexported>" name then "" else "(" ^ name ^ ")" in
+        let get_summary (summary : Spec_domain.t Wassail.Cfg.t * Global_read.Domain.t Wassail.Cfg.t * Global_read.Domain.t) : Global_read.Summary.t =
+          match summary with
+          | (_, _, summary) -> summary in
+        let print = (fun fid summary -> Printf.printf "function %ld %s: \t%s\n" fid (function_name summary) (Global_read.Summary.to_string (get_summary summary))) in
+        Printf.printf "\nGlobal variables usage analysis of file %s\n=======================================================\n" filename;
+        IntMap.iteri globals_usage ~f:(fun ~key:id ~data:summary -> print id summary)
+  )

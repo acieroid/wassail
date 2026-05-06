@@ -42,3 +42,5 @@ module Instruction_counter = Instruction_counter
 module Sizes = Sizes
 
 module Value_set = Value_set
+
+module Global_read = Global_read

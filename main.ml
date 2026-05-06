@@ -67,5 +67,8 @@ let () =
        ; "value-set-cfg", Analysis.value_set_cfg
        ; "value-set-inter", Analysis.value_set_inter
        ; "value-set-inter-classical", Analysis.value_set_inter_classical
+
+       (* Global variables usage *)
+       ; "globals-usage", Analysis.globals_usage
        
        ])

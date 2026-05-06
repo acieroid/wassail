@@ -5,3 +5,8 @@
 \#*\#
 .merlin
 /js/jsbridge.bc.js
+
+*.csv
+*.dot
+
+/*.wat
