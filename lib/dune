@@ -16,7 +16,7 @@
    Var_prop
    Taint Taint_options Taint_domain Taint_transfer Taint_summary
    Taintcall Taintcall_domain Taintcall_transfer
-   Use_def Dominance Control_deps Memory_deps Slicing Slicing_options
+   Use_def Dominance Control_deps Memory_deps Slicing
    Instruction_counter Sizes
    Maths
    Variable
@@ -26,7 +26,8 @@
    Abstract_store_domain Reduced_interval_congruence Value_set_transfer Value_set_summary Value_set_options
    Value_set_abstractions
    Print_trace
-   Global_read_domain Global_read_transfer Global_read_summary Global_read Global_read_options Global_defs
+   Global_read_domain Global_read_transfer Global_read_summary Global_read Global_defs
+   Global_deps
    )
  (libraries core_kernel wasm sexplib)
  (inline_tests (flags)) ;; To include only one test, specify -only-test foo.ml:linenumber as the flag

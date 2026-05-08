@@ -59,11 +59,6 @@ module MakeSummaryBased (Transfer : Transfer.SUMMARY_TRANSFER)(Intra : Intra.INT
             | None -> failwith "Inter: can't find CFG" in
           (* Log.info
             (Printf.sprintf "Analyzing cfg %s (name: %s)\n" (Int32.to_string cfg_idx) cfg.name); *)
-          let () =
-            let oc = Out_channel.create ~append:true "store_types.txt" in
-            Out_channel.output_string oc (Printf.sprintf "==================================(function %s: %s)" (Int32.to_string cfg_idx) cfg.name ^ "\n");
-            Out_channel.close oc;
-          in
           Log.info
             (Printf.sprintf "Analyzing cfg %s (name: %s)\n" (Int32.to_string cfg_idx) (Cfg.name cfg));
           (* Perform intra-procedural analysis *)

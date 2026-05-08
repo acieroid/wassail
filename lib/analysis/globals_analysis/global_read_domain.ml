@@ -2,11 +2,14 @@ open Core
 
 (** Abstract domain used by the global-read analysis.
 
-    A value of this domain represents the set of global variables that may have
-    been read. Each global is represented as a {!Var.Global} value inside a
-    {!Var.Set.t}. *)
+    A value of this domain represents the set of labels of [global.set]
+    instructions whose definitions may be read. The distinguished value [Top]
+    represents an unknown set of definitions and is used when the analysis must
+    conservatively assume that any global definition may be read. *)
 
-(** Set of global variables read by the analyzed code. *)
+(** Set of global definitions read by the analyzed code, represented by the
+    labels of the corresponding [global.set] instructions, or [Top] when the
+    set is unknown. *)
 type t = Top | NotTop of Instr.Label.Set.t
 
 (** Equality over abstract states. *)
@@ -24,22 +27,19 @@ let compare (x : t) (y : t) : int =
   | Top, NotTop _ -> 1
   | NotTop _, Top -> -1
 
-(** [add ~globals ~used_global] returns [globals] extended with the global
-    variable identified by [used_global]. *)
-(* let add ~(globals : t) ~(used_global : int) : t =
-  Var.Set.add globals (Var.Global used_global) *)
-
-(** Least element of the domain: no global variable has been read. *)
+(** Least element of the domain: no global definition has been read. *)
 let bottom : t = NotTop Instr.Label.Set.empty
 
-(** Pretty-printer for abstract states. *)
+(** Pretty-printer for abstract states.
+
+    [Top] is displayed as the set of all global definitions. A finite state is
+    displayed as the list of labels of the [global.set] instructions it
+    contains. *)
 let to_string (globals : t) : string =
   match globals with
-  | Top -> "[ all global definitions ]"
+  | Top -> "[ all global definitions may be used ]"
   | NotTop globals ->
-    "[" ^
-    String.concat ~sep:", " (List.map (Var.Set.to_list globals) ~f:Instr.Label.to_string)
-    ^ "]"
+    "[" ^ String.concat ~sep:", " (List.map (Var.Set.to_list globals) ~f:Instr.Label.to_string) ^ "]"
 
 (** Least upper bound of two abstract states. *)
 let join (x : t) (y : t) : t = 

@@ -12,10 +12,8 @@ type t = Global_read_domain.t
 
 
 (** Pretty-printer for summaries. *)
-let to_string : t -> string = function
-  | Top -> "[ all globals may be used ]"
-  | NotTop summary when Var.Set.is_empty summary -> "[ no globals used ]"
-  | summary -> "Globals used: " ^ Global_read_domain.to_string summary
+let to_string : t -> string = 
+  function summary -> "global.set instructions potentially used: " ^ Global_read_domain.to_string summary
 
 
 (** Bottom summary: no global variable is read. *)

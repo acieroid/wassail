@@ -3,26 +3,6 @@ open Helpers
 
 type t = Instr.Label.Set.t Instr.Label.Map.t (* Map from instruction to its memory dependencies *)
 
-(* let print_deps (deps : t) =
-  print_endline "Memory deps:";
-  Instr.Label.Map.iteri deps ~f:(fun ~key ~data ->
-    let deps_str =
-      Instr.Label.Set.to_list data
-      |> List.map ~f:Instr.Label.to_string
-      |> String.concat ~sep:", "
-    in
-    Printf.printf "%s -> { %s }\n"
-      (Instr.Label.to_string key)
-      deps_str
-  ) *)
-
-(* let print_labelled_data (i : Abstract_store_domain.t Instr.labelled_data) =
-  (Printf.printf "Label: %s\n" (Instr.Label.to_string i.label);
-  Printf.printf "Instr: %s\n" (Instr.data_to_string i.instr);
-  Printf.printf "Before:\n%s\n"
-    (Abstract_store_domain.to_string i.annotation_before);
-  Printf.printf "After:\n%s\n"
-    (Abstract_store_domain.to_string i.annotation_after);) *)
 
 let find_store_address 
     (cfg : Spec_domain.t Instr.t Instr.Label.Map.t) 

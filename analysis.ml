@@ -116,7 +116,7 @@ let value_set_cfg =
         Spec_inference.use_const := true;
         if show_intermediates then Value_set.Options.show_intermediates := true;
         if narrow then Intra.narrow_option := true;
-        if trace then Value_set.Options.print_trace := true;
+        if trace then (Log.enable_info (); Value_set.Options.print_trace := true);
         if disjoint_stack then Value_set.Options.disjoint_stack := true;
         if disjoint then Value_set.Options.disjoint_memory_spaces := true;
         if debug then 
@@ -143,7 +143,7 @@ let value_set_inter =
       fun () ->
         if show_intermediates then Value_set.Options.show_intermediates := true;
         if narrow then Intra.narrow_option := true;
-        if trace then Value_set.Options.print_trace := true;
+        if trace then (Log.enable_info (); Value_set.Options.print_trace := true);
         if disjoint_stack then Value_set.Options.disjoint_stack := true;
         if ignore_imports then Value_set.Options.ignore_imports := true;
         if disjoint then Value_set.Options.disjoint_memory_spaces := true;
@@ -182,7 +182,7 @@ let value_set_inter_classical =
       fun () ->
         if show_intermediates then Value_set.Options.show_intermediates := true;
         if narrow then Intra.narrow_option := true;
-        if trace then Value_set.Options.print_trace := true;
+        if trace then (Log.enable_info (); Value_set.Options.print_trace := true);
         if disjoint_stack then Value_set.Options.disjoint_stack := true;
         if disjoint then Value_set.Options.disjoint_memory_spaces := true;
         if debug then 
@@ -340,7 +340,7 @@ let globals_usage =
       let%map_open filename = anon ("file" %: string)
       and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)"  in
       fun () ->
-        if trace then Global_read.Options.print_trace := true;
+        if trace then Log.enable_info ();
         let module_ = filename |> Wasm_module.of_file in
         let cg = module_ |> Call_graph.make in
         let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in

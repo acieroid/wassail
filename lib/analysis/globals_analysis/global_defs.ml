@@ -1,7 +1,17 @@
 open Core
 
+(** Maps each global variable to the set of labels of the [global.set]
+    instructions that may define it. *)
 type t = Instr.Label.Set.t Var.Map.t
 
+(** Computes the global definitions present in [module_].
+
+    The result associates each global variable with the labels of all
+    [global.set] instructions that assign to it.
+
+    This analysis temporarily disables global propagation in
+    {!Spec_inference.propagate_globals}. The original value of [propagate_globals] is restored
+    after the first intra-procedural analysis is launched. *)
 let make (module_ : Wasm_module.t) : t =
   let initial_propagation = !Spec_inference.propagate_globals in
   Spec_inference.propagate_globals := false;
@@ -24,15 +34,11 @@ let make (module_ : Wasm_module.t) : t =
           | _ -> acc
         )
       )
-
-let to_string (defs : t) : string =
-  if Var.Map.is_empty defs then
-    "No globals are defined in this program"
-  else
-    Var.Map.to_string defs Instr.Label.Set.to_string
     
+(** The empty set of global definitions. *)
 let empty : t = Var.Map.empty
 
-
+(** Returns the labels of the [global.set] instructions defining [global_var],
+    if any are known in [defs]. *)
 let get ~(defs : t) ~(global_var : Var.t) : Instr.Label.Set.t option =
   Var.Map.find defs global_var

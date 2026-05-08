@@ -12,14 +12,15 @@ open Core
 module Make = struct
   (** Abstract state manipulated by the analysis. *)
   module State = Global_read_domain
-  (** Runtime options for the analysis. *)
-  module Options = Global_read_options
   (** Function summaries used by the interprocedural analysis. *)
   module Summary = Global_read_summary
 
   (** Precomputed global-definition information used by the transfer functions.
-      This is initialized once by [Global_read.analyze_inter] before launching
-      the interprocedural analysis. *)
+
+      This reference is initialized once by [Global_read.analyze_inter] before
+      launching the interprocedural analysis, via [set_global_defs]. It is then
+      read by transfer functions (notably [data]) to resolve which definitions
+      correspond to a given [global.get]. *)
   let global_defs : Global_defs.t ref = ref Global_defs.empty
 
   (** Stores the global-definition preanalysis for later use by transfer
@@ -27,12 +28,6 @@ module Make = struct
   let set_global_defs (defs : Global_defs.t) : unit =
     global_defs := defs
 
-  (** Returns the global-definition preanalysis previously stored with
-      [set_global_defs]. *)
-  (* let get_global_defs () : Global_defs.t =
-    match !global_defs with
-    | Some defs -> defs
-    | None -> assert false *)
 
   (** Type of annotations expected on the input CFG. *)
   type annot_expected = Spec_domain.t
@@ -54,9 +49,11 @@ module Make = struct
 
   (** Transfer function for data instructions.
 
-      A [global.get] instruction reads a global variable, so the corresponding
-      global is added to the abstract state. Other data instructions leave the
-      state unchanged. *)
+      A [global.get] instruction reads a global variable. Using the precomputed
+      definitions from [global_defs], the transfer retrieves the set of variables
+      that may define this global and joins them into the abstract state.
+
+      Other data instructions leave the state unchanged. *)
   let data
       (_module_ : Wasm_module.t)
       (_cfg : annot_expected Cfg.t)
@@ -66,7 +63,6 @@ module Make = struct
     match i.instr with
     | GlobalGet g ->
       (let global_var = Var.Global (Int32.to_int_exn g) in
-      if !Options.print_trace then
         Log.info (Printf.sprintf "global.get %ld --- function uses variable %s" g (Var.to_string global_var));
         match Global_defs.get ~defs:!global_defs ~global_var with
         | None -> state
@@ -86,7 +82,7 @@ module Make = struct
       (state : State.t) (* the pre-state *)
     : [`Simple of State.t | `Branch of State.t * State.t] =
     match i.instr with
-    | BrIf _ -> `Branch (state, state)
+    | If _ | BrIf _ -> `Branch (state, state)
     | Unreachable -> `Simple Global_read_domain.bottom
     | _ -> `Simple state
 
@@ -124,7 +120,7 @@ module Make = struct
   (** Transfer function for imported function calls.
 
       Imported functions are handled conservatively and are assumed to read all
-      global variables. *)
+      global variables, hence the abstract state is set to [Top]. *)
   let imported
       (_module_ : Wasm_module.t)
       (_desc : Wasm_module.func_desc)
@@ -134,7 +130,10 @@ module Make = struct
     : State.t =
     Global_read_domain.Top
 
-  (** Applies the summary of a called function at a call site. *)
+  (** Applies the summary of a called function at a call site.
+
+      The summary represents the set of globals that may be read by the callee,
+      and is joined into the current abstract state. *)
   let apply_summary 
       (_module_ : Wasm_module.t)
       (f : Int32.t) 
@@ -143,8 +142,7 @@ module Make = struct
       (state : State.t)
       (summary : summary)
     : State.t =
-    if !Options.print_trace then 
-      Log.info (Printf.sprintf "call %ld --- summary of function %ld:\t%s" f f (Global_read_summary.to_string summary));
+    Log.info (Printf.sprintf "call %ld --- summary of function %ld:\t%s" f f (Global_read_summary.to_string summary));
     Summary.apply ~state ~summary
 
 
@@ -152,10 +150,10 @@ module Make = struct
       state.
 
       If the function exit is unreachable according to the input annotations,
-      the bottom summary is returned. Otherwise, the final abstract state is
-      converted into a function summary. *)
+      the bottom summary is returned. Otherwise, the final abstract state
+      (representing globals read by the function) is converted into a function
+      summary. *)
   let summary (cfg : annot_expected Cfg.t) (out_state : State.t) : summary =
-    if !Options.print_trace then Log.info ("END STATE:\t" ^ State.to_string out_state);
     let function_summary =
       match (Cfg.find_block_exn cfg cfg.exit_block).annotation_after with
       | Bottom ->
@@ -164,12 +162,12 @@ module Make = struct
       | NotBottom _ ->
         Summary.make out_state
     in
-    if !Options.print_trace then 
-      Log.info ("SUMMARY:\t" ^ Summary.to_string function_summary);
+    Log.info ("SUMMARY:\t" ^ Summary.to_string function_summary);
     function_summary
 
 
-  (** Extracts the summary of a function from the analyzed CFG. *)
+  (** Extracts the summary of a function from the analyzed CFG by reading the
+      abstract state at the exit block and delegating to [summary]. *)
   let extract_summary 
       (_module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t)

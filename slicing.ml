@@ -63,31 +63,6 @@ let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
     ~f:(fun acc instr ->
         Instr.Label.Set.union acc (Instr.all_labels_no_merge instr))
 
-(* let slice =
-  Command.basic
-    ~summary:"Produce an executable program after slicing the given function at the given slicing criterion"
-    Command.Let_syntax.(
-      let%map_open filename = anon ("file" %: string)
-      and funidx = anon ("fun" %: int32)
-      and instr = anon ("instr" %: int)
-      and outfile = anon ("output" %: string) in
-      fun () ->
-        Spec_inference.propagate_globals := false;
-        Spec_inference.propagate_locals := false;
-        Spec_inference.use_const := false;
-        if !Slicing.Options.print_trace then Log.info "Loading module";
-        let module_ = Wasm_module.of_file filename in
-        if !Slicing.Options.print_trace then Log.info "Constructing CFG";
-        let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
-        let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
-        if !Slicing.Options.print_trace then Log.info "Slicing";
-        if !Slicing.Options.print_trace then Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
-        let funcinst = Slicing.slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) None in
-        if !Slicing.Options.print_trace then Log.info "done";
-        (* let sliced_labels = all_labels funcinst.code.body in *)
-        let module_ = Wasm_module.replace_func module_ funidx funcinst in
-        Out_channel.with_file outfile
-          ~f:(fun ch -> Out_channel.output_string ch (Wasm_module.to_string module_))) *)
 
 let slice_line_number =
   Command.basic
@@ -99,18 +74,18 @@ let slice_line_number =
       and outfile = anon ("output" %: string) 
       and pointer_analysis = flag "--pointers" no_arg ~doc:" Run pointer analysis before slicing to improve precision" 
       and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
-      if trace then Slicing.Options.print_trace := true;
+      if trace then Wassail.Log.enable_info ();
       fun () ->
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
         Spec_inference.use_const := false;
-        if !Slicing.Options.print_trace then Log.info "Loading module";
+        Log.info "Loading module";
         let module_ = Wasm_module.of_file filename in
-        if !Slicing.Options.print_trace then Log.info "Constructing CFG";
+        Log.info "Constructing CFG";
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
         let pointer_analysis = (* TODO: turn pointer analysis on by default *)
           if pointer_analysis then
-            (if trace then Value_set.Options.print_trace := true;
+            (if trace then Wassail.Log.enable_info ();
             Spec_inference.use_const := true;
             Spec_inference.propagate_globals := true;
             Spec_inference.propagate_locals := true;
@@ -140,9 +115,9 @@ let slice_line_number =
              | Some instr -> instr in
         let slicing_criterion = Instr.label instr in
         Log.info ("---------- Slicing of function " ^ (Int32.to_string funidx) ^ " ----------");
-        if !Slicing.Options.print_trace then Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
+        Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
         let funcinst = Slicing.slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) pointer_analysis in
-        if !Slicing.Options.print_trace then Log.info "done";
+        Log.info "done";
         (* let sliced_labels = all_labels funcinst.code.body in *)
         let module_ = Wasm_module.replace_func module_ funidx funcinst in
         Out_channel.with_file outfile

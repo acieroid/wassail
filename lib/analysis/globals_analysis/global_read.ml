@@ -8,9 +8,6 @@ open Core
     describing the globals that may be accessed, and these summaries are propagated
     through the call graph until a fixpoint is reached. *)
 
-(** Command-line options controlling the global-read analysis. *)
-module Options = Global_read_options
-
 (** Abstract domain used to represent the set of globals that may be read. *)
 module Domain = Global_read_domain
 
@@ -47,7 +44,7 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
     (fun wasm_mod ~cfgs:_ -> Global_defs.make wasm_mod)
     (fun _ _ -> Int32Map.empty)
     (fun global_defs wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
-      if !Options.print_trace then Log.info
+      Log.info
         (Printf.sprintf "---------- Global-read analysis of SCC {%s} ----------"
           (String.concat ~sep:", " (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
       (* Run the global-read analysis. *)
