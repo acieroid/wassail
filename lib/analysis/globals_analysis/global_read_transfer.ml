@@ -17,6 +17,23 @@ module Make = struct
   (** Function summaries used by the interprocedural analysis. *)
   module Summary = Global_read_summary
 
+  (** Precomputed global-definition information used by the transfer functions.
+      This is initialized once by [Global_read.analyze_inter] before launching
+      the interprocedural analysis. *)
+  let global_defs : Global_defs.t ref = ref Global_defs.empty
+
+  (** Stores the global-definition preanalysis for later use by transfer
+      functions. *)
+  let set_global_defs (defs : Global_defs.t) : unit =
+    global_defs := defs
+
+  (** Returns the global-definition preanalysis previously stored with
+      [set_global_defs]. *)
+  (* let get_global_defs () : Global_defs.t =
+    match !global_defs with
+    | Some defs -> defs
+    | None -> assert false *)
+
   (** Type of annotations expected on the input CFG. *)
   type annot_expected = Spec_domain.t
 
@@ -48,9 +65,12 @@ module Make = struct
     : State.t =
     match i.instr with
     | GlobalGet g ->
-      (if !Options.print_trace then
-        Log.info (Printf.sprintf "global.get %ld --- function uses variable %s" g (Var.to_string (Var.Global (Int32.to_int_exn g))));
-      Global_read_domain.add ~globals:state ~used_global:(Int32.to_int_exn g))
+      (let global_var = Var.Global (Int32.to_int_exn g) in
+      if !Options.print_trace then
+        Log.info (Printf.sprintf "global.get %ld --- function uses variable %s" g (Var.to_string global_var));
+        match Global_defs.get ~defs:!global_defs ~global_var with
+        | None -> state
+        | Some defs -> Global_read_domain.join state defs)
     | _ -> state
 
 

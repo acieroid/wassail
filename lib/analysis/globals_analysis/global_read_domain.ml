@@ -20,11 +20,6 @@ let compare : t -> t -> int = Var.Set.compare
 let add ~(globals : t) ~(used_global : int) : t =
   Var.Set.add globals (Var.Global used_global)
 
-(** [is_read ~globals ~g] is [true] when the global variable [g] belongs to
-    [globals]. *)
-let is_read ~(globals : t) ~(g : int) : bool =
-  Var.Set.mem globals (Var.Global g)
-
 (** Least element of the domain: no global variable has been read. *)
 let bottom : t = Var.Set.empty
 

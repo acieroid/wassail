@@ -10,3 +10,14 @@
 *.dot
 
 /*.wat
+
+wow
+/*.log
+*.numbers
+bitFieldBackup.txt
+lib/analysis/points_to_analysis/
+store_types.txt
+.DS_Store
+.idea/
+.vscode/
+benchmarks/.DS_Store

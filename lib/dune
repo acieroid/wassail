@@ -26,7 +26,7 @@
    Abstract_store_domain Reduced_interval_congruence Value_set_transfer Value_set_summary Value_set_options
    Value_set_abstractions
    Print_trace
-   Global_read_domain Global_read_transfer Global_read_summary Global_read Global_read_options
+   Global_read_domain Global_read_transfer Global_read_summary Global_read Global_read_options Global_defs
    )
  (libraries core_kernel wasm sexplib)
  (inline_tests (flags)) ;; To include only one test, specify -only-test foo.ml:linenumber as the flag
