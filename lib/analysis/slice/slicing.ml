@@ -34,7 +34,6 @@ module InSlice = struct
   include T
 end
 
-
 type preanalysis_results = {
   control_dependencies : Instr.Label.Set.t Instr.Label.Map.t;
   control_time : Time_float.Span.t;
@@ -43,8 +42,8 @@ type preanalysis_results = {
   mem_dependencies : Memory_deps.t;
   mem_time : Time_float.Span.t;
   global_set_instructions : InSlice.Set.t;
-  global_dependencies : Instr.Label.Set.t Instr.Label.Map.t; (* global.get instructions depend on fct calls *)
   global_time : Time_float.Span.t;
+  global_dependencies : Instr.Label.Set.t Instr.Label.Map.t; (* global.get instructions depend on fct calls *)
 }
 
 
@@ -105,30 +104,65 @@ let preanalysis
   let global_dependencies =
     let global_gets = find_global_get_instructions cfg_instructions in
     let call_instructions = find_call_instructions cfg_instructions in
-    List.fold global_gets 
-      ~init:Instr.Label.Map.empty
-      ~f:(fun dependencies g ->
-        match g with
-        | global_var_label, idx -> 
-          let global_var = Var.Global (Int32.to_int_exn idx) in
-          let deps = 
-            List.fold call_instructions
-              ~init:Instr.Label.Set.empty
-              ~f:(fun acc (call_label, fct_index) ->
-                if function_may_affect_global_variable
-                     pointer_analysis
-                     (* ~call_label *)
-                     ~global_var
-                     ~fct_index
-                then
-                  let () = print_endline ("fct " ^ Int32.to_string fct_index ^ " may affect global variable " ^ Var.to_string global_var) in
-                  Instr.Label.Set.add acc call_label
-                else
-                  let () = print_endline ("fct " ^ Int32.to_string fct_index ^ " does not affect global variable " ^ Var.to_string global_var) in
-                  acc)
-          in
-          Instr.Label.Map.add_exn dependencies ~key:global_var_label ~data:deps
-      )
+    let globals_depend_on_calls =
+      List.fold global_gets 
+        ~init:Instr.Label.Map.empty
+        ~f:(fun dependencies g ->
+          match g with
+          | global_var_label, idx -> 
+            let global_var = Var.Global (Int32.to_int_exn idx) in
+            let deps = 
+              List.fold call_instructions
+                ~init:Instr.Label.Set.empty
+                ~f:(fun acc (call_label, fct_index) ->
+                  if function_may_affect_global_variable
+                      pointer_analysis
+                      (* ~call_label *)
+                      ~global_var
+                      ~fct_index
+                  then
+                    (if !Options.print_trace then Log.info ("fct " ^ Int32.to_string fct_index ^ " may affect global variable " ^ Var.to_string global_var);
+                    Instr.Label.Set.add acc call_label)
+                  else
+                    (if !Options.print_trace then Log.info ("fct " ^ Int32.to_string fct_index ^ " does not affect global variable " ^ Var.to_string global_var);
+                    acc))
+            in
+            Instr.Label.Map.add_exn dependencies ~key:global_var_label ~data:deps
+        )
+    in
+    let calls_depend_on_globals =
+      let global_deps = Global_read.function_global_deps module_ in
+      List.fold call_instructions
+        ~init:Instr.Label.Map.empty
+        ~f:(fun dependencies (call_label, idx) ->
+            let globals_used_by_function = Int32Map.find_exn global_deps idx in
+            let block = Cfg.find_enclosing_block_exn cfg call_label in
+            let predecessors = Cfg.all_predecessors cfg block in
+            let instr_set =
+              List.fold predecessors ~init:Instr.Label.Set.empty 
+                ~f:(fun acc block ->
+                        match block.content with
+                        | Data instrs' -> 
+                          List.fold instrs' ~init:acc ~f:(fun acc instr ->
+                            match globals_used_by_function with
+                            | Top -> Instr.Label.Set.add acc instr.label
+                            | NotTop globals_used ->
+                              if Instr.Label.Set.mem globals_used instr.label then
+                                Instr.Label.Set.add acc instr.label
+                              else
+                                acc)
+                        | _ -> acc)
+            in
+            Instr.Label.Map.update dependencies call_label
+              ~f:(function 
+                  | None -> instr_set 
+                  | Some set -> Instr.Label.Set.union set instr_set))
+    in
+    Instr.Label.Map.merge globals_depend_on_calls calls_depend_on_globals
+      ~f:(fun ~key:_ -> function 
+                        | `Both (a, b) -> Some (Instr.Label.Set.union a b)
+                        | `Left x -> Some x
+                        | `Right x -> Some x)
   in
   let t4 = Time_float.now () in
   let control_time = Time_float.diff t1 t0 in
@@ -244,7 +278,7 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
               | None -> slice
             end
           | _ -> slice) in
-  let initial_worklist = InSlice.Set.union preanalysis.global_set_instructions (InSlice.Set.of_list (List.map (Instr.Label.Set.to_list criteria) ~f:(fun criterion -> InSlice.{ label = criterion; reason = None }))) in
+  let initial_worklist = (*InSlice.Set.union preanalysis.global_set_instructions*) (InSlice.Set.of_list (List.map (Instr.Label.Set.to_list criteria) ~f:(fun criterion -> InSlice.{ label = criterion; reason = None }))) in
   let initial_slice = Instr.Label.Set.empty in
   let slice = Instr.Label.Set.filter (agrawal (loop initial_worklist initial_slice InSlice.Set.empty))
     ~f:(fun lab -> match lab.section with

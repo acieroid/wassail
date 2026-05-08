@@ -12,24 +12,14 @@ type t = Global_read_domain.t
 
 
 (** Pretty-printer for summaries. *)
-let to_string (summary : t) : string =
-  if Var.Set.is_empty summary then
-    "[ no globals used ]"
-  else
-    "Globals used: " 
-    ^ Global_read_domain.to_string summary
+let to_string : t -> string = function
+  | Top -> "[ all globals may be used ]"
+  | NotTop summary when Var.Set.is_empty summary -> "[ no globals used ]"
+  | summary -> "Globals used: " ^ Global_read_domain.to_string summary
 
 
 (** Bottom summary: no global variable is read. *)
 let bottom : t = Global_read_domain.bottom
-
-
-(** [of_import nglobals] constructs a summary for an imported function.
-    Since imported functions are assumed to potentially read any global,
-    this returns the set of all globals. *)
-let of_import (nglobals : int32) : t =
-  let g_list = List.init (Int32.to_int_exn nglobals) ~f:(fun n -> Var.Global n) in
-  Var.Set.of_list g_list
 
 
 (** [initial_summaries cfgs module_ typ] initializes summaries for imported
@@ -40,7 +30,7 @@ let initial_summaries
     (module_ : Wasm_module.t)
     (_typ : [`Bottom | `Top]) 
   : t Int32Map.t =
-  let used_globals = of_import module_.nglobals in
+  let used_globals = Global_read_domain.Top in
   List.fold_left module_.imported_funcs
     ~init:Int32Map.empty
     ~f:(fun summaries desc ->
@@ -55,8 +45,5 @@ let make (state : t) : t = state
 (** [apply ~summary ~state] applies a summary at a call site by joining it
     with the current abstract state. This propagates information about globals
     read by the callee into the caller's state. *)
-let apply
-    ~(summary : t)
-    ~(state : Global_read_domain.t)
-  : Global_read_domain.t =
+let apply ~(summary : t) ~(state : Global_read_domain.t) : Global_read_domain.t =
   Global_read_domain.join summary state

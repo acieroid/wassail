@@ -1,6 +1,6 @@
 open Core
 
-type t = Var.Set.t Var.Map.t
+type t = Instr.Label.Set.t Var.Map.t
 
 let make (module_ : Wasm_module.t) : t =
   let initial_propagation = !Spec_inference.propagate_globals in
@@ -17,11 +17,10 @@ let make (module_ : Wasm_module.t) : t =
         ~f:(fun acc instr ->
           match instr with
           | Data { label; instr=(GlobalSet g); _ } ->
-            let def_var = Var.Var label in
             let global = Var.Global (Int32.to_int_exn g) in
             Var.Map.update acc global ~f:(function
-              | None -> Var.Set.singleton def_var
-              | Some defs -> Var.Set.add defs def_var)
+              | None -> Instr.Label.Set.singleton label
+              | Some defs -> Var.Set.add defs label)
           | _ -> acc
         )
       )
@@ -30,10 +29,10 @@ let to_string (defs : t) : string =
   if Var.Map.is_empty defs then
     "No globals are defined in this program"
   else
-    Var.Map.to_string defs Var.Set.to_string
+    Var.Map.to_string defs Instr.Label.Set.to_string
     
 let empty : t = Var.Map.empty
 
 
-let get ~(defs : t) ~(global_var : Var.t) : Var.Set.t option =
+let get ~(defs : t) ~(global_var : Var.t) : Instr.Label.Set.t option =
   Var.Map.find defs global_var

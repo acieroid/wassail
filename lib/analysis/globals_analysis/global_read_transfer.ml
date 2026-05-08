@@ -70,7 +70,7 @@ module Make = struct
         Log.info (Printf.sprintf "global.get %ld --- function uses variable %s" g (Var.to_string global_var));
         match Global_defs.get ~defs:!global_defs ~global_var with
         | None -> state
-        | Some defs -> Global_read_domain.join state defs)
+        | Some defs -> Global_read_domain.join state (NotTop defs))
     | _ -> state
 
 
@@ -126,13 +126,13 @@ module Make = struct
       Imported functions are handled conservatively and are assumed to read all
       global variables. *)
   let imported
-      (module_ : Wasm_module.t)
+      (_module_ : Wasm_module.t)
       (_desc : Wasm_module.func_desc)
       (_annot_before : annot_expected)
       (_annot_after : annot_expected)
       (_state : State.t)
     : State.t =
-    Global_read_summary.of_import module_.nglobals
+    Global_read_domain.Top
 
   (** Applies the summary of a called function at a call site. *)
   let apply_summary 

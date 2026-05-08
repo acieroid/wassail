@@ -56,9 +56,15 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
       let summaries' = List.fold_left wasm_mod.imported_funcs
                           ~init:summaries
                           ~f:(fun summaries desc ->
-                              Int32Map.set summaries ~key:desc.idx ~data:(Summary.of_import wasm_mod.nglobals)) in
+                              Int32Map.set summaries ~key:desc.idx ~data:Global_read_domain.Top) in
       Transfer.set_global_defs global_defs;
       let results = Inter.analyze wasm_mod ~cfgs:annotated_scc ~summaries:summaries' in
       Int32Map.mapi results ~f:(fun ~key:idx ~data:(global_read_cfg, summary) ->
           let spec_cfg = Int32Map.find_exn scc idx in
           (spec_cfg, global_read_cfg, summary)))
+
+let function_global_deps (module_ : Wasm_module.t) : Summary.t Int32Map.t =
+  let cg = module_ |> Call_graph.make in
+  let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
+  let globals_usage = analyze_inter module_ schedule in
+  Int32Map.map globals_usage ~f:(fun (_,_,summary) -> summary)
