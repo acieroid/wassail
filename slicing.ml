@@ -72,7 +72,7 @@ let slice_line_number =
       and funidx = anon ("fun" %: int32)
       and line_number = anon ("line-number" %: int)
       and outfile = anon ("output" %: string) 
-      and pointer_analysis = flag "--pointers" no_arg ~doc:" Run pointer analysis before slicing to improve precision" 
+      and pointer_analysis = flag "--no-pointers" no_arg ~doc:" Disables pointer analysis before slicing: les precise, but faster" 
       and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
       if trace then Wassail.Log.enable_info ();
       fun () ->
@@ -84,7 +84,7 @@ let slice_line_number =
         Log.info "Constructing CFG";
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
         let pointer_analysis = (* TODO: turn pointer analysis on by default *)
-          if pointer_analysis then
+          if not pointer_analysis then
             (if trace then Wassail.Log.enable_info ();
             Spec_inference.use_const := true;
             Spec_inference.propagate_globals := true;
