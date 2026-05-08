@@ -168,6 +168,39 @@ let call_depends_on_store
     if overlap then Some store_label else None
   | None -> Some store_label
 
+
+
+let load_depends_on_call
+    ~(pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    ~(load_label : Instr.Label.t)
+    ~(load_offset : int)
+    ~(call_label : Instr.Label.t)
+    ~(fct_index : int32)
+  : Instr.Label.Set.t =
+  match pointer_analysis with
+  | None -> Instr.Label.Set.singleton call_label
+  | Some (cfg_pointers, cfg_spec, summaries) ->
+    let load_address = find_load_address cfg_spec load_label in
+    let load_address_value_set =
+      Abstract_store_domain.find_value_set cfg_pointers load_label load_address 
+      |> (Value_set_abstractions.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn load_offset)))))
+    in
+    let function_summary = Int32Map.find_exn summaries fct_index in
+    let affected_memory_addresses = function_summary.store_operations in
+    let overlap =
+      List.fold 
+        (Reduced_interval_congruence.RICSet.to_list affected_memory_addresses)
+        ~init:false
+        ~f:(fun acc address ->
+          acc || Value_set_abstractions.may_overlap ~store_vs:(ValueSet address) ~load_vs:load_address_value_set) in
+    if overlap then Instr.Label.Set.singleton call_label else Instr.Label.Set.empty
+
+
+
+
+
+
+
 let make 
     (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
     (cfg : 'a Cfg.t) 
@@ -180,16 +213,24 @@ let make
            | Call { instr = CallIndirect _ ; _ } -> true
            | Data { instr = Load _ ; _ } -> true
            | _ -> false)) in
-  let deps = Instr.Label.Map.of_alist_exn (List.map loads_and_calls ~f:(fun label ->
-      let block = Cfg.find_enclosing_block_exn cfg label in
-      let predecessors = Cfg.all_predecessors cfg block in
-      (label, List.fold_left predecessors ~init:Instr.Label.Set.empty ~f:(fun acc block ->
-           Instr.Label.Set.union acc
-             (match block.content with
-             | Call { instr = CallDirect _; label; _ } -> Instr.Label.Set.singleton label
-             | Call { instr = CallIndirect _; label; _ } -> Instr.Label.Set.singleton label
-             | Control _ | Entry | Return _ | Imported _ -> Instr.Label.Set.empty
-             | Data instrs' ->
+  Instr.Label.Map.of_alist_exn (List.map loads_and_calls ~f:(fun label ->
+    let block = Cfg.find_enclosing_block_exn cfg label in
+    let predecessors = Cfg.all_predecessors cfg block in
+    (label, List.fold_left predecessors ~init:Instr.Label.Set.empty ~f:(fun acc block ->
+          Instr.Label.Set.union acc
+            (match block.content with
+            (* Let's see what depends on a call operation *)
+            | Call { instr = CallDirect (_, _, i); label = call_label; _ } -> 
+              begin match Instr.Label.Map.find_exn instrs label with
+              | Data { instr = Load {offset=load_offset; _}; _ } ->
+                load_depends_on_call ~pointer_analysis ~load_label:label ~load_offset ~call_label ~fct_index:i
+              | Call { instr = CallDirect (_, _, _i); label = _dependant_label; _ } ->
+                Instr.Label.Set.singleton call_label
+              | _ -> Instr.Label.Set.singleton call_label
+              end
+            | Call { instr = CallIndirect _; label; _ } -> Instr.Label.Set.singleton label
+            | Control _ | Entry | Return _ | Imported _ -> Instr.Label.Set.empty
+            | Data instrs' ->
                 Instr.Label.Set.of_list (List.filter_map instrs' ~f:(function
                   (* Let's see what depends on a store operation *)
                   | { instr = Store {offset=store_offset; _}; label = store_label; _ } -> (
@@ -201,16 +242,8 @@ let make
                     | Call { instr = CallDirect (_, _, i); _ } ->
                       call_depends_on_store pointer_analysis ~call_label:label ~store_label:store_label ~fct_index:i
                       ~store_offset
-                    | _ ->  Some store_label
-                  )
-                  (* Let's see if a global.get depends on a function call*)
-                  (* | { instr = GlobalGet idx; _} ->
-                    let global_variable = Var.Global (Int32.to_int_exn idx)
-                    global_get_depends_on_call
-                    in failwith "" *)
-
-                  | _ -> None))))))) in
-  deps
+                    | _ ->  Some store_label)
+                  | _ -> None)))))))
 
 let deps_for (deps : t) (instr : Instr.Label.t) : Instr.Label.Set.t =
   match Instr.Label.Map.find deps instr with
