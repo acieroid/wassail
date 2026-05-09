@@ -98,36 +98,35 @@ let globals_depend_on_calls
     The result maps each call label to the set of instruction labels it depends
     on because of global-variable reads performed by the callee. *)
 let calls_depend_on_globals
-    (module_ : Wasm_module.t)
+    (global_deps : Global_read_domain.t Int32Map.t)
     (call_instructions : (Instr.Label.t * int32) list)
     (cfg : Spec_domain.t Cfg.t)
   : t =
-  let global_deps = Global_read.function_global_deps module_ in
-      List.fold call_instructions
-        ~init:Instr.Label.Map.empty
-        ~f:(fun dependencies (call_label, idx) ->
-            let globals_used_by_function = Int32Map.find_exn global_deps idx in
-            let block = Cfg.find_enclosing_block_exn cfg call_label in
-            let predecessors = Cfg.all_predecessors cfg block in
-            let instr_set =
-              List.fold predecessors ~init:Instr.Label.Set.empty 
-                ~f:(fun acc block ->
-                        match block.content with
-                        | Data instrs' -> 
-                          List.fold instrs' ~init:acc ~f:(fun acc instr ->
-                            match globals_used_by_function with
-                            | Top -> Instr.Label.Set.add acc instr.label
-                            | NotTop globals_used ->
-                              if Instr.Label.Set.mem globals_used instr.label then
-                                Instr.Label.Set.add acc instr.label
-                              else
-                                acc)
-                        | _ -> acc)
-            in
-            Instr.Label.Map.update dependencies call_label
-              ~f:(function 
-                  | None -> instr_set 
-                  | Some set -> Instr.Label.Set.union set instr_set))
+  List.fold call_instructions
+    ~init:Instr.Label.Map.empty
+    ~f:(fun dependencies (call_label, idx) ->
+        let globals_used_by_function = Int32Map.find_exn global_deps idx in
+        let block = Cfg.find_enclosing_block_exn cfg call_label in
+        let predecessors = Cfg.all_predecessors cfg block in
+        let instr_set =
+          List.fold predecessors ~init:Instr.Label.Set.empty 
+            ~f:(fun acc block ->
+                    match block.content with
+                    | Data instrs' -> 
+                      List.fold instrs' ~init:acc ~f:(fun acc instr ->
+                        match globals_used_by_function with
+                        | Top -> Instr.Label.Set.add acc instr.label
+                        | NotTop globals_used ->
+                          if Instr.Label.Set.mem globals_used instr.label then
+                            Instr.Label.Set.add acc instr.label
+                          else
+                            acc)
+                    | _ -> acc)
+        in
+        Instr.Label.Map.update dependencies call_label
+          ~f:(function 
+              | None -> instr_set 
+              | Some set -> Instr.Label.Set.union set instr_set))
 
 (** Return all [global.get] instructions in the current function, together with
     the index of the global variable they read. *)
@@ -164,7 +163,7 @@ let find_call_instructions
     The two dependency maps are merged by taking the union of dependency sets
     when both analyses produce dependencies for the same instruction label. *)
 let global_dependencies 
-    ~(module_ : Wasm_module.t)
+    ~(global_deps : Global_read_domain.t Int32Map.t)
     ~(cfg : Spec_domain.t Cfg.t)
     ~(cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t)
     ~(pointer_analysis : (Abstract_store_domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Abstract_store_domain.t Int32Map.t) option)
@@ -172,7 +171,7 @@ let global_dependencies
   let global_gets = find_global_get_instructions cfg_instructions in
   let call_instructions = find_call_instructions cfg_instructions in
   let global_call = globals_depend_on_calls global_gets cfg pointer_analysis in
-  let call_global = calls_depend_on_globals module_ call_instructions cfg in
+  let call_global = calls_depend_on_globals global_deps call_instructions cfg in
   Instr.Label.Map.merge global_call call_global
     ~f:(fun ~key:_ -> function 
                       | `Both (a, b) -> Some (Instr.Label.Set.union a b)

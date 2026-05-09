@@ -55,3 +55,16 @@ let meet (x : t) (y : t) : t =
 
 (** Widening operator. Since the domain is finite, widening is simply [join]. *)
 let widen : t -> t -> t = join
+
+
+let to_variable_names 
+  (spec : Spec_domain.t Instr.t Instr.Label.Map.t) 
+  (globals : Instr.Label.Set.t) : String.Set.t =
+  globals
+    |> Instr.Label.Set.to_list
+    |> List.map ~f:(fun label -> 
+      (match Instr.Label.Map.find_exn spec label with
+      | Data { instr = GlobalSet g; _ } -> Var.Global (Int32.to_int_exn g)
+      | _ -> assert false)
+      |> Var.to_string)
+    |> String.Set.of_list

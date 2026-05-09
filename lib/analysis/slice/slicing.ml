@@ -57,14 +57,15 @@ let preanalysis
   let t1 = Time_float.now () in
   let (_, _, data_dependencies) = Use_def.make module_ cfg in
   let t2 = Time_float.now () in
-  let mem_dependencies = Memory_deps.make pointer_analysis cfg in
+  let global_deps = Global_read.function_global_deps module_ in
+  let mem_dependencies = Memory_deps.make global_deps pointer_analysis cfg in
   (
   let t3 = Time_float.now () in
   (* let global_set_instructions = InSlice.Set.of_list (List.map ~f:(fun label -> InSlice.{ label; reason = None })
                                                        (Instr.Label.Map.keys (Instr.Label.Map.filter cfg_instructions ~f:(function
                                                            | Data { instr = GlobalSet _; _ } -> true
                                                            | _ -> false)))) in *)
-  let global_dependencies = Global_deps.global_dependencies ~module_ ~cfg ~cfg_instructions ~pointer_analysis in
+  let global_dependencies = Global_deps.global_dependencies ~global_deps ~cfg ~cfg_instructions ~pointer_analysis in
   let t4 = Time_float.now () in
   let control_time = Time_float.diff t1 t0 in
   let data_time = Time_float.diff t2 t1 in

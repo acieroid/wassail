@@ -95,7 +95,7 @@ let rec find_parameter_value_set
   let () = print_endline (String.concat ~sep:"" vars) in
   match pointer_analysis with
   | None -> assert false
-  | Some (cfg_pointers, cfg_spec, _) ->
+  | Some (cfg_pointers, spec, _) ->
     let block = Cfg.find_enclosing_block_exn cfg_pointers label in
     let call_instr =
       match block.content with
@@ -113,7 +113,7 @@ let rec find_parameter_value_set
         | _ -> assert false
       in
       let stack_before_call =
-        (label |> Instr.Label.Map.find_exn cfg_spec 
+        (label |> Instr.Label.Map.find_exn spec 
                |> Instr.annotation_before
                |> Spec_domain.get_or_fail).vstack
       in
@@ -140,7 +140,7 @@ let call_depends_on_store
     ~(store_offset : int)
   : Instr.Label.t option =
   match pointer_analysis with
-  | Some (cfg_pointers, cfg_spec, summaries) ->
+  | Some (cfg_pointers, spec, summaries) ->
     let fct_summary = Int32Map.find_exn summaries fct_index in
     let accessed_memory = Abstract_store_domain.get fct_summary ~var:(Variable.Accessed) in
     let accessed_memory =
@@ -158,7 +158,7 @@ let call_depends_on_store
       | ValueSet Bottom -> ValueSet Bottom
       | _ -> accessed_memory
     in
-    let store_address = find_store_address cfg_spec store_label in
+    let store_address = find_store_address spec store_label in
     let store_address_value_set = 
       Abstract_store_domain.find_value_set 
         cfg_pointers store_label store_address 
@@ -179,8 +179,8 @@ let load_depends_on_call
   : Instr.Label.Set.t =
   match pointer_analysis with
   | None -> Instr.Label.Set.singleton call_label
-  | Some (cfg_pointers, cfg_spec, summaries) ->
-    let load_address = find_load_address cfg_spec load_label in
+  | Some (cfg_pointers, spec, summaries) ->
+    let load_address = find_load_address spec load_label in
     let load_address_value_set =
       Abstract_store_domain.find_value_set cfg_pointers load_label load_address 
       |> (Value_set_abstractions.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn load_offset)))))
@@ -200,10 +200,69 @@ let load_depends_on_call
 
 
 
+let globals_modified (summary : Abstract_store_domain.t) : String.Set.t =
+  summary 
+    |> Abstract_store_domain.extract_global_values
+    |> Map.filteri
+      ~f:(fun ~key ~data ->
+        not (Reduced_interval_congruence.RIC.equal data (Reduced_interval_congruence.RIC.relative_ric key))) 
+    |> Map.to_alist 
+    |> List.fold ~init:[] ~f:(fun acc (g,_) -> g :: acc)
+    |> String.Set.of_list
+
+
+let call_depends_on_call
+    ~(global_deps : Global_read_domain.t Int32Map.t)
+    ~(pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    ~(depend_on_this_call : Instr.Label.t)
+    ~(fct_1_index : int32)
+    ~(fct_2_index : int32)
+  : Instr.Label.Set.t =
+  match pointer_analysis with
+  | None -> Instr.Label.Set.singleton depend_on_this_call
+  | Some (_, spec, summaries) ->
+    let fct_1_summary = Int32Map.find_exn summaries fct_1_index in
+    let fct_2_summary = Int32Map.find_exn summaries fct_2_index in
+    let addresses_read_by_fct1 = Abstract_store_domain.get fct_1_summary ~var:Variable.Accessed in
+    let addresses_affected_by_fct2 = fct_2_summary.store_operations in
+    let memory_overlap =
+      addresses_affected_by_fct2
+        |> Reduced_interval_congruence.RICSet.to_list
+        |> List.fold ~init:false
+          ~f:(fun acc addr ->
+            acc || Value_set_abstractions.may_overlap ~store_vs:(ValueSet addr) ~load_vs:addresses_read_by_fct1)
+    in
+    if memory_overlap then
+      Instr.Label.Set.singleton depend_on_this_call
+    else
+      let globals_modified_by_fct2 = globals_modified fct_2_summary in
+      if Set.is_empty globals_modified_by_fct2 then
+        Instr.Label.Set.empty
+      else
+        match Int32Map.find_exn global_deps fct_1_index with
+        | Top -> Instr.Label.Set.singleton depend_on_this_call
+        | NotTop globals_read_by_fct1 ->
+          if Global_read_domain.to_variable_names spec globals_read_by_fct1
+              |> Set.inter globals_modified_by_fct2 
+              |> Set.is_empty 
+          then
+            Instr.Label.Set.empty
+          else
+            Instr.Label.Set.singleton depend_on_this_call
+
+    
+    
+
+
+
+
+
+
 
 let make 
+    (global_deps : Global_read_domain.t Int32Map.t)
     (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
-    (cfg : 'a Cfg.t) 
+    (cfg : Spec_domain.t Cfg.t) 
   : t =
   let instrs = Cfg.all_instructions cfg in
   (* Instructions that are load or call depend on all stores/calls that may have been executed before, hence on all stores contained in a predecessor of the current node in the CFG *)
@@ -224,8 +283,13 @@ let make
               begin match Instr.Label.Map.find_exn instrs label with
               | Data { instr = Load {offset=load_offset; _}; _ } ->
                 load_depends_on_call ~pointer_analysis ~load_label:label ~load_offset ~call_label ~fct_index:i
-              | Call { instr = CallDirect (_, _, _i); label = _dependant_label; _ } ->
-                Instr.Label.Set.singleton call_label
+              | Call { instr = CallDirect (_, _, fct_1_index); label = _dependant_label; _ } ->
+                call_depends_on_call
+                  ~global_deps
+                  ~pointer_analysis
+                  ~depend_on_this_call:call_label
+                  ~fct_1_index
+                  ~fct_2_index:i
               | _ -> Instr.Label.Set.singleton call_label
               end
             | Call { instr = CallIndirect _; label; _ } -> Instr.Label.Set.singleton label
