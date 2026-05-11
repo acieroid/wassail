@@ -220,7 +220,7 @@ let call_depends_on_call
   : Instr.Label.Set.t =
   match pointer_analysis with
   | None -> Instr.Label.Set.singleton depend_on_this_call
-  | Some (_, spec, summaries) ->
+  | Some (_, _, summaries) ->
     let fct_1_summary = Int32Map.find_exn summaries fct_1_index in
     let fct_2_summary = Int32Map.find_exn summaries fct_2_index in
     let addresses_read_by_fct1 = Abstract_store_domain.get fct_1_summary ~var:Variable.Accessed in
@@ -242,7 +242,7 @@ let call_depends_on_call
         match Int32Map.find_exn global_deps fct_1_index with
         | Top -> Instr.Label.Set.singleton depend_on_this_call
         | NotTop globals_read_by_fct1 ->
-          if Global_read_domain.to_variable_names spec globals_read_by_fct1
+          if Global_read_domain.to_variable_names globals_read_by_fct1
               |> Set.inter globals_modified_by_fct2 
               |> Set.is_empty 
           then
