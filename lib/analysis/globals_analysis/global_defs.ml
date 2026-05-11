@@ -1,18 +1,28 @@
 open Core
 
-(** Maps each global variable to the set of labels of the [global.set]
-    instructions that may define it. *)
-(* type t = Instr.Label.Set.t Var.Map.t *)
+(** Maps each global variable to the set of [global.set] instructions that may define it.
+
+    Each definition is represented as a {!Global_read_domain.GlobalInstruction.t},
+    which pairs a textual identifier of the global (typically obtained via {!Var.to_string})
+    with the label of the corresponding instruction. *)
 type t = Global_read_domain.GlobalInstruction.Set.t Var.Map.t
 
 (** Computes the global definitions present in [module_].
 
-    The result associates each global variable with the labels of all
-    [global.set] instructions that assign to it.
+    The result maps each global variable to the set of all [global.set]
+    instructions that may assign to it across all functions of the module.
 
-    This analysis temporarily disables global propagation in
-    {!Spec_inference.propagate_globals}. The original value of [propagate_globals] is restored
-    after the first intra-procedural analysis is launched. *)
+    Internally, each function is analyzed independently using an intra-procedural
+    specification analysis (via {!Spec_analysis.analyze_intra1}), and all
+    instructions in the resulting CFG are inspected.
+
+    For each encountered [global.set g], a definition entry is added for the
+    corresponding {!Var.Global} variable.
+
+    During the analysis of each function, global propagation
+    ({!Spec_inference.propagate_globals}) is temporarily disabled to avoid
+    interference with definition collection. Its original value is restored
+    immediately after analyzing each function. *)
 let make (module_ : Wasm_module.t) : t =
   let initial_propagation = !Spec_inference.propagate_globals in
   let functions = module_.funcs in
@@ -35,11 +45,14 @@ let make (module_ : Wasm_module.t) : t =
           | _ -> acc
         )
       )
-    
+      
 (** The empty set of global definitions. *)
 let empty : t = Var.Map.empty
 
-(** Returns the labels of the [global.set] instructions defining [global_var],
-    if any are known in [defs]. *)
+(** Returns the set of [global.set] instructions that may define [global_var],
+    if any are known in [defs].
+
+    Each element of the returned set contains both the global identifier
+    (as a string) and the label of the defining instruction. *)
 let get ~(defs : t) ~(global_var : Var.t) : Global_read_domain.GlobalInstruction.Set.t option =
   Var.Map.find defs global_var

@@ -2,18 +2,27 @@ open Core
 
 (** Abstract domain used by the global-read analysis.
 
-    A value of this domain represents the set of labels of [global.set]
-    instructions whose definitions may be read. The distinguished value [Top]
-    represents an unknown set of definitions and is used when the analysis must
-    conservatively assume that any global definition may be read. *)
+    A value of this domain represents the set of [global.set] instructions whose
+    definitions may be read. Each instruction is represented as a
+    {!GlobalInstruction.t}, which stores both the textual name of the global
+    variable and the label of the corresponding instruction.
 
+    The distinguished value [Top] represents an unknown set of definitions and
+    is used when the analysis must conservatively assume that any global
+    definition may be read. *)
 
+(** Representation of a global definition instruction.
 
+    A value [(name, label)] identifies the [global.set] instruction at [label]
+    and records the textual name of the global variable it defines. Keeping the
+    name next to the label makes it possible to recover the affected global even
+    when only a set of definition instructions is available. *)
 module GlobalInstruction = struct
   module T = struct
     type t = string * Instr.Label.t
     [@@deriving sexp, compare, equal]
 
+    (** Pretty-prints a global definition instruction as [label(name)]. *)
     let to_string (s, i : t) : string =
       Instr.Label.to_string i ^ "(" ^ s ^ ")"
   end
@@ -22,8 +31,11 @@ module GlobalInstruction = struct
   module Set = struct
     module T = struct
       include Set.Make(T)
+      (** Pretty-prints a set of global definition instructions. *)
       let to_string (t : t) : string = String.concat ~sep:"," (List.map ~f:T.to_string (Set.to_list t))
 
+      (** Returns [true] when [set] contains a global definition instruction with
+          label [instr], independently of the recorded global name. *)
       let mem (set : t) (instr : Instr.Label.t) : bool =
         set |> Set.to_list
             |> List.fold ~init:false ~f:(fun acc (_, instr') -> acc || Instr.Label.equal instr instr')
@@ -34,8 +46,7 @@ module GlobalInstruction = struct
 end
 
 (** Set of global definitions read by the analyzed code, represented by the
-    labels of the corresponding [global.set] instructions, or [Top] when the
-    set is unknown. *)
+    corresponding [global.set] instructions, or [Top] when the set is unknown. *)
 type t = Top | NotTop of GlobalInstruction.Set.t
 
 (** Equality over abstract states. *)
@@ -59,8 +70,8 @@ let bottom : t = NotTop GlobalInstruction.Set.empty
 (** Pretty-printer for abstract states.
 
     [Top] is displayed as the set of all global definitions. A finite state is
-    displayed as the list of labels of the [global.set] instructions it
-    contains. *)
+    displayed as the list of [global.set] instructions it contains, including
+    both their labels and the names of the globals they define. *)
 let to_string (globals : t) : string =
   match globals with
   | Top -> "[ all global definitions may be used ]"
@@ -83,6 +94,11 @@ let meet (x : t) (y : t) : t =
 let widen : t -> t -> t = join
 
 
+(** Extracts the names of the global variables defined by the instructions in
+    [globals].
+
+    This function discards the instruction labels and returns only the textual
+    global names stored in the {!GlobalInstruction.t} values. *)
 let to_variable_names 
   (globals : GlobalInstruction.Set.t) : String.Set.t =
   globals

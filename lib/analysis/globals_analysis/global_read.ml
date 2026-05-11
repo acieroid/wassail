@@ -1,28 +1,51 @@
 open Helpers
 open Core
 
-(** Interprocedural analysis that computes, for each WebAssembly function, the set of
-    global variables that may be read during its execution.
+(** Interprocedural analysis that computes, for each WebAssembly function, the
+    global definitions that may be read during its execution.
 
     The analysis is summary-based: each function is associated with a summary
-    describing the globals that may be accessed, and these summaries are propagated
-    through the call graph until a fixpoint is reached. *)
+    describing the [global.set] instructions whose definitions may be observed by
+    reads performed by the function, either directly or through calls. These
+    summaries are propagated through the call graph until a fixpoint is reached.
 
-(** Abstract domain used to represent the set of globals that may be read. *)
+    This module is used to determine which global definitions a call instruction
+    may depend on. This information can then be used by the slicer to avoid adding
+    dependencies from a call to unrelated [global.set] instructions. *)
+
+(** Abstract domain used to represent the set of global definitions that may be
+    read.
+
+    Finite elements contain sets of {!Global_read_domain.GlobalInstruction.t};
+    [Top] represents the case where any global definition may be read. *)
 module Domain = Global_read_domain
 
-(** Transfer functions used by the intraprocedural analyzer. *)
+(** Transfer functions used by the intraprocedural analyzer.
+
+    The transfer module updates the current abstract state when global reads are
+    encountered and uses the precomputed global-definition map supplied through
+    {!Global_read_transfer.Make.set_global_defs}. *)
 module Transfer = Global_read_transfer.Make
 
-(** Function summaries produced and consumed by the global-read analysis. *)
+(** Function summaries produced and consumed by the global-read analysis.
+
+    In this analysis, a summary is the same kind of information as an abstract
+    state: it describes which global definitions may be read during a function's
+    execution. *)
 module Summary = Global_read_summary
 
 (** Summary-based intraprocedural analyzer instantiated with the global-read
-    transfer functions. *)
+    transfer functions.
+
+    This analyzer computes a global-read abstract state at each instruction of a
+    single function, while consulting the currently available summaries for calls. *)
 module Intra = Intra.MakeSummaryBased(Transfer)
 
 (** Summary-based interprocedural analyzer built from the intraprocedural
-    global-read analysis. *)
+    global-read analysis.
+
+    It repeatedly invokes the intraprocedural analyzer over SCCs of the call graph
+    until function summaries stabilize. *)
 module Inter = Inter.MakeSummaryBased(Transfer)(Intra)
 
 
@@ -30,9 +53,14 @@ module Inter = Inter.MakeSummaryBased(Transfer)(Intra)
     global-read analysis over the strongly connected components [sccs] of
     [wasm_mod].
 
+    Before the SCC traversal starts, {!Global_defs.make} is run once as a
+    preanalysis. The resulting map associates each global variable with the
+    [global.set] instructions that may define it. This map is then passed to the
+    transfer functions before each SCC is analyzed.
+
     For each SCC, the analyzer collects the summaries already computed for other
-    functions, adds conservative summaries for imported functions, and then analyzes
-    the functions in the SCC until their summaries stabilize.
+    functions, adds conservative [Top] summaries for imported functions, and then
+    analyzes the functions in the SCC until their summaries stabilize.
 
     The returned map associates each function index with:
 
@@ -60,6 +88,14 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
           let spec_cfg = Int32Map.find_exn scc idx in
           (spec_cfg, global_read_cfg, summary)))
 
+(** Computes the global-read summary of every non-imported function in [module_].
+
+    This is the main entry point for clients that only need the final summaries,
+    rather than the intermediate CFG annotations produced by {!analyze_inter}.
+
+    The function first builds the call graph of [module_], derives an SCC-based
+    analysis schedule, runs {!analyze_inter}, and finally projects away the CFGs
+    to keep only the summary associated with each function index. *)
 let function_global_deps (module_ : Wasm_module.t) : Summary.t Int32Map.t =
   let cg = module_ |> Call_graph.make in
   let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
