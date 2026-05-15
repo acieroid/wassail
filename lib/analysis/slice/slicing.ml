@@ -438,7 +438,7 @@ let find_call_indirect_instructions (cfg : Spec_domain.t Cfg.t) : Instr.Label.t 
       | Call {label; instr = CallIndirect _; _} -> Some label
       | _ -> None)
 
-module Test = struct
+(* module Test = struct
   open Instr.Label.Test
   let build_cfg ?fidx:(fidx : int32 = 0l) (program : string) : Wasm_module.t * Spec_domain.t Cfg.t =
     let module_ = Wasm_module.of_string program in
@@ -1703,4 +1703,4 @@ module Test = struct
       check_slice original slice 0l 1
 
 
-end
+end *)

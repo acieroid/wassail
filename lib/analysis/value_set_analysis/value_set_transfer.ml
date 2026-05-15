@@ -479,6 +479,7 @@ module Make (*: Transfer.TRANSFER *) = struct
           | _ -> failwith "Trying to use boolean as an address"
           end
         in
+        (* TODO: maybe include all touched addresses depending on size? *)
         let state = Abstract_store_domain.set state ~var:Variable.Accessed ~vs:(Abstract_store_domain.Value.join vs_plus_offset previously_accessed) 
         in
       (* begin match vs with

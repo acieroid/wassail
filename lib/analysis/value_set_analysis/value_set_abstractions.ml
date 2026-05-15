@@ -250,10 +250,10 @@ let i32_sub (x : t) (y : t) : t =
   i32_add (negative x) y
 
 
-let rec may_overlap ~(store_vs : t) ~(load_vs : t) : bool =
+let rec may_overlap ~(store_size : int32) ~(load_size : int32) ~(store_vs : t) ~(load_vs : t) : bool =
   match store_vs, load_vs with
-  | Bitfield vs1, _ -> may_overlap ~store_vs:(ValueSet (RIC.of_bitfield vs1)) ~load_vs
-  | _, Bitfield vs2 -> may_overlap ~store_vs ~load_vs:(ValueSet (RIC.of_bitfield vs2))
-  | Boolean {numeric_value; _}, _ -> may_overlap ~store_vs:(ValueSet numeric_value) ~load_vs
-  | _, Boolean {numeric_value; _} -> may_overlap ~store_vs ~load_vs:(ValueSet numeric_value)
-  | ValueSet vs1, ValueSet vs2 -> RIC.may_overlap vs1 vs2
+  | Bitfield vs1, _ -> may_overlap ~store_size ~load_size ~store_vs:(ValueSet (RIC.of_bitfield vs1)) ~load_vs
+  | _, Bitfield vs2 -> may_overlap ~store_size ~load_size ~store_vs ~load_vs:(ValueSet (RIC.of_bitfield vs2))
+  | Boolean {numeric_value; _}, _ -> may_overlap ~store_size ~load_size ~store_vs:(ValueSet numeric_value) ~load_vs
+  | _, Boolean {numeric_value; _} -> may_overlap ~store_size ~load_size ~store_vs ~load_vs:(ValueSet numeric_value)
+  | ValueSet vs1, ValueSet vs2 -> RIC.may_overlap ~store_size ~load_size vs1 vs2

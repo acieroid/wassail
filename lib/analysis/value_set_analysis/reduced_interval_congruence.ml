@@ -718,13 +718,13 @@ module RIC = struct
     let partially = partially_accessed ~by:value_set ~size:size in
     {fully; partially}
 
-let list_to_string f lst =
-  "[" ^ String.concat ~sep:"; " (List.map ~f lst) ^ "]"
+  let list_to_string f lst =
+    "[" ^ String.concat ~sep:"; " (List.map ~f lst) ^ "]"
   
-  let may_overlap ?(size1 = 4l) ?(size2 = 4l) (store_ric : t) (load_ric : t) =
-    let accessed_by_store = accessed ~value_set:store_ric ~size:size1 in
+  let may_overlap ~(store_size : int32) ~(load_size : int32) (store_ric : t) (load_ric : t) =
+    let accessed_by_store = accessed ~value_set:store_ric ~size:store_size in
     let touched_by_store = accessed_by_store.fully :: accessed_by_store.partially
-    and touched_by_load = List.init (Int32.to_int_exn size2) ~f:(fun i -> add_offset load_ric (Int32.of_int_exn i)) in
+    and touched_by_load = List.init (Int32.to_int_exn load_size) ~f:(fun i -> add_offset load_ric (Int32.of_int_exn i)) in
     List.exists touched_by_store ~f:(fun r1 ->
       List.exists touched_by_load ~f:(fun r2 ->
         if equal r1 Bottom || equal r2 Bottom then
@@ -881,9 +881,9 @@ let list_to_string f lst =
     match bf with
     | Top -> Top
     | Bottom -> Bottom
-    | bf ->
-      let offset = Bitfield.constant_value bf in
-      let power_of_two, lower_bound, upper_bound = Bitfield.variable_values bf in
+    | Bit bf ->
+      let offset = Int32.(Bitfield.constant_value (Bit bf) + shift_left (shift_right_logical (bf.ones land bf.zeros) 31) 31)in
+      let power_of_two, lower_bound, upper_bound = Bitfield.variable_values (Bit bf) in
       ric(Int32.of_int_exn (Int.pow 2 power_of_two), Int lower_bound, Int upper_bound, ("", offset))
 
   (** [binop_logical op r1 r2]
@@ -2826,10 +2826,53 @@ let%test_module "RIC tests" = (module struct
 
     let%test "of_bitfield 1:::::::::::::::::::::::::::::::" =
       let bf = Bitfield.Bit {zeros = 0b1111111111111111111111111111111l; ones = 0b11111111111111111111111111111111l} in
-      print_endline ("bitfield = " ^ Bitfield.to_string bf);
       let r = of_bitfield bf in
-      print_endline ("---to-RIC--->   " ^ to_string r);
+      print_endline
+        (Printf.sprintf 
+          "[RIC.of_bitfield] %s   ---to-RIC--->   %s"
+          (Bitfield.to_string bf)
+          (to_string r));
       equal r (ric (1l, NegInfinity, Int (-1l), ("", 0l)))
+
+    let%test "of_bitfield 011:0:1001" =
+      let bf = Bitfield.Bit {zeros = 0b11111111111111111111111001110110l; ones = 0b111011001l} in
+      let r = of_bitfield bf in
+      print_endline
+        (Printf.sprintf 
+          "[RIC.of_bitfield] %s   ---to-RIC--->   %s"
+          (Bitfield.to_string bf)
+          (to_string r));
+      equal r (ric (16l, Int 0l, Int 5l, ("", 393l)))
+    
+    let%test "of_bitfield 1111111111111111111111111110:1:0" =
+      let bf = Bitfield.Bit {zeros = 0b11011l; ones = 0b11111111111111111111111111101110l} in
+      let r = of_bitfield bf in
+      print_endline
+        (Printf.sprintf 
+          "[RIC.of_bitfield] %s   ---to-RIC--->   %s"
+          (Bitfield.to_string bf)
+          (to_string r));
+      equal r (ric (2l, Int 0l, Int 5l, ("", (-28l))))
+
+    let%test "of_bitfield :0000000000000000000000000:1::10" =
+      let bf = Bitfield.Bit {zeros = 0b11111111111111111111111111101101l; ones = 0b10000000000000000000000000111110l} in
+      let r = of_bitfield bf in
+      print_endline
+        (Printf.sprintf 
+          "[RIC.of_bitfield] %s   ---to-RIC--->   %s"
+          (Bitfield.to_string bf)
+          (to_string r));
+      equal r (ric (4l, Int 0l, Int 0b100000000000000000000000001011l, ("", Int32.(18l + 0b10000000000000000000000000000000l))))
+
+    let%test "of_bitfield ::1::000000000000000000000010010" =
+      let bf = Bitfield.Bit {zeros = 0b11011111111111111111111111101101l; ones = 0b11111000000000000000000000010010l} in
+      let r = of_bitfield bf in
+      print_endline
+        (Printf.sprintf 
+          "[RIC.of_bitfield] %s   ---to-RIC--->   %s"
+          (Bitfield.to_string bf)
+          (to_string r));
+      equal r (ric (0b1000000000000000000000000000l, Int 0l, Int 0b11011l, ("", 0b10100000000000000000000000010010l)))
   end)
 end)
 

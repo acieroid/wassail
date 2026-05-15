@@ -299,8 +299,10 @@ let variable_values (bf : t) : int * int32 * int32 =
       0, 0l, 0l
     else
       let power_of_two = Maths.Binary.number_of_trailing_zeros variable in
-      let lower_bound = if Int32.(variable >= 0l) then 0l else Int32.shift_right 0b10000000000000000000000000000000l power_of_two in
-      let upper_bound = Int32.(shift_right_logical) (Int32.(shift_left) variable 1) (1 + power_of_two) in
+      let lower_bound = 0l in
+      let upper_bound = Int32.shift_right_logical variable power_of_two in
+      (* let lower_bound = if Int32.(variable >= 0l) then 0l else Int32.shift_right 0b10000000000000000000000000000000l power_of_two in
+      let upper_bound = Int32.(shift_right_logical) (Int32.(shift_left) variable 1) (1 + power_of_two) in *)
       power_of_two, lower_bound, upper_bound
 
 (** [is_true bf]

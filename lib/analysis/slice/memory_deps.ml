@@ -4,25 +4,36 @@ open Helpers
 type t = Instr.Label.Set.t Instr.Label.Map.t (* Map from instruction to its memory dependencies *)
 
 
-let find_store_address 
+let find_store_address_and_size 
     (cfg : Spec_domain.t Instr.t Instr.Label.Map.t) 
     (label : Instr.Label.t) 
-  : Var.t =
-  let annotation_before =
-    label |> Instr.Label.Map.find_exn cfg 
-          |> Instr.annotation_before in
-  let (_, address) = 
-    pop2 (Spec_domain.get_or_fail annotation_before).vstack in
-  address
+  : Var.t * int32 =
+  let instruction = label |> Instr.Label.Map.find_exn cfg in
+  let store_size =
+    match instruction with
+    | Data { instr = Store {typ = I32; _}; _ }
+    | Data { instr = Store {typ = F32; _}; _ } -> 4l
+    | Data { instr = Store {typ = I64; _}; _ }
+    | Data { instr = Store {typ = F64; _}; _ } -> 8l
+    | _ -> assert false in
+  let annotation_before = instruction |> Instr.annotation_before in
+  let (_, address) = pop2 (Spec_domain.get_or_fail annotation_before).vstack in
+  address, store_size
 
-let find_load_address 
+let find_load_address_and_size 
     (cfg : Spec_domain.t Instr.t Instr.Label.Map.t) 
     (label : Instr.Label.t) 
-  : Var.t =
-  let annotation_before =
-    label |> Instr.Label.Map.find_exn cfg 
-          |> Instr.annotation_before in
-  pop (Spec_domain.get_or_fail annotation_before).vstack
+  : Var.t * int32 =
+  let instruction = label |> Instr.Label.Map.find_exn cfg in
+  let load_size =
+    match instruction with
+    | Data { instr = Load {typ = I32; _}; _ }
+    | Data { instr = Load {typ = F32; _}; _ } -> 4l
+    | Data { instr = Load {typ = I64; _}; _ }
+    | Data { instr = Load {typ = F64; _}; _ } -> 8l
+    | _ -> assert false in
+  let annotation_before = instruction |> Instr.annotation_before in
+  pop (Spec_domain.get_or_fail annotation_before).vstack, load_size
 
 let load_depends_on_store 
     (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
@@ -34,17 +45,18 @@ let load_depends_on_store
   match pointer_analysis with
   | None -> Some store_label
   | Some (cfg_pointers, cfg_spec, _) ->
-    let store_address = find_store_address cfg_spec store_label in
+    let store_address, store_size = find_store_address_and_size cfg_spec store_label in
     let store_address_value_set = 
       Abstract_store_domain.find_value_set cfg_pointers store_label store_address 
       |> (Value_set_abstractions.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn store_offset)))))
     in
-    let load_address = find_load_address cfg_spec load_label in
+    let load_address, load_size = find_load_address_and_size cfg_spec load_label in
     let load_address_value_set = 
       Abstract_store_domain.find_value_set cfg_pointers load_label load_address 
       |> (Value_set_abstractions.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn load_offset)))))
     in
-    let overlap = Value_set_abstractions.may_overlap ~store_vs:store_address_value_set ~load_vs:load_address_value_set in
+
+    let overlap = Value_set_abstractions.may_overlap ~store_size ~load_size ~store_vs:store_address_value_set ~load_vs:load_address_value_set in
     if overlap then Some store_label else None
   
 
@@ -158,13 +170,13 @@ let call_depends_on_store
       | ValueSet Bottom -> ValueSet Bottom
       | _ -> accessed_memory
     in
-    let store_address = find_store_address spec store_label in
+    let store_address, store_size = find_store_address_and_size spec store_label in
     let store_address_value_set = 
       Abstract_store_domain.find_value_set 
         cfg_pointers store_label store_address 
       |> (Value_set_abstractions.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn store_offset)))))
     in
-    let overlap = Value_set_abstractions.may_overlap ~store_vs:store_address_value_set ~load_vs:accessed_memory in
+    let overlap = Value_set_abstractions.may_overlap ~store_size ~load_size:1l ~store_vs:store_address_value_set ~load_vs:accessed_memory in
     if overlap then Some store_label else None
   | None -> Some store_label
 
@@ -180,7 +192,7 @@ let load_depends_on_call
   match pointer_analysis with
   | None -> Instr.Label.Set.singleton call_label
   | Some (cfg_pointers, spec, summaries) ->
-    let load_address = find_load_address spec load_label in
+    let load_address, load_size = find_load_address_and_size spec load_label in
     let load_address_value_set =
       Abstract_store_domain.find_value_set cfg_pointers load_label load_address 
       |> (Value_set_abstractions.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn load_offset)))))
@@ -192,7 +204,7 @@ let load_depends_on_call
         (Reduced_interval_congruence.RICSet.to_list affected_memory_addresses)
         ~init:false
         ~f:(fun acc address ->
-          acc || Value_set_abstractions.may_overlap ~store_vs:(ValueSet address) ~load_vs:load_address_value_set) in
+          acc || Value_set_abstractions.may_overlap ~store_size:1l ~load_size ~store_vs:(ValueSet address) ~load_vs:load_address_value_set) in
     if overlap then Instr.Label.Set.singleton call_label else Instr.Label.Set.empty
 
 
@@ -230,7 +242,8 @@ let call_depends_on_call
         |> Reduced_interval_congruence.RICSet.to_list
         |> List.fold ~init:false
           ~f:(fun acc addr ->
-            acc || Value_set_abstractions.may_overlap ~store_vs:(ValueSet addr) ~load_vs:addresses_read_by_fct1)
+            (* TODO: refine load_size. We now approximate for the worst case (i64.load) *)
+            acc || Value_set_abstractions.may_overlap ~store_size:1l ~load_size:8l ~store_vs:(ValueSet addr) ~load_vs:addresses_read_by_fct1)
     in
     if memory_overlap then
       Instr.Label.Set.singleton depend_on_this_call
@@ -260,6 +273,7 @@ let call_depends_on_call
 
 
 let make 
+    (* (module_ : Wasm_module.t)  (probably needed for CallIndirect instructions) *)
     (global_deps : Global_read_domain.t Int32Map.t)
     (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
     (cfg : Spec_domain.t Cfg.t) 
@@ -283,16 +297,17 @@ let make
               begin match Instr.Label.Map.find_exn instrs label with
               | Data { instr = Load {offset=load_offset; _}; _ } ->
                 load_depends_on_call ~pointer_analysis ~load_label:label ~load_offset ~call_label ~fct_index:i
-              | Call { instr = CallDirect (_, _, fct_1_index); label = _dependant_label; _ } ->
+              | Call { instr = CallDirect (_, _, fct_1_index); _ } ->
                 call_depends_on_call
                   ~global_deps
                   ~pointer_analysis
                   ~depend_on_this_call:call_label
                   ~fct_1_index
                   ~fct_2_index:i
+              (* TODO: | Call { instr = CallIndirect (table_idx, _, _, _); _ } -> *)
               | _ -> Instr.Label.Set.singleton call_label
               end
-            | Call { instr = CallIndirect _; label; _ } -> Instr.Label.Set.singleton label
+            | Call { instr = CallIndirect _; label; _ } -> Instr.Label.Set.singleton label (* TODO *)
             | Control _ | Entry | Return _ | Imported _ -> Instr.Label.Set.empty
             | Data instrs' ->
                 Instr.Label.Set.of_list (List.filter_map instrs' ~f:(function
