@@ -72,7 +72,7 @@ let slice_line_number =
       and funidx = anon ("fun" %: int32)
       and line_number = anon ("line-number" %: int)
       and outfile = anon ("output" %: string) 
-      and pointer_analysis = flag "--no-pointers" no_arg ~doc:" Disables pointer analysis before slicing: les precise, but faster" 
+      and no_pointer_analysis = flag "--no-pointers" no_arg ~doc:" Disables pointer analysis before slicing: les precise, but faster" 
       and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
       if trace then Wassail.Log.enable_info ();
       fun () ->
@@ -81,35 +81,21 @@ let slice_line_number =
         Spec_inference.use_const := false;
         Log.info "Loading module";
         let module_ = Wasm_module.of_file filename in
+        let cfg_raw = Cfg_builder.build module_ funidx in
         Log.info "Constructing CFG";
-        let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
-        let pointer_analysis = (* TODO: turn pointer analysis on by default *)
-          if not pointer_analysis then
+        let cfg = Cfg.without_empty_nodes_with_no_predecessors (*Spec_analysis.analyze_intra1 module_ funidx*)
+        (Spec_inference.Intra.analyze module_ cfg_raw ()) in
+        let pointer_analysis =
+          if not no_pointer_analysis then
             (if trace then Wassail.Log.enable_info ();
-            Spec_inference.use_const := true;
-            Spec_inference.propagate_globals := true;
-            Spec_inference.propagate_locals := true;
-            let cfg_spec_with_propagation = Spec_analysis.analyze_intra1 module_ funidx in
-            let instructions_from_pointer_cfg = Cfg.all_instructions cfg_spec_with_propagation in
-            (* Value_set_options.print_trace := true; *)
-            let cg = Call_graph.make module_ in
-            let schedule = Call_graph.analysis_schedule cg module_.nfuncimports |> List.concat in
-            let cfg_pointers_map = Value_set.analyze_intra module_ schedule in
-            let cfg_pointers =
-              match Int32Map.find cfg_pointers_map funidx with
-              | None -> failwith ("No entry for function " ^ Int32.to_string funidx)
-              | Some (_summary, None) -> failwith ("Function" ^ Int32.to_string funidx ^ "has no CFG")
-              | Some (_summary, Some cfg) -> cfg in
+            let (cfg_pointers, instructions_from_pointer_cfg, summaries) =
+              Value_set.run_pointer_analysis module_ cfg_raw funidx in
             let cfgdot = Cfg.to_dot cfg_pointers ~annot_str:Value_set.Domain.to_string in
             let () = Out_channel.write_all (filename ^ ".pointers.dot") ~data:cfgdot in
-            let summaries = Int32Map.map cfg_pointers_map ~f:(fun (summary, _) -> summary) in
             Some (cfg_pointers, instructions_from_pointer_cfg, summaries))
           else
             None
         in
-        Spec_inference.use_const := false;
-        Spec_inference.propagate_globals := false;
-        Spec_inference.propagate_locals := false;
         let instr = match List.find (Cfg.all_instructions_list cfg) ~f:(fun instr -> (Instr.line_number instr) = line_number) with
              | None -> failwith "No instruction found at this line"
              | Some instr -> instr in

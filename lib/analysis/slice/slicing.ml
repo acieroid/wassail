@@ -40,9 +40,8 @@ type preanalysis_results = {
   data_time : Time_float.Span.t;
   mem_dependencies : Memory_deps.t;
   mem_time : Time_float.Span.t;
-  (* global_set_instructions : InSlice.Set.t; *)
-  global_time : Time_float.Span.t;
   global_dependencies : Instr.Label.Set.t Instr.Label.Map.t; (* global.get instructions depend on fct calls, and calls depend on global.set instructions *)
+  global_time : Time_float.Span.t;
 }
 
 (** Performs the pre-analysis phase in order to slice a function, according to any slicing criterion *)
@@ -50,7 +49,7 @@ let preanalysis
     (module_ : Wasm_module.t) 
     (cfg : Spec_domain.t Cfg.t) 
     (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) 
-    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    (pointer_analysis : Value_set.pointer_analysis option)
   : preanalysis_results =
   let t0 = Time_float.now () in
   let control_dependencies = Control_deps.control_deps_exact_instrs cfg in
@@ -84,7 +83,13 @@ let preanalysis
     slicing criterion `criterion`, encoded as an instruction index. Returns the
     set of instructions that are part of the slice, as a set of instruction
     labels. *)
-let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) (preanalysis : preanalysis_results) (criteria : Instr.Label.Set.t) : (Instr.Label.Set.t * (Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t)) =
+let instructions_to_keep 
+    (module_ : Wasm_module.t) 
+    (cfg : Spec_domain.t Cfg.t) 
+    (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) 
+    (preanalysis : preanalysis_results) 
+    (criteria : Instr.Label.Set.t) 
+  : (Instr.Label.Set.t * (Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t)) =
   Log.info (Printf.sprintf "Slicing with criteria %s" (Instr.Label.Set.to_string criteria));
   let t0 = Time_float.now () in
   let rec loop (worklist : InSlice.Set.t) (slice : Instr.Label.Set.t) (visited : InSlice.Set.t) : Instr.Label.Set.t =
@@ -414,7 +419,7 @@ let slice_to_funcinst
     (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) 
     ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) 
     (slicing_criteria : Instr.Label.Set.t) 
-    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option) 
+    (pointer_analysis : Value_set.pointer_analysis option) 
   : Func_inst.t =
   let instructions_in_slice = match instructions_in_slice with
     | Some instrs -> instrs

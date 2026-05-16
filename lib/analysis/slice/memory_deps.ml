@@ -36,7 +36,7 @@ let find_load_address_and_size
   pop (Spec_domain.get_or_fail annotation_before).vstack, load_size
 
 let load_depends_on_store 
-    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    (pointer_analysis : Value_set.pointer_analysis option)
     ~(load_label : Instr.Label.t)
     ~(store_label : Instr.Label.t)
     ~(store_offset : int)
@@ -100,11 +100,10 @@ let tokenize (s : string) : string list =
 
 
 let rec find_parameter_value_set 
-    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    (pointer_analysis : Value_set.pointer_analysis option)
     (label : Instr.Label.t) 
     (vars : string list)
   : Value_set_abstractions.t =
-  let () = print_endline (String.concat ~sep:"" vars) in
   match pointer_analysis with
   | None -> assert false
   | Some (cfg_pointers, spec, _) ->
@@ -145,7 +144,7 @@ let rec find_parameter_value_set
     
 
 let call_depends_on_store
-    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    (pointer_analysis : Value_set.pointer_analysis option)
     ~(call_label : Instr.Label.t)
     ~(store_label : Instr.Label.t)
     ~(fct_index : int32)
@@ -160,13 +159,10 @@ let call_depends_on_store
       | ValueSet RIC {stride; lower_bound; upper_bound; offset=("", o)} -> 
         Value_set_abstractions.ValueSet (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))
       | ValueSet RIC {stride; lower_bound; upper_bound; offset=(relative_offset, o)} ->
-        let offset_vs = find_parameter_value_set pointer_analysis call_label (tokenize relative_offset) in
-        let () = print_endline ("relative_offset: " ^ Value_set_abstractions.to_string offset_vs) in
-        let vs = Value_set_abstractions.i32_add
-          (Value_set_abstractions.ValueSet (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o))))
-          offset_vs in
-        let () = print_endline ("addresses accessed by function: " ^ Value_set_abstractions.to_string vs) in
-        vs
+        find_parameter_value_set pointer_analysis call_label (tokenize relative_offset) 
+        |>  (Value_set_abstractions.i32_add
+              (Value_set_abstractions.ValueSet 
+                (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))))
       | ValueSet Bottom -> ValueSet Bottom
       | _ -> accessed_memory
     in
@@ -183,7 +179,7 @@ let call_depends_on_store
 
 
 let load_depends_on_call
-    ~(pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    ~(pointer_analysis : Value_set.pointer_analysis option)
     ~(load_label : Instr.Label.t)
     ~(load_offset : int)
     ~(call_label : Instr.Label.t)
@@ -225,7 +221,7 @@ let globals_modified (summary : Abstract_store_domain.t) : String.Set.t =
 
 let call_depends_on_call
     ~(global_deps : Global_read_domain.t Int32Map.t)
-    ~(pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    ~(pointer_analysis : Value_set.pointer_analysis option)
     ~(depend_on_this_call : Instr.Label.t)
     ~(fct_1_index : int32)
     ~(fct_2_index : int32)
@@ -275,7 +271,7 @@ let call_depends_on_call
 let make 
     (* (module_ : Wasm_module.t)  (probably needed for CallIndirect instructions) *)
     (global_deps : Global_read_domain.t Int32Map.t)
-    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    (pointer_analysis : Value_set.pointer_analysis option)
     (cfg : Spec_domain.t Cfg.t) 
   : t =
   let instrs = Cfg.all_instructions cfg in

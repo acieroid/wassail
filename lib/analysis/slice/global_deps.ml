@@ -38,7 +38,7 @@ type t = Instr.Label.Set.t Instr.Label.Map.t
     This predicate is used when deciding whether a [global.get] should depend on
     a preceding call. *)
 let function_may_affect_global_variable
-    (pointer_analysis : (Value_set.Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Value_set.Domain.t Int32Map.t) option)
+    (pointer_analysis : Value_set.pointer_analysis option)
     ~(global_var : Var.t)
     ~(fct_index : int32)
   : bool =
@@ -68,7 +68,7 @@ let function_may_affect_global_variable
 let globals_depend_on_calls
     (global_gets : (Instr.Label.t * int32) list)
     (cfg : Spec_domain.t Cfg.t)
-    (pointer_analysis : (Abstract_store_domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Abstract_store_domain.t Int32Map.t) option)
+    (pointer_analysis : Value_set.pointer_analysis option)
   : t =
   List.fold global_gets 
         ~init:Instr.Label.Map.empty
@@ -196,7 +196,7 @@ let global_dependencies
     ~(global_deps : Global_read_domain.t Int32Map.t)
     ~(cfg : Spec_domain.t Cfg.t)
     ~(cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t)
-    ~(pointer_analysis : (Abstract_store_domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Abstract_store_domain.t Int32Map.t) option)
+    ~(pointer_analysis : Value_set.pointer_analysis option)
   : t =
   let global_gets = find_global_get_instructions cfg_instructions in
   let call_instructions = find_call_instructions cfg_instructions in

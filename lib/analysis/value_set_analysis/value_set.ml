@@ -25,9 +25,9 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
       let value_set_summary = Transfer.extract_summary wasm_mod annotated_cfg result_cfg in
       (value_set_summary, Some result_cfg))
 
-let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec_domain.t Cfg.t) : Domain.t Cfg.t =
+(* let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec_domain.t Cfg.t) : Domain.t Cfg.t =
   let rel_cfg = (* Relational.Transfer.dummy_annotate *) spec_cfg in
-  Intra.analyze wasm_mod rel_cfg summaries
+  Intra.analyze wasm_mod rel_cfg summaries *)
 
 let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t * Abstract_store_domain.t Cfg.t * Summary.t) Int32Map.t =
   Analysis_helpers.mk_inter
@@ -54,6 +54,37 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
       
 let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Domain.t Icfg.t =
   ClassicalInter.analyze module_ (Analysis_helpers.mk_inter_classical module_ entry)
+
+
+type pointer_analysis = 
+  Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Domain.t Int32Map.t
+
+let run_pointer_analysis 
+    (module_ : Wasm_module.t) 
+    (cfg : unit Cfg.t) 
+    (funidx : int32)
+  : pointer_analysis =
+  let original_use_const = !Spec_inference.use_const
+  and original_prop_globals = !Spec_inference.propagate_globals
+  and original_prop_locals = !Spec_inference.propagate_locals in
+  Spec_inference.use_const := true;
+  Spec_inference.propagate_globals := true;
+  Spec_inference.propagate_locals := true;
+  let cfg_spec_with_propagation = Spec_inference.Intra.analyze module_ cfg () in
+  let instructions_from_pointer_cfg = Cfg.all_instructions cfg_spec_with_propagation in
+  let cg = Call_graph.make module_ in
+  let schedule = Call_graph.analysis_schedule cg module_.nfuncimports |> List.concat in
+  let cfg_pointers_map = analyze_intra module_ schedule in
+  let cfg_pointers =
+    match Int32Map.find cfg_pointers_map funidx with
+    | None -> failwith ("No entry for function " ^ Int32.to_string funidx)
+    | Some (_summary, None) -> failwith ("Function" ^ Int32.to_string funidx ^ "has no CFG")
+    | Some (_summary, Some cfg) -> cfg in
+  let summaries = Int32Map.map cfg_pointers_map ~f:(fun (summary, _) -> summary) in
+  Spec_inference.use_const := original_use_const;
+  Spec_inference.propagate_globals := original_prop_globals;
+  Spec_inference.propagate_locals := original_prop_locals;
+  (cfg_pointers, instructions_from_pointer_cfg, summaries)
 
 (* module Test = struct
   let%test "add.wat" =
