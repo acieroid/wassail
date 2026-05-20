@@ -122,7 +122,11 @@ let calls_depend_on_globals
   List.fold call_instructions
     ~init:Instr.Label.Map.empty
     ~f:(fun dependencies (call_label, idx) ->
-        let globals_used_by_function = Int32Map.find_exn global_deps idx in
+        let globals_used_by_function = 
+          match Int32Map.find global_deps idx with
+          | Some globals -> globals
+          | None -> Top
+        in
         let block = Cfg.find_enclosing_block_exn cfg call_label in
         let predecessors = Cfg.all_predecessors cfg block in
         let instr_set =

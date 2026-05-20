@@ -257,3 +257,110 @@ let rec may_overlap ~(store_size : int32) ~(load_size : int32) ~(store_vs : t) ~
   | Boolean {numeric_value; _}, _ -> may_overlap ~store_size ~load_size ~store_vs:(ValueSet numeric_value) ~load_vs
   | _, Boolean {numeric_value; _} -> may_overlap ~store_size ~load_size ~store_vs ~load_vs:(ValueSet numeric_value)
   | ValueSet vs1, ValueSet vs2 -> RIC.may_overlap ~store_size ~load_size vs1 vs2
+
+
+let eqz ?(var : Variable.t option) (x : t) : t =
+  match x with
+  | Boolean x -> Boolean (Boolean.eqz x)
+  | ValueSet ric -> Boolean (Boolean.eqz (Boolean.of_RIC ~ric ~var:(Option.value_exn var)))
+  | Bitfield bf -> Boolean (Boolean.eqz (Boolean.of_bitfield ~bf ~var:(Option.value_exn var)))
+
+
+let rec count_trailing_zeros (vs : t) : t =
+  match vs with
+  | ValueSet Top | Boolean { numeric_value = RIC.Top; _ } | Bitfield Top -> ValueSet (RIC.ric (1l, Int 0l, Int 32l, ("", 32l)))
+  | ValueSet Bottom | Boolean { numeric_value = RIC.Bottom; _ } | Bitfield Bottom -> ValueSet RIC.Bottom
+  | ValueSet vs -> count_trailing_zeros (Bitfield (vs |> RIC.to_bitfield))
+  | Boolean { numeric_value = vs; _ } -> count_trailing_zeros (Bitfield (vs |> RIC.to_bitfield))
+  | Bitfield (Bit bf) ->
+    let tristate = Int32.(bf.ones land bf.zeros) in
+    let max = Int32.(bf.ones land (lnot bf.zeros)) |> Int32.ctz in
+    ValueSet (
+      max |> List.init ~f:(fun x -> x)
+          |> List.filter ~f:(fun x -> Int32.equal (Int32.rem (Int32.shift_right_logical tristate x) 2l) 1l)
+          |> List.append [max]
+          |> List.fold ~init:RIC.Bottom ~f:(fun acc x -> RIC.join acc (RIC.constant (Int32.of_int_exn x))))
+
+let reverse_bit_order (i : int32) : int32 =
+  List.init 32 ~f:(fun x -> x)
+  |> List.fold ~init:0l ~f:(fun acc bit_index ->
+       let bit = Int32.(bit_and i (shift_left 1l bit_index)) in
+       if Int32.equal bit 0l then acc
+       else Int32.bit_or acc (Int32.shift_left 1l (31 - bit_index)))
+
+let rec count_leading_zeros (vs : t) : t =
+  match vs with
+  | ValueSet Top | Boolean { numeric_value = RIC.Top; _ } | Bitfield Top -> ValueSet (RIC.ric (1l, Int 0l, Int 32l, ("", 32l)))
+  | ValueSet Bottom | Boolean { numeric_value = RIC.Bottom; _ } | Bitfield Bottom -> ValueSet RIC.Bottom
+  | ValueSet vs -> count_leading_zeros (Bitfield (vs |> RIC.to_bitfield))
+  | Boolean { numeric_value = vs; _ } -> count_leading_zeros (Bitfield (vs |> RIC.to_bitfield))
+  | Bitfield (Bit { ones; zeros }) -> count_trailing_zeros (Bitfield (Bit { ones = reverse_bit_order ones; zeros = reverse_bit_order zeros})) 
+
+let rec population_count (vs : t) : t =
+  match vs with
+  | ValueSet Top | Boolean { numeric_value = RIC.Top; _ } | Bitfield Top -> ValueSet (RIC.ric (1l, Int 0l, Int 32l, ("", 32l)))
+  | ValueSet Bottom | Boolean { numeric_value = RIC.Bottom; _ } | Bitfield Bottom -> ValueSet RIC.Bottom
+  | ValueSet vs -> population_count (Bitfield (vs |> RIC.to_bitfield))
+  | Boolean { numeric_value = vs; _ } -> population_count (Bitfield (vs |> RIC.to_bitfield))
+  | Bitfield (Bit { ones; zeros }) ->
+    let max = Int32.popcount ones in
+    let min = max - (Int32.(ones land zeros) |> Int32.popcount) in
+    ValueSet (RIC.ric (1l, Int (Int32.of_int_exn min), Int (Int32.of_int_exn max), ("", 0l)))
+
+
+
+
+
+(*
+TTTTTTTTTTTTTTTTTTTTTTTEEEEEEEEEEEEEEEEEEEEEE   SSSSSSSSSSSSSSS TTTTTTTTTTTTTTTTTTTTTTT   SSSSSSSSSSSSSSS 
+T:::::::::::::::::::::TE::::::::::::::::::::E SS:::::::::::::::ST:::::::::::::::::::::T SS:::::::::::::::S
+T:::::::::::::::::::::TE::::::::::::::::::::ES:::::SSSSSS::::::ST:::::::::::::::::::::TS:::::SSSSSS::::::S
+T:::::TT:::::::TT:::::TEE::::::EEEEEEEEE::::ES:::::S     SSSSSSST:::::TT:::::::TT:::::TS:::::S     SSSSSSS
+TTTTTT  T:::::T  TTTTTT  E:::::E       EEEEEES:::::S            TTTTTT  T:::::T  TTTTTTS:::::S            
+        T:::::T          E:::::E             S:::::S                    T:::::T        S:::::S            
+        T:::::T          E::::::EEEEEEEEEE    S::::SSSS                 T:::::T         S::::SSSS         
+        T:::::T          E:::::::::::::::E     SS::::::SSSSS            T:::::T          SS::::::SSSSS    
+        T:::::T          E:::::::::::::::E       SSS::::::::SS          T:::::T            SSS::::::::SS  
+        T:::::T          E::::::EEEEEEEEEE          SSSSSS::::S         T:::::T               SSSSSS::::S 
+        T:::::T          E:::::E                         S:::::S        T:::::T                    S:::::S
+        T:::::T          E:::::E       EEEEEE            S:::::S        T:::::T                    S:::::S
+      TT:::::::TT      EE::::::EEEEEEEE:::::ESSSSSSS     S:::::S      TT:::::::TT      SSSSSSS     S:::::S
+      T:::::::::T      E::::::::::::::::::::ES::::::SSSSSS:::::S      T:::::::::T      S::::::SSSSSS:::::S
+      T:::::::::T      E::::::::::::::::::::ES:::::::::::::::SS       T:::::::::T      S:::::::::::::::SS 
+      TTTTTTTTTTT      EEEEEEEEEEEEEEEEEEEEEE SSSSSSSSSSSSSSS         TTTTTTTTTTT       SSSSSSSSSSSSSSS   
+*)
+
+let%test_module "Binary tests" = (module struct
+
+  let%test "Bitfield_tests" =
+    print_endline "\n_______ ____________________________ _______\n        Value-set abstractions        \n------- ---------------------------- -------\n"; true
+
+  let%test "count_trailing_zeros" =
+    print_string ("[count_trailing_zeros] ");
+    let bf = Bitfield (Bit { zeros = 0b1111_1111_1111_1111_1100_1101_1101_1111l; 
+                              ones = 0b0000_0000_0000_0000_0011_0010_1110_1010l}) in
+    let () = bf |> to_string |> print_string in
+    let trailing_zeros = bf |> count_trailing_zeros in
+    let () = " --trailing zeros--> " ^ to_string trailing_zeros |> print_endline in
+    trailing_zeros |> equal (ValueSet (RIC.ric (2l, Int 0l, Int 2l, ("", 1l))))
+
+
+  let%test "count_leading_zeros" =
+    print_string ("[count_leading_zeros] ");
+    let bf = Bitfield (Bit { zeros = 0b1111_1111_1111_1111_1111_1101_1101_1111l; 
+                              ones = 0b0000_0000_0010_0010_0010_0010_1110_1010l}) in
+    let () = bf |> to_string |> print_string in
+    let leading_zeros = bf |> count_leading_zeros in
+    let () = " --leading zeros--> " ^ to_string leading_zeros |> print_endline in
+    leading_zeros |> equal (ValueSet (RIC.ric (4l, Int 0l, Int 3l, ("", 10l))))
+
+  let%test "population_count" =
+    print_string ("[population_count] ");
+    let bf = Bitfield (Bit { zeros = 0b1111_1111_1111_1111_1111_1101_1101_1111l; 
+                              ones = 0b0000_0000_0010_0010_0010_0010_1110_1010l}) in
+    let () = bf |> to_string |> print_string in
+    let pop_count = bf |> population_count in
+    let () = " --population count--> " ^ to_string pop_count |> print_endline in
+    pop_count |> equal (ValueSet (RIC.ric (1l, Int 2l, Int 9l, ("", 0l))))
+end)
+    

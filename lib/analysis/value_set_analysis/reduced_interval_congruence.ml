@@ -371,6 +371,36 @@ module RIC = struct
       | s, l, u, o -> RIC {stride = s; lower_bound = l; upper_bound = u; offset = o}
     )
 
+  let zero = ric (0l, Int 0l, Int 0l, ("", 0l))
+
+  let one = ric (0l, Int 0l, Int 0l, ("", 1l))
+
+  (** [to_string r]
+      Normalized math‑style printer: e.g. ["2[0,3]+(x+1)"] or ["⊤"/"⊥"]. *)
+  let to_string (r : t) : string =
+    let r = reduce r in
+    match r with
+    | Top -> "⊤"
+    | Bottom -> "⊥"
+    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = o} ->
+      let offset = 
+        match o with 
+        | (var, i) -> 
+          if Int32.equal i 0l then
+            (if not (String.equal var "") then "+" else "") ^ var
+          else if String.equal var "" then
+            (if Int32.compare i 0l > 0 then "+" else if Int32.compare i 0l < 0 then "-" else "") ^ Int32.to_string (Int32.abs i)
+          else
+            "+(" ^ var ^ ((if Int32.compare i 0l > 0 then "+" else "") ^ Int32.to_string i) ^ ")"
+      in
+      let interval = Interval.to_string (Interval.Interval {lower_bound = l; upper_bound = u}) in
+      let stride = if Int32.equal s 1l then "" else Int32.to_string s in
+      match stride, interval, offset with 
+      | "0", _, "" -> "0"
+      | "0", _, o -> if String.equal "+" (String.sub o ~pos:0 ~len:1) then String.sub o ~pos:1 ~len:(String.length o - 1) else o
+      | "", "]-∞,∞[", _ | "", "ℤ", _ -> "⊤"
+      | _ -> stride ^ interval ^ offset
+
   (** All negative integers. *)
   let negative_integers = ric (1l, NegInfinity, Int (-1l), ("", 0l))
 
@@ -416,9 +446,10 @@ module RIC = struct
       Attach base symbol [name] to an absolute RIC. *)
   let set_relative_offset (r : t) (offset : string) : t =
     match r with
+    | Top -> Top
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
       ric (s, l, u, (offset, o))
-    | _ -> assert false
+    | _ -> let () = print_endline ("set_relative_offset : " ^ to_string r ^ " ... " ^ offset) in assert false
 
   (** [remove_relative_offset r]
       Drop the base symbol, making the offset absolute. *)
@@ -481,31 +512,7 @@ module RIC = struct
       RIC {offset = (v2, _); _} -> String.equal v1 v2 
     | _ -> true
 
-  (** [to_string r]
-      Normalized math‑style printer: e.g. ["2[0,3]+(x+1)"] or ["⊤"/"⊥"]. *)
-  let to_string (r : t) : string =
-    let r = reduce r in
-    match r with
-    | Top -> "⊤"
-    | Bottom -> "⊥"
-    | RIC {stride = s; lower_bound = l; upper_bound = u; offset = o} ->
-      let offset = 
-        match o with 
-        | (var, i) -> 
-          if Int32.equal i 0l then
-            (if not (String.equal var "") then "+" else "") ^ var
-          else if String.equal var "" then
-            (if Int32.compare i 0l > 0 then "+" else if Int32.compare i 0l < 0 then "-" else "") ^ Int32.to_string (Int32.abs i)
-          else
-            "+(" ^ var ^ ((if Int32.compare i 0l > 0 then "+" else "") ^ Int32.to_string i) ^ ")"
-      in
-      let interval = Interval.to_string (Interval.Interval {lower_bound = l; upper_bound = u}) in
-      let stride = if Int32.equal s 1l then "" else Int32.to_string s in
-      match stride, interval, offset with 
-      | "0", _, "" -> "0"
-      | "0", _, o -> if String.equal "+" (String.sub o ~pos:0 ~len:1) then String.sub o ~pos:1 ~len:(String.length o - 1) else o
-      | "", "]-∞,∞[", _ | "", "ℤ", _ -> "⊤"
-      | _ -> stride ^ interval ^ offset
+  
 
   (** [meet r1 r2]
       Intersection. If bases differ, returns [⊥]. Otherwise intersects components after
@@ -819,10 +826,11 @@ module RIC = struct
     match r with
     | Bottom -> Bottom
     | Top -> Top
-    | RIC {lower_bound = NegInfinity; upper_bound = Infinity; _} -> assert false (* We need to avoid this situation at all cost *)
+    | RIC {lower_bound = NegInfinity; upper_bound = Infinity; _} -> Bitfield.Top
     | RIC {lower_bound = NegInfinity; upper_bound = Int u; stride = s; offset = ("", o); _} ->
       assert (equal (negative_part r) Bottom || equal (positive_part r) Bottom); (* We assume all values are of the same sign *)
-      let n = Binary.number_of_trailing_zeros Int32.(-s) in
+      (* let n = Binary.number_of_trailing_zeros Int32.(-s) in *)
+      let n = Int32.ctz Int32.(-s) in
       let increment_ones = Int32.shift_left (-1l) n in
       let increment_zeros = Int32.shift_right_logical (-1l) 1 in
       let increment_mask = Bitfield.Bit {zeros = increment_zeros; ones = increment_ones} in
@@ -836,7 +844,8 @@ module RIC = struct
       else
         Top *)
       let constant = Bitfield.of_integer Int32.(l * s + o) in
-      let n = Binary.number_of_trailing_zeros s in
+      (* let n = Binary.number_of_trailing_zeros s in *)
+      let n = Int32.ctz s in
       let increment_ones = Int32.shift_right_logical (Int32.shift_left (-1l) (n + 1)) 1 in
       let increment_mask = Bitfield.Bit {zeros = (-1l); ones = increment_ones} in
       Bitfield.xor_ increment_mask constant
@@ -952,7 +961,7 @@ module RIC = struct
 
   (** [is_false r]
       Interprets [r] as a boolean: [true] iff 0 is compatible with [r]. *)
-  let is_false (r : t) : bool =
+  let may_be_false (r : t) : bool =
     match r with
     | Top -> true
     | Bottom -> false
@@ -962,7 +971,7 @@ module RIC = struct
   (** [is_true r]
       Interprets [r] as a boolean: [true] iff some non‑zero value is compatible with [r]
       (or [Top]). *)
-  let is_true (r : t) : bool =
+  let may_be_true (r : t) : bool =
     let r = reduce r in
     match r with
     | Top -> true
@@ -973,6 +982,8 @@ module RIC = struct
         are_disjoint r (ric (1l, Int 0l, Int 0l, ("", 0l)))
       else
         true *)
+
+  let constant (i : int32) : t = ric (0l, Int 0l, Int 0l, ("", i))
 end
 
 

@@ -60,10 +60,6 @@ let preanalysis
   let mem_dependencies = Memory_deps.make global_deps pointer_analysis cfg in
   (
   let t3 = Time_float.now () in
-  (* let global_set_instructions = InSlice.Set.of_list (List.map ~f:(fun label -> InSlice.{ label; reason = None })
-                                                       (Instr.Label.Map.keys (Instr.Label.Map.filter cfg_instructions ~f:(function
-                                                           | Data { instr = GlobalSet _; _ } -> true
-                                                           | _ -> false)))) in *)
   let global_dependencies = Global_deps.global_dependencies ~global_deps ~cfg ~cfg_instructions ~pointer_analysis in
   let t4 = Time_float.now () in
   let control_time = Time_float.diff t1 t0 in
@@ -254,7 +250,7 @@ let type_of_call
       | NotBottom s -> Some s.vstack in
   match i.instr, vstack_before with
   | (_, None) ->
-    Log.warn (Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
+    Log.warn (Printf.sprintf "instruction is unreachable: %s(%s)" (Instr.Label.to_string i.label) (Instr.to_string (Instr.Label.Map.find_exn instructions_map i.label)));
     (* instruction is unreachable, treating it as having no effect *)
     ([], [])
   | (CallDirect (_, (in_type, out_type), _), _) -> (List.map in_type ~f:(fun t -> T t), List.map out_type ~f:(fun t -> T t))
@@ -279,7 +275,7 @@ let type_of_control
     (List.map ~f:(fun t -> T t) (fst bt),
      List.map ~f:(fun t -> T t) (snd bt))
   | (_, None) ->
-    Log.warn (Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
+    Log.warn (Printf.sprintf "instruction is unreachable: %s(%s)" (Instr.Label.to_string i.label) (Instr.to_string (Instr.Label.Map.find_exn instructions_map i.label)));
     (* instruction is unreachable, treating it as having no effect *)
     ([], [])
   | (_, Some vstack_before) ->

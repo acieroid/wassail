@@ -17,6 +17,8 @@ module True_or_false = struct
     | None -> assert false
     | Some tf -> tf
 
+  let set (tf : t) ~(var : Variable.t) ~data : t = Variable.Map.set tf ~key:var ~data
+
   let true_or_false_to_string (tf : true_or_false) : string =
     "T(" ^ RIC.to_string tf.true_ ^ "), F(" ^ RIC.to_string tf.false_ ^ ")"
 
@@ -113,7 +115,7 @@ let or_ (boolean1 : t) (boolean2 : t) : t =
           Some {true_ = RIC.join t f; false_ = f});
     numeric_value = RIC.or_ boolean1.numeric_value boolean2.numeric_value}
 
-(** i32.eqz *)
+
 let not_ (boolean : t) : t =
   { true_or_false =
       Variable.Map.fold 
@@ -121,6 +123,18 @@ let not_ (boolean : t) : t =
         ~f:(fun ~key ~data:{true_ = t; false_ = f} acc -> Variable.Map.set acc ~key ~data:{True_or_false.true_ = f; false_ = t}) 
         boolean.true_or_false;
     numeric_value = RIC.not_ boolean.numeric_value }
+
+let eqz (boolean : t) : t =
+    { true_or_false =
+      Variable.Map.fold 
+        ~init:Variable.Map.empty 
+        ~f:(fun ~key ~data:{true_ = t; false_ = f} acc -> Variable.Map.set acc ~key ~data:{True_or_false.true_ = f; false_ = t}) 
+        boolean.true_or_false;
+    numeric_value = 
+      RIC.join 
+        (if RIC.may_be_false boolean.numeric_value then RIC.one else RIC.Bottom) 
+        (if RIC.may_be_true boolean.numeric_value then RIC.zero else RIC.Bottom)
+    }
 
 let join (boolean1 : t) (boolean2 : t) : t = 
   let boolean1 = { true_or_false = Variable.Map.make_compatible ~this:boolean1.true_or_false ~relative_to:boolean2.true_or_false ~get:True_or_false.get;
@@ -149,6 +163,14 @@ let can_be_false (boolean : t) : bool =
   | {true_or_false = tf; _} ->
     not (Variable.Map.exists tf ~f:(fun {false_ = x; _} -> RIC.equal x RIC.Bottom))
 
+
+let of_RIC ~(ric : RIC.t) ~(var : Variable.t) : t =
+  let false_ = if RIC.may_be_false ric then RIC.zero else RIC.Bottom in
+  let true_ = if RIC.may_be_true ric then RIC.remove ~this:RIC.zero ~from:ric |> List.fold ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) else RIC.Bottom in
+  { true_or_false = True_or_false.set Variable.Map.empty ~var ~data:{ true_; false_ }; numeric_value = ric}
+
+let of_bitfield ~(bf : Bitfield.t) ~(var : Variable.t) : t =
+  of_RIC ~ric:(RIC.of_bitfield bf) ~var
 
 
 (*                                                                                              

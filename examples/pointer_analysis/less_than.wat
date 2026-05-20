@@ -19,7 +19,7 @@
     local.get $l1
     i32.le_u
     ;; i32.gt_u
-    if
+    if (result i32)
       local.get $l0  
     else
       local.get $l0
@@ -29,8 +29,10 @@
     i32.le_u
     if
       local.get $l0
+      drop
     else
       local.get $l1
+      drop
     end
     return
   )

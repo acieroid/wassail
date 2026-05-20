@@ -109,6 +109,7 @@ module Make (*: Transfer.TRANSFER *) = struct
     (* TODO: is there a way to know the memory size? *)
     | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstractions.ValueSet Top)
     | Nop | Drop | MemoryGrow -> state
+    (* TODO: these 3 operations may modify memory content: *)
     | MemoryCopy | MemoryFill | MemoryInit _ -> state
     | RefIsNull | RefNull _ | RefFunc _ -> state
     | Select _ ->
@@ -711,27 +712,47 @@ module Make (*: Transfer.TRANSFER *) = struct
       let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
       let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
       begin match test with
-      | I32Eqz -> (* TODO: implement this *)
-        begin match vs with
-          | Boolean b -> 
-            let state = 
-              { Abstract_store_domain.abstract_store = 
-                  Variable.Map.remove state.abstract_store (Variable.Var var);
-                store_operations = state.store_operations } in (* TODO: check that this is sound *)
-            Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.Value.Boolean (Boolean.not_ b))
-          (* | ValueSet _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean {Boolean.true_or_false = Variable.Map.empty; numeric_value = RIC.Top}) *)
-          | ValueSet vs -> 
-            let vs = Abstract_store_domain.Value.ValueSet (RIC.of_bitfield (Bitfield.not_ (RIC.to_bitfield vs))) in
-            Abstract_store_domain.set state ~var:(ret i) ~vs
-          | Bitfield bf -> 
-            let vs = Abstract_store_domain.Value.Bitfield (Bitfield.not_ bf) in
-            Abstract_store_domain.set state ~var:(ret i) ~vs
-        end
+      | I32Eqz ->
+        Abstract_store_domain.set
+          state
+          ~var:(ret i)
+          ~vs:(Value_set_abstractions.eqz ~var:(Variable.Var var) vs)
       | _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean {Boolean.true_or_false = Variable.Map.empty; numeric_value = RIC.Top})
       end
-    | Unary _ | Convert _ -> (* TODO: write this case *) 
-      Log.warn "unary and convert operations have not been implemented";
-      state
+    | Unary { op = Clz; _ } ->
+      let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
+      let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
+      Abstract_store_domain.set
+        state
+        ~var:(ret i)
+        ~vs:(Value_set_abstractions.count_leading_zeros vs)
+    | Unary { op = Ctz; _ } ->
+      let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
+      let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
+      Abstract_store_domain.set
+        state
+        ~var:(ret i)
+        ~vs:(Value_set_abstractions.count_trailing_zeros vs)
+    | Unary { op = Popcnt; _ } ->
+      let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
+      let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
+      Abstract_store_domain.set
+        state
+        ~var:(ret i)
+        ~vs:(Value_set_abstractions.population_count vs)
+    | Unary { op = ExtendS _; _} ->
+      Abstract_store_domain.set
+        state
+        ~var:(ret i)
+        ~vs:(ValueSet RIC.Top)
+    | Unary { typ = I32; _ } -> assert false (* No other unary operators on 32 bit integers *)
+    | Unary _ ->
+      Abstract_store_domain.set
+        state
+        ~var:(ret i)
+        ~vs:(ValueSet RIC.Top)
+    | Convert _ ->
+      Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstractions.ValueSet Top)
 
 
   let apply_condition 
@@ -866,12 +887,12 @@ module Make (*: Transfer.TRANSFER *) = struct
       begin match boolean_value with
       | ValueSet vs -> 
         let false_ = 
-          if RIC.is_false vs then
+          if RIC.may_be_false vs then
             state
           else
             Abstract_store_domain.bottom
         and true_ = 
-          if RIC.is_true vs then
+          if RIC.may_be_true vs then
             state
           else
             Abstract_store_domain.bottom
@@ -882,12 +903,12 @@ module Make (*: Transfer.TRANSFER *) = struct
         `Branch (state_if_true, state_if_false)
       | Bitfield bf ->
         let false_ = 
-          if Bitfield.is_false bf then
+          if Bitfield.may_be_false bf then
             state
           else
             Abstract_store_domain.bottom
         and true_ = 
-          if Bitfield.is_true bf then
+          if Bitfield.may_be_true bf then
             state
           else
             Abstract_store_domain.bottom

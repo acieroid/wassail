@@ -1,4 +1,5 @@
 (module
+(memory (export "mem") 1)
   ;; Define a mutable global variable initialized to 0
   (global $sp (mut i32) (i32.const 0)) 
   (global $heap (mut i32) (i32.const 0)) 

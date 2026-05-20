@@ -292,14 +292,14 @@ module Binary = struct
       complement representation of [x].  Runs in O(t) where [t] is the number of
       trailing zeros.  Undefined for negative [x] is not assumed; works for any
       [int32]. *)
-  let number_of_trailing_zeros (x : int32) : int =
+  (* let number_of_trailing_zeros (x : int32) : int =
       let rec aux x n =
         if Int32.(x % 2l = 1l) then
           n
         else
           aux (Int32.(shift_right x 1)) (n + 1) 
       in
-      aux x 0
+      aux x 0 *)
 
   (** [bitFlip x y i] returns the number of increments by [y] (starting at 0)
       until bit [i] of the running value (initially [x]) flips at least once.
@@ -310,7 +310,8 @@ module Binary = struct
     if Int32.(y = 0l) then
       0
     else
-      let t = number_of_trailing_zeros y in
+      (* let t = number_of_trailing_zeros y in *)
+      let t = Int32.ctz y in
       if t > 0 then
         if i < t then
           0
@@ -469,15 +470,15 @@ let%test_module "Binary tests" = (module struct
     Printf.printf "[bitFlips] x=%ld y=%ld -> %s\n" x y (List.to_string ~f:Int.to_string got); Out_channel.flush stdout; true
 
   (* ---------------- Binary helpers extra ---------------- *)
-  let%test "ntz basic" =
+  (* let%test "ntz basic" =
     let x = 8l in
     let got = Binary.number_of_trailing_zeros x in
-    Printf.printf "[ntz] x=%ld -> %d\n" x got; Out_channel.flush stdout; got = 3
+    Printf.printf "[ntz] x=%ld -> %d\n" x got; Out_channel.flush stdout; got = 3 *)
 
-  let%test "ntz mixed" =
+  (* let%test "ntz mixed" =
     let x = 12l in
     let got = Binary.number_of_trailing_zeros x in
-    Printf.printf "[ntz] x=%ld -> %d\n" x got; Out_channel.flush stdout; got = 2
+    Printf.printf "[ntz] x=%ld -> %d\n" x got; Out_channel.flush stdout; got = 2 *)
 
   let%test "bitFlip y=0 -> 0" =
     let x = 123l and y = 0l and i = 5 in

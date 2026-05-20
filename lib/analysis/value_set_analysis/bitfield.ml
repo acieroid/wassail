@@ -298,7 +298,8 @@ let variable_values (bf : t) : int * int32 * int32 =
     if Int32.(variable = 0l) then
       0, 0l, 0l
     else
-      let power_of_two = Maths.Binary.number_of_trailing_zeros variable in
+      (* let power_of_two = Maths.Binary.number_of_trailing_zeros variable in *)
+      let power_of_two = Int32.ctz variable in
       let lower_bound = 0l in
       let upper_bound = Int32.shift_right_logical variable power_of_two in
       (* let lower_bound = if Int32.(variable >= 0l) then 0l else Int32.shift_right 0b10000000000000000000000000000000l power_of_two in
@@ -310,7 +311,7 @@ let variable_values (bf : t) : int * int32 * int32 =
   least one non-zero concrete value (i.e., there exists a model with some
   bit allowed to be [1]).  Implements three cases: [Top → true],
   [Bottom → false], and for [Bit b], checks whether [b.ones <> 0l]. *)
-let is_true (bf : t) : bool =
+let may_be_true (bf : t) : bool =
   match bf with
   | Top -> true
   | Bottom -> false
@@ -320,7 +321,7 @@ let is_true (bf : t) : bool =
   Conservative boolean test for zero: returns [true] iff the concrete value
   [0] is compatible with the per-bit constraints encoded by [bf].
   Implemented via [contains bf 0l]. *)
-let is_false (bf : t) : bool =
+let may_be_false (bf : t) : bool =
   contains bf 0l
 
 

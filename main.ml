@@ -61,6 +61,7 @@ let () =
        ; "gen-slice-specific", Slicing_evaluation.gen_slice_specific
        ; "find-criterion", Slicing_evaluation.find_criterion
        ; "count-in-slice", Slicing_evaluation.count_in_slice
+       ; "slice-evaluator", Slicing_evaluator.evaluate
 
        (* Pointer analysis *)
        ; "value-set-intra", Analysis.value_set_intra

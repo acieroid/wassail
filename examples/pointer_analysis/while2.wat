@@ -1,11 +1,12 @@
 (module
+(memory (export "mem") 1)
   (func $main (local $i i32)
     ;; initialize i = 0
     
     i32.const 22
     i32.const 34
     i32.lt_u
-    if (result i32)
+    if
       i32.const 15
       i32.const 55
       i32.store
