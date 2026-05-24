@@ -107,8 +107,10 @@ module Make (*: Transfer.TRANSFER *) = struct
       | None -> failwith "nothing on the stack" in
     match i.instr with
     (* TODO: is there a way to know the memory size? *)
-    | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstractions.ValueSet Top)
-    | Nop | Drop | MemoryGrow -> state
+    (* | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstractions.ValueSet Top) *)
+    | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:Variable.MemorySize)
+    | MemoryGrow -> state
+    | Nop | Drop -> state
     (* TODO: these 3 operations may modify memory content: *)
     | MemoryCopy | MemoryFill | MemoryInit _ -> state
     | RefIsNull | RefNull _ | RefFunc _ -> state

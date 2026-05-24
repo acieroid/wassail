@@ -48,6 +48,7 @@ module T = struct
     | Mem of RIC.t
     | Stack of RIC.t (* used when considering the stack disjoint from the rest of the memory *)
     | Accessed (* used to store all the addresses that may have been read by a function *)
+    | MemorySize (* used to track memory size (in nb of pages) *)
   [@@deriving sexp, compare, equal]
 
   (** [to_string v] renders a variable in a compact, stable format suited for logs.
@@ -55,7 +56,8 @@ module T = struct
         {- [Var x] prints as [x];}
         {- [Mem r] prints as [mem[<r>]];}
         {- [Stack r] prints as [stack[<r>]] with relative offset base removed;}
-        {- [Accessed] prints as [Accessed_memory].}}
+        {- [Accessed] prints as [Accessed_memory];}
+        {- [MemorySize] prints as [Memory_size].}}
       @param var the variable to pretty‑print
       @return a printable representation. *)
   let to_string (var : t) : string =
@@ -64,6 +66,7 @@ module T = struct
     | Mem ric -> "mem[" ^ RIC.to_string ric ^ "]"
     | Stack ric -> "stack[" ^ RIC.to_string (RIC.remove_relative_offset ric) ^"]"
     | Accessed -> "Accessed_memory"
+    | MemorySize -> "Memory_size"
 
   (** Smart constructor for a memory variable from raw RIC components.
       @param ric a quadruple [(stride, lower, upper, (offset_base, offset_delta))]
@@ -180,7 +183,7 @@ module T = struct
         List.fold ~init:[v_addr]
           ~f:(fun acc x ->
             match x with
-            | Var _ | Stack _ | Accessed -> acc
+            | Var _ | Stack _ | Accessed | MemorySize -> acc
             | Mem addr -> 
               List.concat (List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y) acc))
           by
@@ -188,7 +191,7 @@ module T = struct
         List.fold ~init:[v_addr]
           ~f:(fun acc x ->
             match x with
-            | Var _ | Mem _ | Accessed -> acc
+            | Var _ | Mem _ | Accessed | MemorySize -> acc
             | Stack addr -> 
               List.concat (List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y) acc))
           by
@@ -202,7 +205,7 @@ module T = struct
       function raises [Failure] with an explanatory message. *)
   let update_relative_offset ~(var : t) ~(actual_values : RIC.t String.Map.t) : t =
     match var with
-    | Var _ | Accessed -> var
+    | Var _ | Accessed | MemorySize -> var
     | Mem address ->
       let new_address = RIC.update_relative_offset ~ric_:address ~actual_values in
       Mem new_address

@@ -11,6 +11,7 @@ let to_string (s : t) : string =
   (* let affected = Variable.Map.find s.abstract_store Variable.Affected in *)
   let affected_memory = s.store_operations in
   let accessed = Variable.Map.find s.abstract_store Variable.Accessed in
+  let memory_size = Variable.Map.find s.abstract_store Variable.MemorySize in
   let returns = 
     Variable.Map.filter_keys s.abstract_store 
       ~f:(fun key -> 
@@ -30,12 +31,6 @@ let to_string (s : t) : string =
     Variable.Map.filter_keys s.abstract_store
       ~f:(fun key -> Variable.is_stack key) in
   let string_list =
-    (* begin match ret with
-    | None -> []
-    | Some Abstract_store_domain.Value.Boolean _ -> ["RETURN: ⊤"]
-    | Some value -> ["RETURN:" ^ Abstract_store_domain.Value.to_string value]
-    end
-    @ *)
     (if Variable.Map.is_empty returns then
       []
     else
@@ -71,9 +66,16 @@ let to_string (s : t) : string =
     @ 
     (begin match accessed with
     | None | Some (Abstract_store_domain.Value.ValueSet RIC.Bottom) -> 
-      let () = print_endline "nothing accessed" in []
+      []
     | Some addresses ->
       ["ACCESSED MEMORY:" ^ Value_set_abstractions.to_string addresses]
+    end)
+    @
+    (begin match memory_size with
+    | None | Some (Abstract_store_domain.Value.ValueSet RIC.Bottom) -> 
+      []
+    | Some size ->
+      ["MEMORY SIZE (nb of pages):" ^ Value_set_abstractions.to_string size]
     end)
   in "\t\t" ^ String.concat ~sep:"\n\t\t" string_list
   
@@ -94,6 +96,7 @@ let bottom (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
     | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
     | _ -> failwith "more than one return value" in
   Abstract_store_domain.set summary ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
+  |> Abstract_store_domain.set ~var:(Variable.MemorySize) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
 
 (* TODO: set value depending on type (e.g. f64 is always bottom) *)
 let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
@@ -111,7 +114,7 @@ let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
     | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top)
     | _ -> failwith "more than one return value" in
   Abstract_store_domain.set summary ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top)
-
+  |> Abstract_store_domain.set ~var:(Variable.MemorySize) ~vs:(Abstract_store_domain.Value.ValueSet RIC.positive_integers)
 
 
 let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : Type.t list) : t =
@@ -146,12 +149,14 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
       let summary = Abstract_store_domain.set summary ~var:(Variable.entire_memory) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top) in
       (* Stack portion of the linear memory is assumed to not have been changed *)
       let summary = 
-        if !Value_set_options.disjoint_stack then
+        (if !Value_set_options.disjoint_stack then
           Abstract_store_domain.set summary ~var:(Variable.entire_stack) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
         else
-          summary
+          summary)
+      |> Abstract_store_domain.set ~var:Variable.MemorySize ~vs:(Abstract_store_domain.Value.ValueSet RIC.positive_integers)
       in
-        {Abstract_store_domain.abstract_store = summary.abstract_store; store_operations = RICSet.singleton RIC.Top})
+        {Abstract_store_domain.abstract_store = summary.abstract_store; 
+        store_operations = RICSet.singleton RIC.Top})
   | "fd_close" | "proc_exit" ->
     (* Globals are unchanged *)
     let globals = List.init (Int32.to_int_exn nglobals) ~f:(fun i -> Variable.Var (Var.Global i)) in
@@ -162,14 +167,16 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
       | [] -> summary
       | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top)
       | _ -> failwith "more than one return value"
-      end in
+      end 
+    in
     (* Linear memory is unchanged, but we may have accessed all of it: *)
     let summary = Abstract_store_domain.set summary ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top) in
     (* Stack portion of the linear memory is assumed to not have been changed *)
-    if !Value_set_options.disjoint_stack then
+    (if !Value_set_options.disjoint_stack then
       Abstract_store_domain.set summary ~var:(Variable.entire_stack) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
     else
-      summary
+      summary)
+    |> Abstract_store_domain.set ~var:Variable.MemorySize ~vs:(Abstract_store_domain.Value.ValueSet RIC.positive_integers)
   | _ ->
     (* There is no way to know if global variables have been changed *)
     Log.warn (Printf.sprintf "Imported function is not modelled: %s" name);
@@ -187,7 +194,7 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
       | _ :: [] -> Abstract_store_domain.set summary ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Top)
       | _ -> failwith "more than one return value"
       end in
-    if !Value_set_options.ignore_imports then 
+    (if !Value_set_options.ignore_imports then 
       ((* Linear memory is considered to be unchanged *)
       let summary = Abstract_store_domain.set summary ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Bottom) in
       (* Stack portion of the linear memory is assumed to not have been changed *)
@@ -205,7 +212,8 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
           Abstract_store_domain.set summary ~var:(Variable.entire_stack) ~vs:(Abstract_store_domain.Value.ValueSet RIC.Bottom)
         else
           summary in
-      {abstract_store = summary.abstract_store; store_operations = RICSet.singleton RIC.Top})
+      {abstract_store = summary.abstract_store; store_operations = RICSet.singleton RIC.Top}))
+    |> Abstract_store_domain.set ~var:Variable.MemorySize ~vs:(Abstract_store_domain.Value.ValueSet RIC.positive_integers)
 
 let initial_summaries 
     (cfgs : 'a Cfg.t Int32Map.t) 
@@ -217,8 +225,6 @@ let initial_summaries
         (match typ with
          | `Bottom -> bottom
          | `Top -> top) cfg Var.Set.empty))
-    (* ~f:(fun summaries (idx, name, (args, ret)) ->
-        Int32Map.set summaries ~key:idx ~data:(of_import name module_.nglobals args ret)) *)
     ~f:(fun summaries desc ->
         Int32Map.set summaries ~key:desc.idx ~data:(of_import desc.name module_.nglobals desc.arguments desc.returns))
 
@@ -231,7 +237,8 @@ let make (state : Abstract_store_domain.t) : t =
           | Variable.Var Var.Return _
           | Variable.Mem _
           | Variable.Stack _
-          | Variable.Accessed -> true
+          | Variable.Accessed 
+          | Variable.MemorySize -> true
           | _ -> false);
     store_operations = state.store_operations }
 
@@ -293,7 +300,8 @@ let apply
       ~f:(fun ~key:var ~data:vs acc ->
         match var with
         | Variable.Var _
-        | Variable.Accessed -> Variable.Map.set acc ~key:var ~data:vs
+        | Variable.Accessed
+        | Variable.MemorySize -> Variable.Map.set acc ~key:var ~data:vs
         | Variable.Stack _
         | Variable.Mem _ ->
           let is_safe =
@@ -340,9 +348,10 @@ let apply
   (* TODO: This next part assumes only one return value is possible: please generalize *)
   (* let () = print_endline ("variable de retour?" ^ Variable.to_string fff) in *)
   (* match Variable.Map.find summary.abstract_store (Variable.Var (Var.Return 0l)), return_variable with *)
-  match extract_return_value summary.abstract_store, return_variable with
+  (match extract_return_value summary.abstract_store, return_variable with
   | Some vs, Some return_variable -> Abstract_store_domain.set state ~var:(Variable.Var return_variable) ~vs
   | None, None -> state
   | None, Some ret -> (print_endline ("return variable: " ^ Var.to_string ret); assert false)
-  | Some _, None -> (print_endline "some none"; assert false)
+  | Some _, None -> (print_endline "some none"; assert false))
   (* | _ -> assert false TODO: error message? *)
+  |> Abstract_store_domain.update_memory_size ~summary

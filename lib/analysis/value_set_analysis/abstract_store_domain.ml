@@ -34,8 +34,9 @@ let get (store : t) ~(var : Variable.t) : Value.t =
       ValueSet 
         (match var with
         | Accessed -> RIC.Bottom
-        | Var Const I32 n -> Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", n))
-        | Var Const _ -> Reduced_interval_congruence.RIC.Top
+        | MemorySize -> RIC.positive_integers
+        | Var Const I32 n -> RIC.ric (0l, Int 0l, Int 0l, ("", n))
+        | Var Const _ -> RIC.Top
         (* | Var Merge _ -> RIC.Bottom *)
         | Var _ -> RIC.Bottom
         (* | Var _ -> RIC.relative_ric (Variable.to_string var) *)
@@ -207,7 +208,7 @@ let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : R
     (if Variable.is_linear_memory var then
       let untouched_addresses =
         match var with
-        | Var _ | Accessed | Stack _-> assert false
+        | Var _ | Accessed | Stack _ | MemorySize -> assert false
         | Mem addr ->
           if !Value_set_options.disjoint_stack && String.equal "g0" relative_offset then
             [addr]
@@ -222,7 +223,7 @@ let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : R
     else if Variable.is_stack var then
       (let untouched_addresses =
         match var with
-        | Var _ | Accessed | Mem _-> assert false
+        | Var _ | Accessed | Mem _ | MemorySize -> assert false
         | Stack addr ->
           if not (String.equal "g0" relative_offset) then
             [addr]
@@ -263,7 +264,7 @@ let set (store : t) ~(var : Variable.t) ~(vs : Value.t) : t =
     Variable.Map.fold store.abstract_store ~init:true ~f:(fun ~key:k ~data:_ acc ->
       acc && 
       match k, var with
-      | Var _, _ | _, Var _ | Accessed, _ | _, Accessed | Mem _, Stack _ | Stack _, Mem _-> true
+      | Var _, _ | _, Var _ | Accessed, _ | _, Accessed | Mem _, Stack _ | Stack _, Mem _ | MemorySize, _ | _, MemorySize -> true
       | Mem _, Mem _ 
       | Stack _, Stack _ ->
         Variable.equal k var ||
@@ -396,7 +397,7 @@ let update_accessed_vars (store : t) (accessed_addresses : RIC.accessed_memory) 
 let weak_update (store : t) ~(previous_state : t) ~(var : Variable.t) ~(vs : Value.t) : t =
   let address = 
     match var with
-    | Var _ | Accessed -> assert false
+    | Var _ | Accessed | MemorySize -> assert false
     | Mem address -> address
     | Stack address -> address
   in
@@ -405,7 +406,7 @@ let weak_update (store : t) ~(previous_state : t) ~(var : Variable.t) ~(vs : Val
     List.filter ~f:(fun (v, _) -> not (Variable.equal v (Mem RIC.Bottom)))
       (List.map ~f:(fun v -> 
           match v with 
-          | Var _ | Accessed | Stack _ -> assert false
+          | Var _ | Accessed | Stack _  | MemorySize -> assert false
           | Mem addr -> (Variable.Mem (RIC.meet addr address)), (get previous_state ~var:v))
         memory_variables)
   in
@@ -493,6 +494,21 @@ let access_memory (store : t) ~(addresses : Value.t) : t =
   let new_accessed_memory = Value.join previously_accessed addresses in
   set store ~var:(Variable.Accessed) ~vs:new_accessed_memory
 
+let update_memory_size (store : t) ~(summary : t) : t =
+  let combine_relative_offsets ro1 ro2 =
+    match ro1, ro2 with
+    | "", ro | ro, "" -> ro
+    | _ -> ro1 ^ "+" ^ ro2
+  in
+  match (get store ~var:Variable.MemorySize), (get summary ~var:Variable.MemorySize) with
+  | ValueSet RIC { stride = 1l; lower_bound = Int 0l; upper_bound = Infinity; offset = (ro1, o1) },
+    ValueSet RIC { stride = 1l; lower_bound = Int 0l; upper_bound = Infinity; offset = (ro2, o2) } ->
+      let relative_offset = combine_relative_offsets ro1 ro2 in
+      let offset = Int32.(o1 + o2) in
+      set store ~var:Variable.MemorySize
+        ~vs:(ValueSet (RIC.ric (1l, Int 0l, Infinity, (relative_offset, offset))))
+  | _ ->
+      set store ~var:Variable.MemorySize ~vs:(ValueSet RIC.Top)
 
 (* let log_address_type (address : Var.t) (vs_address : Value.t) : unit =
   let oc = Out_channel.create ~append:true "store_types.txt" in
