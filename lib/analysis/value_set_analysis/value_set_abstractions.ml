@@ -19,6 +19,10 @@ type t =
   | Bitfield of Bitfield.t
 [@@deriving sexp, compare, equal]
 
+let bottom : t = ValueSet RIC.Bottom
+
+let top : t = ValueSet RIC.Top
+
 let equal (x : t) (y : t) : bool =
   match x, y with
   | ValueSet x, ValueSet y -> RIC.equal x y

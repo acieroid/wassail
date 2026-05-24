@@ -412,6 +412,8 @@ module RIC = struct
   let relative_ric (var : string) : t =
     ric (0l, Int 0l, Int 0l, (var, 0l))
 
+  let of_int32 (i : int32) : t = ric (0l, Int 0l, Int 0l, ("", i))
+
   (** [spans_neg_inf_to_pos_inf r]
       [true] iff [r] covers ]−∞,∞[ (or is [Top]). *)
   let spans_neg_inf_to_pos_inf (r : t) : bool =

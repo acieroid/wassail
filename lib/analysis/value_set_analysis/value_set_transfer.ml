@@ -94,13 +94,8 @@ module Make (*: Transfer.TRANSFER *) = struct
       (i : annot_expected Instr.labelled_data)
       (state : State.t)
     : State.t =
-    if !Value_set_options.print_trace then (
-      print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.data_to_string i.instr);
-      (* if i.line_number = 172 then
-        (print_endline "-------------------------------------------------------------------------------------------------------";
-        let _ = In_channel.input_line_exn In_channel.stdin in
-        ();) *)
-    );
+    if !Value_set_options.print_trace then
+      (print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.data_to_string i.instr););
     let ret (i : annot_expected Instr.labelled_data) : Variable.t = 
       match List.hd (Spec_domain.get_or_fail i.annotation_after).vstack with
       | Some r -> Variable.Var r
@@ -109,7 +104,14 @@ module Make (*: Transfer.TRANSFER *) = struct
     (* TODO: is there a way to know the memory size? *)
     (* | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstractions.ValueSet Top) *)
     | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:Variable.MemorySize)
-    | MemoryGrow -> state
+    | MemoryGrow -> 
+      state 
+        |> Abstract_store_domain.set ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:Variable.MemorySize)
+        |> Abstract_store_domain.set 
+          ~var:Variable.MemorySize 
+          ~vs:(Value_set_abstractions.plus 
+            (Abstract_store_domain.get state ~var:Variable.MemorySize)
+            (Abstract_store_domain.get state ~var:(Variable.Var (pop (Spec_domain.get_or_fail i.annotation_before).vstack))))
     | Nop | Drop -> state
     (* TODO: these 3 operations may modify memory content: *)
     | MemoryCopy | MemoryFill | MemoryInit _ -> state
@@ -328,78 +330,6 @@ module Make (*: Transfer.TRANSFER *) = struct
           | ValueSet vs, Bitfield bf
           | Boolean {numeric_value = vs; _}, Bitfield bf -> ValueSet (RIC.of_bitfield (Bitfield.and_ bf (RIC.to_bitfield vs)))
           | Bitfield bf1, Bitfield bf2 -> Bitfield (Bitfield.and_ bf1 bf2)
-            (* let numeric_value = (RIC.and_ vs1 vs2) in
-            begin match vs1, vs2 with
-            (* PARITY CHECK *)
-            | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 1l)}, vs2 ->
-              let true_ = RIC.meet vs2 (RIC.ric (2l, NegInfinity, Infinity, ("", 1l))) in
-              let false_ = RIC.meet vs2 (RIC.ric (2l, NegInfinity, Infinity, ("", 0l))) in
-              let tf = (Variable.Map.set 
-                          Variable.Map.empty 
-                          ~key:(Variable.Var y) 
-                          ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
-              Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            | vs1, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 1l)} ->
-              let true_ = RIC.meet vs1 (RIC.ric (2l, NegInfinity, Infinity, ("", 1l))) in
-              let false_ = RIC.meet vs1 (RIC.ric (2l, NegInfinity, Infinity, ("", 0l))) in
-              let tf = (Variable.Map.set 
-                          Variable.Map.empty 
-                          ~key:(Variable.Var x) 
-                          ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
-              Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            (* MULTIPLE OF 4 *)
-            | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 3l)}, vs2 ->
-              let true_ = vs2 in
-              let false_ = RIC.meet vs2 (RIC.ric (4l, NegInfinity, Infinity, ("", 0l))) in
-              let tf = (Variable.Map.set 
-                          Variable.Map.empty 
-                          ~key:(Variable.Var y) 
-                          ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
-              Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            | vs1, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 3l)} ->
-              let true_ = vs1 in
-              let false_ = RIC.meet vs1 (RIC.ric (4l, NegInfinity, Infinity, ("", 0l))) in
-              let tf = (Variable.Map.set 
-                          Variable.Map.empty 
-                          ~key:(Variable.Var x) 
-                          ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
-              Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            (* MULTIPLE OF 8 *)
-            | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 7l)}, vs2 ->
-              let true_ = vs2 in
-              let false_ = RIC.meet vs2 (RIC.ric (8l, NegInfinity, Infinity, ("", 0l))) in
-              let tf = (Variable.Map.set 
-                          Variable.Map.empty 
-                          ~key:(Variable.Var y) 
-                          ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
-              Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            | vs1, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 7l)} ->
-              let true_ = vs1 in
-              let false_ = RIC.meet vs1 (RIC.ric (8l, NegInfinity, Infinity, ("", 0l))) in
-              let tf = (Variable.Map.set 
-                          Variable.Map.empty 
-                          ~key:(Variable.Var x) 
-                          ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
-              Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            (* MULTIPLE OF 16 *)
-            | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 15l)}, vs2 ->
-              let true_ = vs2 in
-              let false_ = RIC.meet vs2 (RIC.ric (16l, NegInfinity, Infinity, ("", 0l))) in
-              let tf = (Variable.Map.set 
-                          Variable.Map.empty 
-                          ~key:(Variable.Var y) 
-                          ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
-              Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            | vs1, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", 15l)} ->
-              let true_ = vs1 in
-              let false_ = RIC.meet vs1 (RIC.ric (16l, NegInfinity, Infinity, ("", 0l))) in
-              let tf = (Variable.Map.set 
-                          Variable.Map.empty 
-                          ~key:(Variable.Var x) 
-                          ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
-              Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            | _ -> ValueSet numeric_value
-            end *)
           | Boolean v1, Boolean v2 -> Boolean (Boolean.and_ v1 v2)
           end
         in
@@ -767,9 +697,6 @@ module Make (*: Transfer.TRANSFER *) = struct
       { Abstract_store_domain.abstract_store = Variable.Map.remove state.abstract_store var;
         store_operations = state.store_operations } in
     let locals_and_globals = Abstract_store_domain.extract_locals_and_globals state in
-    (* print_endline ("locals: " ^ List.to_string ~f:Var.to_string spec_state.locals);
-    print_endline ("globals: " ^ List.to_string ~f:Var.to_string spec_state.globals);
-    print_endline ("locals&globals: " ^ List.to_string ~f:Variable.to_string locals_and_globals); *)
     let true_ = 
       if Boolean.can_be_true boolean then
         let true_ =
@@ -836,51 +763,8 @@ module Make (*: Transfer.TRANSFER *) = struct
     : [`Simple of State.t | `Branch of State.t * State.t] =
     if !Value_set_options.print_trace then (
       print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.control_to_short_string i.instr);
-      if i.line_number = 172 then
-        print_endline "-------------------------------------------------------------------------------------------------------"
     );
-    (* let _apply_summary (f : Int32.t) (arity : int * int) (state : State.t) : State.t =
-      if !Value_set_options.print_trace then Log.info (Printf.sprintf "applying summary of function %ld" f);
-      if !Value_set_options.print_trace then print_endline ("\tState before the call: " ^ Abstract_store_domain.to_string state);
-      match Int32Map.find summaries f with
-      | None ->
-        if Int32.(f < module_.nfuncimports) then begin
-          Log.warn (Printf.sprintf "No summary found for function %ld (imported function): assuming value-sets are preserved" f);
-          state
-        end else
-          (if !Value_set_options.print_trace then Log.warn "This function depends on another function that has not been analyzed yet, so it is part of some recursive loop. It will eventually stabilize";
-          state)
-      | Some summary ->
-        if !Value_set_options.print_trace then print_endline ("\tSummary of function " ^ Int32.to_string f ^ ": " ^ Value_set_summary.to_string summary);
-        let args = List.take (Spec_domain.get_or_fail i.annotation_before).vstack (fst arity) in
-        let return_variable = if snd arity = 1 then List.hd (Spec_domain.get_or_fail i.annotation_after).vstack else None in
-        let value_set_after_call = Value_set_summary.apply
-          ~summary
-          ~state
-          ~args
-          ~return_variable in
-        (* let export = List.find module_.exported_funcs ~f:(fun (id, _, _) -> Int32.(id = f)) in *)
-        let export = List.find module_.exported_funcs ~f:(fun descr -> Int32.(descr.idx = f)) in
-        match export with
-        (* | Some (_, fname, _) -> *)
-        | Some descr ->
-          if !Value_set_options.print_trace then Log.info (Printf.sprintf "function is named %s" descr.name);
-          if !Value_set_options.print_trace then Log.warn "Exports have not been implemented yet!";
-          value_set_after_call
-        | None -> value_set_after_call *)
-    (* in *)
     match i.instr with
-    (* | Call (arity, _, f) -> 
-      if !Value_set_options.print_trace then print_endline ("\t(nb of arguments: " ^ string_of_int (fst arity) ^ ", nb of return values: " ^ string_of_int (snd arity) ^ ")");
-      let new_store = apply_summary f arity state in
-      let new_store = Abstract_store_domain.remove_pointers_to_top new_store in
-      `Simple new_store
-    | CallIndirect (_, arity, _, typ) ->
-      let targets = Call_graph.indirect_call_targets module_ typ in
-      (* Apply the summaries *)
-      `Simple (List.fold_left targets
-        ~init:Abstract_store_domain.bottom
-        ~f:(fun acc idx -> Abstract_store_domain.join (apply_summary idx arity state) acc)) *)
     | Br _ -> `Simple state
     | BrIf _ | If _ -> 
       let condition = Variable.Var (pop (Spec_domain.get_or_fail i.annotation_before).vstack) in

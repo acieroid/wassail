@@ -4,11 +4,59 @@ open Helpers
 module Options = Value_set_options
 module Domain = Abstract_store_domain
 (* module RIC = Reduced_interval_congruence.RIC *)
-module Transfer = Value_set_transfer.Make
+module TransferFunction = Value_set_transfer.Make
 module Summary = Value_set_summary
-module ClassicalInter = Intra.MakeClassicalInter(Transfer)
-module Intra = Intra.MakeSummaryBased(Transfer)
-module Inter = Inter.MakeSummaryBased(Transfer)(Intra)
+module ClassicalInter = Intra.MakeClassicalInter(TransferFunction)
+module ValueSetCallAdapter: Intra.CALL_ADAPTER
+  with module Transfer = TransferFunction
+  and type extra = TransferFunction.summary Int32Map.t =
+struct
+  module Transfer = TransferFunction
+  type extra = TransferFunction.summary Int32Map.t
+
+  let analyze_call
+      (module_ : Wasm_module.t)
+      (_cfg : Transfer.annot_expected Cfg.t)
+      (instr : Transfer.annot_expected Instr.labelled_call)
+      (state : Transfer.State.t)
+      (summaries : extra)
+    : Transfer.State.t =
+    if !Value_set_options.print_trace then print_endline (string_of_int instr.line_number ^ ":\t" ^ Instr.call_to_string instr.instr);
+    let apply_summary f arity state =
+      match Map.find summaries f with
+      | None ->
+        if Int32.(f < module_.nfuncimports) then
+          let desc = List32.nth_exn module_.imported_funcs f in
+          Transfer.imported module_ desc instr.annotation_before instr.annotation_after state
+        else
+          (* This function depends on another function that has not been analyzed yet, so it is part of some recursive loop. It will eventually stabilize. *)
+          state
+      | Some summary ->
+        Transfer.apply_summary module_ f arity instr state summary
+    in
+    match instr.instr with
+    | CallDirect (arity, _, f) -> apply_summary f arity state
+    | CallIndirect (_, arity, _, typ) ->
+      let call_index =
+        state
+        |> Domain.get
+            ~var:(Variable.Var (pop (Spec_domain.get_or_fail instr.annotation_before).vstack))
+      in
+      let targets = Call_graph.indirect_call_targets module_ typ
+        |> List.filter ~f:(fun idx ->
+            Value_set_abstractions.meet
+              call_index
+              (ValueSet (Reduced_interval_congruence.RIC.of_int32 idx))
+            |> Value_set_abstractions.equal Value_set_abstractions.bottom
+            |> not)
+      in
+      if List.is_empty targets then (Log.error "indirect call index doesn't match any function"; failwith "invalid program: indirect call index doesn't match any function");
+      List.fold_left targets
+        ~init:Transfer.bottom
+        ~f:(fun acc idx -> Transfer.State.join (apply_summary idx arity state) acc)
+end
+module Intra = Intra.MakeSumm(TransferFunction)(ValueSetCallAdapter)
+module Inter = Inter.MakeSummaryBased(TransferFunction)(Intra)
 
 let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t option) Int32Map.t =
   Analysis_helpers.mk_intra
@@ -16,13 +64,13 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
       (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs wasm_mod `Bottom)))
     (fun data wasm_mod cfg ->
       Log.info
-        (Printf.sprintf "---------- Value-set analysis of function %s ----------" (Int32.to_string cfg.idx));
+        (Printf.sprintf "-------------------- Value-set analysis of function %s --------------------" (Int32.to_string cfg.idx));
       (* Run the value-set analysis *)
       let annotated_cfg = (* Relational.Transfer.dummy_annotate  *) cfg in
       let summaries = Int32Map.map data ~f:fst in
       (* let (result_cfg, value_set_summary) = Intra.analyze wasm_mod annotated_cfg summaries in *)
       let result_cfg = Intra.analyze wasm_mod annotated_cfg summaries in
-      let value_set_summary = Transfer.extract_summary wasm_mod annotated_cfg result_cfg in
+      let value_set_summary = TransferFunction.extract_summary wasm_mod annotated_cfg result_cfg in
       (value_set_summary, Some result_cfg))
 
 (* let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec_domain.t Cfg.t) : Domain.t Cfg.t =
