@@ -229,7 +229,7 @@ module Test = struct
     let _, _, actual = make module_ cfg in
     let expected = Use.Map.of_alist_exn [(Use.make (lab 1) (Var.Var (lab 0)), Def.Instruction (lab 0, Var.Var (lab 0)));
                                          (Use.make (lab 5) (Var.Var (lab 4)), Def.Instruction (lab 4, Var.Var (lab 4)));
-                                         (Use.make (lab 5) (Var.Merge (4, 1)), Def.Instruction (merge 4, Var.Merge (4, 1)));
+                                         (Use.make (lab 5) (Var.Merge (4, 0)), Def.Instruction (merge 4, Var.Merge (4, 0)));
                                          (Use.make (merge 4) (Var.Var (lab 2)), Def.Instruction (lab 2, Var.Var (lab 2)));
                                          (Use.make (merge 4) (Var.Var (lab 3)), Def.Instruction (lab 3, Var.Var (lab 3)));
                                          (Use.make (merge 6) (Var.Var (lab 5)), Def.Instruction (lab 5, Var.Var (lab 5)))] in

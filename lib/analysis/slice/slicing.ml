@@ -197,7 +197,7 @@ let type_of_data
     | Const (I32 _) -> ([], [T Type.I32])
     | Const (I64 _) -> ([], [T Type.I64])
     | Const (F32 _) -> ([], [T Type.F32])
-    | Const (F64 _) -> ([], [T Type.F32])
+    | Const (F64 _) -> ([], [T Type.F64])
     | Unary op -> ([T op.typ], [T op.typ])
     | Binary op -> ([T op.typ; T op.typ], [T op.typ])
     | Compare op -> ([T op.typ; T op.typ], [T Type.I32])
@@ -213,7 +213,7 @@ let type_of_data
     | GlobalSet g -> ([T (List32.nth_exn cfg.global_types g)], [])
     | Load op -> ([T Type.I32], [T op.typ])
     | Store op -> ([T Type.I32; T op.typ], [])
-    | RefIsNull -> ([Any "any"], [])
+    | RefIsNull -> ([Any "any"], [T Type.I32])
     | RefNull _ -> ([], [Any "any"])
     | RefFunc _ -> ([], [Any "any"])
 
@@ -270,8 +270,8 @@ let type_of_control
       let vstack = vstack_before in
       (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i)), [])
     | BrIf _ ->
-      let vstack = List.drop vstack_before 1 in
-      ([T Type.I32] @ (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i))), [])
+      let rest = List.drop vstack_before 1 in
+      ([T Type.I32], List.mapi rest ~f:(fun i _ -> Any (string_of_int i)))
     | BrTable (_, _) ->
       let vstack = List.drop vstack_before 1 in
       ([T Type.I32] @ (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i))), [])
