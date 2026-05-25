@@ -38,17 +38,21 @@ struct
     | CallDirect (arity, _, f) -> apply_summary f arity state
     | CallIndirect (_, arity, _, typ) ->
       let call_index =
-        state
-        |> Domain.get
-            ~var:(Variable.Var (pop (Spec_domain.get_or_fail instr.annotation_before).vstack))
+        state |> Domain.get
+          ~var:(Variable.Var (pop (Spec_domain.get_or_fail instr.annotation_before).vstack))
       in
       let targets = Call_graph.indirect_call_targets module_ typ
         |> List.filter ~f:(fun idx ->
-            Value_set_abstractions.meet
-              call_index
-              (ValueSet (Reduced_interval_congruence.RIC.of_int32 idx))
-            |> Value_set_abstractions.equal Value_set_abstractions.bottom
-            |> not)
+            match call_index with
+            | Bitfield _
+            | Boolean _ -> true
+            | ValueSet RIC { offset = (o,_); _ } when not (String.is_empty o) -> true
+            | ValueSet _ ->
+                Value_set_abstractions.meet
+                  call_index
+                  (ValueSet (Reduced_interval_congruence.RIC.of_int32 idx))
+                |> Value_set_abstractions.equal Value_set_abstractions.bottom
+                |> not)
       in
       if List.is_empty targets then (Log.error "indirect call index doesn't match any function"; failwith "invalid program: indirect call index doesn't match any function");
       List.fold_left targets
