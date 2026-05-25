@@ -48,6 +48,22 @@ module Test = struct
     let actual = deps_for deps (lab 4) in
     let expected = Instr.Label.Set.singleton (lab 2) in
     Instr.Label.Set.check_equality ~actual ~expected
+  let%test "non dep with memory with store after load in the same block" =
+    let open Instr.Label.Test in
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result i32)))
+  (func (;test;) (type 0) (param i32) (result i32)
+    memory.size     ;; Instr 0
+    i32.load        ;; Instr 1
+    memory.size     ;; Instr 2
+    memory.size     ;; Instr 3
+    i32.store)      ;; Instr 4 (should not be a dependency of the preceding load in the same block)
+  (memory (;0;) 2))" in
+    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    let deps = make cfg in
+    let actual = deps_for deps (lab 4) in
+    let expected = Instr.Label.Set.empty in
+    Instr.Label.Set.check_equality ~actual ~expected
   let%test "mem-dep with call" =
     let open Instr.Label.Test in
     let module_ = Wasm_module.of_string "(module
