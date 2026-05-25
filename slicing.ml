@@ -89,6 +89,7 @@ let slice_line_number =
           if not no_pointer_analysis then
             (if trace then Wassail.Log.enable_info ();
             let (cfg_pointers, instructions_from_pointer_cfg, summaries) =
+              Value_set.Options.show_intermediates := true;
               Value_set.run_pointer_analysis module_ cfg_raw funidx in
             let cfgdot = Cfg.to_dot cfg_pointers ~annot_str:Value_set.Domain.to_string in
             let () = Out_channel.write_all (filename ^ ".pointers.dot") ~data:cfgdot in

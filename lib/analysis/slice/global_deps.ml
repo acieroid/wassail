@@ -66,6 +66,7 @@ let function_may_affect_global_variable
     The result maps each [global.get] label to the set of call labels it depends
     on. *)
 let globals_depend_on_calls
+    (module_ : Wasm_module.t)
     (global_gets : (Instr.Label.t * int32) list)
     (cfg : Spec_domain.t Cfg.t)
     (pointer_analysis : Value_set.pointer_analysis option)
@@ -91,6 +92,29 @@ let globals_depend_on_calls
                           else
                             (Log.info ("fct " ^ Int32.to_string fct_index ^ " does not affect global variable " ^ Var.to_string global_var);
                             acc)
+                        | Call { label = indirect_label; instr = CallIndirect (_, _, _, type_index); _ } ->
+                          begin match pointer_analysis with
+                          | None -> Instr.Label.Set.add acc indirect_label
+                          | Some (cfg_pointers, cfg_spec, _) ->
+                            Memory_deps.functions_potentially_called
+                              ~module_
+                              ~indirect_label
+                              ~type_index
+                              ~cfg_pointers
+                              ~cfg_spec
+                            |> List.fold ~init:acc
+                              ~f:(fun acc fct_index ->
+                                if function_may_affect_global_variable
+                                    pointer_analysis
+                                    ~global_var
+                                    ~fct_index 
+                                then
+                                  (Log.info ("fct " ^ Int32.to_string fct_index ^ "(potentially called by call_indirect " ^ Instr.Label.to_string indirect_label ^ ")" ^ " may affect global variable " ^ Var.to_string global_var);
+                                  Instr.Label.Set.add acc indirect_label)
+                                else
+                                  (Log.info ("fct " ^ Int32.to_string fct_index ^ " does not affect global variable " ^ Var.to_string global_var);
+                                  acc))
+                                end
                         | _ -> acc)
             in
             Instr.Label.Map.update dependencies global_var_label
@@ -149,6 +173,57 @@ let calls_depend_on_globals
               | None -> instr_set 
               | Some set -> Instr.Label.Set.union set instr_set))
 
+
+let indirect_calls_depend_on_globals
+    (module_ : Wasm_module.t)
+    (pointer_analysis : Value_set.pointer_analysis option)
+    (global_deps : Global_read_domain.t Int32Map.t)
+    (call_indirect_instructions : (Instr.Label.t * int32) list)
+    (cfg : Spec_domain.t Cfg.t)
+  : t =
+  List.fold call_indirect_instructions
+    ~init:Instr.Label.Map.empty
+    ~f:(fun dependencies (indirect_label, type_index) ->
+        (match pointer_analysis with
+        | Some (cfg_pointers, cfg_spec, _) ->
+          Memory_deps.functions_potentially_called
+            ~module_
+            ~indirect_label
+            ~type_index
+            ~cfg_pointers
+            ~cfg_spec
+        | None -> 
+          Call_graph.indirect_call_targets module_ type_index)
+        |> List.fold ~init:dependencies
+          ~f:(fun dependencies idx ->
+            let globals_used_by_function = 
+              match Int32Map.find global_deps idx with
+              | Some globals -> globals
+              | None -> Top
+            in
+            let block = Cfg.find_enclosing_block_exn cfg indirect_label in
+            let predecessors = Cfg.all_predecessors cfg block in
+            let instr_set =
+              List.fold predecessors ~init:Instr.Label.Set.empty 
+                ~f:(fun acc block ->
+                        match block.content with
+                        | Data instrs' -> 
+                          List.fold instrs' ~init:acc ~f:(fun acc instr ->
+                            match globals_used_by_function with
+                            | Top -> Instr.Label.Set.add acc instr.label
+                            | NotTop globals_used ->
+                              if Global_read_domain.GlobalInstruction.Set.mem globals_used instr.label then
+                                Instr.Label.Set.add acc instr.label
+                              else
+                                acc)
+                        | _ -> acc)
+            in
+            Instr.Label.Map.update dependencies indirect_label
+              ~f:(function 
+                  | None -> instr_set 
+                  | Some set -> Instr.Label.Set.union set instr_set)))
+
+
 (** Returns all [global.get] instructions in the current function.
 
     Each returned pair [(label, global_idx)] contains the label of the
@@ -175,7 +250,16 @@ let find_call_instructions
   |> List.filter_map ~f:(fun (label, instr) ->
       match instr with
       | Call { instr = CallDirect (_, _, func_idx); _ } -> Some (label, func_idx)
-      (* TODO: add indirect calls *)
+      | _ -> None)
+
+
+let find_call_indirect_instructions
+    (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t)
+  : (Instr.Label.t * int32) list =
+  Instr.Label.Map.to_alist cfg_instructions
+  |> List.filter_map ~f:(fun (label, instr) ->
+      match instr with
+      | Call { instr = CallIndirect (_, _, _, type_index); _ } -> Some (label, type_index)
       | _ -> None)
 
 (** Computes all additional global-related dependencies for the current function.
@@ -197,6 +281,7 @@ let find_call_instructions
     The two dependency maps are merged by taking the union of dependency sets
     when both analyses produce dependencies for the same instruction label. *)
 let global_dependencies 
+    ~(module_ : Wasm_module.t)
     ~(global_deps : Global_read_domain.t Int32Map.t)
     ~(cfg : Spec_domain.t Cfg.t)
     ~(cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t)
@@ -204,9 +289,16 @@ let global_dependencies
   : t =
   let global_gets = find_global_get_instructions cfg_instructions in
   let call_instructions = find_call_instructions cfg_instructions in
-  let global_call = globals_depend_on_calls global_gets cfg pointer_analysis in
+  let call_indirect_instructions = find_call_indirect_instructions cfg_instructions in
+  let global_call = globals_depend_on_calls module_ global_gets cfg pointer_analysis in
   let call_global = calls_depend_on_globals global_deps call_instructions cfg in
+  let call_indirect_global = indirect_calls_depend_on_globals module_ pointer_analysis global_deps call_indirect_instructions cfg in
   Instr.Label.Map.merge global_call call_global
+    ~f:(fun ~key:_ -> function 
+                      | `Both (a, b) -> Some (Instr.Label.Set.union a b)
+                      | `Left x -> Some x
+                      | `Right x -> Some x)
+  |> Instr.Label.Map.merge call_indirect_global
     ~f:(fun ~key:_ -> function 
                       | `Both (a, b) -> Some (Instr.Label.Set.union a b)
                       | `Left x -> Some x

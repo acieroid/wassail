@@ -707,8 +707,8 @@ let store (* fonction store *)
 
 let find_value_set
     (cfg : t Cfg.t)
-    (label : Instr.Label.t) 
-    (var : Var.t)
+    ~(label : Instr.Label.t) 
+    ~(var : Var.t)
   : Value_set_abstractions.t =
   let block = Cfg.find_enclosing_block_exn cfg label in
   let store =

@@ -47,12 +47,12 @@ let load_depends_on_store
   | Some (cfg_pointers, cfg_spec, _) ->
     let store_address, store_size = find_store_address_and_size cfg_spec store_label in
     let store_address_value_set = 
-      Abstract_store_domain.find_value_set cfg_pointers store_label store_address 
+      Abstract_store_domain.find_value_set cfg_pointers ~label:store_label ~var:store_address 
       |> (Value_set_abstractions.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn store_offset)))))
     in
     let load_address, load_size = find_load_address_and_size cfg_spec load_label in
     let load_address_value_set = 
-      Abstract_store_domain.find_value_set cfg_pointers load_label load_address 
+      Abstract_store_domain.find_value_set cfg_pointers ~label:load_label ~var:load_address 
       |> (Value_set_abstractions.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn load_offset)))))
     in
 
@@ -100,6 +100,7 @@ let tokenize (s : string) : string list =
 
 
 let rec find_parameter_value_set 
+    ?(is_call_indirect : bool = false)
     (pointer_analysis : Value_set.pointer_analysis option)
     (label : Instr.Label.t) 
     (vars : string list)
@@ -120,35 +121,38 @@ let rec find_parameter_value_set
     | "l" :: idx :: rest ->
       (let fct_arity =
         match call_instr.instr with
-        | CallDirect ((x,_), _, _) -> x
-        | _ -> assert false
+        | CallDirect ((x,_), _, _)
+        | CallIndirect (_, (x,_), _, _) -> x
       in
       let stack_before_call =
         (label |> Instr.Label.Map.find_exn spec 
                |> Instr.annotation_before
                |> Spec_domain.get_or_fail).vstack
+        |> if is_call_indirect then List.tl_exn else fun x -> x
       in
       let var = Variable.Var (extract_nth_argument stack_before_call fct_arity (int_of_string idx)) in
       let vs = Abstract_store_domain.get store ~var in
       Value_set_abstractions.plus (find_parameter_value_set pointer_analysis label rest) vs) 
-    | "g" :: idx :: "+" :: rest ->
-    (* | "g" :: idx :: rest -> *)
+    | "g" :: idx :: "+" :: rest
+    | "g" :: idx :: rest ->
       let vs = Abstract_store_domain.get store ~var:(Variable.Var (Var.Global (int_of_string idx))) in
       Value_set_abstractions.plus (find_parameter_value_set pointer_analysis label rest) vs
     | "n" :: "e" :: "g" :: lg :: idx :: rest ->
       Value_set_abstractions.minus 
         (find_parameter_value_set pointer_analysis label rest)
         (find_parameter_value_set pointer_analysis label [lg; idx])
-    | lst -> 
+    | lst ->
       (print_endline (String.concat ~sep:";" lst); failwith "not yet implemented")
     
 
 let call_depends_on_store
-    (pointer_analysis : Value_set.pointer_analysis option)
+    ?(is_call_indirect : bool = false)
+    ~(pointer_analysis : Value_set.pointer_analysis option)
     ~(call_label : Instr.Label.t)
     ~(store_label : Instr.Label.t)
     ~(fct_index : int32)
     ~(store_offset : int)
+    (() : unit)
   : Instr.Label.t option =
   match pointer_analysis with
   | Some (cfg_pointers, spec, summaries) ->
@@ -159,7 +163,7 @@ let call_depends_on_store
       | ValueSet RIC {stride; lower_bound; upper_bound; offset=("", o)} -> 
         Value_set_abstractions.ValueSet (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))
       | ValueSet RIC {stride; lower_bound; upper_bound; offset=(relative_offset, o)} ->
-        find_parameter_value_set pointer_analysis call_label (tokenize relative_offset) 
+        find_parameter_value_set ~is_call_indirect pointer_analysis call_label (tokenize relative_offset) 
         |>  (Value_set_abstractions.i32_add
               (Value_set_abstractions.ValueSet 
                 (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))))
@@ -169,7 +173,7 @@ let call_depends_on_store
     let store_address, store_size = find_store_address_and_size spec store_label in
     let store_address_value_set = 
       Abstract_store_domain.find_value_set 
-        cfg_pointers store_label store_address 
+        cfg_pointers ~label:store_label ~var:store_address 
       |> (Value_set_abstractions.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn store_offset)))))
     in
     let overlap = Value_set_abstractions.may_overlap ~store_size ~load_size:1l ~store_vs:store_address_value_set ~load_vs:accessed_memory in
@@ -190,7 +194,7 @@ let load_depends_on_call
   | Some (cfg_pointers, spec, summaries) ->
     let load_address, load_size = find_load_address_and_size spec load_label in
     let load_address_value_set =
-      Abstract_store_domain.find_value_set cfg_pointers load_label load_address 
+      Abstract_store_domain.find_value_set cfg_pointers ~label:load_label ~var:load_address 
       |> (Value_set_abstractions.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn load_offset)))))
     in
     let function_summary = Int32Map.find_exn summaries fct_index in
@@ -200,10 +204,69 @@ let load_depends_on_call
         (Reduced_interval_congruence.RICSet.to_list affected_memory_addresses)
         ~init:false
         ~f:(fun acc address ->
-          acc || Value_set_abstractions.may_overlap ~store_size:1l ~load_size ~store_vs:(ValueSet address) ~load_vs:load_address_value_set) in
+          acc || 
+          let store_vs =
+            match address with
+            | RIC { offset = ("", _); _ } -> Value_set_abstractions.ValueSet address
+            | RIC { stride; lower_bound; upper_bound; offset=(relative_offset, o)} ->
+              find_parameter_value_set pointer_analysis call_label (tokenize relative_offset)
+              |> (Value_set_abstractions.i32_add
+                   (Value_set_abstractions.ValueSet 
+                     (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))))
+            | _ -> ValueSet address
+          in
+          Value_set_abstractions.may_overlap ~store_size:1l ~load_size ~store_vs ~load_vs:load_address_value_set) in
     if overlap then Instr.Label.Set.singleton call_label else Instr.Label.Set.empty
 
 
+let functions_potentially_called 
+    ~(module_ : Wasm_module.t)
+    ~(indirect_label : Instr.Label.t)
+    ~(type_index : int32)
+    ~(cfg_pointers : Abstract_store_domain.t Cfg.t)
+    ~(cfg_spec : (Instr.Label.t, Spec_domain.t Instr.t, 'a) Map_intf.Map.t)
+  : int32 list =
+  let call_indirect_index =
+      pop (indirect_label 
+            |> Instr.Label.Map.find_exn cfg_spec 
+            |> Instr.annotation_before
+            |> Spec_domain.get_or_fail).vstack in
+    let call_indirect_index_value =
+      Abstract_store_domain.find_value_set cfg_pointers ~label:indirect_label ~var:call_indirect_index in
+    Call_graph.indirect_call_targets module_ type_index
+      |> List.filter ~f:(fun idx ->
+        Value_set_abstractions.meet
+          call_indirect_index_value
+          (ValueSet (Reduced_interval_congruence.RIC.of_int32 idx))
+        |> Value_set_abstractions.equal Value_set_abstractions.bottom
+        |> not)
+
+let load_depends_on_call_indirect
+    ~(module_ : Wasm_module.t)
+    ~(pointer_analysis : Value_set.pointer_analysis option)
+    ~(load_label : Instr.Label.t)
+    ~(load_offset : int)
+    ~(call_indirect_label : Instr.Label.t)
+    ~(type_index : int32)
+  : Instr.Label.Set.t =
+  match pointer_analysis with
+  | None -> Instr.Label.Set.singleton call_indirect_label
+  | Some (cfg_pointers, cfg_spec, _summaries) ->
+    functions_potentially_called
+      ~module_
+      ~indirect_label:call_indirect_label
+      ~type_index
+      ~cfg_pointers
+      ~cfg_spec
+    |> List.fold ~init:Instr.Label.Set.empty
+      ~f:(fun acc fct_index ->
+        Instr.Label.Set.union acc
+        (load_depends_on_call
+          ~pointer_analysis
+          ~load_label
+          ~load_offset
+          ~call_label:call_indirect_label
+          ~fct_index))
 
 
 
@@ -222,17 +285,47 @@ let globals_modified (summary : Abstract_store_domain.t) : String.Set.t =
 let call_depends_on_call
     ~(global_deps : Global_read_domain.t Int32Map.t)
     ~(pointer_analysis : Value_set.pointer_analysis option)
-    ~(depend_on_this_call : Instr.Label.t)
+    ~(call_label : Instr.Label.t)
+    ~(depends_on_this_call : Instr.Label.t)
     ~(fct_1_index : int32)
     ~(fct_2_index : int32)
   : Instr.Label.Set.t =
   match pointer_analysis with
-  | None -> Instr.Label.Set.singleton depend_on_this_call
+  | None -> Instr.Label.Set.singleton depends_on_this_call
   | Some (_, _, summaries) ->
     let fct_1_summary = Int32Map.find_exn summaries fct_1_index in
     let fct_2_summary = Int32Map.find_exn summaries fct_2_index in
-    let addresses_read_by_fct1 = Abstract_store_domain.get fct_1_summary ~var:Variable.Accessed in
-    let addresses_affected_by_fct2 = fct_2_summary.store_operations in
+    let addresses_read_by_fct1 : Value_set_abstractions.t = 
+      let tmp_address = Abstract_store_domain.get fct_1_summary ~var:Variable.Accessed in
+      match tmp_address with
+      | Value_set_abstractions.ValueSet RIC { offset = ("", _); _ } -> tmp_address
+      | ValueSet RIC {stride; lower_bound; upper_bound; offset=(relative_offset, o)} ->
+        find_parameter_value_set pointer_analysis call_label (tokenize relative_offset)
+        |> (Value_set_abstractions.i32_add
+              (Value_set_abstractions.ValueSet 
+                (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))))
+      | _ -> tmp_address
+    in
+    let addresses_affected_by_fct2 = 
+      fct_2_summary.store_operations 
+      |> Reduced_interval_congruence.RICSet.to_list
+      |> List.map ~f:(fun address ->
+        match address with
+        | RIC {offset = ("", _); _} -> address
+        | RIC {stride; lower_bound; upper_bound; offset=(relative_offset, o)} ->
+          let tmp_vs =
+            find_parameter_value_set pointer_analysis depends_on_this_call (tokenize relative_offset)
+            |> (Value_set_abstractions.i32_add
+                (Value_set_abstractions.ValueSet
+                  (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))))
+          in
+          (match tmp_vs with
+          | ValueSet tmp_vs -> tmp_vs
+          | Boolean { numeric_value; _ } -> numeric_value
+          | Bitfield bf -> Reduced_interval_congruence.RIC.of_bitfield bf)
+        | _ -> address)
+      |> Reduced_interval_congruence.RICSet.of_list
+    in
     let memory_overlap =
       addresses_affected_by_fct2
         |> Reduced_interval_congruence.RICSet.to_list
@@ -242,14 +335,14 @@ let call_depends_on_call
             acc || Value_set_abstractions.may_overlap ~store_size:1l ~load_size:8l ~store_vs:(ValueSet addr) ~load_vs:addresses_read_by_fct1)
     in
     if memory_overlap then
-      Instr.Label.Set.singleton depend_on_this_call
+      Instr.Label.Set.singleton depends_on_this_call
     else
       let globals_modified_by_fct2 = globals_modified fct_2_summary in
       if Set.is_empty globals_modified_by_fct2 then
         Instr.Label.Set.empty
       else
         match Int32Map.find_exn global_deps fct_1_index with
-        | Top -> Instr.Label.Set.singleton depend_on_this_call
+        | Top -> Instr.Label.Set.singleton depends_on_this_call
         | NotTop globals_read_by_fct1 ->
           if Global_read_domain.to_variable_names globals_read_by_fct1
               |> Set.inter globals_modified_by_fct2 
@@ -257,10 +350,143 @@ let call_depends_on_call
           then
             Instr.Label.Set.empty
           else
-            Instr.Label.Set.singleton depend_on_this_call
+            Instr.Label.Set.singleton depends_on_this_call
 
     
-    
+let call_indirect_depends_on_call
+    ~(module_ : Wasm_module.t)
+    ~(global_deps : Global_read_domain.t Int32Map.t)
+    ~(pointer_analysis : Value_set.pointer_analysis option)
+    ~(depends_on_this_call : Instr.Label.t)
+    ~(call_idx_number : int32)
+    ~(indirect_label : Instr.Label.t)
+    ~(type_index : int32)
+  : Instr.Label.Set.t =
+  match pointer_analysis with
+  | None -> Instr.Label.Set.singleton depends_on_this_call
+  | Some (cfg_pointers, cfg_spec, _) ->
+    let targets = functions_potentially_called
+      ~module_
+      ~indirect_label
+      ~type_index
+      ~cfg_pointers
+      ~cfg_spec
+    in
+    (* if List.is_empty targets then (Log.error "indirect call index doesn't match any function"; failwith "invalid program: indirect call index doesn't match any function"); *)
+    List.fold_left targets
+      ~init:Instr.Label.Set.empty
+      ~f:(fun acc idx -> Instr.Label.Set.union acc 
+        (call_depends_on_call
+          ~global_deps
+          ~pointer_analysis
+          ~call_label:indirect_label
+          ~depends_on_this_call
+          ~fct_1_index:idx
+          ~fct_2_index:call_idx_number
+        )
+      )
+                
+
+
+let call_depends_on_call_indirect
+    ~(module_ : Wasm_module.t)
+    ~(global_deps : Global_read_domain.t Int32Map.t)
+    ~(pointer_analysis : Value_set.pointer_analysis option)
+    ~(type_index : int32)
+    ~(call_label : Instr.Label.t)
+    ~(indirect_label : Instr.Label.t)
+    ~(call_index : int32)
+  : Instr.Label.Set.t =
+  match pointer_analysis with
+  | None -> Instr.Label.Set.singleton indirect_label
+  | Some (cfg_pointers, cfg_spec, _) ->
+    let targets = functions_potentially_called
+      ~module_
+      ~indirect_label
+      ~type_index
+      ~cfg_pointers
+      ~cfg_spec
+    in
+    List.fold_left targets
+      ~init:Instr.Label.Set.empty
+      ~f:(fun acc fct_index ->
+        Instr.Label.Set.union acc
+        (call_depends_on_call
+          ~global_deps
+          ~pointer_analysis
+          ~call_label
+          ~depends_on_this_call:indirect_label
+          ~fct_1_index:call_index
+          ~fct_2_index:fct_index
+        )
+      )
+
+
+let call_indirect_depends_on_call_indirect
+    ~(module_ : Wasm_module.t)
+    ~(global_deps : Global_read_domain.t Int32Map.t)
+    ~(pointer_analysis : Value_set.pointer_analysis option)
+    ~(dependency_label : Instr.Label.t)
+    ~(dependency_type_index : int32)
+    ~(dependent_label : Instr.Label.t)
+    ~(dependent_type_index : int32)
+  : Instr.Label.Set.t =
+  match pointer_analysis with
+  | None -> Instr.Label.Set.singleton dependency_label
+  | Some (cfg_pointers, cfg_spec, _) ->
+    let dependency_targets = functions_potentially_called
+      ~module_
+      ~indirect_label:dependency_label
+      ~type_index:dependency_type_index
+      ~cfg_pointers
+      ~cfg_spec
+    and dependent_targets = functions_potentially_called
+      ~module_
+      ~indirect_label:dependent_label
+      ~type_index:dependent_type_index
+      ~cfg_pointers
+      ~cfg_spec
+    in
+    dependency_targets
+    |> List.fold ~init:Instr.Label.Set.empty
+      ~f:(fun acc dependency_index ->
+        dependent_targets
+        |> List.fold ~init:acc
+          ~f:(fun acc dependent_index ->
+            Instr.Label.Set.union acc
+              (call_depends_on_call
+                ~global_deps
+                ~pointer_analysis
+                ~call_label:dependent_label
+                ~depends_on_this_call:dependency_label
+                ~fct_1_index:dependent_index
+                ~fct_2_index:dependency_index)
+          )
+      )
+
+
+let call_indirect_depends_on_store
+    ~(module_ : Wasm_module.t)
+    ~(pointer_analysis : Value_set.pointer_analysis option)
+    ~(store_label : Instr.Label.t)
+    ~(store_offset : int)
+    ~(indirect_label : Instr.Label.t)
+    ~(type_index : int32)
+  : Instr.Label.t option =
+  match pointer_analysis with
+  | None -> Some store_label
+  | Some (cfg_pointers, cfg_spec, _) ->
+    functions_potentially_called
+      ~module_
+      ~indirect_label
+      ~type_index
+      ~cfg_pointers
+      ~cfg_spec
+    |> List.fold ~init:None
+      ~f:(fun acc fct_index ->
+        match acc with
+        | None -> call_depends_on_store ~is_call_indirect:true ~pointer_analysis ~call_label:indirect_label ~store_label ~fct_index ~store_offset ()
+        | _ -> acc)
 
 
 
@@ -269,7 +495,7 @@ let call_depends_on_call
 
 
 let make 
-    (* (module_ : Wasm_module.t)  (probably needed for CallIndirect instructions) *)
+    (module_ : Wasm_module.t)
     (global_deps : Global_read_domain.t Int32Map.t)
     (pointer_analysis : Value_set.pointer_analysis option)
     (cfg : Spec_domain.t Cfg.t) 
@@ -293,17 +519,57 @@ let make
               begin match Instr.Label.Map.find_exn instrs label with
               | Data { instr = Load {offset=load_offset; _}; _ } ->
                 load_depends_on_call ~pointer_analysis ~load_label:label ~load_offset ~call_label ~fct_index:i
-              | Call { instr = CallDirect (_, _, fct_1_index); _ } ->
+              | Call { instr = CallDirect (_, _, fct_1_index); label = dependent_label; _ } ->
                 call_depends_on_call
                   ~global_deps
                   ~pointer_analysis
-                  ~depend_on_this_call:call_label
+                  ~call_label:dependent_label
+                  ~depends_on_this_call:call_label
                   ~fct_1_index
                   ~fct_2_index:i
               (* TODO: | Call { instr = CallIndirect (table_idx, _, _, _); _ } -> *)
+              | Call { instr = CallIndirect (_, _, _, type_index); label = indirect_label; _ } ->
+                call_indirect_depends_on_call
+                  ~module_
+                  ~global_deps
+                  ~pointer_analysis
+                  ~depends_on_this_call:call_label
+                  ~call_idx_number:i
+                  ~indirect_label
+                  ~type_index
               | _ -> Instr.Label.Set.singleton call_label
               end
-            | Call { instr = CallIndirect _; label; _ } -> Instr.Label.Set.singleton label (* TODO *)
+            (* Let's see what depends on a call_indirect operation *)
+            | Call { instr = CallIndirect (_, _, _, type_index); label = call_indirect_label; _ } -> 
+              begin match Instr.Label.Map.find_exn instrs label with
+              | Data { instr = Load {offset=load_offset; _}; _ } ->
+                load_depends_on_call_indirect
+                  ~module_
+                  ~pointer_analysis
+                  ~load_label:label
+                  ~load_offset
+                  ~call_indirect_label
+                  ~type_index
+              | Call { instr = CallDirect (_, _, call_index); label = call_label; _ } ->
+                call_depends_on_call_indirect
+                  ~module_
+                  ~global_deps
+                  ~pointer_analysis
+                  ~type_index
+                  ~call_label
+                  ~indirect_label:call_indirect_label
+                  ~call_index
+              | Call { instr = CallIndirect (_, _, _, dependent_type_index); label = dependent_label; _ } ->
+                call_indirect_depends_on_call_indirect
+                  ~module_
+                  ~global_deps
+                  ~pointer_analysis
+                  ~dependency_label:call_indirect_label
+                  ~dependency_type_index:type_index
+                  ~dependent_label
+                  ~dependent_type_index
+              | _ -> Instr.Label.Set.singleton call_indirect_label
+              end
             | Control _ | Entry | Return _ | Imported _ -> Instr.Label.Set.empty
             | Data instrs' ->
                 Instr.Label.Set.of_list (List.filter_map instrs' ~f:(function
@@ -315,8 +581,17 @@ let make
                       load_depends_on_store pointer_analysis ~load_label:label ~store_label ~store_offset ~load_offset
                     (* Call depends on store: *)
                     | Call { instr = CallDirect (_, _, i); _ } ->
-                      call_depends_on_store pointer_analysis ~call_label:label ~store_label:store_label ~fct_index:i
-                      ~store_offset
+                      call_depends_on_store ~pointer_analysis ~call_label:label ~store_label:store_label ~fct_index:i
+                      ~store_offset ()
+                    (* call_indirect depends on store: *)
+                    | Call { instr = CallIndirect (_, _, _, type_index); label = indirect_label; _ } ->
+                      call_indirect_depends_on_store
+                        ~module_
+                        ~pointer_analysis
+                        ~store_label
+                        ~store_offset
+                        ~indirect_label
+                        ~type_index
                     | _ ->  Some store_label)
                   | _ -> None)))))))
 
