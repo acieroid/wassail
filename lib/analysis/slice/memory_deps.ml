@@ -12,17 +12,24 @@ let make (cfg : 'a Cfg.t) : t =
            | Data { instr = Load _ ; _ } -> true
            | _ -> false)) in
   let deps = Instr.Label.Map.of_alist_exn (List.map loads_and_calls ~f:(fun label ->
-      let block = Cfg.find_enclosing_block_exn cfg label in
-      let predecessors = Cfg.all_predecessors cfg block in
-      (label, List.fold_left predecessors ~init:Instr.Label.Set.empty ~f:(fun acc block ->
+      let enclosing_block = Cfg.find_enclosing_block_exn cfg label in
+      let predecessors = Cfg.all_predecessors cfg enclosing_block in
+      (label, List.fold_left predecessors ~init:Instr.Label.Set.empty ~f:(fun acc pred_block ->
            Instr.Label.Set.union acc
-             (match block.content with
-             | Call { instr = CallDirect _; label; _ } -> Instr.Label.Set.singleton label
-             | Call { instr = CallIndirect _; label; _ } -> Instr.Label.Set.singleton label
+             (match pred_block.content with
+             | Call { instr = CallDirect _; label = cl; _ } -> Instr.Label.Set.singleton cl
+             | Call { instr = CallIndirect _; label = cl; _ } -> Instr.Label.Set.singleton cl
              | Control _ | Entry | Return _ | Imported _ -> Instr.Label.Set.empty
-             | Data instrs ->
-               Instr.Label.Set.of_list (List.filter_map instrs ~f:(function
-                   | { instr = Store _; label; _ } -> Some label
+             | Data block_instrs ->
+               if Int.equal pred_block.idx enclosing_block.idx then
+                 (* Same block: only include stores that appear before the load/call *)
+                 let preceding = List.take_while block_instrs ~f:(fun i -> not (Instr.Label.equal i.label label)) in
+                 Instr.Label.Set.of_list (List.filter_map preceding ~f:(function
+                     | { instr = Store _; label = sl; _ } -> Some sl
+                     | _ -> None))
+               else
+                 Instr.Label.Set.of_list (List.filter_map block_instrs ~f:(function
+                     | { instr = Store _; label = sl; _ } -> Some sl
                    | _ -> None))))))) in
   deps
 
@@ -61,7 +68,7 @@ module Test = struct
   (memory (;0;) 2))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let deps = make cfg in
-    let actual = deps_for deps (lab 4) in
+    let actual = deps_for deps (lab 1) in
     let expected = Instr.Label.Set.empty in
     Instr.Label.Set.check_equality ~actual ~expected
   let%test "mem-dep with call" =
