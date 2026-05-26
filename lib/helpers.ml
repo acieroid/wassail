@@ -135,7 +135,9 @@ let apply_to_script name lexbuf run =
     )
       extract
 
-let apply_to_string str run = parse_from_lexbuf_textual "no-file" (Lexing.from_string str) run
+let apply_to_string (string : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
+  let lexbuf = Lexing.from_string string in
+  parse_from_lexbuf_textual "no-file" lexbuf f
 
 let parse_string str = apply_to_string str (fun m -> m)
 
@@ -165,10 +167,6 @@ let apply_to_file (filename : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
     Log.warn (Printf.sprintf "Invalid extension for WebAssembly module: %s. Assuming .wat extension\n" ext);
     apply_to_textual_file filename f
 
-
-let apply_to_string (string : string) (f : Wasm.Ast.module_ -> 'a) : 'a =
-  let lexbuf = Lexing.from_string string in
-  parse_from_lexbuf_textual "no-file" lexbuf f
 
 module type ABSTRACT_DOMAIN = sig
   type t

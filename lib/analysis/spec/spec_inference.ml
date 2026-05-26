@@ -97,9 +97,9 @@ module Spec_inference
       | Nop -> state
       | MemorySize -> { state with vstack = ret :: state.vstack }
       | MemoryGrow -> { state with vstack = ret :: drop 1 state.vstack }
-      | MemoryCopy -> { state with vstack = ret :: drop 3 state.vstack }
-      | MemoryFill -> { state with vstack = ret :: drop 3 state.vstack }
-      | MemoryInit _ -> { state with vstack = ret :: drop 3 state.vstack }
+      | MemoryCopy -> { state with vstack = drop 3 state.vstack }
+      | MemoryFill -> { state with vstack = drop 3 state.vstack }
+      | MemoryInit _ -> { state with vstack = drop 3 state.vstack }
       | Drop -> { state with vstack = drop 1 state.vstack }
       | Select _ -> { state with vstack = ret :: (drop 3 state.vstack) }
       | LocalGet l -> { state with vstack = (if !propagate_locals then get l state.locals else ret) :: state.vstack }
@@ -196,7 +196,7 @@ module Spec_inference
       let res = Var.Merge (block.idx, !counter) in
       counter := !counter + 1;
       res in
-    let _ : Var.t = new_var() in
+    (* let _ : Var.t = new_var() in *)
     let rename_exit (s : State.SpecWithoutBottom.t) =
       (* If this is the exit block, rename the top of the stack to a new variable *)
       if Cfg.exit_block cfg = block.idx then
