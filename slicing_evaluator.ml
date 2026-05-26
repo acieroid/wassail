@@ -249,7 +249,7 @@ let wat_files_in_directory (dirname : string) : string list =
   match Sys_unix.is_directory dirname with
   | `Yes -> 
     Sys_unix.ls_dir dirname
-    |> List.filter ~f:(fun file -> Filename.check_suffix file ".wat" (*|| Filename.check_suffix file ".wasm"*))
+    |> List.filter ~f:(fun file -> Filename.check_suffix file ".wat" || Filename.check_suffix file ".wasm")
     |> List.map ~f:(Filename.concat dirname)
     |> List.sort ~compare:String.compare
   | `No -> failwith (Printf.sprintf "%s is not a directory" dirname)
@@ -272,14 +272,13 @@ let set_output_directory (input : string) (output_folder : string) : unit =
 
 let evaluate =
   Command.basic
-    ~summary:"Evaluate slicer for all .wat/.wasm files in a directory, or one file when --single option is toggled on"
+    ~summary:"Evaluate slicer on a .wat/.wasm file, or all .wat/.wasm files in a directory"
     Command.Let_syntax.(
       let%map_open filename = anon ("path" %: string)
       and prefix_opt = flag "-p" (optional string) ~doc:"prefix for where to save the results file (default: current directory)"
       and all = flag "-a" no_arg ~doc:"slice on all functions, for all slicing criteria"
       and last = flag "-l" no_arg ~doc:"slice on all functions, for the last slicing criterion" 
       and random = flag "-r" (optional int) ~doc:"N slice on all functions, for N random slicing criteria (default: 1 criterion)"
-      and single = flag "--single" no_arg ~doc:"evaluate a single file"
       in
       fun () ->
         begin match prefix_opt with
@@ -313,7 +312,7 @@ let evaluate =
           match random with
             | Some n -> `Random n
             | None -> if all then `All else if last then `Last else `Random 1 in
-        if single then
+        if String.is_suffix filename ~suffix:".wat" || String.is_suffix filename ~suffix:".wasm" then
           evaluate_file filename criterion_selection
         else
           wat_files_in_directory filename
