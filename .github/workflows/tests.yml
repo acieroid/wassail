@@ -12,8 +12,8 @@ jobs:
         os:
           - ubuntu-latest
         ocaml-version:
-          - 4.14.2
-          - 5.2.0
+          - 4.14.3
+          - 5.4.1
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
