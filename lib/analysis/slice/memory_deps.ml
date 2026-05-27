@@ -14,6 +14,9 @@ let make (cfg : 'a Cfg.t) : t =
   let deps = Instr.Label.Map.of_alist_exn (List.map loads_and_calls ~f:(fun label ->
       let enclosing_block = Cfg.find_enclosing_block_exn cfg label in
       let predecessors = Cfg.all_predecessors cfg enclosing_block in
+      let is_in_loop = List.exists predecessors ~f:(fun p ->
+          List.exists (Cfg.Edges.from cfg.edges p.idx) ~f:(fun (pred_of_p, _) ->
+              Int.equal pred_of_p enclosing_block.idx)) in
       (label, List.fold_left predecessors ~init:Instr.Label.Set.empty ~f:(fun acc pred_block ->
            Instr.Label.Set.union acc
              (match pred_block.content with
@@ -22,11 +25,17 @@ let make (cfg : 'a Cfg.t) : t =
              | Control _ | Entry | Return _ | Imported _ -> Instr.Label.Set.empty
              | Data block_instrs ->
                if Int.equal pred_block.idx enclosing_block.idx then
-                 (* Same block: only include stores that appear before the load/call *)
-                 let preceding = List.take_while block_instrs ~f:(fun i -> not (Instr.Label.equal i.label label)) in
-                 Instr.Label.Set.of_list (List.filter_map preceding ~f:(function
-                     | { instr = Store _; label = sl; _ } -> Some sl
-                     | _ -> None))
+                 (* Same block: only include stores that appear before the load/call, unless there is a loop (the block can reach itself) *)
+                 if is_in_loop then
+                   Instr.Label.Set.of_list (List.filter_map block_instrs ~f:(function
+                       | { instr = Store _; label = sl; _ } -> Some sl
+                       | _ -> None))
+                 else
+                   let preceding = List.take_while block_instrs
+                       ~f:(fun i -> not (Instr.Label.equal i.label label)) in
+                   Instr.Label.Set.of_list (List.filter_map preceding ~f:(function
+                       | { instr = Store _; label = sl; _ } -> Some sl
+                       | _ -> None))
                else
                  Instr.Label.Set.of_list (List.filter_map block_instrs ~f:(function
                      | { instr = Store _; label = sl; _ } -> Some sl
@@ -58,18 +67,35 @@ module Test = struct
   let%test "non dep with memory with store after load in the same block" =
     let open Instr.Label.Test in
     let module_ = Wasm_module.of_string "(module
-  (type (;0;) (func (param i32) (result i32)))
-  (func (;test;) (type 0) (param i32) (result i32)
+  (type (;0;) (func (param i32) (result)))
+  (func (;test;) (type 0) (param i32) (result)
     memory.size     ;; Instr 0
     i32.load        ;; Instr 1
     memory.size     ;; Instr 2
-    memory.size     ;; Instr 3
-    i32.store)      ;; Instr 4 (should not be a dependency of the preceding load in the same block)
+    i32.store)      ;; Instr 3 (should not be a dependency of the preceding load in the same block)
   (memory (;0;) 2))" in
     let cfg = Spec_analysis.analyze_intra1 module_ 0l in
     let deps = make cfg in
     let actual = deps_for deps (lab 1) in
     let expected = Instr.Label.Set.empty in
+    Instr.Label.Set.check_equality ~actual ~expected
+  let%test "dep with memory with store after load in the same block, in a loop" =
+    let open Instr.Label.Test in
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32) (result)))
+  (func (;test;) (type 0) (param i32) (result)
+    loop              ;; Instr 0
+      memory.size     ;; Instr 1
+      i32.load        ;; Instr 2
+      memory.size     ;; Instr 3
+      i32.store       ;; Instr 4 (should be a dependency of the preceding load in the same block)
+      br 0
+    end)
+  (memory (;0;) 2))" in
+    let cfg = Spec_analysis.analyze_intra1 module_ 0l in
+    let deps = make cfg in
+    let actual = deps_for deps (lab 2) in
+    let expected = Instr.Label.Set.singleton (lab 4) in
     Instr.Label.Set.check_equality ~actual ~expected
   let%test "mem-dep with call" =
     let open Instr.Label.Test in
