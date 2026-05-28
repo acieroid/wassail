@@ -56,12 +56,12 @@ let to_dot
       (String.concat ~sep:"|"
          (List.map instrs
             ~f:(fun instr ->
-                Printf.sprintf "<tr><td>%s</td><td>%s</td></tr>%s"
+                Printf.sprintf "<tr><td>%s</td><td>%s</td></tr><tr><td colspan=\"2\">%s</td></tr>"
                   (Instr.Label.to_string instr.label)
                   (Instr.data_to_string instr.instr)
                   (annot_str instr.annotation_after))))
   | Call instr ->
-    Printf.sprintf "block%s%d [shape=none, color=%s, label=<<table><tr><td colspan=\"2\">Call block %s%d</td></tr>%s<tr><td>%s</td><td>%s</td></tr>%s</table>>];"
+    Printf.sprintf "block%s%d [shape=none, color=%s, label=<<table><tr><td colspan=\"2\">Call block %s%d</td></tr>%s<tr><td>%s</td><td>%s</td></tr><tr><td colspan=\"2\">%s</td></tr></table>>];"
       prefix b.idx
       color
       prefix b.idx
@@ -76,7 +76,7 @@ let to_dot
       desc.idx
   | Entry | Return _ -> "" (* not represented here *)
   | Control instr ->
-    Printf.sprintf "block%s%d [shape=none, color=%s, label=<<table><tr><td colspan=\"2\">Control block %s%d</td></tr>%s<tr><td>%s</td><td>%s</td></tr>%s</table>>];"
+    Printf.sprintf "block%s%d [shape=none, color=%s, label=<<table><tr><td colspan=\"2\">Control block %s%d</td></tr>%s<tr><td>%s</td><td>%s</td></tr><tr><td colspan=\"2\">%s</td></tr></table>>];"
       prefix b.idx
       color
       prefix b.idx

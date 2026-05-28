@@ -1,0 +1,1050 @@
+open Core
+module RIC_module = Reduced_interval_congruence
+open RIC_module
+module Boolean = Boolean
+module Bitfield = Bitfield
+module Value = Value_set_abstractions
+open Helpers
+
+(** Type [t] is the abstract store: a map from variables to their abstract values. *)
+type t = {
+  abstract_store : Value.t Variable.Map.t;
+  store_operations : RICSet.t
+}
+[@@deriving sexp, compare, equal]
+
+let equal (store1 : t) (store2 : t) : bool =
+  Variable.Map.equal Value.equal store1.abstract_store store2.abstract_store 
+  && RICSet.equal store1.store_operations store2.store_operations
+
+(** [extract_memory_variables store] returns all memory-related variables in [store]. *)
+let extract_memory_variables (store : t) : Variable.t list =
+  Variable.Map.extract_memory_variables store.abstract_store
+
+let extract_stack_variables (store : t) : Variable.t list =
+  Variable.Map.extract_stack_variables store.abstract_store
+
+let extract_locals_and_globals (store : t) : Variable.t list =
+  Variable.Map.extract_locals_and_globals store.abstract_store
+
+let get (store : t) ~(var : Variable.t) : Value.t =
+  match Variable.Map.find store.abstract_store var with
+    | Some value -> value
+    | None ->
+      ValueSet 
+        (match var with
+        | Accessed -> RIC.Bottom
+        | MemorySize -> RIC.positive_integers
+        | Var Const I32 n -> RIC.ric (0l, Int 0l, Int 0l, ("", n))
+        | Var Const _ -> RIC.Top
+        (* | Var Merge _ -> RIC.Bottom *)
+        | Var _ -> RIC.Bottom
+        (* | Var _ -> RIC.relative_ric (Variable.to_string var) *)
+        | Mem _ ->
+          let mems = extract_memory_variables store in
+          if Variable.is_covered ~by:mems var then
+            List.fold 
+              ~init:RIC.Bottom
+              ~f:(fun acc m -> 
+                if Variable.share_addresses m var then
+                  match (Option.value_exn (Variable.Map.find store.abstract_store m)) with
+                  | ValueSet vs -> RIC.join acc vs
+                  (* | Boolean _ -> RIC.Top TODO: Assert false? *)
+                  | Boolean b -> RIC.join acc (b.numeric_value)
+                  | Bitfield bf -> RIC.join acc (RIC.of_bitfield bf)
+                else if Variable.comparable_offsets m var then
+                  acc
+                else
+                  RIC.Top)
+              mems
+          else
+            RIC.Top
+        | Stack _ ->
+          let stack_vars = extract_stack_variables store in
+          if Variable.is_covered ~by:stack_vars var then
+            List.fold 
+              ~init:RIC.Bottom
+              ~f:(fun acc m -> 
+                if Variable.share_addresses m var then
+                  match (Option.value_exn (Variable.Map.find store.abstract_store m)) with
+                  | ValueSet vs -> RIC.join acc vs
+                  (* | Boolean _ -> RIC.Top TODO: Assert false? *)
+                  | Boolean b -> RIC.join acc (b.numeric_value)
+                  | Bitfield bf -> RIC.join acc (RIC.of_bitfield bf)
+                else if Variable.comparable_offsets m var then
+                  acc
+                else
+                  assert false)
+              stack_vars
+          else
+            RIC.Top)
+
+let extract_global_values (store : t) : RIC.t String.Map.t =
+  let globals = 
+    List.filter 
+      (Variable.Map.extract_locals_and_globals store.abstract_store)
+      ~f:(fun var -> 
+        match var with
+        | Variable.Var Var.Global _ -> true
+        | _ -> false) in
+  let global_values =
+    List.map globals ~f:(fun var -> 
+      Variable.to_string var,
+      match get store ~var with
+      | ValueSet vs -> vs
+      (* | Boolean _ -> RIC.Top) in TODO: if not i32, shouldn't it be Top? *)
+      | Boolean b -> b.numeric_value
+      | Bitfield bf -> RIC.of_bitfield bf) in
+  List.fold
+    global_values
+    ~init:String.Map.empty
+    ~f:(fun acc (key, data) -> Map.set acc ~key ~data)
+
+let extract_argument_values (store : t) ~(args : Var.t list) : RIC.t String.Map.t =
+  let values = 
+    List.map 
+      (List.rev args) 
+      ~f:(fun var -> 
+        match get store ~var:(Variable.Var var) with
+        | Value.ValueSet vs -> vs
+        (* | Value.Boolean _ -> RIC.Top) in *)
+        | Boolean b -> b.numeric_value
+        | Bitfield bf -> RIC.of_bitfield bf) in
+  List.fold2_exn
+    (List.init (List.length args) ~f:(fun i -> Var.to_string (Var.Local i)))
+    values
+    ~init:String.Map.empty
+    ~f:(fun acc key data -> Map.set acc ~key ~data)
+
+(** [to_string store] converts the abstract store to a string, showing all variable bindings. *)
+let _to_string (vs : Value.t Variable.Map.t) : string =
+  let vs =
+  if not (!Value_set_options.disjoint_stack) then
+    Variable.Map.filter_keys vs ~f:(fun key -> match key with | Stack _ -> false | _ -> true)
+  else
+    vs
+  in
+  Printf.sprintf "[%s]" (String.concat ~sep:"; "
+                          (List.map (Variable.Map.to_alist vs)
+                            ~f:(fun (k, t) ->
+                                let var_string = Variable.to_string k in
+                                let val_string = Value.to_string t in
+                                if String.equal var_string val_string then var_string else
+                                  Printf.sprintf "%s ↦ %s" var_string val_string)))
+
+let to_string (vs : t) : string = 
+  if !Value_set_options.show_intermediates then
+    _to_string vs.abstract_store
+  else
+    let vs =
+      Variable.Map.filter_keys vs.abstract_store 
+        ~f:(fun var ->
+          match var with
+          | Stack _ | Mem _ | Var Var.Global _ | Var Var.Local _ | Var Var.Return _ -> true
+          | _ -> false) in
+    _to_string vs
+
+(** [to_string_without_bottoms store] returns a string that omits any variables mapped to [RIC.Bottom]. *)
+let to_string_without_bottoms (vs : t) : string =
+  let restricted = Variable.Map.filter vs.abstract_store ~f:(fun d ->
+    match d with
+    | Boolean _ -> true
+    | ValueSet d -> not (RIC.equal RIC.Bottom d)
+    | Bitfield bf -> not (Bitfield.equal Bitfield.Bottom bf)) in
+  to_string { abstract_store = restricted; store_operations = vs.store_operations }
+
+let to_dot_string (s : t) : string =
+    Printf.sprintf "<tr><td></td><td>%s</td></tr>" (to_string s)
+
+(** [update_all store vars ric] sets [ric] for each variable in [vars] within [store]. *)
+let update_all (store : t) (vars : Variable.Set.t) (new_value : Value.t) : t =
+  { abstract_store = (Variable.Map.update_all store.abstract_store vars new_value);
+    store_operations = store.store_operations }
+
+(** [make_compatible ~this_store ~relative_to] splits memory variables in [this_store] 
+    so they align with memory structure in [relative_to]. *)
+let make_compatible ~(this_store : t) ~(relative_to : t) : t = 
+  { abstract_store = (Variable.Map.make_compatible ~this:this_store.abstract_store ~relative_to:relative_to.abstract_store ~get:(fun s -> get {abstract_store = s; store_operations = RICSet.empty}));
+    store_operations = this_store.store_operations }
+
+(** [widen store1 store2] widens [store2] with respect to [store1] to accelerate fixpoint computation. *)
+let widen (store1 : t) (store2 : t) : t =
+  let store1 = make_compatible ~this_store:store1 ~relative_to:store2 in
+  let store2 = make_compatible ~this_store:store2 ~relative_to:store1 in
+  let store =
+    Variable.Map.merge store2.abstract_store store1.abstract_store ~f:(fun ~key:k v ->
+      match k, v with
+      | _, `Both (ValueSet x, ValueSet y) -> Some (Value.ValueSet (RIC.widen y ~relative_to:x))
+      | _, `Both _ -> Some (Value.ValueSet RIC.Top)
+      | Mem _, `Right ValueSet y -> Some (Value.ValueSet (RIC.widen y ~relative_to:RIC.Top))
+      | Stack _, `Right ValueSet y -> Some (Value.ValueSet (RIC.widen y ~relative_to:RIC.Top))
+      | Var _, `Right ValueSet y -> Some (Value.ValueSet (RIC.widen y ~relative_to:RIC.Bottom))
+      | Mem _, `Left ValueSet x -> Some (Value.ValueSet (RIC.widen RIC.Top ~relative_to:x))
+      | Stack _, `Left ValueSet x -> Some (Value.ValueSet (RIC.widen RIC.Top ~relative_to:x))
+      | Var _, `Left ValueSet x -> Some (Value.ValueSet (RIC.widen RIC.Bottom ~relative_to:x))
+      | _ -> Some (Value.ValueSet RIC.Top))
+  in
+  { abstract_store = store; store_operations = store1.store_operations }
+
+let filter_relative_offsets (store : t) (rel_offset : string) : t =
+  let abstract_store =
+    Variable.Map.filter_keys store.abstract_store
+      ~f:(fun var ->
+        match var with
+        | Mem RIC {offset = (v, _); _} -> String.equal v rel_offset
+        | _ -> true)
+  in
+  { abstract_store = abstract_store; store_operations = store.store_operations }
+
+(** [truncate_memory_var store ~var ~accessed_addresses] removes accessed addresses from [var]'s region. 
+    The untouched portion is preserved in the store. *)
+let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : RIC.accessed_memory) : t =
+  (* let disjoint_memory = !Value_set_options.disjoint_memory_spaces in *)
+  let vs = get store ~var:var in
+  let abstract_store = Variable.Map.remove store.abstract_store var in
+  let accessed = accessed_addresses.fully :: accessed_addresses.partially in
+  let relative_offset = RIC.extract_relative_offset accessed_addresses.fully in
+  let untouched_variables =
+    (if Variable.is_linear_memory var then
+      let untouched_addresses =
+        match var with
+        | Var _ | Accessed | Stack _ | MemorySize -> assert false
+        | Mem addr ->
+          if !Value_set_options.disjoint_stack && String.equal "g0" relative_offset then
+            [addr]
+          else
+            (List.fold 
+              ~init:[addr]
+              ~f:(fun acc x -> List.concat (List.map ~f:(fun y -> 
+                RIC.remove ~this:x ~from:y) acc))
+              accessed)
+      in
+      Variable.Set.of_list (List.map ~f:(fun x -> Variable.Mem x) untouched_addresses)
+    else if Variable.is_stack var then
+      (let untouched_addresses =
+        match var with
+        | Var _ | Accessed | Mem _ | MemorySize -> assert false
+        | Stack addr ->
+          if not (String.equal "g0" relative_offset) then
+            [addr]
+          else
+            (List.fold ~init:[addr]
+                       ~f:(fun acc x -> List.concat (List.map ~f:(fun y -> RIC.remove ~this:x ~from:y) acc))
+                       accessed)
+      in
+      Variable.Set.of_list (List.map ~f:(fun x -> Variable.Stack x) untouched_addresses))
+    else
+      assert false) in
+    update_all 
+      { abstract_store = abstract_store; store_operations = store.store_operations } 
+      untouched_variables 
+      vs
+
+(** [set store ~var ~vs] updates [var] in [store] to [vs]. Fails if [var] overlaps with existing memory vars. *)
+let set (store : t) ~(var : Variable.t) ~(vs : Value.t) : t =
+  let store = 
+    if Variable.is_linear_memory var || Variable.is_stack var then 
+      let store = 
+        make_compatible 
+          ~this_store:store 
+          ~relative_to:
+            { abstract_store = 
+                (Variable.Map.empty |> Variable.Map.set ~key:var ~data:vs);
+              store_operations = RICSet.empty }
+      in
+        { abstract_store = 
+            Variable.Map.filter_keys 
+              ~f:(fun v -> not (Variable.share_addresses v var)) 
+              store.abstract_store;
+          store_operations = store.store_operations }
+    else 
+      store
+  in
+  let is_valid =
+    Variable.Map.fold store.abstract_store ~init:true ~f:(fun ~key:k ~data:_ acc ->
+      acc && 
+      match k, var with
+      | Var _, _ | _, Var _ | Accessed, _ | _, Accessed | Mem _, Stack _ | Stack _, Mem _ | MemorySize, _ | _, MemorySize -> true
+      | Mem _, Mem _ 
+      | Stack _, Stack _ ->
+        Variable.equal k var ||
+        not (Variable.share_addresses k var))
+  in
+  if not is_valid then
+    failwith "error: trying to update a memory/stack variable that overlaps with other memory variables"
+  else
+    let store = 
+      if (not !Value_set_options.disjoint_memory_spaces) 
+         && Variable.is_linear_memory var then
+          filter_relative_offsets store (Variable.get_relative_offset var)
+      else
+        store
+    in
+    { abstract_store = Variable.Map.set store.abstract_store ~key:var ~data:vs; 
+      store_operations = store.store_operations }
+
+(** [bottom] is the least informative abstract store, mapping no variables. *)
+let bottom : t = 
+  let bottom =
+    { abstract_store = Variable.Map.empty; store_operations = RICSet.empty }
+    |> set ~var:Variable.entire_memory ~vs:(ValueSet RIC.Bottom)
+  in
+  if !Value_set_options.disjoint_stack then
+    bottom |> set ~var:Variable.entire_stack ~vs:(ValueSet RIC.Bottom)
+  else
+    bottom
+    
+
+let remove_pointers_to_top (store : t) : t =
+  let store =
+    { abstract_store = 
+        Variable.Map.filteri store.abstract_store ~f:(fun ~key ~data -> 
+          (not (Variable.is_linear_memory key || Variable.is_stack key)) || (not (Value.equal (ValueSet RIC.Top) data)));
+      store_operations = store.store_operations } in
+  let store =
+    if List.is_empty (extract_memory_variables store) then
+      set store ~var:Variable.entire_memory ~vs:(ValueSet RIC.Top)
+    else
+      store
+  in
+  if !Value_set_options.disjoint_stack && List.is_empty (extract_stack_variables store) then
+    set store ~var:Variable.entire_stack ~vs:(ValueSet RIC.Top)
+  else
+    store
+
+(** [to_top_RIC store var] sets [var] to [RIC.Top] in [store]. *)
+let to_top_RIC (store : t) (var : Variable.t) : t =
+  remove_pointers_to_top 
+    { abstract_store = (Variable.Map.set store.abstract_store ~key:var ~data:(Value.ValueSet RIC.Top));
+      store_operations = store.store_operations }
+
+(** [to_top_RICs store vars] sets each variable in [vars] to [RIC.Top] in [store]. *)
+(* let to_top_RICs (store : t) (vars : Variable.Set.t) : t =
+  remove_pointers_to_top
+    (Variable.Set.fold vars ~init:store ~f:to_top_RIC) *)
+
+(** [to_bottom_RIC store var] sets [var] to [RIC.Bottom] in [store]. *)
+(* let to_bottom_RIC (store : t) (var : Variable.t) : t =
+  { abstract_store = (Variable.Map.set store.abstract_store ~key:var ~data:(Value.ValueSet RIC.Bottom));
+    store_operations = store.store_operations } *)
+
+(** [to_bottom_RICs store vars] sets each variable in [vars] to [RIC.Bottom] in [store]. *)
+(* let to_bottom_RICs (store : t) (vars : Variable.Set.t) : t =
+  Variable.Set.fold vars ~init:store ~f:to_bottom_RIC *)
+
+(** [join store1 store2] computes the least upper bound of two stores. 
+    Missing memory variables are treated as [RIC.Top]. *)
+let join (store1 : t) (store2 : t) : t =
+  if equal store1 bottom then store2
+  else if equal store2 bottom then store1
+  else
+  let store1 = make_compatible ~this_store:store1 ~relative_to:store2 in
+  let store2 = make_compatible ~this_store:store2 ~relative_to:store1 in
+  (* print_endline ("joining these two states: " ^ to_string store1 ^ "  and  " ^ to_string store2); *)
+  let store =
+    { abstract_store =
+      Variable.Map.merge store1.abstract_store store2.abstract_store ~f:(fun ~key:var v -> 
+          match v with
+          | `Both (ValueSet x, ValueSet y) -> Some (Value.ValueSet (RIC.join x y))
+          | `Both (Boolean x, Boolean y) -> Some (Boolean (Boolean.join x y))
+          | `Both (Bitfield x, Bitfield y) -> Some (Bitfield (Bitfield.join x y))
+          | `Both _ | `Left Boolean _ | `Right Boolean _ | `Left Bitfield _ | `Right Bitfield _ -> Some (Value.ValueSet RIC.Top)
+          | `Left ValueSet _ | `Right ValueSet _ ->
+            Some (
+              match (get store1 ~var), (get store2 ~var) with
+              | ValueSet a, ValueSet b -> ValueSet (RIC.join a b)
+              | _ -> assert false));
+      store_operations = RICSet.union store1.store_operations store2.store_operations }
+  in
+  (* print_endline ("result: " ^ to_string store); *)
+  let store = remove_pointers_to_top store in
+  store
+
+(** [update_accessed_vars store accessed_addresses] applies [truncate_memory_var] to all memory variables. *)
+let update_accessed_vars (store : t) (accessed_addresses : RIC.accessed_memory) : t =
+  let memory_vars = extract_memory_variables store in
+  let new_store =
+    match memory_vars with
+    | x :: _ when Variable.equal Variable.entire_memory x -> store
+    | _ ->
+      let store = 
+        List.fold 
+          ~init:store 
+          ~f:(fun store var -> truncate_memory_var store ~var:var ~accessed_addresses:accessed_addresses) memory_vars 
+      in
+      if List.is_empty (extract_memory_variables store) then 
+        set store ~var:Variable.entire_memory ~vs:(ValueSet RIC.Top)
+      else
+        store
+  in
+  if !Value_set_options.disjoint_stack then
+    let stack_vars = extract_stack_variables store in
+    match stack_vars with
+    | x :: _ when Variable.equal Variable.entire_stack x -> store
+    | _ ->
+      let store = 
+        List.fold 
+          ~init:new_store 
+          ~f:(fun store var -> truncate_memory_var store ~var:var ~accessed_addresses:accessed_addresses) stack_vars 
+      in
+      if List.is_empty (extract_stack_variables store) then 
+        set store ~var:Variable.entire_stack ~vs:(ValueSet RIC.Top)
+      else
+        store
+  else
+    new_store
+
+let weak_update (store : t) ~(previous_state : t) ~(var : Variable.t) ~(vs : Value.t) : t =
+  let address = 
+    match var with
+    | Var _ | Accessed | MemorySize -> assert false
+    | Mem address -> address
+    | Stack address -> address
+  in
+  let memory_variables = extract_memory_variables previous_state in
+  let affected_variables = 
+    List.filter ~f:(fun (v, _) -> not (Variable.equal v (Mem RIC.Bottom)))
+      (List.map ~f:(fun v -> 
+          match v with 
+          | Var _ | Accessed | Stack _  | MemorySize -> assert false
+          | Mem addr -> (Variable.Mem (RIC.meet addr address)), (get previous_state ~var:v))
+        memory_variables)
+  in
+  let store = List.fold ~init:store
+                        ~f:(fun store (v, prev_vs) -> 
+                          let vs = Value.join vs prev_vs in
+                          set store ~var:v ~vs)
+                        affected_variables
+  in
+  let store =
+    if List.is_empty (extract_memory_variables store) then
+      set store ~var:Variable.entire_memory ~vs:(ValueSet RIC.Top)
+    else
+      store
+  in
+  if List.is_empty (extract_stack_variables store) then
+    set store ~var:Variable.entire_stack ~vs:(ValueSet RIC.Top)
+  else
+    store
+
+(** [assign_constant_value store ~const ~to_] sets [to_] to the singleton RIC containing [const]. *)
+let assign_constant_value (store : t) ~(const : int32) ~(to_ : Variable.t): t =
+  let vs = RIC.ric (0l, Int 0l, Int 0l, ("", const)) in
+  (*Variable.Map.*)set store ~var:to_ ~vs:(ValueSet vs)
+
+(** [copy_value_set store ~from ~to_] copies the value from [from] to [to_]. 
+    Does nothing if [to_] is a constant. *)
+let copy_value_set (store : t) ~(from : Variable.t) ~(to_ : Variable.t) : t =
+  match to_ with
+  | Var Var.Const _ -> store
+  | _ ->
+    let vs = get store ~var:from in
+    set store ~var:to_ ~vs:vs
+
+(** [i32_add store ~x ~y ~result] performs addition of [x] and [y], stores result in [result]. *)
+let i32_add (store : t) ~(x : Variable.t) ~(y : Variable.t) ~(result : Variable.t) : t =
+  let vs =
+    match x, y with
+    | Var Var.Const Prim_value.I32 x, Var Var.Const Prim_value.I32 y -> 
+      Print_trace.print "\t%ld + %ld -> %s\n" x y (Variable.to_string result);
+      Value.add_consts x y
+    | Var Var.Const Prim_value.I32 x, Var y 
+    | Var y, Var Var.Const Prim_value.I32 x ->
+      (let vs_y = get store ~var:(Variable.Var y) in
+      Print_trace.print "\t%ld + %s(%s) -> %s\n" x (Var.to_string y) (Value.to_string vs_y) (Variable.to_string result);
+      Value.add_const vs_y x
+      )
+    | Var x, Var y ->
+      (let vs_x = get store ~var:(Variable.Var x) in
+      let vs_y = get store ~var:(Variable.Var y) in
+      Print_trace.print "\t%s(%s) + %s(%s) -> %s\n" (Var.to_string x) (Value.to_string vs_x) (Var.to_string y) (Value.to_string vs_y) (Variable.to_string result);
+      Value.i32_add vs_x vs_y)
+    | _ -> assert false
+  in
+  Print_trace.print "\tResult: %s\n" (Value.to_string vs);
+  set store ~var:result ~vs:vs
+
+(** [i32_sub store ~x ~y ~result] performs subtraction [y - x], stores result in [result]. *)
+let i32_sub (store : t) ~(x : Variable.t) ~(y : Variable.t) ~(result : Variable.t) : t =
+  let vs =
+      match x, y with
+      | Var Var.Const Prim_value.I32 x, Var Var.Const Prim_value.I32 y -> 
+        Print_trace.print "\t%ld - %ld -> %s\n" y x (Variable.to_string result);
+        Value.sub_consts x y
+      | Var Var.Const Prim_value.I32 x, Var y -> 
+        (let vs_y = get store ~var:(Variable.Var y) in
+        Print_trace.print "\t%s(%s) - %ld -> %s\n" (Var.to_string y) (Value.to_string vs_y) x (Variable.to_string result);
+        Value.sub_const x vs_y)
+      | Var x, Var Var.Const Prim_value.I32 y -> 
+        (let vs_x = get store ~var:(Variable.Var x) in
+        Print_trace.print "\t%ld - %s(%s) -> %s\n" y (Var.to_string x) (Value.to_string vs_x) (Variable.to_string result);
+        Value.negative (Value.sub_const y vs_x))
+      | Var x, Var y ->
+        (let vs_x = get store ~var:(Variable.Var x) in
+        let vs_y = get store ~var:(Variable.Var y) in
+        Print_trace.print "\t%s(%s) - %s(%s) -> %s\n" (Var.to_string y) (Value.to_string vs_y) (Var.to_string x) (Value.to_string vs_x) (Variable.to_string result);
+        Value.i32_sub vs_x vs_y)
+      | _ -> assert false
+  in
+  Print_trace.print "\tResult: %s\n" (Value.to_string vs);
+  set store ~var:result ~vs:vs
+
+let access_memory (store : t) ~(addresses : Value.t) : t =
+  let previously_accessed = get store ~var:(Variable.Accessed) in
+  let new_accessed_memory = Value.join previously_accessed addresses in
+  set store ~var:(Variable.Accessed) ~vs:new_accessed_memory
+
+let update_memory_size (store : t) ~(summary : t) : t =
+  let combine_relative_offsets ro1 ro2 =
+    match ro1, ro2 with
+    | "", ro | ro, "" -> ro
+    | _ -> ro1 ^ "+" ^ ro2
+  in
+  match (get store ~var:Variable.MemorySize), (get summary ~var:Variable.MemorySize) with
+  | ValueSet RIC { stride = 1l; lower_bound = Int 0l; upper_bound = Infinity; offset = (ro1, o1) },
+    ValueSet RIC { stride = 1l; lower_bound = Int 0l; upper_bound = Infinity; offset = (ro2, o2) } ->
+      let relative_offset = combine_relative_offsets ro1 ro2 in
+      let offset = Int32.(o1 + o2) in
+      set store ~var:Variable.MemorySize
+        ~vs:(ValueSet (RIC.ric (1l, Int 0l, Infinity, (relative_offset, offset))))
+  | _ ->
+      set store ~var:Variable.MemorySize ~vs:(ValueSet RIC.Top)
+
+(* let log_address_type (address : Var.t) (vs_address : Value.t) : unit =
+  let oc = Out_channel.create ~append:true "store_types.txt" in
+  begin match address with
+  | Var.Global _ ->
+    Out_channel.output_string oc ("[GLOBAL] " ^(Var.to_string address) ^ "\n");
+  | Var.Local _ -> 
+    Out_channel.output_string oc ("[FUNCTION PARAMETER] " ^ (Var.to_string address) ^ "\n");
+  | Var.Var _ -> 
+    (* Out_channel.output_string oc ("[INTERMEDIATE]" ^ (Var.to_string address)); *)
+    begin match vs_address with
+    | Value.ValueSet RIC.Top -> 
+      Out_channel.output_string oc (Var.to_string address ^ "[TOP]\n");
+    | Value.ValueSet RIC {offset = (o, _); _} -> 
+      (if String.equal o "g0" then
+        Out_channel.output_string oc ("[STACK POINTER]\n")
+      else if String.equal (String.prefix o 1) "g" then
+        Out_channel.output_string oc ("[GLOBAL]\n")
+      else if String.equal (String.prefix o 1) "l" then
+        Out_channel.output_string oc ("[LOCAL OFFSET]\n")
+      else if String.equal (String.prefix o 1) "" then
+        Out_channel.output_string oc ("[ABSOLUTE]\n")
+      else 
+        Out_channel.output_string oc ("[OTHER]\n"));
+    | Value.ValueSet Bottom -> 
+      Out_channel.output_string oc ("[BOTTOM]\n");
+    | Value.Boolean _ -> 
+      Out_channel.output_string oc ("[BOOLEAN]\n");
+    | Bitfield _ ->
+      Out_channel.output_string oc ("[BITFIELD]\n");
+    end
+  | Var.Merge _ -> 
+    Out_channel.output_string oc ("[MERGE]" ^ (Var.to_string address));
+    begin match vs_address with
+    | Value.ValueSet RIC.Top -> 
+      Out_channel.output_string oc (Var.to_string address ^ "[TOP]\n");
+    | Value.ValueSet RIC {offset = (o, _); _} -> 
+      (if String.equal o "g0" then
+        Out_channel.output_string oc (" [STACK POINTER]\n")
+      else if String.equal (String.prefix o 1) "g" then
+        Out_channel.output_string oc (" [GLOBAL]\n")
+      else if String.equal (String.prefix o 1) "l" then
+        Out_channel.output_string oc (" [LOCAL OFFSET]\n")
+      else if String.equal (String.prefix o 1) "" then
+        Out_channel.output_string oc (" [ABSOLUTE]\n")
+      else 
+        Out_channel.output_string oc (" [OTHER]\n"));
+    | Value.ValueSet Bottom -> 
+      Out_channel.output_string oc (" [BOTTOM]\n");
+    | Value.Boolean _ -> 
+      Out_channel.output_string oc (" [BOOLEAN]\n");
+    | Bitfield _ ->
+      Out_channel.output_string oc ("[BITFIELD]\n");
+    end
+  | Var.Const _ -> 
+    Out_channel.output_string oc ("[CONSTANT] " ^ (Var.to_string address) ^ "\n");
+  | _ -> 
+    Out_channel.output_string oc ("[UNKNOWN] " ^ (Var.to_string address) ^ "\n");
+  end;
+  Out_channel.close oc *)
+
+
+let store_debug (address : Value.t) : unit =
+  if !Value_set_options.debug then
+      match address with
+      | ValueSet r when RIC.equal RIC.Bottom r -> 
+        print_endline "Warning: trying to store at address BOTTOM... press enter to continue.";
+        let _ = In_channel.input_line_exn In_channel.stdin in
+        ()
+      | ValueSet r when RIC.equal r RIC.Top ->
+        print_endline "Warning: trying to store at address TOP... press enter to continue.";
+        let _ = In_channel.input_line_exn In_channel.stdin in
+        ()
+      | _ -> () 
+    else ()
+    
+(** store function *)
+let store (* fonction store *)
+    ~(state : t) 
+    ~(instruction : Memoryop.t) 
+    ~(annotation_before : Spec_domain.t option) 
+    ~(value : Var.t option)
+    ~(address : Var.t option)
+  : t =
+  let value, address = 
+    match annotation_before, value, address with
+    | Some annotation_before, None, None ->
+      pop2 (Spec_domain.get_or_fail annotation_before).vstack 
+    | None, Some value, Some address -> value, address
+    | _ -> assert false
+  in
+  (* print_endline("adresse de store: " ^ (Var.to_string address)); *)
+  let vs_address = get state ~var:(Variable.Var address) in
+  Print_trace.print "\tAddress(%s)\tValue(%s)\n" (Var.to_string address) (Var.to_string value);
+  store_debug vs_address;
+  let is_g0 = String.equal "g0" (Value.extract_relative_offset vs_address) in
+  let disjoint_stack = !Value_set_options.disjoint_stack in
+  let is_stack = is_g0 && disjoint_stack in
+  let vs_value = get state ~var:(Variable.Var value) in
+  let size = Memoryop.size instruction in
+  let new_state =
+    let vs_address =
+      match vs_address with
+      | ValueSet vs -> vs
+      | Boolean b -> b.numeric_value
+      | Bitfield bf -> RIC.of_bitfield bf
+  in
+    begin match instruction with
+    | { typ = I32; offset = offset; _ } ->
+      let offset = Int32.of_int_exn offset in
+      let vs_value = if Int32.(size = 4l) then vs_value else Value.ValueSet RIC.Top in
+      Print_trace.print "\tstoring value-set %s into %s variable %s\n"
+        (Value.to_string vs_value)
+        (if is_stack then "stack" else "memory")
+        (Variable.to_string
+          (if is_stack
+            then Variable.Stack (RIC.add_offset vs_address offset)
+            else Variable.Mem   (RIC.add_offset vs_address offset)));
+      let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
+      Print_trace.print
+        "\tfully accessed memory: %s\n\tpartially accessed memory: %s\n"
+        (RIC.to_string accessed.fully)
+        (String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially));
+      let new_state = update_accessed_vars state accessed in
+      let added_store_operations = 
+        RICSet.filter 
+          ~f:(fun addr -> not (RIC.equal addr RIC.Bottom)) 
+          (RICSet.of_list (accessed.fully :: accessed.partially)) 
+      in
+      let new_state = { abstract_store = new_state.abstract_store; 
+                        store_operations = RICSet.union added_store_operations new_state.store_operations} in
+      let variable_to_update =
+          if is_stack then
+            Variable.Stack accessed.fully
+          else
+            Variable.Mem accessed.fully in
+      Print_trace.print "\tvariable to update: %s\n" (Variable.to_string variable_to_update);
+      if RIC.equal accessed.fully RIC.Bottom then
+        (Print_trace.print "\tno update necessary\n";
+        new_state)
+      else
+        if RIC.is_singleton (accessed.fully) then
+          (Print_trace.print "\tperforming STRONG update\n";
+          set new_state ~var:variable_to_update ~vs:vs_value)
+        else
+          (Print_trace.print "\tperforming WEAK update\n";
+          weak_update new_state ~previous_state:state ~var:variable_to_update ~vs:vs_value)
+          (* (match vs_value with
+          | Value.ValueSet vs_value ->
+            weak_update new_state ~previous_state:state ~var:variable_to_update ~vs:vs_value (*TODO: make it possible to store something other than an RIC*)
+          | _ ->
+            weak_update new_state ~previous_state:state ~var:variable_to_update ~vs:RIC.Top)) *)
+      | { typ = F32; offset = offset; _ } ->
+        let offset = Int32.of_int_exn offset in
+        Print_trace.print "\tstoring value-set ⊤ into %s variable %s\n"
+          (if is_stack then "stack" else "memory")
+          (Variable.to_string
+            (if is_stack
+              then Variable.Stack (RIC.add_offset vs_address offset)
+              else Variable.Mem   (RIC.add_offset vs_address offset)));
+        let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
+        let added_store_operations = 
+          RICSet.filter 
+            ~f:(fun addr -> not (RIC.equal addr RIC.Bottom)) 
+            (RICSet.of_list (accessed.fully :: accessed.partially)) 
+        in
+        let state = {abstract_store = state.abstract_store; store_operations = RICSet.union added_store_operations state.store_operations} in
+        (Print_trace.print "\tfully accessed memory: %s\n\tpartially accessed memory: %s\n"
+          (RIC.to_string accessed.fully)
+          (String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially)));
+        update_accessed_vars state accessed
+      | { typ = I64; offset = offset; _ }
+      | { typ = F64; offset = offset; _ } ->
+        let offset = Int32.of_int_exn offset in
+        Print_trace.print "\tstoring value-set ⊤ into %s variable %s\n"
+          (if is_stack then "stack" else "memory")
+          (Variable.to_string
+            (if is_stack
+              then Variable.Stack (RIC.add_offset vs_address offset)
+              else Variable.Mem   (RIC.add_offset vs_address offset)));
+        let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
+        let added_store_operations = 
+          RICSet.filter 
+            ~f:(fun addr -> not (RIC.equal addr RIC.Bottom)) 
+            (RICSet.of_list (accessed.fully :: accessed.partially)) 
+        in
+        let state = {abstract_store = state.abstract_store; store_operations = RICSet.union added_store_operations state.store_operations} in
+        Print_trace.print "\tfully accessed memory: %s\n\tpartially accessed memory: %s\n"
+          (RIC.to_string accessed.fully)
+          (String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially));
+        update_accessed_vars state accessed
+      end
+  in
+  remove_pointers_to_top new_state
+
+
+let find_value_set
+    (cfg : t Cfg.t)
+    ~(label : Instr.Label.t) 
+    ~(var : Var.t)
+  : Value_set_abstractions.t =
+  let block = Cfg.find_enclosing_block_exn cfg label in
+  let store =
+    match block.content with
+    | Data instrs -> 
+      (List.find_exn instrs ~f:(fun i ->
+        Instr.Label.equal i.label label)).annotation_before
+    | Call call_instr -> call_instr.annotation_before
+    | _ -> failwith "label does not belong to a data or call block"
+  in
+  (* print_endline "instruction: "; *)
+  (* print_labelled_data instr; *)
+  (* let store = instr.annotation_before in *)
+  (* print_endline ("store at current instruction: " ^ (Abstract_store_domain.to_string store)); *)
+  let vs = get store ~var:(Variable.Var var) in
+  (* print_endline ("value-set of variable " ^ (Var.to_string var) ^ " : " ^(Value_set_abstractions.to_string vs)); *)
+  vs
+
+
+
+
+
+(*
+TTTTTTTTTTTTTTTTTTTTTTTEEEEEEEEEEEEEEEEEEEEEE   SSSSSSSSSSSSSSS TTTTTTTTTTTTTTTTTTTTTTT   SSSSSSSSSSSSSSS 
+T:::::::::::::::::::::TE::::::::::::::::::::E SS:::::::::::::::ST:::::::::::::::::::::T SS:::::::::::::::S
+T:::::::::::::::::::::TE::::::::::::::::::::ES:::::SSSSSS::::::ST:::::::::::::::::::::TS:::::SSSSSS::::::S
+T:::::TT:::::::TT:::::TEE::::::EEEEEEEEE::::ES:::::S     SSSSSSST:::::TT:::::::TT:::::TS:::::S     SSSSSSS
+TTTTTT  T:::::T  TTTTTT  E:::::E       EEEEEES:::::S            TTTTTT  T:::::T  TTTTTTS:::::S            
+        T:::::T          E:::::E             S:::::S                    T:::::T        S:::::S            
+        T:::::T          E::::::EEEEEEEEEE    S::::SSSS                 T:::::T         S::::SSSS         
+        T:::::T          E:::::::::::::::E     SS::::::SSSSS            T:::::T          SS::::::SSSSS    
+        T:::::T          E:::::::::::::::E       SSS::::::::SS          T:::::T            SSS::::::::SS  
+        T:::::T          E::::::EEEEEEEEEE          SSSSSS::::S         T:::::T               SSSSSS::::S 
+        T:::::T          E:::::E                         S:::::S        T:::::T                    S:::::S
+        T:::::T          E:::::E       EEEEEE            S:::::S        T:::::T                    S:::::S
+      TT:::::::TT      EE::::::EEEEEEEE:::::ESSSSSSS     S:::::S      TT:::::::TT      SSSSSSS     S:::::S
+      T:::::::::T      E::::::::::::::::::::ES::::::SSSSSS:::::S      T:::::::::T      S::::::SSSSSS:::::S
+      T:::::::::T      E::::::::::::::::::::ES:::::::::::::::SS       T:::::::::T      S:::::::::::::::SS 
+      TTTTTTTTTTT      EEEEEEEEEEEEEEEEEEEEEE SSSSSSSSSSSSSSS         TTTTTTTTTTT       SSSSSSSSSSSSSSS   
+*)
+
+
+let%test_module "abstract store tests" = (module struct
+  let%test "Abstract_store_tests" =
+    print_endline "_______ _____________________ _______\n        Abstract Store Domain        \n------- --------------------- -------\n";
+    true
+  
+  let var1 = Variable.Var (Var.Global 0)
+  let var2 = Variable.Var (Var.Local 0)
+  let var3 = Variable.mem (0l, Int 0l, Int 0l, ("", 4l))
+
+  let vs =
+    {abstract_store = Variable.Map.empty; store_operations = RICSet.empty }
+    |> set ~var:var1 ~vs:(Value.ValueSet (RIC.ric (2l, Int 0l, Int 3l, ("", 4l))))
+    |> set ~var:var2 ~vs:(Value.ValueSet (RIC.Bottom))
+    |> set ~var:var3 ~vs:(Value.ValueSet (RIC.Top))
+
+  let%test "to_string includes all bindings" =
+    let s = to_string vs in
+    print_endline ("[to_string]\n\t" ^ s); true
+
+  let%test "to_string_without_bottoms omits Bottoms" =
+    let s = to_string_without_bottoms vs in
+    print_endline ("[to_string_without_bottoms]\n\t" ^ s); true
+
+  let%test "join abstract stores" =
+    let var1 = Variable.Var (Var.Global 0) in
+    let var2 = Variable.Var (Var.Local 0) in
+    let store1 =
+      Variable.Map.empty
+      |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (2l, Int 0l, Int 2l, ("", 0l))))
+      |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet (RIC.ric (3l, Int 1l, Int 3l, ("", 0l))))
+    in
+    let store2 =
+      Variable.Map.empty
+      |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (2l, Int 1l, Int 4l, ("", 0l))))
+      |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet (RIC.ric (3l, Int 2l, Int 5l, ("", 0l))))
+    in
+    let joined = join {abstract_store = store1; store_operations = RICSet.empty}  
+                      {abstract_store = store2; store_operations = RICSet.empty} in
+    let expected =
+      { abstract_store =
+          Variable.Map.empty
+          |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (2l, Int 0l, Int 4l, ("", 0l))))
+          |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet (RIC.ric (3l, Int 1l, Int 5l, ("", 0l))));
+        store_operations = RICSet.empty }
+      |> set ~var:Variable.entire_memory ~vs:(Value.ValueSet (RIC.Top));
+    in
+    print_endline ("[JOIN]\n\t"  ^ to_string {abstract_store = store1; store_operations = RICSet.empty} ^ "\n\t" ^ to_string {abstract_store = store2; store_operations = RICSet.empty} ^ "\n\t\t" ^ to_string joined);
+    equal joined expected
+
+  let%test "join abstract stores 2" =
+    let var1 = Variable.Var (Var.Local 0) in
+    let var2 = Variable.entire_memory in
+    let store1 =
+      { abstract_store =
+          Variable.Map.empty
+          |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, ("", 3l))))
+          |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet RIC.Top);
+        store_operations = RICSet.empty }
+    in
+    let store2 =
+      { abstract_store =
+          Variable.Map.empty
+          |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet RIC.Bottom);
+        store_operations = RICSet.empty }
+    in
+    let joined = join store1 store2 in
+    let expected =
+      { abstract_store =
+          Variable.Map.empty
+          |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, ("", 3l))))
+          |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet RIC.Top);
+        store_operations = RICSet.empty }
+    in
+    print_endline ("[JOIN]\n\t"  ^ to_string store1 ^ "\n\t" ^ to_string store2 ^ "\n\t\t" ^ to_string joined);
+    equal joined expected
+
+  let%test "join abstract stores 3" =
+    let var1 = Variable.Var (Var.Local 0) in
+    let var2 = Variable.Var (Var.Local 3) in
+    let store1 =
+      { abstract_store =
+          Variable.Map.empty
+          |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, ("", 3l))))
+          |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, ("", 6l))));
+        store_operations = RICSet.empty }
+    in
+    let store2 =
+      { abstract_store =
+          Variable.Map.empty
+          |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet RIC.Bottom);
+        store_operations = RICSet.empty }
+    in
+    let joined = join store1 store2 in
+    let expected =
+      { abstract_store =
+          Variable.Map.empty
+          |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, ("", 3l))))
+          |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, ("", 6l))))
+          |> Variable.Map.set ~key:Variable.entire_memory ~data:(Value.ValueSet RIC.Top);
+        store_operations = RICSet.empty }
+    in
+    print_endline ("[JOIN]\n\t"  ^ to_string store1 ^ "\n\t" ^ to_string store2 ^ "\n\t\t" ^ to_string joined);
+    equal joined expected
+
+  (* let%test "meet abstract stores" =
+    let var1 = Variable.Var (Var.Global 0) in
+    let var2 = Variable.Var (Var.Local 0) in
+    let store1 =
+      Variable.Map.empty
+      |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (2, Int 0, Int 4, ("", 0))))
+      |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet (RIC.ric (3, Int 1, Int 5, ("", 0))))
+    in
+    let store2 =
+      Variable.Map.empty
+      |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (2, Int 2, Int 6, ("", 0))))
+      |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet (RIC.ric (3, Int 0, Int 2, ("", 0))))
+    in
+    let met = meet store1 store2 in
+    let expected =
+      Variable.Map.empty
+      |> Variable.Map.set ~key:var1 ~data:(Value.ValueSet (RIC.ric (2, Int 2, Int 4, ("", 0))))
+      |> Variable.Map.set ~key:var2 ~data:(Value.ValueSet (RIC.ric (3, Int 1, Int 2, ("", 0))))
+    in
+    print_endline ("[MEET]\n\t"  ^ to_string store1 ^ "\n\t" ^ to_string store2 ^ "\n\t\t" ^ to_string met);
+    equal met expected *)
+
+  let%test "truncate memory var retains untouched regions" =
+    let addr = RIC.ric (1l, Int 0l, Int 10l, ("", 0l)) in
+    let mem_var = Variable.Mem addr in
+    let vs = Value.ValueSet (RIC.ric (1l, Int 0l, Int 1l, ("", 0l))) in
+    print_endline "[truncate_memory_var]";
+    print_endline ("\tvariable to truncate: " ^ Variable.to_string mem_var);
+    let store = { abstract_store = Variable.Map.singleton mem_var vs; store_operations = RICSet.empty } in
+    print_endline ("\tinitial store: " ^ to_string store);
+    let accessed = { RIC.fully = RIC.ric (1l, Int 1l, Int 2l, ("", 0l)); partially = [] } in
+    print_endline ("\taccessed addresses: " ^ RIC.to_string accessed.fully);
+    let truncated = truncate_memory_var store ~var:mem_var ~accessed_addresses:accessed in
+    print_endline ("\ttruncated new store: " ^ to_string truncated);
+    let expected = set { abstract_store = (Variable.Map.singleton (Variable.mem (0l, Int 0l, Int 0l, ("", 0l))) vs); store_operations = RICSet.empty } ~var:(Variable.mem (1l, Int 3l, Int 10l, ("", 0l))) ~vs in
+    equal expected truncated
+
+  let%test "truncate memory 2" =
+    let addr = RIC.ric (1l, Int 0l, Int 10l, ("", 0l)) in
+    let mem_var = Variable.Mem addr in
+    let vs = Value.ValueSet (RIC.ric (1l, Int 0l, Int 1l, ("", 0l))) in
+    print_endline "[truncate_memory_var]";
+    print_endline ("\tvariable to truncate: " ^ Variable.to_string mem_var);
+    let store = { abstract_store = Variable.Map.singleton mem_var vs; store_operations = RICSet.empty } in
+    print_endline ("\tinitial store: " ^ to_string store);
+    let accessed = { RIC.fully = RIC.ric (1l, Int 1l, Int 2l, ("", 100l)); partially = [] } in
+    print_endline ("\taccessed addresses: " ^ RIC.to_string accessed.fully);
+    let truncated = truncate_memory_var store ~var:mem_var ~accessed_addresses:accessed in
+    print_endline ("\ttruncated new store: " ^ to_string truncated);
+    equal store truncated
+
+
+  let%test "weak_update" =
+    let addr1 = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) in
+    let addr2 = RIC.ric (1l, Int 3l, Int 4l, ("", 0l)) in
+    let mem1 = Variable.Mem addr1 in
+    let mem2 = Variable.Mem addr2 in
+    let prev_state =
+      { abstract_store =
+          Variable.Map.empty
+          |> Variable.Map.set ~key:mem1 ~data:(Value.ValueSet (RIC.ric (0l, Int 0l, Int 4l, ("", 42l))))
+          |> Variable.Map.set ~key:mem2 ~data:(Value.ValueSet (RIC.ric (0l, Int 2l, Int 6l, ("", 36l))));
+        store_operations = RICSet.empty }
+    in
+    print_endline "[weak update]";
+    print_endline ("\tprevious state: " ^ to_string prev_state);
+    let store = { abstract_store = Variable.Map.empty; store_operations = RICSet.empty } in
+    let new_val = RIC.ric (0l, Int 2l, Int 6l, ("", 0l)) in
+    print_endline ("\tnew value-set: " ^ RIC.to_string new_val);
+    let new_mem = Variable.mem (1l, Int 1l, Int 3l, ("", 0l)) in
+    print_endline ("\tvariable being updated: " ^ Variable.to_string new_mem);
+    let updated = weak_update store ~previous_state:prev_state ~var:new_mem ~vs:(ValueSet new_val) in
+    print_endline ("\tresult of weak_update:\n\t\t" ^ to_string updated);
+    let expected = 
+      { abstract_store =
+          Variable.Map.empty
+          |> Variable.Map.set ~key:(Variable.mem (0l, Int 0l, Int 0l, ("", 1l))) ~data:(Value.ValueSet (RIC.ric (42l, Int 0l, Int 1l, ("", 0l))))
+          |> Variable.Map.set ~key:(Variable.mem (0l, Int 0l, Int 0l, ("", 3l))) ~data:(Value.ValueSet (RIC.ric (36l, Int 0l, Int 1l, ("", 0l)))); 
+        store_operations = RICSet.empty }
+      |> set ~var:(Variable.Stack RIC.Top) ~vs:(Value.ValueSet RIC.Top);
+    in
+    equal expected updated
+
+  let%test "get: get memory var in bottom state" =
+    let var = Variable.mem (1l, Int 0l, Int 2l, ("", 0l)) in
+    let store = bottom
+    in
+    let result = get store ~var:var in
+    print_endline ("[get]\n\tinitial store: " ^ to_string store ^ "\n\tvariable to search for: " ^ Variable.to_string var
+      ^ "\n\textracted value-set: " ^ Value.to_string result);
+    Value.equal result (Value.ValueSet RIC.Bottom)
+
+  let%test "get: variable not in store but covered by two others" =
+    let var1 = Variable.mem (1l, Int 0l, Int 2l, ("", 0l)) in
+    let var2 = Variable.mem (1l, Int 3l, Int 5l, ("", 0l)) in
+    let target = Variable.mem (1l, Int 2l, Int 3l, ("", 0l)) in
+    let vs1 = RIC.ric (1l, Int 0l, Int 2l, ("", 0l)) in
+    let vs1' = Value.ValueSet vs1 in
+    let vs2 = RIC.ric (2l, Int 3l, Int 5l, ("", 0l)) in
+    let vs2' = Value.ValueSet vs2 in
+    let store =
+      { abstract_store = Variable.Map.empty; store_operations = RICSet.empty }
+      |> set ~var:var1 ~vs:vs1'
+      |> set ~var:var2 ~vs:vs2'
+    in
+    let result = get store ~var:target in
+    print_endline ("[get]\n\tinitial store: " ^ to_string store ^ "\n\tvariable to search for: " ^ Variable.to_string target
+      ^ "\n\textracted value-set: " ^ Value.to_string result);
+    Value.equal result (Value.ValueSet (RIC.join vs1 vs2))
+
+  let%test "get: variable not in store and not covered by others" =
+    let var1 = Variable.mem (1l, Int 0l, Int 2l, ("", 0l)) in
+    let var2 = Variable.mem (1l, Int 4l, Int 5l, ("", 0l)) in
+    let target = Variable.mem (1l, Int 2l, Int 3l, ("", 0l)) in
+    let vs1 = RIC.ric (1l, Int 0l, Int 2l, ("", 0l)) in
+    let vs1' = Value.ValueSet (vs1) in
+    let vs2 = RIC.ric (2l, Int 3l, Int 5l, ("", 0l)) in
+    let vs2' = Value.ValueSet (vs2) in
+    let store =
+      { abstract_store = Variable.Map.empty; store_operations = RICSet.empty }
+      |> set ~var:var1 ~vs:vs1'
+      |> set ~var:var2 ~vs:vs2'
+    in
+    let result = get store ~var:target in
+    print_endline ("[get]\n\tinitial store: " ^ to_string store ^ "\n\tvariable to search for: " ^ Variable.to_string target
+      ^ "\n\textracted value-set: " ^ Value.to_string result);
+    Value.equal result (Value.ValueSet RIC.Top)
+
+  let%test "make two stores compatible to join" =
+    let m1 = Variable.Mem (RIC.ric (1l, Int 1l, Int 4l, ("", 0l))) in
+    let vs1 = RIC.ric (0l, Int 0l, Int 0l, ("", 42l)) in
+    let m2 = Variable.Mem (RIC.ric (2l, Int 0l, Int 4l, ("", 0l))) in
+    let vs2 = RIC.ric (0l, Int 0l, Int 0l, ("", 36l)) in
+    let empty_store = { abstract_store = Variable.Map.empty; store_operations = RICSet.empty } in
+    let store1 = set empty_store ~var:m1 ~vs:(Value.ValueSet vs1) in
+    let store2 = set empty_store ~var:m2 ~vs:(Value.ValueSet vs2) in
+    print_endline "[make_compatible]";
+    print_endline ("\tstore1: " ^ to_string store1);
+    print_endline ("\tstore2: " ^ to_string store2);
+    let store1 = make_compatible ~this_store:store1 ~relative_to:store2 in
+    let store2 = make_compatible ~this_store:store2 ~relative_to:store1 in
+    print_endline ("\tcompatible store1: " ^ to_string store1);
+    print_endline ("\tcompatible store2: " ^ to_string store2);
+    print_endline ("\tjoin: " ^ to_string (join store1 store2));
+    let expected = { abstract_store = Variable.Map.empty; store_operations = RICSet.empty }
+      |> set ~var:(Variable.Mem (RIC.ric (2l, Int 0l, Int 1l, ("", 2l)))) ~vs:(Value.ValueSet (RIC.ric (6l, Int 0l, Int 1l, ("", 36l)))) in
+    equal (join store1 store2) expected
+
+  let%test "join: Mem variables with incompatible offsets" =
+    let mem1 = Variable.Mem (RIC.ric (1l, Int 0l, Int 4l, ("stack", 0l))) in
+    let mem2 = Variable.Mem (RIC.ric (1l, Int 0l, Int 4l, ("heap", 0l))) in
+    let vs1 = RIC.ric (1l, Int 0l, Int 4l, ("stack", 0l)) in
+    let vs2 = RIC.ric (1l, Int 0l, Int 4l, ("heap", 0l)) in
+    let store1 = { abstract_store = Variable.Map.singleton mem1 (Value.ValueSet vs1); store_operations = RICSet.empty } in
+    let store2 = { abstract_store = Variable.Map.singleton mem2 (Value.ValueSet vs2); store_operations = RICSet.empty }  in
+    let joined = join store1 store2 in
+    print_endline "[join: incompatible Mem offsets]";
+    print_endline ("\tstore1: " ^ to_string store1);
+    print_endline ("\tstore2: " ^ to_string store2);
+    print_endline ("\tjoined: " ^ to_string joined);
+    Value.equal (Value.ValueSet RIC.Top) (get joined ~var:mem2)
+
+  let%test "set: update Mem[(\"b\" + 0)] in presence of Mem[(\"a\" + 0)]" =
+    let var_a = Variable.mem (0l, Int 0l, Int 0l, ("a", 0l)) in
+    let var_b = Variable.mem (0l, Int 0l, Int 0l, ("b", 0l)) in
+    let vs_a = RIC.ric (1l, Int 0l, Int 2l, ("a", 0l)) in
+    let vs_b = RIC.ric (1l, Int 0l, Int 2l, ("b", 0l)) in
+    let store = { abstract_store = Variable.Map.singleton var_a (Value.ValueSet vs_a); store_operations = RICSet.empty } in
+    let updated_store = set store ~var:var_b ~vs:(Value.ValueSet vs_b) in
+    print_endline "[set: different symbolic offsets]";
+    print_endline ("\tinitial store: " ^ to_string store);
+    print_endline ("\tupdating value-set of variable " ^ Variable.to_string var_b);
+    print_endline ("\tupdated store: " ^ to_string updated_store);
+    Variable.Map.length updated_store.abstract_store = 1 &&
+    Value.equal (get updated_store ~var:var_a) (Value.ValueSet RIC.Top) &&
+    Value.equal (get updated_store ~var:var_b) (Value.ValueSet vs_b)
+
+  let%test "set: set memory variable in bottom state" =
+    let var = Variable.mem (1l, Int 0l, Int 2l, ("", 0l)) in
+    let vs = RIC.ric (1l, Int 0l, Int 2l, ("", 0l)) in
+    let store = bottom |> set ~var:var ~vs:(Value.ValueSet vs) in
+    print_endline ("[set: bottom state]\n\tInitial state: " ^ to_string bottom ^ "\n\tstore after setting a value in bottom store: " ^ to_string store ^ "\n\tvariable to set: " ^ Variable.to_string var
+      ^ "\n\tvalue-set to set it to: " ^ RIC.to_string vs);
+    true
+
+  let%test "set: set memory variable in bottom state (relative address)" =
+    let var = Variable.mem (1l, Int 0l, Int 2l, ("a", 0l)) in
+    let vs = RIC.ric (1l, Int 0l, Int 2l, ("", 0l)) in
+    let store = bottom |> set ~var:var ~vs:(Value.ValueSet vs) in
+    print_endline ("[set: bottom state (relative address)]\n\tInitial state: " ^ to_string bottom ^ "\n\tstore after setting a value in bottom store: " ^ to_string store ^ "\n\tvariable to set: " ^ Variable.to_string var
+      ^ "\n\tvalue-set to set it to: " ^ RIC.to_string vs);
+    true
+end)

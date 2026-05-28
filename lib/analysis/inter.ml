@@ -57,6 +57,8 @@ module MakeSummaryBased (Transfer : Transfer.SUMMARY_TRANSFER)(Intra : Intra.INT
           let cfg = match Int32Map.find cfgs cfg_idx with
             | Some r -> r
             | None -> failwith "Inter: can't find CFG" in
+          (* Log.info
+            (Printf.sprintf "Analyzing cfg %s (name: %s)\n" (Int32.to_string cfg_idx) cfg.name); *)
           Log.info
             (Printf.sprintf "Analyzing cfg %s (name: %s)\n" (Int32.to_string cfg_idx) (Cfg.name cfg));
           (* Perform intra-procedural analysis *)

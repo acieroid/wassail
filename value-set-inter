@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# Check that at least one argument is given (the file)
+if [ -z "$1" ]; then
+  echo "Usage: value-set-inter <wasm_file> [additional_flags]"
+  exit 1
+fi
+
+# Save the first argument (WAT file) and shift so that $@ contains the remaining flags
+file="$1"
+shift
+
+# Schedule computed from the file
+schedule=$(dune exec -- wassail schedule "$file")
+
+# Now run value-set-inter with the file, computed schedule, and any extra flags
+dune exec -- wassail value-set-inter "$file" $schedule "$@"
