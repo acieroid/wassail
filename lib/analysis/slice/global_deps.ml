@@ -162,7 +162,7 @@ let calls_depend_on_globals
                         match globals_used_by_function with
                         | Top -> Instr.Label.Set.add acc instr.label
                         | NotTop globals_used ->
-                          if Global_read_domain.GlobalInstruction.Set.mem globals_used instr.label then
+                          if Global_read_domain.GlobalInstruction.Set.mem_label globals_used instr.label then
                             Instr.Label.Set.add acc instr.label
                           else
                             acc)
@@ -212,7 +212,7 @@ let indirect_calls_depend_on_globals
                             match globals_used_by_function with
                             | Top -> Instr.Label.Set.add acc instr.label
                             | NotTop globals_used ->
-                              if Global_read_domain.GlobalInstruction.Set.mem globals_used instr.label then
+                              if Global_read_domain.GlobalInstruction.Set.mem_label globals_used instr.label then
                                 Instr.Label.Set.add acc instr.label
                               else
                                 acc)

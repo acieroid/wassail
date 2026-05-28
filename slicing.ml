@@ -74,7 +74,9 @@ let slice_line_number =
       and outfile = anon ("output" %: string) 
       and no_pointer_analysis = flag "--no-pointers" no_arg ~doc:" Disables pointer analysis before slicing: les precise, but faster" 
       and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
-      if trace then Wassail.Log.enable_info ();
+      if trace then 
+        (Wassail.Log.enable_info ();
+        Wassail.Value_set.Options.print_trace := true);
       fun () ->
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
@@ -91,6 +93,7 @@ let slice_line_number =
             let (cfg_pointers, instructions_from_pointer_cfg, summaries) =
               Value_set.Options.show_intermediates := true;
               Value_set.run_pointer_analysis module_ cfg_raw funidx in
+            Log.info "-------------------- End of value-set analysis --------------------\n";
             let cfgdot = Cfg.to_dot cfg_pointers ~annot_str:Value_set.Domain.to_string in
             let () = Out_channel.write_all (filename ^ ".pointers.dot") ~data:cfgdot in
             Some (cfg_pointers, instructions_from_pointer_cfg, summaries))
@@ -101,7 +104,7 @@ let slice_line_number =
              | None -> failwith "No instruction found at this line"
              | Some instr -> instr in
         let slicing_criterion = Instr.label instr in
-        Log.info ("---------- Slicing of function " ^ (Int32.to_string funidx) ^ " ----------");
+        Log.info ("-------------------- Slicing of function " ^ (Int32.to_string funidx) ^ " --------------------");
         Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
         let funcinst = Slicing.slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) pointer_analysis in
         Log.info "done";

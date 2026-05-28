@@ -73,7 +73,7 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
     (fun _ _ -> Int32Map.empty)
     (fun global_defs wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
       Log.info
-        (Printf.sprintf "---------- Global-read analysis of SCC {%s} ----------"
+        (Printf.sprintf "-------------------- Global-read analysis of SCC {%s} --------------------"
           (String.concat ~sep:", " (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
       (* Run the global-read analysis. *)
       let annotated_scc = scc in
