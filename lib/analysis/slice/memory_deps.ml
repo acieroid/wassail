@@ -513,6 +513,12 @@ let make
   Instr.Label.Map.of_alist_exn (List.map loads_and_calls ~f:(fun label ->
     let enclosing_block = Cfg.find_enclosing_block_exn cfg label in
     let predecessors = Cfg.all_predecessors cfg enclosing_block in
+    let is_in_loop = List.exists predecessors ~f:(fun p ->
+          List.exists (Cfg.Edges.from cfg.edges p.idx) ~f:(fun (pred_of_p, _) ->
+              Int.equal pred_of_p enclosing_block.idx)) in
+    (* let get_store_label : 'a Instr.labelled_data -> Instr.Label.t option  = (function
+        | { instr = Store _ | MemoryCopy | MemoryFill | MemoryInit _ ; label = sl; _ } -> Some sl
+        | _ -> None) in *)
     (label, List.fold_left predecessors ~init:Instr.Label.Set.empty ~f:(fun acc pred_block ->
           Instr.Label.Set.union acc
             (match pred_block.content with
@@ -575,7 +581,8 @@ let make
             | Control _ | Entry | Return _ | Imported _ -> Instr.Label.Set.empty
             | Data instrs' ->
               let instrs' =
-                if Int.equal pred_block.idx enclosing_block.idx then
+                if Int.equal pred_block.idx enclosing_block.idx && not is_in_loop then
+                  (* Same block: only include stores that appear before the load/call, unless there is a loop (the block can reach itself) *)
                   List.take_while instrs' ~f:(fun i -> not (Instr.Label.equal i.label label)) 
                 else
                   instrs'
@@ -600,34 +607,33 @@ let make
                         ~store_offset
                         ~indirect_label
                         ~type_index
-                    | _ ->  Some store_label)
+                    | Data { instr = MemoryCopy; _ }  ->  Some store_label
+                    | _ -> assert false (* Not a load or call *))
+                  (* Let's see what depends on a memory.fill : *)
+                  | { instr = MemoryFill; label = store_label; _ } ->
+                    let () =
+                    (match pointer_analysis with
+                    | Some _ -> Log.warn "memory.fill instruction is not yet supported by pointer analysis";
+                    | None -> ())
+                    in
+                    Some store_label
+                  (* Let's see what depends on a memory.init : *)
+                  | { instr = MemoryInit _; label = store_label; _ } ->
+                    let () =
+                    (match pointer_analysis with
+                    | Some _ -> Log.warn "memory.init _ instruction is not yet supported by pointer analysis";
+                    | None -> ())
+                    in
+                    Some store_label
+                  (* Let's see what depends on a memory.copy : *)
+                  | { instr = MemoryCopy; label = store_label; _ } ->
+                    let () =
+                    (match pointer_analysis with
+                    | Some _ -> Log.warn "memory.copy instruction is not yet supported by pointer analysis";
+                    | None -> ())
+                    in
+                    Some store_label
                   | _ -> None)))))))
-(* =======
-  let deps = Instr.Label.Map.of_alist_exn (List.map loads_and_calls ~f:(fun label ->
-      let enclosing_block = Cfg.find_enclosing_block_exn cfg label in
-      let predecessors = Cfg.all_predecessors cfg enclosing_block in
-      let is_in_loop = List.exists predecessors ~f:(fun p ->
-          List.exists (Cfg.Edges.from cfg.edges p.idx) ~f:(fun (pred_of_p, _) ->
-              Int.equal pred_of_p enclosing_block.idx)) in
-      let get_store_label : 'a Instr.labelled_data -> Instr.Label.t option  = (function
-          | { instr = Store _ | MemoryCopy | MemoryFill | MemoryInit _ ; label = sl; _ } -> Some sl
-          | _ -> None) in
-      (label, List.fold_left predecessors ~init:Instr.Label.Set.empty ~f:(fun acc pred_block ->
-           Instr.Label.Set.union acc
-             (match pred_block.content with
-             | Call { instr = CallDirect _; label = cl; _ } -> Instr.Label.Set.singleton cl
-             | Call { instr = CallIndirect _; label = cl; _ } -> Instr.Label.Set.singleton cl
-             | Control _ | Entry | Return _ | Imported _ -> Instr.Label.Set.empty
-             | Data block_instrs ->
-               if Int.equal pred_block.idx enclosing_block.idx && not is_in_loop then
-                 (* Same block: only include stores that appear before the load/call, unless there is a loop (the block can reach itself) *)
-                 let preceding = List.take_while block_instrs
-                     ~f:(fun i -> not (Instr.Label.equal i.label label)) in
-                 Instr.Label.Set.of_list (List.filter_map preceding ~f:get_store_label)
-               else
-                 Instr.Label.Set.of_list (List.filter_map block_instrs ~f:get_store_label)))))) in
-  deps
->>>>>>> master *)
 
 let deps_for (deps : t) (instr : Instr.Label.t) : Instr.Label.Set.t =
   match Instr.Label.Map.find deps instr with
