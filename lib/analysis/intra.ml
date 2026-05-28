@@ -77,8 +77,6 @@ module Result (Transfer : Transfer.TRANSFER_BASE) = struct
     | _, Uninitialized -> r1
     | Simple s1, _ when Transfer.State.equal s1 Transfer.bottom -> r2
     | _, Simple s2 when Transfer.State.equal s2 Transfer.bottom -> r1
-    (* | Uninitialized, _ -> r2
-    | _, Uninitialized -> r1 *)
     | Simple st1, Simple st2 ->
       let joined = Transfer.State.join st1 st2 in
       Simple joined

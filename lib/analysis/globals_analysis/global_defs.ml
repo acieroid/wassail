@@ -1,28 +1,37 @@
 open Core
 
-(** Maps each global variable to the set of [global.set] instructions that may define it.
+(** Maps each global variable to the set of [global.set] instructions that may
+    define it.
 
-    Each definition is represented as a {!Global_read_domain.GlobalInstruction.t},
-    which pairs a textual identifier of the global (typically obtained via {!Var.to_string})
-    with the label of the corresponding instruction. *)
+    Each definition is represented as a
+    {!Global_read_domain.GlobalInstruction.t}, which pairs:
+    - a textual identifier of the global (typically obtained via
+      {!Var.to_string});
+    - the label of the corresponding [global.set] instruction. *)
 type t = Global_read_domain.GlobalInstruction.Set.t Var.Map.t
 
-(** Computes the global definitions present in [module_].
 
-    The result maps each global variable to the set of all [global.set]
-    instructions that syntactically assign to it across all functions of the module.
+(** Structural equality between two global-definition maps. *)
+let equal (x : t) (y : t) : bool =
+  Var.Map.equal Global_read_domain.GlobalInstruction.Set.equal x y
 
-    Internally, each function is analyzed independently using an intra-procedural
-    specification analysis (via {!Spec_analysis.analyze_intra1}), and all
-    instructions in the resulting CFG are inspected.
+(** Computes the set of syntactic global definitions present in [module_].
 
-    For each encountered [global.set g], a definition entry is added for the
+    The resulting map associates each global variable with all
+    [global.set] instructions that may assign to it anywhere in the module.
+
+    Each function is analyzed independently using
+    {!Spec_analysis.analyze_intra1} in order to obtain its CFG annotated with
+    instruction labels. All instructions of the CFG are then traversed, and
+    every encountered [global.set g] contributes a definition for the
     corresponding {!Var.Global} variable.
 
-    During the analysis of each function, global propagation
-    ({!Spec_inference.propagate_globals}) is temporarily disabled to avoid
-    interference with definition collection. Its original value is restored
-    after each successful function analysis. *)
+    During the analysis of each function,
+    {!Spec_inference.propagate_globals} is temporarily disabled to avoid
+    interference with definition collection.
+
+    The original value of {!Spec_inference.propagate_globals} is restored after
+    each function analysis, even if the analysis raises an exception. *)
 let make (module_ : Wasm_module.t) : t =
   let initial_propagation = !Spec_inference.propagate_globals in
   let functions = module_.funcs in
@@ -30,8 +39,13 @@ let make (module_ : Wasm_module.t) : t =
     ~init:Var.Map.empty
     ~f:(fun acc func ->
       Spec_inference.propagate_globals := false;
-      let cfg = Spec_analysis.analyze_intra1 module_ func.idx in
-      Spec_inference.propagate_globals := initial_propagation;
+      let cfg = 
+        Exn.protect
+          ~f:(fun () ->
+            Spec_analysis.analyze_intra1 module_ func.idx)
+          ~finally:(fun () ->
+            Spec_inference.propagate_globals := initial_propagation)
+      in
       List.fold 
         (Cfg.all_instructions_list cfg)
         ~init:acc
@@ -46,14 +60,15 @@ let make (module_ : Wasm_module.t) : t =
         )
       )
       
-(** The empty set of global definitions. *)
+(** The empty mapping of global definitions. *)
 let empty : t = Var.Map.empty
 
-(** Returns the set of [global.set] instructions that may define [global_var],
-    if any are known in [defs].
+(** Returns the set of [global.set] instructions associated with
+    [global_var], if any are known in [defs].
 
-    Each element of the returned set contains both the global identifier
-    (as a string) and the label of the defining instruction. *)
+    Each returned element contains:
+    - the textual identifier of the global;
+    - the label of a corresponding defining instruction. *)
 let get ~(defs : t) ~(global_var : Var.t) : Global_read_domain.GlobalInstruction.Set.t option =
   Var.Map.find defs global_var
 
@@ -77,14 +92,15 @@ TTTTTT  T:::::T  TTTTTT  E:::::E       EEEEEES:::::S            TTTTTT  T:::::T 
       TTTTTTTTTTT      EEEEEEEEEEEEEEEEEEEEEE SSSSSSSSSSSSSSS         TTTTTTTTTTT       SSSSSSSSSSSSSSS   
 *)
 
-(* 
-let%test_module "abstract store tests" = (module struct
+
+let%test_module "Global definitions tests" = (module struct
   let%test "Global_defs_tests" =
     print_endline "_______ _____________________ _______\n        Global definitions        \n------- --------------------- -------\n";
     true
 
   let%test "global defs from a sample wat file" =
-    let module_ : Wasm_module.t = 
+    print_endline "[Testing global definitions in a sample wat file]";
+    let global_defs : t = 
       "(module
         ;; Three mutable globals
         (global $g0 (mut i32) (i32.const 0))
@@ -116,8 +132,8 @@ let%test_module "abstract store tests" = (module struct
           global.set $g1
         )
       )"
-    |> Wasm_module.of_string in
-    let global_defs = module_ |> make in
+    |> Wasm_module.of_string
+    |> make in
     let g0_1 : Instr.Label.t = { section = Function 0l; id = 1 } in
     let g0_2 : Instr.Label.t = { section = Function 0l; id = 5 } in
     let g0_defs : Global_read_domain.GlobalInstruction.Set.t = (Global_read_domain.GlobalInstruction.Set.of_list [("g0", g0_1); ("g0", g0_2)]) in
@@ -127,9 +143,40 @@ let%test_module "abstract store tests" = (module struct
     let g1_defs : Global_read_domain.GlobalInstruction.Set.t = (Global_read_domain.GlobalInstruction.Set.of_list [("g1", g1_1); ("g1", g1_2); ("g1", g1_3)]) in
     let g2 : Instr.Label.t = { section = Function 1l; id = 3 } in
     let g2_defs : Global_read_domain.GlobalInstruction.Set.t = (Global_read_domain.GlobalInstruction.Set.singleton ("g2", g2)) in
-    let expected = Var.Map.of_alist_exn [Var.Global 0, g0_defs; Var.Global 1, g1_defs; Var.Global 2, g2_defs] in
-    print_endline (Wasm_module.to_string module_);
-    print_endline "Global definitions:";
-    print_endline (Var.Map.to_string global_defs Global_read_domain.GlobalInstruction.Set.to_string);
-    not (Var.Map.equal global_defs)
-end) *)
+    let expected : t = Var.Map.of_alist_exn [Var.Global 0, g0_defs; Var.Global 1, g1_defs; Var.Global 2, g2_defs] in
+    print_endline "\tGlobal definitions:";
+    print_endline ("\t" ^ Var.Map.to_string global_defs Global_read_domain.GlobalInstruction.Set.to_string);
+    equal expected global_defs
+
+  let%test "no global defs" =
+    print_endline "[No global definitions]";
+    let global_defs =
+      "(module
+        (global $g0 (mut i32) (i32.const 0))
+        (func $f
+          global.get $g0
+          drop))"
+      |> Wasm_module.of_string
+      |> make
+    in
+    equal empty global_defs
+  
+
+  let%test "get unknown global returns none" =
+    print_endline "[get returns None for unknown global]";
+    let defs = empty in
+    Option.is_none (get ~defs ~global_var:(Var.Global 0))
+
+  let%test "get known global returns definitions" =
+    print_endline "[get returns the right label set]";
+    let label = { Instr.Label.section = Function 0l; id = 1 } in
+    let defs_set =
+      Global_read_domain.GlobalInstruction.Set.singleton ("g0", label)
+    in
+    let defs =
+      Var.Map.of_alist_exn [ Var.Global 0, defs_set ]
+    in
+    match get ~defs ~global_var:(Var.Global 0) with
+    | Some actual -> Global_read_domain.GlobalInstruction.Set.equal defs_set actual
+    | None -> false
+end)
