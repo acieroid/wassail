@@ -17,7 +17,6 @@ let count (wasm_mod : Wasm_module.t) : t =
       ~f:(fun counts instr ->
           let counts' = go_over_instructions counts fidx (Instr.instructions_contained_in instr) in
           increase_count counts' instr) in
-  List.fold_left wasm_mod.funcs ~init:StringMap.empty
+  Wasm_module.fold_defined_funcs wasm_mod ~init:StringMap.empty
     ~f:(fun acc func ->
       go_over_instructions acc func.idx func.code.body)
-

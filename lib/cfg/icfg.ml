@@ -90,7 +90,7 @@ module ICFG = struct
       | _ -> ()
     and collect_calls_instrs (instrs : 'a Instr.t list) : unit =
       List.iter instrs ~f:collect_calls in
-    List.iter wasm_mod.funcs
+    Wasm_module.iter_defined_funcs wasm_mod
       ~f:(fun f ->
           List.iter f.code.body
             ~f:collect_calls);
@@ -493,9 +493,9 @@ module Test = struct
     all last (fun n -> predecessors icfg n |> List.map ~f:fst)
 
   let print_diff (expected : BlockIdx.t tree) (actual : BlockIdx.t tree) : unit =
-    Log.error (Printf.sprintf "expected: %s\nactual: %s\n"
-                 (tree_to_string BlockIdx.to_string expected)
-                 (tree_to_string BlockIdx.to_string actual))
+    Log.error (fun () -> Printf.sprintf "expected: %s\nactual: %s\n"
+                  (tree_to_string BlockIdx.to_string expected)
+                  (tree_to_string BlockIdx.to_string actual))
 
   let expect_successors (icfg : 'a t) (expected : BlockIdx.t tree) : bool =
     let actual = all_successors icfg in

@@ -15,7 +15,7 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
        (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs module_ `Bottom)))
     (fun data module_ cfg ->
        Log.info
-         (Printf.sprintf "---------- Taint analysis of function %s ----------" (Int32.to_string cfg.idx));
+         (fun () -> Printf.sprintf "---------- Taint analysis of function %s ----------" (Int32.to_string cfg.idx));
        (* Run the taint analysis *)
        (* Options.use_relational := false; *)
        let annotated_cfg = (* Relational.Transfer.dummy_annotate  *) cfg in
@@ -33,11 +33,11 @@ let check (expected : Summary.t) (actual : Summary.t) : bool =
     if Summary.equal actual expected then
       true
     else begin
-      Log.imprecision (Printf.sprintf "summaries not equal: expected: %s; actual: %s" (Summary.to_string expected) (Summary.to_string actual));
+      Log.imprecision (fun () -> Printf.sprintf "summaries not equal: expected: %s; actual: %s" (Summary.to_string expected) (Summary.to_string actual));
       true (* not equal, but it does subsume so the test does not fail *)
     end
   else begin
-    Log.error (Printf.sprintf "summaries does not subsume: expected: %s; actual: %s" (Summary.to_string expected) (Summary.to_string actual));
+    Log.error (fun () -> Printf.sprintf "summaries does not subsume: expected: %s; actual: %s" (Summary.to_string expected) (Summary.to_string actual));
     false
   end
 
@@ -46,13 +46,13 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
     (fun _cfgs _wasm_mod -> Int32Map.empty)
     (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
        Log.info
-         (Printf.sprintf "---------- Taint analysis of SCC {%s} ----------"
-            (String.concat ~sep:"," (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
+         (fun () -> Printf.sprintf "---------- Taint analysis of SCC {%s} ----------"
+             (String.concat ~sep:"," (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
        (* Run the taint analysis *)
        (* Options.use_relational := false; *)
        let annotated_scc = scc (* Int32Map.map scc ~f:Relational.Transfer.dummy_annotate *) in
        let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_spec_cfg, _taint_cfg, summary) -> summary) in
-       let summaries' = List.fold_left wasm_mod.imported_funcs
+       let summaries' = Wasm_module.fold_imported_functions wasm_mod
            ~init:summaries
            ~f:(fun summaries desc ->
                Int32Map.set summaries ~key:desc.idx ~data:(Summary.of_import desc.name wasm_mod.nglobals desc.arguments desc.returns)) in
@@ -63,10 +63,12 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
 
 (** Extracts the index of functions that are considered sinks, based on their names *)
 let find_sinks_from_names (module_ : Wasm_module.t) (names : StringSet.t) : Int32Set.t =
-  let funs = List.filter_map module_.funcs ~f:(fun f ->
-      match Wasm_module.get_funcname module_ f.idx with
-      | Some name when StringSet.mem names name -> Some f.idx
-      | _ -> None) in
+  let funs =
+    Wasm_module.fold_defined_funcs module_ ~init:[] ~f:(fun acc f ->
+        match Wasm_module.get_funcname module_ f.idx with
+        | Some name when StringSet.mem names name -> f.idx :: acc
+        | _ -> acc)
+  in
   Int32Set.of_list funs
 
 module TestIntra = struct

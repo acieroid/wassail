@@ -73,7 +73,7 @@ let preanalysis (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (cfg_instr
     set of instructions that are part of the slice, as a set of instruction
     labels. *)
 let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) (preanalysis : preanalysis_results) (criteria : Instr.Label.Set.t) : (Instr.Label.Set.t * (Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t * Time_float.Span.t)) =
-  Log.info (Printf.sprintf "Slicing with criteria %s" (Instr.Label.Set.to_string criteria));
+  Log.info (fun () -> Printf.sprintf "Slicing with criteria %s" (Instr.Label.Set.to_string criteria));
   let t0 = Time_float.now () in
   let rec loop (worklist : InSlice.Set.t) (slice : Instr.Label.Set.t) (visited : InSlice.Set.t) : Instr.Label.Set.t =
     (* Perform backward slicing as follows:
@@ -95,7 +95,7 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
       (* Already seen this slice part, no need to process it again *)
       loop (InSlice.Set.remove worklist slicepart) slice visited
     | Some slicepart ->
-      Log.info (Printf.sprintf "Looking at instruction %s" (InSlice.to_string slicepart));
+      Log.info (fun () -> Printf.sprintf "Looking at instruction %s" (InSlice.to_string slicepart));
       (* Add instr to the current slice *)
       let slice' = Instr.Label.Set.add slice slicepart.label in
       let visited' = InSlice.Set.add visited slicepart in
@@ -112,8 +112,8 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
               let data_deps : InSlice.Set.t = match def with
                 | Use_def.Def.Instruction (instr', var) ->
                   Log.info
-                    (Printf.sprintf "Instruction %s (%s) is part of the slice due to its data dependence on %s"
-                       (Instr.Label.to_string instr') (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions instr')) (Var.to_string var));
+                    (fun () -> Printf.sprintf "Instruction %s (%s) is part of the slice due to its data dependence on %s"
+                        (Instr.Label.to_string instr') (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions instr')) (Var.to_string var));
                   InSlice.Set.singleton (InSlice.make instr' (Some var) cfg_instructions)
                 | Use_def.Def.Entry _ -> InSlice.Set.empty
                 | Use_def.Def.Constant _ -> InSlice.Set.empty in
@@ -124,8 +124,8 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
         | Some deps -> InSlice.Set.of_list (List.map (Instr.Label.Set.to_list deps)
                                               ~f:(fun label ->
                                                   Log.info
-                                                    (Printf.sprintf "Instruction %s (%s) is part of the slice due to control dependences"
-                                                       (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
+                                                    (fun () -> Printf.sprintf "Instruction %s (%s) is part of the slice due to control dependences"
+                                                        (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
                                                   InSlice.make label None cfg_instructions)) in
       let worklist'' = InSlice.Set.union worklist' control_deps in
       (* For instr' in mem_deps(instr): add instr to W *)
@@ -133,8 +133,8 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
           (InSlice.Set.of_list
              (List.map ~f:(fun label ->
                   Log.info
-                    (Printf.sprintf "Instruction %s (%s) is part of the slice due to memory dependences"
-                       (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
+                    (fun () -> Printf.sprintf "Instruction %s (%s) is part of the slice due to memory dependences"
+                        (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
                   InSlice.make label None cfg_instructions)
                 (Instr.Label.Set.to_list (Memory_deps.deps_for preanalysis.mem_dependencies slicepart.label)))) in
       loop (InSlice.Set.remove worklist''' slicepart) slice' visited' in
@@ -150,7 +150,7 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
               | Some instrs -> begin match Instr.Label.Set.find_map instrs
                                              ~f:(fun i -> if Instr.Label.Set.mem slice i then Some i else None) with
                 | Some label' ->
-                    Log.info (Printf.sprintf "Agrawal tells us to add %s to the slice because there is a dependency to %s\n" (Instr.Label.to_string label) (Instr.Label.to_string label'));
+                    Log.info (fun () -> Printf.sprintf "Agrawal tells us to add %s to the slice because there is a dependency to %s\n" (Instr.Label.to_string label) (Instr.Label.to_string label'));
                     Instr.Label.Set.add slice label
                   | None -> slice
                 end
@@ -230,12 +230,12 @@ let type_of_call
       | NotBottom s -> Some s.vstack in
   match i.instr, vstack_before with
   | (_, None) ->
-    Log.warn (Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
+    Log.warn (fun () -> Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
     (* instruction is unreachable, treating it as having no effect *)
     ([], [])
   | (CallDirect (_, (in_type, out_type), _), _) -> (List.map in_type ~f:(fun t -> T t), List.map out_type ~f:(fun t -> T t))
   | (CallIndirect (_, _, (in_type, out_type), _), _) ->
-      ((List.map in_type ~f:(fun t -> T t)) @ [T Type.I32], (List.map out_type ~f:(fun t -> T t)))
+    (List.rev (T Type.I32 :: List.rev_map in_type ~f:(fun t -> T t)), List.map out_type ~f:(fun t -> T t))
 
 let type_of_control
     (i : ('a Instr.control, 'a) Instr.labelled)
@@ -255,7 +255,7 @@ let type_of_control
     (List.map ~f:(fun t -> T t) (fst bt),
      List.map ~f:(fun t -> T t) (snd bt))
   | (_, None) ->
-    Log.warn (Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
+    Log.warn (fun () -> Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
     (* instruction is unreachable, treating it as having no effect *)
     ([], [])
   | (_, Some vstack_before) ->
@@ -274,7 +274,7 @@ let type_of_control
       ([T Type.I32], List.mapi rest ~f:(fun i _ -> Any (string_of_int i)))
     | BrTable (_, _) ->
       let vstack = List.drop vstack_before 1 in
-      ([T Type.I32] @ (List.mapi vstack ~f:(fun i _ -> Any (string_of_int i))), [])
+      (T Type.I32 :: List.mapi vstack ~f:(fun i _ -> Any (string_of_int i)), [])
     | Return ->
       (List.mapi vstack_before ~f:(fun i _ -> Any (string_of_int i)),
        (* was this, but it actually doesn't leave anything on the stack:
@@ -297,7 +297,7 @@ let dummy_instrs (t : instr_type_element list * instr_type_element list) (next_l
   let input = List.drop (fst t) prefix in
   let output = List.drop (snd t) prefix in
   (* we pop everything off the stack, then we push *)
-  let input = List.map input ~f:(fun _ -> { Instr.instr = Instr.Drop; label = dummy_label (); line_number = -1; annotation_before = (); annotation_after = (); }) in
+  let input_rev = List.rev_map input ~f:(fun _ -> { Instr.instr = Instr.Drop; label = dummy_label (); line_number = -1; annotation_before = (); annotation_after = (); }) in
   let push (v : Prim_value.t) = { Instr.instr = Instr.Const v; label = dummy_label (); line_number = -1; annotation_before = (); annotation_after = () } in
   let output = List.map output ~f:(function
       | Any _ -> push (Prim_value.I32 0l)
@@ -305,7 +305,7 @@ let dummy_instrs (t : instr_type_element list * instr_type_element list) (next_l
       | T Type.I64 -> push (Prim_value.I64 0L)
       | T Type.F32 -> push (Prim_value.F32 (Wasm.F32.of_float 0.))
       | T Type.F64 -> push (Prim_value.F64 (Wasm.F64.of_float 0.))) in
-  input @ output
+  List.rev_append input_rev output
 
 (** The type of an instruction on the stack: positive if it expects value on the stack, negative otherwise *)
 let type_of (i : 'a Instr.t) (cfg : 'a Cfg.t) (instructions_map : Spec_domain.t Instr.t Instr.Label.Map.t) : (instr_type_element list * instr_type_element list) =
@@ -325,7 +325,7 @@ let instrs_type (instrs : unit Instr.t list) (cfg : 'a Cfg.t) (instructions_map 
             (initial_stack, rest)
           | [] ->
             (t :: initial_stack, current_stack)) in
-      (initial_stack, (List.rev o) @ current_stack)) in
+      (initial_stack, List.rev_append o current_stack)) in
   List.rev input, output
 
 let counter : int ref = ref 0
@@ -340,11 +340,11 @@ let replace_with_equivalent_instructions (instrs : unit Instr.t list) (cfg : 'a 
   if List.is_empty instrs then instrs else
     let t = instrs_type instrs cfg instructions_map in
     let replaced = List.map (dummy_instrs t next_label) ~f:(fun i -> Instr.Data i) in
-   Log.info (Printf.sprintf "Replacing instructions %s of type %s -> %s with %s"
-                (String.concat ~sep:"," (List.map ~f:Instr.to_string instrs))
-                (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (fst t)))
-                (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (snd t)))
-                (String.concat ~sep:"," (List.map ~f:Instr.to_string replaced)));
+    Log.info (fun () -> Printf.sprintf "Replacing instructions %s of type %s -> %s with %s"
+                 (String.concat ~sep:"," (List.map ~f:Instr.to_string instrs))
+                 (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (fst t)))
+                 (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (snd t)))
+                 (String.concat ~sep:"," (List.map ~f:Instr.to_string replaced)));
     replaced
 
 (* Check if the body is empty or only consist only of dummy instructions *)
@@ -353,52 +353,56 @@ let body_can_be_removed (body : unit Instr.t list) : bool =
   List.for_all body ~f:(fun instr -> Instr.Label.equal_section (Instr.label instr).section Instr.Label.Dummy)
 
 let rec slice (cfg : 'a Cfg.t) (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) (original_instructions : unit Instr.t list) (instructions_to_keep : Instr.Label.Set.t): unit Instr.t list =
-  let rec loop (instrs : unit Instr.t list) (to_remove_rev : unit Instr.t list) : unit Instr.t list =
+  let flush_removed (to_remove_rev : unit Instr.t list) (out_rev : unit Instr.t list) : unit Instr.t list =
+    List.rev_append
+      (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions)
+      out_rev
+  in
+  let rec loop (instrs : unit Instr.t list) (to_remove_rev : unit Instr.t list) (out_rev : unit Instr.t list) : unit Instr.t list =
     match instrs with
-    | [] -> replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions
+    | [] -> List.rev (flush_removed to_remove_rev out_rev)
     | (Control ({ instr = Block (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
       (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: block with arity greater than 0"; *)
       let sliced_body = slice cfg cfg_instructions body instructions_to_keep in
       (* XXX: we could also drop the block if it is not empty but only contains instructions that are not part of the slice (basically, only dummy instructions) *)
       if body_can_be_removed sliced_body then
         (* Block body is empty, drop the block entirely *)
-        loop rest (entire_instr :: to_remove_rev)
+        loop rest (entire_instr :: to_remove_rev) out_rev
       else
-        (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @ [Instr.Control { instr with instr = Block (bt, arity, sliced_body) }] @ loop rest []
+        loop rest [] (Instr.Control { instr with instr = Block (bt, arity, sliced_body) } :: flush_removed to_remove_rev out_rev)
     | (Control ({ instr = Loop (bt, arity, body); _ } as instr)) as entire_instr :: rest ->
       (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: loop with arity greater than 0"; *)
       let sliced_body = slice cfg cfg_instructions body instructions_to_keep in
       if body_can_be_removed sliced_body then
-        loop rest (entire_instr :: to_remove_rev)
+        loop rest (entire_instr :: to_remove_rev) out_rev
       else
-        (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @ [Instr.Control { instr with instr = Loop (bt, arity, sliced_body) }] @ loop rest []
+        loop rest [] (Instr.Control { instr with instr = Loop (bt, arity, sliced_body) } :: flush_removed to_remove_rev out_rev)
     | (Control ({ instr = If (bt, arity, then_, else_); _ } as instr)) as entire_instr :: rest ->
       (* if (fst arity) > 0 || (snd arity) > 0 then failwith "Unsupported: if with arity greater than 0"; *)
       let sliced_then = slice cfg cfg_instructions then_ instructions_to_keep in
       let sliced_else = slice cfg cfg_instructions else_ instructions_to_keep in
       if body_can_be_removed sliced_then && body_can_be_removed sliced_else then
-        loop rest (entire_instr :: to_remove_rev)
+        loop rest (entire_instr :: to_remove_rev) out_rev
       else
-        (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @
-        [Instr.Control { instr with instr = If (bt, arity,
-                                                sliced_then,
-                                                sliced_else) }] @ loop rest []
+        loop rest [] (Instr.Control { instr with instr = If (bt, arity,
+                                                             sliced_then,
+                                                             sliced_else) } :: flush_removed to_remove_rev out_rev)
     | instr :: rest when Instr.Label.Set.mem instructions_to_keep (Instr.label instr) ->
-    (replace_with_equivalent_instructions (List.rev to_remove_rev) cfg cfg_instructions) @ [instr] @ loop rest []
+      loop rest [] (instr :: flush_removed to_remove_rev out_rev)
     | instr :: rest ->
-      loop rest (instr :: to_remove_rev) in
-  loop original_instructions []
+      loop rest (instr :: to_remove_rev) out_rev in
+  loop original_instructions [] []
 
 let slice_to_funcinst (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (cfg_instructions : Spec_domain.t Instr.t Instr.Label.Map.t) ?instrs:(instructions_in_slice : Instr.Label.Set.t option = None) (slicing_criteria : Instr.Label.Set.t) : Func_inst.t =
   let instructions_in_slice = match instructions_in_slice with
     | Some instrs -> instrs
     | None ->
-      Log.info "Computing instructions part of the slice";
+      Log.info (fun () -> "Computing instructions part of the slice");
       let instrs, _ = instructions_to_keep module_ cfg cfg_instructions (preanalysis module_ cfg cfg_instructions) slicing_criteria in
       instrs in
-  Log.info "Clearing annotations";
+  Log.info (fun () -> "Clearing annotations");
   let unit_cfg = Cfg.clear_annotations cfg in
-  Log.info "Constructing a valid slice";
+  Log.info (fun () -> "Constructing a valid slice");
   let instructions = slice unit_cfg cfg_instructions (Cfg.body unit_cfg) instructions_in_slice  in
   { idx = cfg.idx;
     name = Some cfg.name;
@@ -607,16 +611,16 @@ module Test = struct
      let _, expected_cfg = build_cfg ~fidx sliced in
      let expected = Cfg.body expected_cfg in
      if List.length expected <> List.length actual then begin
-       Log.error (Printf.sprintf "slices are different:\n---expected:---\n%s\n---\nand\n---actual:---\n%s\n---\n"
-                    (Instr.list_to_string expected (fun () -> ""))
-                    (Instr.list_to_string actual (fun () -> "")));
+       Log.error (fun () -> Printf.sprintf "slices are different:\n---expected:---\n%s\n---\nand\n---actual:---\n%s\n---\n"
+                     (Instr.list_to_string expected (fun () -> ""))
+                     (Instr.list_to_string actual (fun () -> "")));
        false
      end else
        List.equal (fun x y ->
            if Instr.equal (fun () () -> true) (Instr.drop_labels x) (Instr.drop_labels y) then
              true
            else begin
-             Log.error (Printf.sprintf "instruction not equal: %s != %s\n" (Instr.to_string x) (Instr.to_string y));
+             Log.error (fun () -> Printf.sprintf "instruction not equal: %s != %s\n" (Instr.to_string x) (Instr.to_string y));
              false
            end) expected actual
 
@@ -1640,7 +1644,7 @@ module Test = struct
   (* XXX: fix this one eventually *)
   (*
   let%test "slicing with unreachable return" =
-    Log.warn "STARTING TEST\n----------\n--------\n%!";
+    Log.warn (fun () -> "STARTING TEST\n----------\n--------\n%!");
     let original = "(module
 (type (;0;) (func (result i32)))
 (func (;0;) (type 0) (result i32)

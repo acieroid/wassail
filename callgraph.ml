@@ -16,7 +16,7 @@ let callgraph =
                 | TableImport _ -> true
                 | _ -> false)) in
         if contains_table_import then
-          Log.warn "Call graph generation cannot deal with imported tables if they are used for indirect calls";
+          Log.warn (fun () -> "Call graph generation cannot deal with imported tables if they are used for indirect calls");
         output_to_file file_out (Call_graph.to_dot cg))
 
 let callgraph_adjlist =

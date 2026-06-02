@@ -68,6 +68,14 @@ module Result (Transfer : Transfer.TRANSFER_BASE) = struct
     | Simple s -> Printf.sprintf "simple: %s" (Transfer.State.to_string s)
     | Branch (s1, s2) -> Printf.sprintf "branch: %s\nand: %s" (Transfer.State.to_string s1) (Transfer.State.to_string s2)
 
+  let equal (r1 : t) (r2 : t) : bool =
+    match r1, r2 with
+    | Uninitialized, Uninitialized -> true
+    | Simple s1, Simple s2 -> Transfer.State.equal s1 s2
+    | Branch (s1, s2), Branch (s1', s2') ->
+      Transfer.State.equal s1 s1' && Transfer.State.equal s2 s2'
+    | _ -> false
+
   let join  (r1 : t) (r2 : t) : t =
     match (r1, r2) with
     | Simple s1, _ when Transfer.State.equal s1 Transfer.bottom -> r2
@@ -142,10 +150,8 @@ module Make
         analysis_data := { !analysis_data with instrs = Map.set !analysis_data.instrs ~key:instr.label ~data:(state, poststate) };
         poststate in
 
-    (* Analyzes one block, returning the state before and after this block *)
-    let analyze_block (block_idx : Cfg.BlockIdx.t) : Transfer.State.t * Result.t =
+    let in_state (block_idx : Cfg.BlockIdx.t) (block : 'a Basic_block.t) : Transfer.State.t =
       (* The block to analyze *)
-      let block = Cfg.find_block_exn cfg block_idx in
       let incoming = Cfg.predecessors cfg block_idx in
       (* in_state is the join of all the the out_state of the predecessors.
          Special case: if the out_state of a predecessor is not a simple one, that means we are the target of a break.
@@ -167,7 +173,12 @@ module Make
           Transfer.init module_ (Wasm_module.get_funcinst module_ block.fidx)
         else
           Transfer.merge_flows module_ cfg block pred_states in
-      (* We analyze it *)
+      in_state
+    in
+    (* Analyzes one block, returning the state before and after this block *)
+    let analyze_block (block_idx : Cfg.BlockIdx.t) : Transfer.State.t * Result.t =
+      let block = Cfg.find_block_exn cfg block_idx in
+      let in_state = in_state block_idx block in
       in_state, transfer block in_state
     in
     let rec fixpoint (worklist : Cfg.BlockIdx.Set.t) (iteration : int) : unit =
@@ -175,30 +186,36 @@ module Make
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = Set.min_elt_exn worklist in
-        Log.debug (Printf.sprintf "-----------------------\nAnalyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
-        let (in_state, out_state) = analyze_block block_idx in
-        Log.debug (Printf.sprintf "in_state was: %s, out_state is: %s\n" (Transfer.State.to_string in_state) (Result.to_string out_state));
-        (* Has out state changed? *)
-        let previous_out_state = after_block block_idx in
-        match previous_out_state with
-        | st when Result.compare out_state st = 0 ->
-          (* Didn't change, we can safely ignore the successors *)
+        Log.debug (fun () -> Printf.sprintf "-----------------------\nAnalyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
+        let block = Cfg.find_block_exn cfg block_idx in
+        let in_state = in_state block_idx block in
+        match Map.find !analysis_data.blocks block_idx with
+        | Some (previous_in_state, _) when Transfer.State.equal in_state previous_in_state ->
           fixpoint (IntSet.remove worklist block_idx) (iteration+1)
-        | _ ->
+        | previous_result ->
+          let out_state = transfer block in_state in
+          Log.debug (fun () -> Printf.sprintf "in_state was: %s, out_state is: %s\n" (Transfer.State.to_string in_state) (Result.to_string out_state));
+          (* Has out state changed? *)
+          let previous_out_state = Option.value_map previous_result ~default:bottom ~f:snd in
+          if Result.equal out_state previous_out_state then
+            (* Didn't change, we can safely ignore the successors *)
+            fixpoint (IntSet.remove worklist block_idx) (iteration+1)
+          else begin
           (* Update the out state in the analysis results.
              We join with the previous results *)
-          let new_out_state =
-            (* XXX: Join may not be necessary here, as long as out_state is greater than previous_out_state *)
-            if Cfg.is_loop_head cfg block_idx then
-              Result.widen previous_out_state (Result.join previous_out_state out_state)
-            else
+            let new_out_state =
+              (* XXX: Join may not be necessary here, as long as out_state is greater than previous_out_state *)
+              if Cfg.is_loop_head cfg block_idx then
+                Result.widen previous_out_state (Result.join previous_out_state out_state)
+              else
 
-              Result.join previous_out_state out_state
-          in
-          analysis_data := { !analysis_data with blocks = Map.set !analysis_data.blocks ~key:block_idx ~data:(in_state, new_out_state) };
-          (* And recurse by adding all successors *)
-          let successors = Cfg.successors cfg block_idx in
-          fixpoint (IntSet.union (IntSet.remove worklist block_idx) (Cfg.BlockIdx.Set.of_list successors)) (iteration+1)
+                Result.join previous_out_state out_state
+            in
+            analysis_data := { !analysis_data with blocks = Map.set !analysis_data.blocks ~key:block_idx ~data:(in_state, new_out_state) };
+            (* And recurse by adding all successors *)
+            let successors = Cfg.successors cfg block_idx in
+            fixpoint (IntSet.union (IntSet.remove worklist block_idx) (Cfg.BlockIdx.Set.of_list successors)) (iteration+1)
+          end
     in
     (* Performs narrowing by re-analyzing once each block *)
     let rec narrow (blocks : Cfg.BlockIdx.t list) : unit = match blocks with
@@ -295,10 +312,8 @@ module MakeSumm
         analysis_data := { !analysis_data with instrs = Map.set !analysis_data.instrs ~key:instr.label ~data:(state, poststate) };
         poststate in
 
-    (* Analyzes one block, returning the state after this block *)
-    let analyze_block (block_idx : Cfg.BlockIdx.t) : Transfer.State.t * Result.t =
+    let in_state (block_idx : Cfg.BlockIdx.t) (block : 'a Basic_block.t) : Transfer.State.t =
       (* The block to analyze *)
-      let block = Cfg.find_block_exn cfg block_idx in
       let incoming = Cfg.predecessors cfg block_idx in
       (* in_state is the join of all the the out_state of the predecessors.
          Special case: if the out_state of a predecessor is not a simple one, that means we are the target of a break.
@@ -320,7 +335,12 @@ module MakeSumm
           Transfer.init module_ (Wasm_module.get_funcinst module_ block.fidx)
         else
           Transfer.merge_flows module_ cfg block pred_states in
-      (* We analyze it *)
+      in_state
+    in
+    (* Analyzes one block, returning the state after this block *)
+    let analyze_block (block_idx : Cfg.BlockIdx.t) : Transfer.State.t * Result.t =
+      let block = Cfg.find_block_exn cfg block_idx in
+      let in_state = in_state block_idx block in
       in_state, transfer block in_state
     in
 
@@ -329,29 +349,35 @@ module MakeSumm
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = Set.min_elt_exn worklist in
-        Log.debug (Printf.sprintf "-----------------------\n Analyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
-        let (in_state, out_state) = analyze_block block_idx in
-        Log.debug (Printf.sprintf "out_state is: %s\n" (Result.to_string out_state));
-        (* Has out state changed? *)
-        let previous_out_state = after_block block_idx in
-        match previous_out_state with
-        | st when Result.compare out_state st = 0 ->
-          (* Didn't change, we can safely ignore the successors *)
+        Log.debug (fun () -> Printf.sprintf "-----------------------\n Analyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
+        let block = Cfg.find_block_exn cfg block_idx in
+        let in_state = in_state block_idx block in
+        match Map.find !analysis_data.blocks block_idx with
+        | Some (previous_in_state, _) when Transfer.State.equal in_state previous_in_state ->
           fixpoint (IntSet.remove worklist block_idx) (iteration+1)
-        | _ ->
+        | previous_result ->
+          let out_state = transfer block in_state in
+          Log.debug (fun () -> Printf.sprintf "out_state is: %s\n" (Result.to_string out_state));
+          (* Has out state changed? *)
+          let previous_out_state = Option.value_map previous_result ~default:bottom ~f:snd in
+          if Result.equal out_state previous_out_state then
+            (* Didn't change, we can safely ignore the successors *)
+            fixpoint (IntSet.remove worklist block_idx) (iteration+1)
+          else begin
           (* Update the out state in the analysis results.
              We join with the previous results *)
-          let new_out_state =
-            (* XXX: Join may not be necessary here, as long as out_state is greater than previous_out_state. But it is safe and should not change precision (as x \sqsubseteq y => x \join y = y) *)
-            if Cfg.is_loop_head cfg block_idx then
-              Result.widen previous_out_state (Result.join previous_out_state out_state)
-            else
-              Result.join previous_out_state out_state
-          in
-          analysis_data := { !analysis_data with blocks = Map.set !analysis_data.blocks ~key:block_idx ~data:(in_state, new_out_state) };
-          (* And recurse by adding all successors *)
-          let successors = Cfg.successors cfg block_idx in
-          fixpoint (IntSet.union (IntSet.remove worklist block_idx) (Cfg.BlockIdx.Set.of_list successors)) (iteration+1)
+            let new_out_state =
+              (* XXX: Join may not be necessary here, as long as out_state is greater than previous_out_state. But it is safe and should not change precision (as x \sqsubseteq y => x \join y = y) *)
+              if Cfg.is_loop_head cfg block_idx then
+                Result.widen previous_out_state (Result.join previous_out_state out_state)
+              else
+                Result.join previous_out_state out_state
+            in
+            analysis_data := { !analysis_data with blocks = Map.set !analysis_data.blocks ~key:block_idx ~data:(in_state, new_out_state) };
+            (* And recurse by adding all successors *)
+            let successors = Cfg.successors cfg block_idx in
+            fixpoint (IntSet.union (IntSet.remove worklist block_idx) (Cfg.BlockIdx.Set.of_list successors)) (iteration+1)
+          end
     in
     (* Performs narrowing by re-analyzing once each block *)
     let rec narrow (blocks : Cfg.BlockIdx.t list) : unit = match blocks with
@@ -400,7 +426,7 @@ module SummaryCallAdapter (Transfer : Transfer.SUMMARY_TRANSFER)
       match Map.find summaries f with
       | None ->
         if Int32.(f < module_.nfuncimports) then
-          let desc = List32.nth_exn module_.imported_funcs f in
+          let desc = Wasm_module.get_imported_func module_ f in
           Transfer.imported module_ desc instr.annotation_before instr.annotation_after state
         else
           (* This function depend on another function that has not been analyzed yet, so it is part of some recursive loop. It will eventually stabilize *)
@@ -503,8 +529,7 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
           poststate in
       result in
 
-    (* Analyzes one block, returning the state after this block *)
-    let analyze_block (block_idx : Icfg.BlockIdx.t) (block : 'a Basic_block.t) : Transfer.State.t * Result.t =
+    let in_state (block_idx : Icfg.BlockIdx.t) (block : 'a Basic_block.t) : Transfer.State.t =
       let incoming = Icfg.predecessors icfg block_idx in
       (* in_state is the join of all the the out_state of the predecessors.
          Special case: if the out_state of a predecessor is not a simple one, that means we are the target of a break.
@@ -528,7 +553,11 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
           Transfer.init module_ (Wasm_module.get_funcinst module_ block.fidx)
         else
           Transfer.merge_flows module_ cfg block pred_states in
-      (* We analyze it *)
+      in_state
+    in
+    (* Analyzes one block, returning the state after this block *)
+    let analyze_block (block_idx : Icfg.BlockIdx.t) (block : 'a Basic_block.t) : Transfer.State.t * Result.t =
+      let in_state = in_state block_idx block in
       in_state, transfer block in_state
     in
 
@@ -538,41 +567,46 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
       else
         let block_idx = Set.min_elt_exn worklist in
         let block = Icfg.find_block_exn icfg block_idx in
-        Log.debug (Printf.sprintf "-----------------------\nAnalyzing block %s\n" (Icfg.BlockIdx.to_string block_idx));
-        let (in_state, out_state) = analyze_block block_idx block in
-        Log.debug (Printf.sprintf "in_state was: %s, out_state is: %s\n" (Transfer.State.to_string in_state) (Result.to_string out_state));
-        (* Has out state changed? *)
-        let previous_out_state = after_block block_idx in
-        match out_state with
-        | st when Result.compare previous_out_state st = 0 ->
-          (* Didn't change (or stayed bottom), we can safely ignore the successors *)
+        Log.debug (fun () -> Printf.sprintf "-----------------------\nAnalyzing block %s\n" (Icfg.BlockIdx.to_string block_idx));
+        let in_state = in_state block_idx block in
+        match Map.find !analysis_data.blocks block_idx with
+        | Some (previous_in_state, _) when Transfer.State.equal in_state previous_in_state ->
           fixpoint (IntSet.remove worklist block_idx) (iteration+1)
-        | Simple s when Transfer.State.equal s Transfer.bottom ->
-          (* Didn't change (or stayed bottom), we can safely ignore the successors *)
-          fixpoint (IntSet.remove worklist block_idx) (iteration+1)
-        | _ ->
+        | previous_result ->
+          let out_state = transfer block in_state in
+          Log.debug (fun () -> Printf.sprintf "in_state was: %s, out_state is: %s\n" (Transfer.State.to_string in_state) (Result.to_string out_state));
+          (* Has out state changed? *)
+          let previous_out_state = Option.value_map previous_result ~default:bottom ~f:snd in
+          match out_state with
+          | st when Result.equal previous_out_state st ->
+            (* Didn't change (or stayed bottom), we can safely ignore the successors *)
+            fixpoint (IntSet.remove worklist block_idx) (iteration+1)
+          | Simple s when Transfer.State.equal s Transfer.bottom ->
+            (* Didn't change (or stayed bottom), we can safely ignore the successors *)
+            fixpoint (IntSet.remove worklist block_idx) (iteration+1)
+          | _ ->
           (* Update the out state in the analysis results.
              We join with the previous results *)
-          let new_out_state =
-            (* XXX: Join may not be necessary here, as long as out_state is greater than previous_out_state. But it is safe and should not change precision (as x \sqsubseteq y => x \join y = y) *)
-            if Icfg.is_loop_head icfg block_idx then
-              Result.widen previous_out_state (Result.join previous_out_state out_state)
-            else begin
-              Result.join previous_out_state out_state
-            end
-          in
-          analysis_data := { !analysis_data with blocks = Map.set !analysis_data.blocks ~key:block_idx ~data:(in_state, new_out_state) };
-          (* And recurse by adding all successors *)
-          let successors = Icfg.successors icfg block_idx in
-          let successors = match block.content with
-            | Call _ ->
-              (* If it's a call, we need to add the corresponding return as a
-                 successor. This is because the analysis of the return depends
-                 both on the state after the called function and on the state
-                 after the call but before entering the function *)
-              successors @ [{block_idx with kind = Return}] (* add it at the end because usually we want to analyze the callee before *)
-            | _ -> successors in
-          fixpoint (IntSet.union (IntSet.remove worklist block_idx) (Icfg.BlockIdx.Set.of_list successors)) (iteration+1)
+            let new_out_state =
+              (* XXX: Join may not be necessary here, as long as out_state is greater than previous_out_state. But it is safe and should not change precision (as x \sqsubseteq y => x \join y = y) *)
+              if Icfg.is_loop_head icfg block_idx then
+                Result.widen previous_out_state (Result.join previous_out_state out_state)
+              else begin
+                Result.join previous_out_state out_state
+              end
+            in
+            analysis_data := { !analysis_data with blocks = Map.set !analysis_data.blocks ~key:block_idx ~data:(in_state, new_out_state) };
+            (* And recurse by adding all successors *)
+            let successors = Icfg.successors icfg block_idx in
+            let successors = match block.content with
+              | Call _ ->
+                (* If it's a call, we need to add the corresponding return as a
+                   successor. This is because the analysis of the return depends
+                   both on the state after the called function and on the state
+                   after the call but before entering the function *)
+                successors @ [{block_idx with kind = Return}] (* add it at the end because usually we want to analyze the callee before *)
+              | _ -> successors in
+            fixpoint (IntSet.union (IntSet.remove worklist block_idx) (Icfg.BlockIdx.Set.of_list successors)) (iteration+1)
     in
     (* Performs narrowing by re-analyzing once each block *)
     let rec narrow (blocks : Icfg.BlockIdx.t list) : unit = match blocks with

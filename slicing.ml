@@ -75,15 +75,15 @@ let slice =
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
         Spec_inference.use_const := false;
-        Log.info "Loading module";
+        Log.info (fun () -> "Loading module");
         let module_ = Wasm_module.of_file filename in
-        Log.info "Constructing CFG";
+        Log.info (fun () -> "Constructing CFG");
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
         let slicing_criterion = Instr.Label.{ section = Function funidx; id = instr } in
-        Log.info "Slicing";
-        Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
+        Log.info (fun () -> "Slicing");
+        Log.info (fun () -> Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
         let funcinst = Slicing.slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) in
-        Log.info "done";
+        Log.info (fun () -> "done");
         (* let sliced_labels = all_labels funcinst.code.body in *)
         let module_ = Wasm_module.replace_func module_ funidx funcinst in
         Out_channel.with_file outfile
@@ -101,18 +101,18 @@ let slice_line_number =
         Spec_inference.propagate_globals := false;
         Spec_inference.propagate_locals := false;
         Spec_inference.use_const := false;
-        Log.info "Loading module";
+        Log.info (fun () -> "Loading module");
         let module_ = Wasm_module.of_file filename in
-        Log.info "Constructing CFG";
+        Log.info (fun () -> "Constructing CFG");
         let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ funidx) in
         let instr = match List.find (Cfg.all_instructions_list cfg) ~f:(fun instr -> (Instr.line_number instr) = line_number) with
              | None -> failwith "No instruction found at this line"
              | Some instr -> instr in
         let slicing_criterion = Instr.label instr in
-        Log.info "Slicing";
-        Log.info (Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
+        Log.info (fun () -> "Slicing");
+        Log.info (fun () -> Printf.sprintf "Slicing criterion: %s" (Instr.Label.to_string slicing_criterion));
         let funcinst = Slicing.slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton slicing_criterion) in
-        Log.info "done";
+        Log.info (fun () -> "done");
         (* let sliced_labels = all_labels funcinst.code.body in *)
         let module_ = Wasm_module.replace_func module_ funidx funcinst in
         Out_channel.with_file outfile

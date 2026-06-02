@@ -11,7 +11,7 @@ let generate =
       and outfile = anon ("out" %: string) in
       fun () ->
         let module_ = Wasm_module.of_file filename in
-        let module_ = List.fold_left module_.funcs ~init:module_ ~f:(fun m f ->
+        let module_ = Wasm_module.fold_defined_funcs module_ ~init:module_ ~f:(fun m f ->
             if List.mem funs f.idx ~equal:Int32.(=) then
               let cfg = Cfg_builder.build module_ f.idx in
               Wasm_module.replace_func m f.idx (Codegen.cfg_to_func_inst cfg)

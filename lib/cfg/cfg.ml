@@ -197,10 +197,8 @@ module Cfg = struct
     Instr.Label.Map.find cfg.label_to_enclosing_block label
 
   let find_enclosing_block_exn (cfg : 'a t) (label : Instr.Label.t) : 'a Basic_block.t  =
-    match List.find (IntMap.to_alist cfg.basic_blocks) ~f:(fun (_, block) ->
-        let labels = Basic_block.all_direct_instruction_labels block in
-        Instr.Label.Set.mem labels label) with
-    | Some (_, b) -> b
+    match Instr.Label.Map.find cfg.label_to_enclosing_block_id label with
+    | Some block_idx -> find_block_exn cfg block_idx
     | None -> failwith "find_enclosing_block did not find a block"
 
   let rec find_nth_parent_block (cfg : 'a t) (instruction : Instr.Label.t) (n : int32) : Instr.Label.t option =

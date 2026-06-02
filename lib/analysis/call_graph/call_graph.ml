@@ -55,16 +55,23 @@ let indirect_call_targets (wasm_mod : Wasm_module.t) (typ : Int32.t) : Int32.t l
     funs_with_matching_type
   | None ->
     (* All functions with the proper type can be called. *)
-    let funs = List.map wasm_mod.imported_funcs ~f:(fun desc -> desc.idx) @ (List.map wasm_mod.funcs ~f:(fun f -> f.idx)) in
     let ftype = Wasm_module.get_type wasm_mod typ in
     (* These are all the functions with a valid type *)
-   List.filter funs ~f:(fun idx -> Stdlib.(ftype = (Wasm_module.get_func_type wasm_mod( idx))))
+    Wasm_module.fold_function_indices wasm_mod ~init:[] ~f:(fun targets idx ->
+        if Stdlib.(ftype = Wasm_module.get_func_type wasm_mod idx) then
+          idx :: targets
+        else
+          targets)
+    |> List.rev
 
 (** Builds a call graph for a module *)
 let make (wasm_mod : Wasm_module.t) : t =
   let find_targets = indirect_call_targets in
   (* Nodes of the call graph, i.e., all functions (imported and defined functions) *)
-  let nodes = Int32Set.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> Int32.of_int_exn i)) in
+  let nodes =
+    Wasm_module.fold_function_indices wasm_mod ~init:Int32Set.empty
+      ~f:(fun nodes idx -> Int32Set.add nodes idx)
+  in
   let rec collect_calls (f : Int32.t) (instr : 'a Instr.t) (edges : Edge.Set.t Int32Map.t) : Edge.Set.t Int32Map.t = match instr with
     | Call { instr = CallDirect (_, _, f'); _ } ->
       let edge : Edge.t = { target = f'; direct = true } in
@@ -87,7 +94,7 @@ let make (wasm_mod : Wasm_module.t) : t =
     | _ -> edges
   and collect_calls_instrs (f : Int32.t) (instrs : 'a Instr.t list) (edges : Edge.Set.t Int32Map.t) : Edge.Set.t Int32Map.t =
     List.fold_left instrs ~init:edges ~f:(fun edges i -> collect_calls f i edges) in
-  let edges = List.fold_left wasm_mod.funcs
+  let edges = Wasm_module.fold_defined_funcs wasm_mod
       ~init:Int32Map.empty
       ~f:(fun edges f ->
           List.fold_left f.code.body

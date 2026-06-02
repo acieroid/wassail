@@ -182,7 +182,7 @@ module Make = struct
       (state : State.t)
       (summary : summary)
     : State.t =
-    Log.info (Printf.sprintf "applying summary of function %ld" f);
+    Log.info (fun () -> Printf.sprintf "applying summary of function %ld" f);
     let spec_before = Spec_domain.get_or_fail i.annotation_before in
     let spec_after = Spec_domain.get_or_fail i.annotation_after in
     let args = List.take spec_before.vstack (fst arity) in
@@ -265,7 +265,7 @@ module Make = struct
     Spec_domain.wrap annot_after ~default:State.bottom ~f:(fun annotation_after ->
         match StringMap.find !taint_specifications desc.name with
         | None ->
-          Log.warn (Printf.sprintf "No specification found for imported function %s (index: %ld): assuming taint is preserved" desc.name desc.idx);
+          Log.warn (fun () -> Printf.sprintf "No specification found for imported function %s (index: %ld): assuming taint is preserved" desc.name desc.idx);
           state
         | Some spec ->
           (* Taint the return value *)

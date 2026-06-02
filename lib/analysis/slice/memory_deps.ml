@@ -4,6 +4,18 @@ type t = Instr.Label.Set.t Instr.Label.Map.t (* Map from instruction to its memo
 
 let make (cfg : 'a Cfg.t) : t =
   let instrs = Cfg.all_instructions cfg in
+  let predecessor_cache = Hashtbl.Poly.create () in
+  let predecessors_for (block : 'a Basic_block.t) =
+    Hashtbl.find_or_add predecessor_cache block.idx
+      ~default:(fun () -> Cfg.all_predecessors cfg block)
+  in
+  let loop_cache = Hashtbl.Poly.create () in
+  let is_in_loop (block : 'a Basic_block.t) (predecessors : 'a Basic_block.t list) =
+    Hashtbl.find_or_add loop_cache block.idx ~default:(fun () ->
+        List.exists predecessors ~f:(fun p ->
+            List.exists (Cfg.Edges.from cfg.edges p.idx) ~f:(fun (pred_of_p, _) ->
+                Int.equal pred_of_p block.idx)))
+  in
   (* Instructions that are load or call depend on all stores/calls that may have been executed before, hence on all stores contained in a predecessor of the current node in the CFG *)
   let loads_and_calls = Instr.Label.Map.keys
       (Instr.Label.Map.filter instrs ~f:(fun i -> match i with
@@ -14,10 +26,8 @@ let make (cfg : 'a Cfg.t) : t =
            | _ -> false)) in
   let deps = Instr.Label.Map.of_alist_exn (List.map loads_and_calls ~f:(fun label ->
       let enclosing_block = Cfg.find_enclosing_block_exn cfg label in
-      let predecessors = Cfg.all_predecessors cfg enclosing_block in
-      let is_in_loop = List.exists predecessors ~f:(fun p ->
-          List.exists (Cfg.Edges.from cfg.edges p.idx) ~f:(fun (pred_of_p, _) ->
-              Int.equal pred_of_p enclosing_block.idx)) in
+      let predecessors = predecessors_for enclosing_block in
+      let is_in_loop = is_in_loop enclosing_block predecessors in
       let get_store_label : 'a Instr.labelled_data -> Instr.Label.t option  = (function
           | { instr = Store _ | MemoryCopy | MemoryFill | MemoryInit _ ; label = sl; _ } -> Some sl
           | _ -> None) in

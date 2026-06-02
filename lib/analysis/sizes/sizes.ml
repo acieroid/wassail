@@ -381,11 +381,24 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
         patch_gap32 g (pos s - p)
       end
 
+    let section0 (id : int) (f : unit -> unit) (needed : bool) =
+      if needed then begin
+        u8 id;
+        let g = gap32 () in
+        let p = pos s in
+        f ();
+        patch_gap32 g (pos s - p)
+      end
+
     (* Type section *)
     let type_ (t : Type.t list * Type.t list) = func_type t
 
-    let type_section (ts : (Type.t list * Type.t list) list) =
-       section 1 (vec type_) ts (ts <> [])
+    let type_section_module (m : Wasm_module.t) =
+      section0 1
+        (fun () ->
+           len (Wasm_module.num_types m);
+           Wasm_module.iter_types m ~f:(fun _ t -> type_ t))
+        (Wasm_module.num_types m <> 0)
 
     (* Import section *)
     let import_desc (d : Import.desc) =
@@ -404,8 +417,12 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
     (* Function section *)
     let func (f : Func_inst.t) = var f.type_idx
 
-     let func_section (fs : Func_inst.t list) =
-       section 3 (vec func) fs (fs <> [])
+     let func_section_module (m : Wasm_module.t) =
+       section0 3
+         (fun () ->
+            len (Wasm_module.num_defined_funcs m);
+            Wasm_module.iter_defined_funcs m ~f:func)
+         (Wasm_module.num_defined_funcs m <> 0)
 
     (* Table section *)
      let table (tab : Table.t) =
@@ -465,8 +482,12 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
       end_ ();
       patch_gap32 g (pos s - p)
 
-    let code_section (fs : Func_inst.t list) =
-      section 10 (vec code) fs (fs <> [])
+    let code_section_module (m : Wasm_module.t) =
+      section0 10
+        (fun () ->
+           len (Wasm_module.num_defined_funcs m);
+           Wasm_module.iter_defined_funcs m ~f:code)
+        (Wasm_module.num_defined_funcs m <> 0)
 
     (* Element section *)
     let elem (_ : Elem_segment.t) =
@@ -501,16 +522,16 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
     let module_ (m : Wasm_module.t) =
       u32 0x6d736100l;
       u32 Wasm.Encode.version;
-      let type_section = size (fun () -> type_section m.types) in
+      let type_section = size (fun () -> type_section_module m) in
       let import_section = size (fun () -> import_section m.imports) in
-      let func_section = size (fun () -> func_section m.funcs) in
+      let func_section = size (fun () -> func_section_module m) in
       let table_section = size (fun () -> table_section m.tables) in
       let memory_section = size (fun () -> memory_section m.memories) in
       let global_section = size (fun () -> global_section m.globals) in
       let export_section = size (fun () -> export_section m.exports) in
       let start_section = size (fun () -> start_section m.start) in
       let elem_section = size (fun () -> elem_section m.elems) in
-      let code_section = size (fun () -> code_section m.funcs) in
+      let code_section = size (fun () -> code_section_module m) in
       let data_section = size (fun () -> data_section m.datas) in
       { type_section; import_section; func_section; table_section; memory_section;
         global_section; export_section; start_section; elem_section; code_section; data_section }
@@ -521,4 +542,3 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
   | None -> ()
   end;
   sizes
-

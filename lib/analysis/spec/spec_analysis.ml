@@ -509,3 +509,26 @@ module TestInter = struct
         with e -> failwith (Printf.sprintf "Inter spec failed on %s: %s" program (Exn.to_string e)))
 
 end
+
+module TestClassicalInter = struct
+  let%test "classical inter entry should assign first argument to local 0" =
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func (param i32 i32) (result i32)))
+  (type (;1;) (func (result i32)))
+  (func (;0;) (type 0) (param i32 i32) (result i32)
+    local.get 0)
+  (func (;1;) (type 1) (result i32)
+    i32.const 10
+    i32.const 20
+    call 0))" in
+    let icfg = analyze_inter_classical module_ 1l in
+    let callee_cfg = Map.find_exn icfg.cfgs 0l in
+    let entry_block = Map.find_exn callee_cfg.basic_blocks callee_cfg.entry_block in
+    let locals = match entry_block.annotation_after with
+      | Spec_domain.NotBottom s -> s.locals
+      | Spec_domain.Bottom -> failwith "entry block is bottom" in
+    let first = Option.value_or_thunk (List.nth locals 0) ~default:(fun _ -> failwith "first local is absent") in
+    let second = Option.value_or_thunk (List.nth locals 1) ~default:(fun _ -> failwith "second local is absent") in
+    Var.equal first (Var.Const (Prim_value.I32 10l)) && Var.equal second (Var.Const (Prim_value.I32 20l))
+
+end

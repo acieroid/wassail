@@ -44,27 +44,50 @@ module Spec_inference
   (*---- Helper functions ----*)
   (** Like List.drop, but raises an exception if the list does not contain enough element *)
   let drop (n : int) (vstack : Var.t list) =
-    if (List.length vstack < n) then begin
-      failwith "Spec_inference.drop: not enough elements in stack"
-    end else
-      List.drop vstack n
+    let rec loop n vstack =
+      if n = 0 then
+        vstack
+      else
+        match vstack with
+        | [] -> failwith "Spec_inference.drop: not enough elements in stack"
+        | _ :: rest -> loop (n - 1) rest
+    in
+    loop n vstack
 
   let top (l : Var.t list) = match List.hd l with
     | Some v -> v
     | None -> failwith "Spec_inference.top: var list is empty"
 
   let take (l : Var.t list) (n : int) =
-    if List.length l < n then
-      failwith "Spec_inference.take: not enough elements in var list"
-    else
-      List.take l n
+    let rec loop n l acc =
+      if n = 0 then
+        List.rev acc
+      else
+        match l with
+        | [] -> failwith "Spec_inference.take: not enough elements in var list"
+        | v :: rest -> loop (n - 1) rest (v :: acc)
+    in
+    loop n l []
 
   let get (n : Int32.t) (l : Var.t list) =
-    match List.nth l (Int32.to_int_exn n) with
-    | Some v -> v
-    | _ -> failwith (Printf.sprintf "Spec_inference.get: nth exception when accessing %ldth element of a list of length %d" n (List.length l))
+    let idx = Int32.to_int_exn n in
+    let rec loop idx l =
+      match idx, l with
+      | 0, v :: _ -> v
+      | _, _ :: rest -> loop (idx - 1) rest
+      | _, [] -> failwith (Printf.sprintf "Spec_inference.get: nth exception when accessing %ldth element of a list of length %d" n (List.length l))
+    in
+    loop idx l
 
-  let set (n : Int32.t) (l : Var.t list) (v : Var.t) = List.mapi l ~f:(fun i v' -> if i = (Int32.to_int_exn n) then v else v')
+  let set (n : Int32.t) (l : Var.t list) (v : Var.t) =
+    let idx = Int32.to_int_exn n in
+    let rec loop idx l acc =
+      match idx, l with
+      | 0, _ :: rest -> List.rev_append acc (v :: rest)
+      | _, v' :: rest -> loop (idx - 1) rest (v' :: acc)
+      | _, [] -> failwith (Printf.sprintf "Spec_inference.set: nth exception when accessing %ldth element of a list of length %d" n (List.length l))
+    in
+    loop idx l []
 
   let rec compute_stack_size_at_entry (cfg : annot_expected Cfg.t) (label : Instr.Label.t) (state : State.SpecWithoutBottom.t) : State.SpecWithoutBottom.t =
     match Cfg.find_enclosing_block cfg label with
@@ -332,7 +355,7 @@ module Spec_inference
     let nargs = List.length (fst funcinst.typ) in
     let locals = funcinst.code.locals in
     State.wrap ~default:bottom ~f:(fun state ->
-        let args = List.take state.vstack nargs in
+        let args = List.rev (List.take state.vstack nargs) in
         let zeroes = List.map locals ~f:(fun t -> Var.Const (Prim_value.zero_of_t t)) in
         let vstack = [] in
         let locals = args @ zeroes in

@@ -7,7 +7,14 @@ type t = {
 [@@deriving sexp, compare, equal]
 
 let of_wasm (m : Wasm.Ast.module_) (idx : Int32.t) (f : Wasm.Ast.func) : t = {
-  locals = List.map f.it.locals ~f:Type.of_wasm;
+  locals = (
+    let nlocals = List.length f.it.locals in
+    let () = if nlocals > Limitations.max_function_locals then
+      failwith (Printf.sprintf
+                  "unsupported: function %ld declares %d locals; maximum is %d"
+                  idx nlocals Limitations.max_function_locals)
+    in
+    List.map f.it.locals ~f:Type.of_wasm);
   body = Instr.seq_of_wasm m (Instr.Label.maker (Instr.Label.Function idx)) f.it.body;
 }
 
