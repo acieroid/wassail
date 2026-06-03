@@ -53,10 +53,13 @@ let preanalysis (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (cfg_instr
   let t2 = Time_float.now () in
   let mem_dependencies = Memory_deps.make cfg in
   let t3 = Time_float.now () in
-  let global_set_instructions = InSlice.Set.of_list (List.map ~f:(fun label -> InSlice.{ label; reason = None })
-                                                       (Instr.Label.Map.keys (Instr.Label.Map.filter cfg_instructions ~f:(function
-                                                           | Data { instr = GlobalSet _; _ } -> true
-                                                           | _ -> false)))) in
+  let global_set_instructions =
+    Instr.Label.Map.fold cfg_instructions ~init:InSlice.Set.empty
+      ~f:(fun ~key:label ~data:instr acc ->
+          match instr with
+          | Data { instr = GlobalSet _; _ } -> InSlice.Set.add acc InSlice.{ label; reason = None }
+          | _ -> acc)
+  in
   let t4 = Time_float.now () in
   let control_time = Time_float.diff t1 t0 in
   let data_time = Time_float.diff t2 t1 in
@@ -102,7 +105,8 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
       let uses =
         match Cfg.find_instr cfg_instructions slicepart.label with
         | None -> failwith "Unsupported in slicing: cannot find an instruction. It probably is part of unreachable code."
-        | Some instr -> Spec_inference.instr_use module_ cfg ?var:slicepart.reason instr in
+        | Some instr -> Spec_inference.instr_use module_ cfg ?var:slicepart.reason instr
+      in
       (* For use in instr_uses(instr) *)
       let worklist' = List.fold_left uses ~init:worklist
           ~f:(fun w use ->
@@ -119,34 +123,37 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
                 | Use_def.Def.Constant _ -> InSlice.Set.empty in
               InSlice.Set.union w data_deps) in
       (* Add all control dependencies of instr to W *)
-      let control_deps : InSlice.Set.t = match Instr.Label.Map.find preanalysis.control_dependencies slicepart.label with
+      let control_deps =
+        match Instr.Label.Map.find preanalysis.control_dependencies slicepart.label with
         | None -> InSlice.Set.empty
-        | Some deps -> InSlice.Set.of_list (List.map (Instr.Label.Set.to_list deps)
-                                              ~f:(fun label ->
-                                                  Log.info
-                                                    (fun () -> Printf.sprintf "Instruction %s (%s) is part of the slice due to control dependences"
-                                                        (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
-                                                  InSlice.make label None cfg_instructions)) in
+        | Some deps ->
+          Instr.Label.Set.fold deps ~init:InSlice.Set.empty
+            ~f:(fun acc label ->
+                Log.info
+                  (fun () -> Printf.sprintf "Instruction %s (%s) is part of the slice due to control dependences"
+                      (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
+                InSlice.Set.add acc (InSlice.make label None cfg_instructions))
+      in
       let worklist'' = InSlice.Set.union worklist' control_deps in
       (* For instr' in mem_deps(instr): add instr to W *)
       let worklist''' = InSlice.Set.union worklist''
-          (InSlice.Set.of_list
-             (List.map ~f:(fun label ->
-                  Log.info
-                    (fun () -> Printf.sprintf "Instruction %s (%s) is part of the slice due to memory dependences"
-                        (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
-                  InSlice.make label None cfg_instructions)
-                (Instr.Label.Set.to_list (Memory_deps.deps_for preanalysis.mem_dependencies slicepart.label)))) in
+          (Instr.Label.Set.fold (Memory_deps.deps_for preanalysis.mem_dependencies slicepart.label)
+             ~init:InSlice.Set.empty
+             ~f:(fun acc label ->
+                 Log.info
+                   (fun () -> Printf.sprintf "Instruction %s (%s) is part of the slice due to memory dependences"
+                       (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
+                 InSlice.Set.add acc (InSlice.make label None cfg_instructions))) in
       loop (InSlice.Set.remove worklist''' slicepart) slice' visited' in
   let agrawal (slice : Instr.Label.Set.t) : Instr.Label.Set.t =
     (* For each br instruction of the function, we add them to the slice if they are control-dependent on an instruction in the slice *)
     (* For each instruction in the slice, we add all br instructions that are control-dependent on it *)
-    Instr.Label.Set.fold (Instr.Label.Set.of_list (Instr.Label.Map.keys cfg_instructions))
+    Instr.Label.Map.fold cfg_instructions
       ~init:slice
-      ~f:(fun slice label ->
-          let instr = Instr.Label.Map.find_exn cfg_instructions label in
+      ~f:(fun ~key:label ~data:instr slice ->
           match instr with
-          | Control { instr = Br _; _ } -> begin match Instr.Label.Map.find preanalysis.control_dependencies label with
+          | Control { instr = Br _; _ } ->
+            begin match Instr.Label.Map.find preanalysis.control_dependencies label with
               | Some instrs -> begin match Instr.Label.Set.find_map instrs
                                              ~f:(fun i -> if Instr.Label.Set.mem slice i then Some i else None) with
                 | Some label' ->
@@ -157,7 +164,10 @@ let instructions_to_keep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (
               | None -> slice
             end
           | _ -> slice) in
-  let initial_worklist = InSlice.Set.union preanalysis.global_set_instructions (InSlice.Set.of_list (List.map (Instr.Label.Set.to_list criteria) ~f:(fun criterion -> InSlice.{ label = criterion; reason = None }))) in
+  let initial_worklist =
+    Instr.Label.Set.fold criteria ~init:preanalysis.global_set_instructions
+      ~f:(fun acc criterion -> InSlice.Set.add acc InSlice.{ label = criterion; reason = None })
+  in
   let initial_slice = Instr.Label.Set.empty in
   let slice = Instr.Label.Set.filter (agrawal (loop initial_worklist initial_slice InSlice.Set.empty))
     ~f:(fun lab -> match lab.section with

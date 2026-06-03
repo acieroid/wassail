@@ -25,7 +25,7 @@ end
 let control_deps_exact_block (cfg : Spec_domain.t Cfg.t) : IntSet.t IntMap.t =
   (* We need to remove any empty block that has no predecessor in the CFG *)
   let cfg = Cfg.without_empty_nodes_with_no_predecessors cfg in
-  let pdom = Dominance.cfg_post_dominator cfg in
+  let pdom = Dominance.cfg_post_dominator_cleaned cfg in
   let post_dominates (x : int) (y : int) : bool = Tree.is_ancestor pdom x y in
   let traverse (x : int) (y : int) : int list =
     (* Traverse the post-dominator tree backwards until we reach y's parent.

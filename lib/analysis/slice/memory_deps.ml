@@ -17,13 +17,15 @@ let make (cfg : 'a Cfg.t) : t =
                 Int.equal pred_of_p block.idx)))
   in
   (* Instructions that are load or call depend on all stores/calls that may have been executed before, hence on all stores contained in a predecessor of the current node in the CFG *)
-  let loads_and_calls = Instr.Label.Map.keys
-      (Instr.Label.Map.filter instrs ~f:(fun i -> match i with
-           | Call { instr = CallDirect _ ; _ } -> true
-           | Call { instr = CallIndirect _ ; _ } -> true
-           | Data { instr = Load _ ; _ } -> true
-           | Data { instr = MemoryCopy; _ } -> true
-           | _ -> false)) in
+  let loads_and_calls =
+    Instr.Label.Map.fold instrs ~init:[] ~f:(fun ~key:label ~data:i acc ->
+        match i with
+        | Call { instr = CallDirect _ ; _ } -> label :: acc
+        | Call { instr = CallIndirect _ ; _ } -> label :: acc
+        | Data { instr = Load _ ; _ } -> label :: acc
+        | Data { instr = MemoryCopy; _ } -> label :: acc
+        | _ -> acc)
+  in
   let deps = Instr.Label.Map.of_alist_exn (List.map loads_and_calls ~f:(fun label ->
       let enclosing_block = Cfg.find_enclosing_block_exn cfg label in
       let predecessors = predecessors_for enclosing_block in

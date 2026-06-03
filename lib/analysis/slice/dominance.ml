@@ -160,13 +160,21 @@ let branch_condition (block : Spec_domain.t Basic_block.t) : Var.t option =
   | _ -> None
 
 (** Computes the dominator tree of a CFG . *)
+let cfg_dominator_cleaned (cfg : Spec_domain.t Cfg.t) : Tree.t =
+  Graph.dominator_tree (graph_of_cfg cfg)
+
+(** Computes the post-dominator tree of a CFG *)
+let cfg_post_dominator_cleaned (cfg : Spec_domain.t Cfg.t) : Tree.t =
+  (* Note that we invert succs and preds here, and start from exit, in order to have the post-dominator tree *)
+  Graph.dominator_tree (Graph.reverse (graph_of_cfg cfg))
+
+(** Computes the dominator tree of a CFG . *)
 let cfg_dominator (cfg : Spec_domain.t Cfg.t) : Tree.t =
-  Graph.dominator_tree (graph_of_cfg (Cfg.without_empty_nodes_with_no_predecessors cfg))
+  cfg_dominator_cleaned (Cfg.without_empty_nodes_with_no_predecessors cfg)
 
 (** Computes the post-dominator tree of a CFG *)
 let cfg_post_dominator (cfg : Spec_domain.t Cfg.t) : Tree.t =
-  (* Note that we invert succs and preds here, and start from exit, in order to have the post-dominator tree *)
-  Graph.dominator_tree (Graph.reverse (graph_of_cfg (Cfg.without_empty_nodes_with_no_predecessors cfg)))
+  cfg_post_dominator_cleaned (Cfg.without_empty_nodes_with_no_predecessors cfg)
 
 module Test = struct
   let%test "dominator tree is correctly computed - wikipedia example" =
@@ -280,4 +288,3 @@ module Test = struct
     let _actual = cfg_post_dominator cfg in
     ()
 end
-
