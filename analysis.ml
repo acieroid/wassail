@@ -107,18 +107,14 @@ let value_set_cfg =
       and file_out = anon ("out" %: string)
       and funs = anon (sequence ("funs" %: int32)) 
       and show_intermediates = flag "--all" no_arg ~doc:"Show all intermediate variables" 
-      and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" 
-      and disjoint_stack = flag "--stack" no_arg ~doc:"Consider stack disjoint from rest of linear memory" 
+      and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening"
       and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" 
-      and debug = flag "--debug" no_arg ~doc:"Stops the analysis each time Top or Bottom are used as an address"
-      and disjoint = flag "--disjoint" no_arg ~doc:"Consider memory spaces accessed via different relative offsets to be disjoint" in
+      and debug = flag "--debug" no_arg ~doc:"Stops the analysis each time Top or Bottom are used as an address" in
       fun () ->
         Spec_inference.use_const := true;
         if show_intermediates then Value_set.Options.show_intermediates := true;
         if narrow then Intra.narrow_option := true;
         if trace then (Log.enable_info (); Value_set.Options.print_trace := true);
-        if disjoint_stack then Value_set.Options.disjoint_stack := true;
-        if disjoint then Value_set.Options.disjoint_memory_spaces := true;
         if debug then 
           (Value_set.Options.print_trace := true; 
           Value_set.Options.debug := true; 
@@ -136,17 +132,13 @@ let value_set_inter =
       and sccs = anon (sequence ("funs" %: int32_comma_separated_list))
       and show_intermediates = flag "--all" no_arg ~doc:"Show all intermediate variables" 
       and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" 
-      and disjoint_stack = flag "--stack" no_arg ~doc:"Consider stack disjoint from rest of linear memory" 
       and ignore_imports = flag "--ignore-imports" no_arg ~doc:"Ignore changes made by imported functions"
-      and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" 
-      and disjoint = flag "--disjoint" no_arg ~doc:"Consider memory spaces accessed via different relative offsets to be disjoint" in
+      and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
       fun () ->
         if show_intermediates then Value_set.Options.show_intermediates := true;
         if narrow then Intra.narrow_option := true;
         if trace then (Log.enable_info (); Value_set.Options.print_trace := true);
-        if disjoint_stack then Value_set.Options.disjoint_stack := true;
         if ignore_imports then Value_set.Options.ignore_imports := true;
-        if disjoint then Value_set.Options.disjoint_memory_spaces := true;
         let _ =
         let oc = Out_channel.create ~append:false "store_types.txt" in
           Out_channel.close oc
@@ -174,17 +166,13 @@ let value_set_inter_classical =
       and fidx = anon ("fidx" %: int32)
       and file_out = anon ("file_out" %: string)
       and show_intermediates = flag "--all" no_arg ~doc:"Show all intermediate variables" 
-      and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" 
-      and disjoint_stack = flag "--stack" no_arg ~doc:"Consider stack disjoint from rest of linear memory" 
+      and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening"
       and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" 
-      and debug = flag "--debug" no_arg ~doc:"Stops the analysis each time Top or Bottom are used as an address"
-      and disjoint = flag "--disjoint" no_arg ~doc:"Consider memory spaces accessed via different relative offsets to be disjoint" in
+      and debug = flag "--debug" no_arg ~doc:"Stops the analysis each time Top or Bottom are used as an address" in
       fun () ->
         if show_intermediates then Value_set.Options.show_intermediates := true;
         if narrow then Intra.narrow_option := true;
         if trace then (Log.enable_info (); Value_set.Options.print_trace := true);
-        if disjoint_stack then Value_set.Options.disjoint_stack := true;
-        if disjoint then Value_set.Options.disjoint_memory_spaces := true;
         if debug then 
           (Value_set.Options.print_trace := true; 
           Value_set.Options.debug := true; 

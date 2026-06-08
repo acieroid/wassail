@@ -9,12 +9,14 @@
   - Basic number‑theory utilities: [gcd], [lcm], [extended_gcd], and
     a 2‑congruence Chinese Remainder Theorem solver [chinese_remainder].
   - String helpers to cancel symbolic "+"/"neg…" offsets.
-  - Lightweight binary helpers in [Binary] to predict bit flip periods.
+  - Lightweight binary helpers in [Binary] to predict the first increment step
+    at which each bit flips.
 
-  All functions are pure and side‑effect free. Unless noted otherwise,
-  arithmetic on regular integers uses OCaml [int32].  When operations are
-  mathematically undefined (e.g. ∞ − ∞, ∞/∞, division by 0), functions raise
-  [Failure] with an explanatory message.
+  The library functions are pure and side‑effect free. Unless noted otherwise,
+  arithmetic on regular integers uses OCaml [int32] and therefore follows
+  OCaml's fixed-width overflow behaviour.  When operations are mathematically
+  undefined (e.g. ∞ − ∞, ∞/∞, division by 0), functions raise [Failure] with an
+  explanatory message.
 *)
 
 open Core 
@@ -30,7 +32,8 @@ open Core
   {b Conventions}
   - [Int x] embeds a 32‑bit integer [x].
   - Ordering: [NegInfinity < Int _ < Infinity].
-  - Arithmetic short‑circuits on infinities when the result is well‑defined.
+  - Arithmetic short‑circuits on infinities when the result is well‑defined;
+    finite arithmetic uses [int32] operations.
   - Undefined cases raise [Failure] with a clear message.
 *)
 module ExtendedInt = struct
@@ -39,6 +42,9 @@ module ExtendedInt = struct
     | Infinity
     | NegInfinity
   [@@deriving sexp, compare, equal]
+
+  let (=) = equal
+  let (<>) (x : t) (y : t) : bool = not (x = y)
 
   (** [to_string i] returns a human‑readable representation.
       - Finite values use [Int32.to_string].
@@ -72,23 +78,21 @@ module ExtendedInt = struct
     | Int _, Infinity -> true
     | _ -> false 
 
-  (** [is_positive x] returns [true] for non‑negative values in the extended
-      domain.  In particular: [is_positive (Int 0l)] = [true], [is_positive
-      Infinity] = [true], [is_positive NegInfinity] = [false]. *)
+  let (<) = less_than
+
+  (** [is_positive x] returns [true] iff [x >= 0] in the extended order.
+      In particular, zero is considered both positive and negative by this
+      helper, because it is used as a sign test for interval arithmetic. *)
   let is_positive (x : t) : bool =
     match x with
-    | Infinity -> true
-    | NegInfinity -> false
     | Int 0l -> true
     | _ -> less_than (Int 0l) x
 
-  (** [is_negative x] returns [true] for non‑positive values in the extended
-      domain.  In particular: [is_negative (Int 0l)] = [true],
-      [is_negative NegInfinity] = [true], [is_negative Infinity] = [false]. *)
+  (** [is_negative x] returns [true] iff [x <= 0] in the extended order.
+      In particular, zero is considered both positive and negative by this
+      helper, because it is used as a sign test for interval arithmetic. *)
   let is_negative (x : t) : bool =
     match x with
-    | Infinity -> false
-    | NegInfinity -> true
     | Int 0l -> true
     | _ -> less_than x (Int 0l)
 
@@ -97,31 +101,36 @@ module ExtendedInt = struct
       [NegInfinity + Infinity]). *)
   let plus (x : t) (y : t) : t =
     match x, y with 
-    | Infinity, NegInfinity | NegInfinity, Infinity -> failwith "Invalid_argument \"ExtendedInt.plus: Infinity + NegInfinity is undefined\""
+    | Infinity, NegInfinity | NegInfinity, Infinity -> invalid_arg "Infinity + NegInfinity is undefined"
     | Infinity, _ | _, Infinity -> Infinity
     | NegInfinity, _ | _, NegInfinity -> NegInfinity
-    | Int x, Int y -> Int (Int32.(x + y))
+    | Int x, Int y -> Int Int32.(x + y)
+  
+  let (+) = plus
 
   (** [minus x y] computes [x − y] in the extended domain.
       @raise Failure on undefined forms ([Infinity − Infinity] or
       [NegInfinity − NegInfinity]). *)
   let minus (x : t) (y : t) : t =
     match x, y with 
-    | Infinity, Infinity -> failwith "Invalid_argument \"ExtendedInt.minus: Infinity - Infinity is undefined\""
-    | NegInfinity, NegInfinity -> failwith "Invalid_argument \"ExtendedInt.minus: NegInfinity - NegInfinity is undefined\""
+    | Infinity, Infinity ->  invalid_arg "Infinity - Infinity is undefined"
+    | NegInfinity, NegInfinity -> invalid_arg "NegInfinity - NegInfinity is undefined"
     | NegInfinity, _ | _, Infinity -> NegInfinity
     | Infinity, _ | _, NegInfinity -> Infinity
-    | Int x, Int y -> Int (Int32.(x - y))
+    | Int x, Int y -> Int Int32.(x - y)
+
+  let (-) = minus
 
   (** [times x y] multiplies two extended integers.
-      Zero short‑circuits: if either operand is [Int 0l], the result is [Int 0l].
-      Products with infinities follow the sign of the finite factor. *)
+      By convention, [0 * Infinity] and [0 * NegInfinity] return [0]. *)
   let times (x : t) (y : t) : t =
     match x, y with 
     | Int 0l, _ | _, Int 0l -> Int 0l
     | Infinity, i | i, Infinity -> if is_positive i then Infinity else NegInfinity
     | NegInfinity, i | i, NegInfinity -> if is_negative i then Infinity else NegInfinity
     | Int x, Int y -> Int (Int32.(x * y))
+
+  let ( * ) = times
   
   (** [divide x y] computes integer division in the extended domain.
       Finite / finite uses truncating division on [int32].
@@ -129,32 +138,36 @@ module ExtendedInt = struct
       @raise Failure on division by zero or on indeterminate forms (±∞/±∞). *)
   let divide (x : t) (y : t) : t =
     match x, y with 
-    | _, Int 0l -> failwith "division by 0"
+    | _, Int 0l -> invalid_arg "division by 0"
     | Infinity, Infinity | Infinity, NegInfinity | NegInfinity, Infinity | NegInfinity, NegInfinity 
-      -> failwith "division error: ±∞/±∞"
+      -> invalid_arg "division error: ±∞/±∞"
     | Int _, Infinity | Int _, NegInfinity -> Int 0l
     | Infinity, i -> if is_positive i then Infinity else NegInfinity
     | NegInfinity, i -> if is_negative i then Infinity else NegInfinity
-    | Int x, Int y -> Int (Int32.(x / y))
+    | Int x, Int y -> Int Int32.(x / y)
 
-  (** [divide_ceiling x y] divides and rounds toward +∞ when the finite result
-      is not exact; otherwise returns the exact quotient.  Signs are determined
-      from the product [x*y].  Delegates to [divide] for non‑finite cases. *)
+  let (/) = divide
+
+  (** [divide_ceiling x y] divides and rounds toward +∞ when both operands are
+      finite and the result is not exact; otherwise returns the exact quotient.
+      Signs are determined from the product [x*y].  Delegates to [divide] for
+      non‑finite cases, so finite values divided by ±∞ return [0]. *)
   let divide_ceiling (x : t) (y : t) : t =
     match x, y with
-    | Int a, Int b when not (Int32.(a % b = 0l)) ->
+    | Int a, Int b when not Int32.(a % b = 0l) ->
       if is_positive (times x y) then
         plus (divide x y) (Int 1l)
       else
         divide x y
     | _ -> divide x y
 
-  (** [divide_floor x y] divides and rounds toward −∞ when the finite result is
-      not exact; otherwise returns the exact quotient.  Delegates to [divide]
-      for non‑finite cases. *)
+  (** [divide_floor x y] divides and rounds toward −∞ when both operands are
+      finite and the result is not exact; otherwise returns the exact quotient.
+      Delegates to [divide] for non‑finite cases, so finite values divided by
+      ±∞ return [0]. *)
   let divide_floor (x : t) (y : t) : t =
     match x, y with
-    | Int a, Int b when not (Int32.(a % b = 0l)) ->
+    | Int a, Int b when not Int32.(a % b = 0l) ->
       if is_positive (times x y) then
         divide x y
       else
@@ -162,18 +175,20 @@ module ExtendedInt = struct
     | _ -> divide x y
 end
 
-(** [gcd a b] is the greatest common divisor of [a] and [b] (Euclid’s
-    algorithm).  The sign of the result matches the sign of [a] when [b = 0];
-    otherwise it follows the usual non‑negative convention up to [int32]. *)
+(** [gcd a b] is the greatest common divisor of [a] and [b] computed with
+    Euclid’s algorithm over [int32].  This helper does not normalize signs:
+    when negative inputs are provided, the sign follows OCaml's remainder
+    behaviour.  In the intended use cases, moduli are expected to be positive. *)
 let rec gcd (a : int32) (b : int32) : int32 =
   if Int32.equal b 0l then 
     a
   else 
-    gcd b (Int32.(a % b))
+    gcd b Int32.(a % b)
 
 (** [lcm a b] is the least common multiple of [a] and [b].  If either input
-    is zero, returns [0l].  Computed as [abs (a*b) / gcd a b] using [int32]
-    arithmetic. *)
+    is zero, returns [0l].  Computed as [abs ((a*b) / gcd a b)] using [int32]
+    arithmetic, so intermediate products may overflow.  In the intended use
+    cases, moduli are expected to be positive. *)
 let lcm (a : int32) (b : int32) : int32 =
   if Int32.equal a 0l || Int32.equal b 0l then 
     0l
@@ -182,8 +197,9 @@ let lcm (a : int32) (b : int32) : int32 =
 
 
 (** Extended Euclid.
-    [extended_gcd a b] returns [(d, x, y)] such that [d = gcd a b] and
-    [d = a*x + b*y].  Coefficients [x] and [y] are not canonical.
+    [extended_gcd a b] returns [(d, x, y)] such that [d = gcd a b] according
+    to this module's [gcd], and [d = a*x + b*y].  Coefficients [x] and [y] are
+    not canonical.  In the intended use cases, inputs are non-negative.
     @return a triple [(d, x, y)]. *)
 let extended_gcd (a : int32) (b : int32) : int32 * int32 * int32 =
   let rec aux (a : int32) (b : int32) x0 x1 y0 y1 =
@@ -195,12 +211,13 @@ let extended_gcd (a : int32) (b : int32) : int32 * int32 * int32 =
   in
   aux a b 1l 0l 0l 1l
 
-(** Chinese Remainder Theorem for two moduli.
+(** Chinese Remainder Theorem for two positive moduli.
     Solves the system [x ≡ b (mod a)] and [x ≡ b' (mod a')].  When a solution
     exists, returns [(x0, m)] where [m = lcm a a'] and [x0] is the unique
     solution modulo [m] with [0 ≤ x0 < m].
     @raise Failure if the congruences are incompatible, i.e. when
-    [(b − b') mod gcd a a' ≠ 0]. *)
+    [(b − b') mod gcd a a' ≠ 0].
+    @raise Division_by_zero if one of the moduli is zero. *)
 let chinese_remainder (a : int32) (b : int32) (a' : int32) (b' : int32) : int32 * int32 =
   let d = gcd a a' in
   if not (Int32.equal (Int32.((b - b') % d)) 0l) then
@@ -226,8 +243,10 @@ let remove_first_occurrence ~(of_ : string) ~(in_ : string list) : string list =
     aux [] in_
 
 (** [cancel_negation ~pos ~neg] simplifies symbolic offset tokens.  Tokens are
-    strings like ["a"; "b"; "negc"].  Every [negx] cancels one matching [x].
-    Returns the simplified multiset as a list, sorted like the input pass. *)
+    strings like ["a"; "b"; "negc"].  Every positive token [x] cancels one
+    matching negative token [negx] when present.  Uncancelled positive tokens
+    are added to the accumulator [neg], so callers should sort the final result
+    if they need a canonical order. *)
 let rec cancel_negation ~(pos : string list) ~(neg : string list) : string list =
   match pos with
   | [] -> neg
@@ -240,88 +259,75 @@ let rec cancel_negation ~(pos : string list) ~(neg : string list) : string list 
 
 (** [add_relative_offsets o1 o2] merges two "+"‑separated offset strings where
     negations are encoded by the prefix ["neg"].  Example:
-    [add_relative_offsets "a+negc" "b+c"] = ["a+b"].  The result has the
-    negations cancelled and terms re‑joined by "+". *)
+    [add_relative_offsets "a+negc" "b+c"] = ["a+b"].  Empty strings are treated
+    as neutral elements.  The result has matching positive/negative terms
+    cancelled and the remaining terms re‑joined by "+" in sorted order. *)
 let add_relative_offsets (o1 : string) (o2 : string) : string =
-  if String.equal o1 "" then
+  if String.is_empty o1 then
     o2
-  else if String.equal o2 "" then
+  else if String.is_empty o2 then
     o1
   else
     let o1_list = String.split_on_chars o1 ~on:['+'] in
     let o2_list = String.split_on_chars o2 ~on:['+'] in
     let o_list = o1_list @ o2_list in
     let pos = 
-      List.rev 
-        (List.sort ~compare:String.compare (List.fold o_list ~init:[] ~f:(fun acc o -> 
-          if String.is_prefix o ~prefix:"neg" then
-            acc
-          else
-            o :: acc)))
+      List.sort ~compare:String.compare 
+        (List.filter o_list ~f:(fun o -> not (String.is_prefix o ~prefix:"neg")))
     in
     let neg = 
-      List.sort ~compare:String.compare (List.fold o_list ~init:[] ~f:(fun acc o -> 
-        if String.is_prefix o ~prefix:"neg" then
-          o ::acc
-        else
-          acc))
+      List.sort ~compare:String.compare 
+        (List.filter o_list ~f:(fun o -> String.is_prefix o ~prefix:"neg"))
     in
     let offsets = cancel_negation ~pos ~neg in
     String.concat ~sep:"+" (List.sort ~compare:String.compare offsets)
 
+(** [negate_relative_offset offset] flips the sign of every "+"-separated
+    symbolic offset token.  A token [x] becomes [negx], and a token [negx]
+    becomes [x].  The returned tokens are sorted and re-joined by ["+"]. *)
 let negate_relative_offset (offset : string) : string =
-  if String.equal offset "" then
+  if String.is_empty offset then
     ""
   else
     let offsets = String.split_on_chars offset ~on:['+'] in
     let offsets = List.map ~f:(fun s -> if String.is_prefix s ~prefix:"neg" then String.drop_prefix s 3 else "neg" ^ s) offsets in
     String.concat ~sep:"+" (List.sort ~compare:String.compare offsets)
 
-(** [is_power_of_two x] — helper used by [to_bitfield]. *)
+(** [is_power_of_two x] returns [true] iff [x] is a strictly positive power of
+    two. *)
   let is_power_of_two (x : int32) : bool =
-    Int32.(x > 0l && (x land (x - 1l)) = 0l)
+    Int32.(x > 0l) && Int32.popcount x = 1
 
 (** {1:binary Binary helpers}
-    Utilities for reasoning about bit patterns on [int32].  These functions
-    are designed for static analyses where we care about when a given bit
-    toggles under repeated increments.
+    Utilities for reasoning about bit patterns on non-negative [int32] values.
+    These functions are designed for static analyses where we care about the
+    first step at which a given bit toggles under repeated increments.
 *)
 module Binary = struct
 
-  (** [number_of_trailing_zeros x] counts trailing zero bits in the two’s‑
-      complement representation of [x].  Runs in O(t) where [t] is the number of
-      trailing zeros.  Undefined for negative [x] is not assumed; works for any
-      [int32]. *)
-  (* let number_of_trailing_zeros (x : int32) : int =
-      let rec aux x n =
-        if Int32.(x % 2l = 1l) then
-          n
-        else
-          aux (Int32.(shift_right x 1)) (n + 1) 
-      in
-      aux x 0 *)
-
-  (** [bitFlip x y i] returns the number of increments by [y] (starting at 0)
-      until bit [i] of the running value (initially [x]) flips at least once.
-      Returns [0] if it will never flip.  Requires [0 ≤ i < 32] and [y ≥ 0]. *)
-  let rec bitFlip (x : int32) (y : int32) (i : int) : int =
-    assert (i < 32 && i >= 0);
-    assert Int32.(y >= 0l);
-    if Int32.(y = 0l) then
+  (** [bit_flip x ~increment ~bit] returns the first positive step [n] such that
+      bit [bit] differs between [x] and [x + n * increment].  Returns [0] when
+      the bit will never flip, for example when [increment = 0] or when the
+      increment cannot affect that low bit.  Requires [0 <= bit < 32] and
+      [increment >= 0].  The implementation converts some intermediate values
+      to OCaml [int], so it is intended for values that fit safely in [int]. *)
+  let rec bit_flip (x : int32) ~(increment : int32) ~(bit : int) : int =
+    assert (bit < 32 && bit >= 0);
+    assert Int32.(increment >= 0l);
+    if Int32.(increment = 0l) then
       0
     else
-      (* let t = number_of_trailing_zeros y in *)
-      let t = Int32.ctz y in
+      let t = Int32.ctz increment in
       if t > 0 then
-        if i < t then
+        if bit < t then
           0
         else
-          bitFlip (Int32.shift_right x t) (Int32.shift_right y t) (i - t)
+          bit_flip (Int32.shift_right x t) ~increment:(Int32.shift_right increment t) ~bit:(bit - t)
       else
-        let m = Int.pow 2 (i + 1)
-        and h = Int.pow 2 i in
+        let m = Int.pow 2 (bit + 1)
+        and h = Int.pow 2 bit in
         let r = Int32.to_int_exn x % m
-        and s = Int32.to_int_exn y % m in
+        and s = Int32.to_int_exn increment % m in
         if s <= h then
           let distance_to_next_flip = if r < h then h - r else m - r in
           (distance_to_next_flip / s) + if (distance_to_next_flip % s) = 0 then 0 else 1
@@ -330,12 +336,13 @@ module Binary = struct
           let s' = m - s in
           (distance_to_next_flip / s') + if (distance_to_next_flip % s') = 0 then 0 else 1
 
-  (** [bitFlips x y] maps [bitFlip x y] over bit positions [0…31].
-      @return a list of 32 integers where the [i]‑th entry is the first flip
-      time for bit [i]. *)
-  let bitFlips (x : int32) (y : int32) : int list =
-    let idx = List.init 32 ~f:(fun n -> n) in
-    List.map idx ~f:(fun i -> bitFlip x y i)
+  (** [bit_flips x ~increment] maps [bit_flip x ~increment] over bit positions
+      [0] through [31].
+      @return a list of 32 integers where the [i]-th entry is the first flip
+      time for bit [i], or [0] if that bit never flips. *)
+  let bit_flips (x : int32) ~(increment : int32) : int list =
+    List.init 32 ~f:(fun n -> n)
+    |> List.map ~f:(fun bit -> bit_flip x ~increment ~bit)
 end
 
 
@@ -358,468 +365,454 @@ TTTTTT  T:::::T  TTTTTT  E:::::E       EEEEEES:::::S            TTTTTT  T:::::T 
       TTTTTTTTTTT      EEEEEEEEEEEEEEEEEEEEEE SSSSSSSSSSSSSSS         TTTTTTTTTTT       SSSSSSSSSSSSSSS   
 *)
 
-let%test_module "Binary tests" = (module struct
+let%test_module "Maths tests" = (module struct
   open Binary
 
   let%test "Bitfield_tests" =
-    print_endline "\n_______ ____________________________ _______\n        Maths.Binary Module        \n------- ---------------------------- -------\n"; true
-  let%test "bitFlip test no 1" =
+    print_endline "\n_______ ___________________ _______\n        Maths.Binary Module        \n------- ------------------- -------\n"; true
+  let%test "bit_flip test no 1" =
     let x = 5l and y = 3l and i = 1 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 2
 
-  let%test "bitFlip test no 2" =
+  let%test "bit_flip test no 2" =
     let x = 5l and y = 1l and i = 1 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 1
 
-  let%test "bitFlip test no 3" =
+  let%test "bit_flip test no 3" =
     let x = 5l and y = 3l and i = 2 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 1
 
-  let%test "bitFlip test no 4" =
+  let%test "bit_flip test no 4" =
     let x = 0l and y = 3l and i = 2 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 2
 
-  let%test "bitFlip test no 5" =
+  let%test "bit_flip test no 5" =
     let x = 0l and y = 5l and i = 2 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 1
 
-  let%test "bitFlip test no 6" =
+  let%test "bit_flip test no 6" =
     let x = 3l and y = 5l and i = 2 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 2
 
-  let%test "bitFlip test no 7" =
+  let%test "bit_flip test no 7" =
     let x = 3l and y = 7l and i = 2 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 4
 
-  let%test "bitFlip test no 8" =
+  let%test "bit_flip test no 8" =
     let x = 2l and y = 7l and i = 2 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 3
 
-  let%test "bitFlip test no 9" =
+  let%test "bit_flip test no 9" =
     let x = 4l and y = 7l and i = 2 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 1
 
-  let%test "bitFlip test no 10" =
+  let%test "bit_flip test no 10" =
     let x = 5l and y = 7l and i = 2 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 2
 
-  let%test "bitFlip test no 11" =
+  let%test "bit_flip test no 11" =
     let x = 5l and y = 3l and i = 1 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 2
 
-  let%test "bitFlip test no 12" =
+  let%test "bit_flip test no 12" =
     let x = 4l and y = 3l and i = 2 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 2
 
-  let%test "bitFlip test no 13" =
+  let%test "bit_flip test no 13" =
     let x = 5l and y = 3l and i = 4 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 4
 
-  let%test "bitFlip test no 14" =
+  let%test "bit_flip test no 14" =
     let x = 5l and y = 3l and i = 0 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 1
 
-  let%test "bitFlip test no 15" =
+  let%test "bit_flip test no 15" =
     let x = 5l and y = 4l and i = 4 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 3
 
-  let%test "bitFlip test no 16" =
+  let%test "bit_flip test no 16" =
     let x = 1l and y = 1l and i = 1 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
     got = 1
 
-  let%test "bitFlips 1" =
-    let x = 5l and y = 3l in
-    let got = bitFlips x y in
-    Printf.printf "[bitFlips] x=%ld y=%ld -> %s\n" x y (List.to_string ~f:Int.to_string got); Out_channel.flush stdout; true
-
-  let%test "bitFlips 2" =
-    let x = 5l and y = 4l in
-    let got = bitFlips x y in
-    Printf.printf "[bitFlips] x=%ld y=%ld -> %s\n" x y (List.to_string ~f:Int.to_string got); Out_channel.flush stdout; true
-
-  (* ---------------- Binary helpers extra ---------------- *)
-  (* let%test "ntz basic" =
-    let x = 8l in
-    let got = Binary.number_of_trailing_zeros x in
-    Printf.printf "[ntz] x=%ld -> %d\n" x got; Out_channel.flush stdout; got = 3 *)
-
-  (* let%test "ntz mixed" =
-    let x = 12l in
-    let got = Binary.number_of_trailing_zeros x in
-    Printf.printf "[ntz] x=%ld -> %d\n" x got; Out_channel.flush stdout; got = 2 *)
-
-  let%test "bitFlip y=0 -> 0" =
+  let%test "bit_flip y=0 -> 0" =
     let x = 123l and y = 0l and i = 5 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout; got = 0
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    got = 0
 
-  let%test "bitFlip i < t -> 0" =
+  let%test "bit_flip i < t -> 0" =
     let x = 1l and y = 8l and i = 1 in
-    let got = bitFlip x y i in
-    Printf.printf "[bitFlip] x=%ld y=%ld i=%d -> %d\n" x y i got; Out_channel.flush stdout; got = 0
+    let got = bit_flip x ~increment:y ~bit:i in
+    Printf.printf "[bitFlip] x=%ld increment=%ld bit=%d -> %d\n" x y i got; Out_channel.flush stdout;
+    got = 0
+
+  let%test "bit_flips 1" =
+    let x = 5l and y = 3l in
+    let got = bit_flips x ~increment:y in
+    Printf.printf "[bitFlips] x=%ld increment=%ld -> %s\n" x y (List.to_string ~f:Int.to_string got); Out_channel.flush stdout; 
+    got 
+    |> List.to_array
+    |> Array.for_alli ~f:(fun bit flip_time -> flip_time = (bit_flip x ~increment:y ~bit))
+
+  let%test "bit_flips 2" =
+    let x = 5l and y = 4l in
+    let got = bit_flips x ~increment:y in
+    Printf.printf "[bitFlips] x=%ld increment=%ld -> %s\n" x y (List.to_string ~f:Int.to_string got); Out_channel.flush stdout; 
+    got 
+    |> List.to_array
+    |> Array.for_alli ~f:(fun bit flip_time -> flip_time = (bit_flip x ~increment:y ~bit))
 
   (* ---------------- ExtendedInt tests ---------------- *)
-  module EI = ExtendedInt
-
-  let show (v : EI.t) = EI.to_string v
+  open ExtendedInt
 
   let%test "ExtendedInt_tests" =
-    print_endline "\n_______ ____________________________ _______\n        Maths.ExtendedInt Module        \n------- ---------------------------- -------\n"; true
+    print_endline "\n_______ ________________________ _______\n        Maths.ExtendedInt Module        \n------- ------------------------ -------\n"; true
 
   (* to_string *)
   let%test "extint to_string int" =
-    let v = EI.Int 42l in
-    let got = EI.to_string v in
-    Printf.printf "[to_string] v=%s -> %s\n" (show v) got; Out_channel.flush stdout;
+    let v = Int 42l in
+    let got = to_string v in
+    Printf.printf "[to_string] v=%s -> %s\n" (to_string v) got; Out_channel.flush stdout;
     String.equal got "42"
 
   let%test "extint to_string infinities" =
-    let v1 = EI.Infinity and v2 = EI.NegInfinity in
-    let s1 = EI.to_string v1 and s2 = EI.to_string v2 in
-    Printf.printf "[to_string] v=%s -> %s; v=%s -> %s\n" (show v1) s1 (show v2) s2; Out_channel.flush stdout;
+    let v1 = Infinity and v2 = NegInfinity in
+    let s1 = to_string v1 and s2 = to_string v2 in
+    Printf.printf "[to_string] v=%s -> %s; v=%s -> %s\n" (to_string v1) s1 (to_string v2) s2; Out_channel.flush stdout;
     String.equal s1 "∞" && String.equal s2 "-∞"
 
   (* maximum / minimum *)
   let%test "extint maximum" =
-    let x = EI.Int 3l and y = EI.Int 5l in
-    let got = EI.maximum x y in
-    Printf.printf "[maximum] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout;
-    EI.equal got (EI.Int 5l)
+    let x = Int 3l and y = Int 5l in
+    let got = maximum x y in
+    Printf.printf "[maximum] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout;
+    equal got (Int 5l)
 
   let%test "extint minimum" =
-    let x = EI.Int 3l and y = EI.Int 5l in
-    let got = EI.minimum x y in
-    Printf.printf "[minimum] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout;
-    EI.equal got (EI.Int 3l)
+    let x = Int 3l and y = Int 5l in
+    let got = minimum x y in
+    Printf.printf "[minimum] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout;
+    equal got (Int 3l)
+
+  let%test "extint maximum with infinity" =
+    let x = Int 10l and y = Infinity in
+    let got = maximum x y in
+    Printf.printf "[maximum] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout;
+    equal got Infinity
+
+  let%test "extint minimum with neginfinity" =
+    let x = NegInfinity and y = Int 10l in
+    let got = minimum x y in
+    Printf.printf "[minimum] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout;
+    equal got NegInfinity
+
+  let%test "extint maximum equal" =
+    let x = Int 4l and y = Int 4l in
+    let got = maximum x y in
+    Printf.printf "[maximum] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout;
+    equal got (Int 4l)
 
   (* less_than *)
   let%test "extint less_than finite" =
-    let x = EI.Int 3l and y = EI.Int 5l in
-    let got = EI.less_than x y in
-    Printf.printf "[less_than] x=%s y=%s -> %b\n" (show x) (show y) got; Out_channel.flush stdout;
+    let x = Int 3l and y = Int 5l in
+    let got = less_than x y in
+    Printf.printf "[less_than] x=%s y=%s -> %b\n" (to_string x) (to_string y) got; Out_channel.flush stdout;
     got
 
   let%test "extint less_than vs infinity" =
-    let x = EI.Int 3l and y = EI.Infinity in
-    let got = EI.less_than x y in
-    Printf.printf "[less_than] x=%s y=%s -> %b\n" (show x) (show y) got; Out_channel.flush stdout;
+    let x = Int 3l and y = Infinity in
+    let got = less_than x y in
+    Printf.printf "[less_than] x=%s y=%s -> %b\n" (to_string x) (to_string y) got; Out_channel.flush stdout;
     got
 
   let%test "extint less_than finite false" =
-    let x = EI.Int 5l and y = EI.Int 3l in
-    let got = EI.less_than x y in
-    Printf.printf "[less_than] x=%s y=%s -> %b\n" (show x) (show y) got; Out_channel.flush stdout;
+    let x = Int 5l and y = Int 3l in
+    let got = less_than x y in
+    Printf.printf "[less_than] x=%s y=%s -> %b\n" (to_string x) (to_string y) got; Out_channel.flush stdout;
     Bool.equal got false
 
   let%test "extint less_than equal false" =
-    let x = EI.Int 4l and y = EI.Int 4l in
-    let got = EI.less_than x y in
-    Printf.printf "[less_than] x=%s y=%s -> %b\n" (show x) (show y) got; Out_channel.flush stdout;
+    let x = Int 4l and y = Int 4l in
+    let got = less_than x y in
+    Printf.printf "[less_than] x=%s y=%s -> %b\n" (to_string x) (to_string y) got; Out_channel.flush stdout;
     Bool.equal got false
 
   let%test "extint less_than vs neginfinity false" =
-    let x = EI.Int 0l and y = EI.NegInfinity in
-    let got = EI.less_than x y in
-    Printf.printf "[less_than] x=%s y=%s -> %b\n" (show x) (show y) got; Out_channel.flush stdout;
+    let x = Int 0l and y = NegInfinity in
+    let got = less_than x y in
+    Printf.printf "[less_than] x=%s y=%s -> %b\n" (to_string x) (to_string y) got; Out_channel.flush stdout;
     Bool.equal got false
+
+  let%test "extint less_than infinity false" =
+    let x = Infinity and y = Int 5l in
+    let got = less_than x y in
+    Printf.printf "[less_than] x=%s y=%s -> %b\n" (to_string x) (to_string y) got; Out_channel.flush stdout;
+    Bool.equal got false
+
+  let%test "extint less_than neginf true" =
+    let x = NegInfinity and y = Int (-100l) in
+    let got = less_than x y in
+    Printf.printf "[less_than] x=%s y=%s -> %b\n" (to_string x) (to_string y) got; Out_channel.flush stdout;
+    got
 
   (* is_positive / is_negative *)
   let%test "extint is_positive zero" =
-    let x = EI.Int 0l in
-    let got = EI.is_positive x in
-    Printf.printf "[is_positive] x=%s -> %b\n" (show x) got; Out_channel.flush stdout;
+    let x = Int 0l in
+    let got = is_positive x in
+    Printf.printf "[is_positive] x=%s -> %b\n" (to_string x) got; Out_channel.flush stdout;
     got
 
   let%test "extint is_negative zero" =
-    let x = EI.Int 0l in
-    let got = EI.is_negative x in
-    Printf.printf "[is_negative] x=%s -> %b\n" (show x) got; Out_channel.flush stdout;
+    let x = Int 0l in
+    let got = is_negative x in
+    Printf.printf "[is_negative] x=%s -> %b\n" (to_string x) got; Out_channel.flush stdout;
     got
 
   let%test "extint is_positive finite negative -> false" =
-    let x = EI.Int (-1l) in
-    let got = EI.is_positive x in
-    Printf.printf "[is_positive] x=%s -> %b\n" (show x) got; Out_channel.flush stdout;
+    let x = Int (-1l) in
+    let got = is_positive x in
+    Printf.printf "[is_positive] x=%s -> %b\n" (to_string x) got; Out_channel.flush stdout;
     Bool.equal got false
 
   let%test "extint is_negative finite positive -> false" =
-    let x = EI.Int 7l in
-    let got = EI.is_negative x in
-    Printf.printf "[is_negative] x=%s -> %b\n" (show x) got; Out_channel.flush stdout;
+    let x = Int 7l in
+    let got = is_negative x in
+    Printf.printf "[is_negative] x=%s -> %b\n" (to_string x) got; Out_channel.flush stdout;
+    Bool.equal got false
+
+  let%test "extint is_positive finite pos" =
+    let x = Int 7l in
+    let got = is_positive x in
+    Printf.printf "[is_positive] x=%s -> %b\n" (to_string x) got; Out_channel.flush stdout; got
+
+  let%test "extint is_negative finite neg" =
+    let x = Int (-3l) in
+    let got = is_negative x in
+    Printf.printf "[is_negative] x=%s -> %b\n" (to_string x) got; Out_channel.flush stdout; got
+
+  let%test "extint is_positive infinity" =
+    let x = Infinity in
+    let got = is_positive x in
+    Printf.printf "[is_positive] x=%s -> %b\n" (to_string x) got; Out_channel.flush stdout; got
+
+  let%test "extint is_negative neginfinity" =
+    let x = NegInfinity in
+    let got = is_negative x in
+    Printf.printf "[is_negative] x=%s -> %b\n" (to_string x) got; Out_channel.flush stdout; got
+
+  let%test "extint is_positive neginfinity -> false" =
+    let x = NegInfinity in
+    let got = is_positive x in
+    Printf.printf "[is_positive] x=%s -> %b\n" (to_string x) got; Out_channel.flush stdout;
+    Bool.equal got false
+
+  let%test "extint is_negative infinity -> false" =
+    let x = Infinity in
+    let got = is_negative x in
+    Printf.printf "[is_negative] x=%s -> %b\n" (to_string x) got; Out_channel.flush stdout;
     Bool.equal got false
 
   (* plus *)
   let%test "extint plus finite" =
-    let x = EI.Int 2l and y = EI.Int 3l in
-    let got = EI.plus x y in
-    Printf.printf "[plus] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout;
-    EI.equal got (EI.Int 5l)
+    let x = Int 2l and y = Int 3l in
+    let got = plus x y in
+    Printf.printf "[plus] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout;
+    equal got (Int 5l)
 
   let%test "extint plus raises" =
-    let x = EI.Infinity and y = EI.NegInfinity in
-    try let _ = EI.plus x y in
-        Printf.printf "[plus] x=%s y=%s -> (no failure)\n" (show x) (show y); Out_channel.flush stdout; false
-    with Failure _ ->
-      Printf.printf "[plus] x=%s y=%s -> fail\n" (show x) (show y); Out_channel.flush stdout; true
+    let x = Infinity and y = NegInfinity in
+    try let _ = plus x y in
+        Printf.printf "[plus] x=%s y=%s -> (no failure)\n" (to_string x) (to_string y); Out_channel.flush stdout; false
+    with Invalid_argument _ ->
+      Printf.printf "[plus] x=%s y=%s -> fail\n" (to_string x) (to_string y); Out_channel.flush stdout; true
+
+  let%test "extint plus infinity with finite" =
+    let x = Infinity and y = Int 1l in
+    let got = plus x y in
+    Printf.printf "[plus] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got Infinity
+
+  let%test "extint plus neginfinity with finite" =
+    let x = NegInfinity and y = Int (-5l) in
+    let got = plus x y in
+    Printf.printf "[plus] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got NegInfinity
+
+  let%test "extint plus raises (commuted)" =
+    let x = NegInfinity and y = Infinity in
+    (try let _ = plus x y in
+         Printf.printf "[plus] x=%s y=%s -> (no failure)\n" (to_string x) (to_string y); Out_channel.flush stdout; false
+     with Invalid_argument _ -> Printf.printf "[plus] x=%s y=%s -> fail\n" (to_string x) (to_string y); Out_channel.flush stdout; true)
 
   (* minus *)
+  let%test "extint minus infinity - finite" =
+    let x = Infinity and y = Int 9l in
+    let got = minus x y in
+    Printf.printf "[minus] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got Infinity
+
+  let%test "extint minus finite - infinity" =
+    let x = Int 9l and y = Infinity in
+    let got = minus x y in
+    Printf.printf "[minus] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got NegInfinity
+
+  let%test "extint minus neginfinity - finite" =
+    let x = NegInfinity and y = Int 2l in
+    let got = minus x y in
+    Printf.printf "[minus] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got NegInfinity
+
+  let%test "extint minus finite - neginfinity" =
+    let x = Int 2l and y = NegInfinity in
+    let got = minus x y in
+    Printf.printf "[minus] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got Infinity
+
+  let%test "extint minus raises infinity - infinity" =
+    let x = Infinity and y = Infinity in
+    (try let _ = minus x y in
+         Printf.printf "[minus] x=%s y=%s -> (no failure)\n" (to_string x) (to_string y); Out_channel.flush stdout; false
+     with Invalid_argument _ -> Printf.printf "[minus] x=%s y=%s -> fail\n" (to_string x) (to_string y); Out_channel.flush stdout; true)
+
+  let%test "extint minus raises neginf - neginf" =
+    let x = NegInfinity and y = NegInfinity in
+    (try let _ = minus x y in
+         Printf.printf "[minus] x=%s y=%s -> (no failure)\n" (to_string x) (to_string y); Out_channel.flush stdout; false
+     with Invalid_argument _ -> Printf.printf "[minus] x=%s y=%s -> fail\n" (to_string x) (to_string y); Out_channel.flush stdout; true)
+
   let%test "extint minus finite" =
-    let x = EI.Int 5l and y = EI.Int 2l in
-    let got = EI.minus x y in
-    Printf.printf "[minus] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout;
-    EI.equal got (EI.Int 3l)
+    let x = Int 5l and y = Int 2l in
+    let got = minus x y in
+    Printf.printf "[minus] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout;
+    equal got (Int 3l)
 
   (* times *)
   let%test "extint times zero shortcircuit" =
-    let x = EI.Int 0l and y = EI.Infinity in
-    let got = EI.times x y in
-    Printf.printf "[times] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout;
-    EI.equal got (EI.Int 0l)
+    let x = Int 0l and y = Infinity in
+    let got = times x y in
+    Printf.printf "[times] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout;
+    equal got (Int 0l)
 
   let%test "extint times sign with infinity" =
-    let x = EI.Int (-2l) and y = EI.Infinity in
-    let got = EI.times x y in
-    Printf.printf "[times] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout;
-    EI.equal got EI.NegInfinity
+    let x = Int (-2l) and y = Infinity in
+    let got = times x y in
+    Printf.printf "[times] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout;
+    equal got NegInfinity
+
+  let%test "extint times finite*finite neg" =
+    let x = Int (-3l) and y = Int 2l in
+    let got = times x y in
+    Printf.printf "[times] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got (Int (-6l))
+
+  let%test "extint times pos * neginf" =
+    let x = Int 3l and y = NegInfinity in
+    let got = times x y in
+    Printf.printf "[times] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got NegInfinity
+
+  let%test "extint times neg * neginf -> +inf" =
+    let x = Int (-3l) and y = NegInfinity in
+    let got = times x y in
+    Printf.printf "[times] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got Infinity
 
   (* divide *)
+  let%test "extint divide negative by positive" =
+    let x = Int (-7l) and y = Int 2l in
+    let got = divide x y in
+    Printf.printf "[divide] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got (Int (-3l))
+
+  let%test "extint divide by zero raises" =
+    let x = Int 7l and y = Int 0l in
+    (try let _ = divide x y in
+         Printf.printf "[divide] x=%s y=%s -> (no failure)\n" (to_string x) (to_string y); Out_channel.flush stdout; false
+     with Invalid_argument _ -> Printf.printf "[divide] x=%s y=%s -> fail\n" (to_string x) (to_string y); Out_channel.flush stdout; true)
+
+  let%test "extint divide infinity / finite sign+" =
+    let x = Infinity and y = Int 2l in
+    let got = divide x y in
+    Printf.printf "[divide] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got Infinity
+
+  let%test "extint divide infinity / finite sign-" =
+    let x = Infinity and y = Int (-2l) in
+    let got = divide x y in
+    Printf.printf "[divide] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got NegInfinity
+
+  let%test "extint divide neginf / neg finite -> +inf" =
+    let x = NegInfinity and y = Int (-2l) in
+    let got = divide x y in
+    Printf.printf "[divide] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got Infinity
+
+  let%test "extint divide finite / neginf -> 0" =
+    let x = Int 123l and y = NegInfinity in
+    let got = divide x y in
+    Printf.printf "[divide] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got (Int 0l)
+
+  let%test "extint divide raises inf/inf" =
+    let x = Infinity and y = Infinity in
+    (try let _ = divide x y in
+         Printf.printf "[divide] x=%s y=%s -> (no failure)\n" (to_string x) (to_string y); Out_channel.flush stdout; false
+     with Invalid_argument _ -> Printf.printf "[divide] x=%s y=%s -> fail\n" (to_string x) (to_string y); Out_channel.flush stdout; true)
+
   let%test "extint divide finite" =
-    let x = EI.Int 7l and y = EI.Int 2l in
-    let got = EI.divide x y in
-    Printf.printf "[divide] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout;
-    EI.equal got (EI.Int 3l)
+    let x = Int 7l and y = Int 2l in
+    let got = divide x y in
+    Printf.printf "[divide] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout;
+    equal got (Int 3l)
 
   let%test "extint divide by infinity" =
-    let x = EI.Int 5l and y = EI.Infinity in
-    let got = EI.divide x y in
-    Printf.printf "[divide] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout;
-    EI.equal got (EI.Int 0l)
+    let x = Int 5l and y = Infinity in
+    let got = divide x y in
+    Printf.printf "[divide] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout;
+    equal got (Int 0l)
 
   (* divide_ceiling / divide_floor *)
   let%test "extint divide_ceiling" =
-    let x = EI.Int 7l and y = EI.Int 2l in
-    let got = EI.divide_ceiling x y in
-    Printf.printf "[divide_ceiling] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout;
-    EI.equal got (EI.Int 4l)
+    let x = Int 7l and y = Int 2l in
+    let got = divide_ceiling x y in
+    Printf.printf "[divide_ceiling] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout;
+    equal got (Int 4l)
 
   let%test "extint divide_floor negative" =
-    let x = EI.Int (-7l) and y = EI.Int 2l in
-    let got = EI.divide_floor x y in
-    Printf.printf "[divide_floor] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout;
-    EI.equal got (EI.Int (-4l))
+    let x = Int (-7l) and y = Int 2l in
+    let got = divide_floor x y in
+    Printf.printf "[divide_floor] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout;
+    equal got (Int (-4l))
 
-  (* ---------------- ExtendedInt: more outcome coverage ---------------- *)
-  (* maximum/minimum with infinities and equals *)
-  let%test "extint maximum with infinity" =
-    let x = EI.Int 10l and y = EI.Infinity in
-    let got = EI.maximum x y in
-    Printf.printf "[maximum] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout;
-    EI.equal got EI.Infinity
-
-  let%test "extint minimum with neginfinity" =
-    let x = EI.NegInfinity and y = EI.Int 10l in
-    let got = EI.minimum x y in
-    Printf.printf "[minimum] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout;
-    EI.equal got EI.NegInfinity
-
-  let%test "extint maximum equal" =
-    let x = EI.Int 4l and y = EI.Int 4l in
-    let got = EI.maximum x y in
-    Printf.printf "[maximum] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout;
-    EI.equal got (EI.Int 4l)
-
-  (* less_than with infinities *)
-  let%test "extint less_than infinity false" =
-    let x = EI.Infinity and y = EI.Int 5l in
-    let got = EI.less_than x y in
-    Printf.printf "[less_than] x=%s y=%s -> %b\n" (show x) (show y) got; Out_channel.flush stdout;
-    Bool.equal got false
-
-  let%test "extint less_than neginf true" =
-    let x = EI.NegInfinity and y = EI.Int (-100l) in
-    let got = EI.less_than x y in
-    Printf.printf "[less_than] x=%s y=%s -> %b\n" (show x) (show y) got; Out_channel.flush stdout;
-    got
-
-  (* is_positive / is_negative full matrix *)
-  let%test "extint is_positive finite pos" =
-    let x = EI.Int 7l in
-    let got = EI.is_positive x in
-    Printf.printf "[is_positive] x=%s -> %b\n" (show x) got; Out_channel.flush stdout; got
-
-  let%test "extint is_negative finite neg" =
-    let x = EI.Int (-3l) in
-    let got = EI.is_negative x in
-    Printf.printf "[is_negative] x=%s -> %b\n" (show x) got; Out_channel.flush stdout; got
-
-  let%test "extint is_positive infinity" =
-    let x = EI.Infinity in
-    let got = EI.is_positive x in
-    Printf.printf "[is_positive] x=%s -> %b\n" (show x) got; Out_channel.flush stdout; got
-
-  let%test "extint is_negative neginfinity" =
-    let x = EI.NegInfinity in
-    let got = EI.is_negative x in
-    Printf.printf "[is_negative] x=%s -> %b\n" (show x) got; Out_channel.flush stdout; got
-
-  let%test "extint is_positive neginfinity -> false" =
-    let x = EI.NegInfinity in
-    let got = EI.is_positive x in
-    Printf.printf "[is_positive] x=%s -> %b\n" (show x) got; Out_channel.flush stdout;
-    Bool.equal got false
-
-  let%test "extint is_negative infinity -> false" =
-    let x = EI.Infinity in
-    let got = EI.is_negative x in
-    Printf.printf "[is_negative] x=%s -> %b\n" (show x) got; Out_channel.flush stdout;
-    Bool.equal got false
-
-  (* plus outcomes *)
-  let%test "extint plus infinity with finite" =
-    let x = EI.Infinity and y = EI.Int 1l in
-    let got = EI.plus x y in
-    Printf.printf "[plus] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got EI.Infinity
-
-  let%test "extint plus neginfinity with finite" =
-    let x = EI.NegInfinity and y = EI.Int (-5l) in
-    let got = EI.plus x y in
-    Printf.printf "[plus] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got EI.NegInfinity
-
-  let%test "extint plus raises (commuted)" =
-    let x = EI.NegInfinity and y = EI.Infinity in
-    (try let _ = EI.plus x y in
-         Printf.printf "[plus] x=%s y=%s -> (no failure)\n" (show x) (show y); Out_channel.flush stdout; false
-     with Failure _ -> Printf.printf "[plus] x=%s y=%s -> fail\n" (show x) (show y); Out_channel.flush stdout; true)
-
-  (* minus outcomes *)
-  let%test "extint minus infinity - finite" =
-    let x = EI.Infinity and y = EI.Int 9l in
-    let got = EI.minus x y in
-    Printf.printf "[minus] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got EI.Infinity
-
-  let%test "extint minus finite - infinity" =
-    let x = EI.Int 9l and y = EI.Infinity in
-    let got = EI.minus x y in
-    Printf.printf "[minus] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got EI.NegInfinity
-
-  let%test "extint minus neginfinity - finite" =
-    let x = EI.NegInfinity and y = EI.Int 2l in
-    let got = EI.minus x y in
-    Printf.printf "[minus] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got EI.NegInfinity
-
-  let%test "extint minus finite - neginfinity" =
-    let x = EI.Int 2l and y = EI.NegInfinity in
-    let got = EI.minus x y in
-    Printf.printf "[minus] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got EI.Infinity
-
-  let%test "extint minus raises infinity - infinity" =
-    let x = EI.Infinity and y = EI.Infinity in
-    (try let _ = EI.minus x y in
-         Printf.printf "[minus] x=%s y=%s -> (no failure)\n" (show x) (show y); Out_channel.flush stdout; false
-     with Failure _ -> Printf.printf "[minus] x=%s y=%s -> fail\n" (show x) (show y); Out_channel.flush stdout; true)
-
-  let%test "extint minus raises neginf - neginf" =
-    let x = EI.NegInfinity and y = EI.NegInfinity in
-    (try let _ = EI.minus x y in
-         Printf.printf "[minus] x=%s y=%s -> (no failure)\n" (show x) (show y); Out_channel.flush stdout; false
-     with Failure _ -> Printf.printf "[minus] x=%s y=%s -> fail\n" (show x) (show y); Out_channel.flush stdout; true)
-
-  (* times outcomes *)
-  let%test "extint times finite*finite neg" =
-    let x = EI.Int (-3l) and y = EI.Int 2l in
-    let got = EI.times x y in
-    Printf.printf "[times] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got (EI.Int (-6l))
-
-  let%test "extint times pos * neginf" =
-    let x = EI.Int 3l and y = EI.NegInfinity in
-    let got = EI.times x y in
-    Printf.printf "[times] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got EI.NegInfinity
-
-  let%test "extint times neg * neginf -> +inf" =
-    let x = EI.Int (-3l) and y = EI.NegInfinity in
-    let got = EI.times x y in
-    Printf.printf "[times] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got EI.Infinity
-
-  (* divide outcomes *)
-  let%test "extint divide negative by positive" =
-    let x = EI.Int (-7l) and y = EI.Int 2l in
-    let got = EI.divide x y in
-    Printf.printf "[divide] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got (EI.Int (-3l))
-
-  let%test "extint divide by zero raises" =
-    let x = EI.Int 7l and y = EI.Int 0l in
-    (try let _ = EI.divide x y in
-         Printf.printf "[divide] x=%s y=%s -> (no failure)\n" (show x) (show y); Out_channel.flush stdout; false
-     with Failure _ -> Printf.printf "[divide] x=%s y=%s -> fail\n" (show x) (show y); Out_channel.flush stdout; true)
-
-  let%test "extint divide infinity / finite sign+" =
-    let x = EI.Infinity and y = EI.Int 2l in
-    let got = EI.divide x y in
-    Printf.printf "[divide] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got EI.Infinity
-
-  let%test "extint divide infinity / finite sign-" =
-    let x = EI.Infinity and y = EI.Int (-2l) in
-    let got = EI.divide x y in
-    Printf.printf "[divide] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got EI.NegInfinity
-
-  let%test "extint divide neginf / neg finite -> +inf" =
-    let x = EI.NegInfinity and y = EI.Int (-2l) in
-    let got = EI.divide x y in
-    Printf.printf "[divide] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got EI.Infinity
-
-  let%test "extint divide finite / neginf -> 0" =
-    let x = EI.Int 123l and y = EI.NegInfinity in
-    let got = EI.divide x y in
-    Printf.printf "[divide] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got (EI.Int 0l)
-
-  let%test "extint divide raises inf/inf" =
-    let x = EI.Infinity and y = EI.Infinity in
-    (try let _ = EI.divide x y in
-         Printf.printf "[divide] x=%s y=%s -> (no failure)\n" (show x) (show y); Out_channel.flush stdout; false
-     with Failure _ -> Printf.printf "[divide] x=%s y=%s -> fail\n" (show x) (show y); Out_channel.flush stdout; true)
-
-  (* divide_ceiling / divide_floor more cases *)
   let%test "extint divide_ceiling exact" =
-    let x = EI.Int 8l and y = EI.Int 2l in
-    let got = EI.divide_ceiling x y in
-    Printf.printf "[divide_ceiling] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got (EI.Int 4l)
+    let x = Int 8l and y = Int 2l in
+    let got = divide_ceiling x y in
+    Printf.printf "[divide_ceiling] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got (Int 4l)
 
   let%test "extint divide_floor exact negative" =
-    let x = EI.Int (-8l) and y = EI.Int 2l in
-    let got = EI.divide_floor x y in
-    Printf.printf "[divide_floor] x=%s y=%s -> %s\n" (show x) (show y) (show got); Out_channel.flush stdout; EI.equal got (EI.Int (-4l))
+    let x = Int (-8l) and y = Int 2l in
+    let got = divide_floor x y in
+    Printf.printf "[divide_floor] x=%s y=%s -> %s\n" (to_string x) (to_string y) (to_string got); Out_channel.flush stdout; equal got (Int (-4l))
 
   (* ---------------- Number theory & string helpers ---------------- *)
   let%test "gcd basic" =
@@ -856,20 +849,39 @@ let%test_module "Binary tests" = (module struct
 
   let%test "remove_first_occurrence present" =
     let got = remove_first_occurrence ~of_:"b" ~in_:["a";"b";"c";"b"] in
-    Printf.printf "[remove_first_occurrence] -> %s\n" (List.to_string ~f:Fn.id got); Out_channel.flush stdout; List.equal String.equal got ["a";"c";"b"]
+    Printf.printf "[remove_first_occurrence] (a b c b) \\ b -> %s\n" (List.to_string ~f:Fn.id got); Out_channel.flush stdout; List.equal String.equal got ["a";"c";"b"]
 
   let%test "remove_first_occurrence absent" =
     let got = remove_first_occurrence ~of_:"x" ~in_:["a";"b"] in
-    Printf.printf "[remove_first_occurrence] -> %s\n" (List.to_string ~f:Fn.id got); Out_channel.flush stdout; List.equal String.equal got ["a";"b"]
+    Printf.printf "[remove_first_occurrence] (a b) \\ x -> %s\n" (List.to_string ~f:Fn.id got); Out_channel.flush stdout; List.equal String.equal got ["a";"b"]
 
   let%test "cancel_negation basic" =
     let got = cancel_negation ~pos:["a";"b"] ~neg:["nega";"negx"] in
-    Printf.printf "[cancel_negation] -> %s\n" (List.to_string ~f:Fn.id got); Out_channel.flush stdout; List.equal String.equal got ["b";"negx"]
+    Printf.printf "[cancel_negation] [%s] -> [%s]\n" (String.concat ~sep:"; " ["a";"b";"nega";"negx"]) (String.concat ~sep:"; " got); Out_channel.flush stdout; List.equal String.equal got ["b";"negx"]
 
   let%test "add_relative_offsets merge & cancel" =
     let got = add_relative_offsets "a+negc" "b+c" in
-    Printf.printf "[add_relative_offsets] -> %s\n" got; Out_channel.flush stdout; String.equal got "a+b"
+    Printf.printf "[add_relative_offsets] (a+negc) + (b+c) -> %s\n" got; Out_channel.flush stdout; String.equal got "a+b"
 
-  
+  let%test "extint divide_ceiling finite / infinity -> 0" =
+    equal (divide_ceiling (Int 10l) Infinity) (Int 0l)
 
+  let%test "extint divide_floor finite / infinity -> 0" =
+    equal (divide_floor (Int 10l) Infinity) (Int 0l)
+
+  let%test "is_power_of_two" =
+    Bool.equal (is_power_of_two 0l) false
+    && Bool.equal (is_power_of_two 1l) true
+    && Bool.equal (is_power_of_two 2l) true
+    && Bool.equal (is_power_of_two 3l) false
+    && Bool.equal (is_power_of_two (-2l)) false
+
+  let%test "negate_relative_offset" =
+    String.equal (negate_relative_offset "a+negb+c") "b+nega+negc"
+
+  let%test "add_relative_offsets empty left" =
+    String.equal (add_relative_offsets "" "a+b") "a+b"
+
+  let%test "add_relative_offsets empty right" =
+    String.equal (add_relative_offsets "a+b" "") "a+b"
 end)

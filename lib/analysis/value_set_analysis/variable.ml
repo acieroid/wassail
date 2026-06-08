@@ -1,33 +1,14 @@
-(** {1:variable Variables for value-set/pointer analysis}
+(** {1:variable Variables for value-set analysis}
 
-    This module defines the notion of a program {e variable} used by the
-    value‑set / pointer analysis. A variable can be:
-    {ul
-      {- a concrete program variable ({!Var.t});}
-      {- a memory block over a reduced interval–congruence ({!RIC.t});}
-      {- a stack block, modelled like memory but tracked independently;}
-      {- the synthetic marker {!Accessed}, collecting addresses read by a function.}}
+    This module defines the variables used as keys in the value-set analysis store.
+    A variable can be a program variable, a linear-memory region,
+    a synthetic read-address accumulator, or the current memory size.
 
-    {2:addr Address model (RIC)}
-    Memory and stack regions are represented by {!Reduced_interval_congruence.RIC.t}.
-    A region carries: a {b stride}, integer {b lower} and {b upper}
-    bounds (as {!Maths.ExtendedInt.t}), and a symbolic {b offset} (e.g. "g0" for the
-    stack pointer) paired with an extra integer displacement.
+    Memory regions are described by a reduced interval-congruence ({!RIC.t})
+    and may include symbolic offset bases.
 
-    {2:conv Conventions}
-    - Bounds may be {e infinite} using {!Maths.ExtendedInt.Infinity} and
-      {!Maths.ExtendedInt.NegInfinity}.
-    - A region equal to {!Reduced_interval_congruence.RIC.Bottom} denotes the empty set.
-    - "Comparable offsets" means offsets refer to the same symbolic base.
-
-    {2:fmt Printing}
-    Values implement human‑readable printers so that test logs are uniform.
-    See {!to_string}, {!Set.S.to_string} and {!Map.to_string}.
-
-    {2:ex Examples}
-    - [Mem (RIC.ric (1l, Int 0l, Int 3l, ("", 0l)))] prints as a byte‑range in linear memory.
-    - [Stack ...] is printed with the relative offset base stripped (e.g. [stack[...]]).
-*)
+    The module also provides helpers for overlap checks, region subtraction,
+    relative-offset substitution, and map/set manipulation. *)
 
 open Core
 
@@ -37,59 +18,36 @@ open Maths
 
 
 module T = struct
-  (** {2:sum The variable kind}
-      A variable is one of:
-      - [Var v] — a concrete program variable (local or global).
-      - [Mem ric] — a linear‑memory region described by {!RIC.t}.
-      - [Stack ric] — a stack region (modeled by {!RIC.t}) tracked separately.
-      - [Accessed] — synthetic accumulator of all addresses {e read} by a function. *)
+  (** Kind of variable tracked by the value-set analysis. *)
   type t = 
     | Var of Var.t
     | Mem of RIC.t
-    | Stack of RIC.t (* used when considering the stack disjoint from the rest of the memory *)
-    | Accessed (* used to store all the addresses that may have been read by a function *)
-    | MemorySize (* used to track memory size (in nb of pages) *)
+    | Accessed (* addresses that may have been read by a function *)
+    | MemorySize (* memory size, in WebAssembly pages *)
   [@@deriving sexp, compare, equal]
 
-  (** [to_string v] renders a variable in a compact, stable format suited for logs.
-      {ul
-        {- [Var x] prints as [x];}
-        {- [Mem r] prints as [mem[<r>]];}
-        {- [Stack r] prints as [stack[<r>]] with relative offset base removed;}
-        {- [Accessed] prints as [Accessed_memory];}
-        {- [MemorySize] prints as [Memory_size].}}
-      @param var the variable to pretty‑print
-      @return a printable representation. *)
+  let (=) = equal
+  let (<>) (x : t) (y : t) : bool = not (x = y)
+
+  (** [to_string v] returns a compact representation of [v] for logs and tests. *)
   let to_string (var : t) : string =
     match var with 
     | Var v -> Var.to_string v
     | Mem ric -> "mem[" ^ RIC.to_string ric ^ "]"
-    | Stack ric -> "stack[" ^ RIC.to_string (RIC.remove_relative_offset ric) ^"]"
     | Accessed -> "Accessed_memory"
     | MemorySize -> "Memory_size"
 
-  (** Smart constructor for a memory variable from raw RIC components.
-      @param ric a quadruple [(stride, lower, upper, (offset_base, offset_delta))]
-      @return [Mem (RIC.ric ric)]. *)
+  (** [mem ric] builds a memory variable from raw RIC components. *)
   let mem (ric : int32 * ExtendedInt.t * ExtendedInt.t * (string * int32)) : t =
     Mem (RIC.ric ric)
 
-  (** The variable denoting the whole linear memory region. *)
+  (** Variable representing the whole linear memory. *)
   let entire_memory = Mem RIC.Top
 
-  (** The variable denoting the whole stack region. *)
-  let entire_stack = Stack RIC.Top
-
-  (** [is_linear_memory v] is [true] iff [v] denotes a linear‑memory region. *)
+  (** [is_linear_memory v] is [true] iff [v] is a memory region. *)
   let is_linear_memory (v : t) : bool =
     match v with
     | Mem _ -> true
-    | _ -> false
-
-  (** [is_stack v] is [true] iff [v] denotes a stack region. *)
-  let is_stack (v : t) : bool =
-    match v with
-    | Stack _ -> true
     | _ -> false
 
   (** [is_global v] is [true] iff [v] is a global program variable. *)
@@ -98,245 +56,180 @@ module T = struct
     | Var Var.Global _ -> true
     | _ -> false
 
-  (** [get_address v] extracts the underlying {!RIC.t} when [v] is [Mem] or [Stack].
-      Returns {!RIC.Bottom} for non‑addressed variants. *)
+  (** [get_address v] returns the address region of [v], or [RIC.Bottom] if [v] has none. *)
   let get_address (var : t) : RIC.t =
     match var with
     | Mem address -> address
-    | Stack address -> address
     | _ -> RIC.Bottom
 
-  (** [get_relative_offset v] returns the symbolic offset base used by [v].
-      For stack variables the base is always ["g0"]. Returns [""] when not applicable. *)
+  (** [get_relative_offset v] returns the symbolic offset base of [v].
+    Non-memory variables return [""]. *)
   let get_relative_offset (v : t) : string =
     match v with
-    | Mem RIC {offset = (offset, _); _} -> offset
-    | Stack _ -> "g0"
+    | Mem addr -> RIC.extract_relative_offset addr
     | _ -> ""
 
-  (** Join a list of variables with a comma for debugging output. *)
-  let list_to_string (vars : t list) : string = String.concat ~sep:", " (List.map vars ~f:to_string)
-
-  (** [is_infinite v] is [true] when [v] denotes an unbounded region (either bound is
-      {!Maths.ExtendedInt.Infinity}/{!Maths.ExtendedInt.NegInfinity}, or the region is [Top]). *)
+  (** [is_infinite v] is [true] iff [v] is an unbounded memory region. *)
   let is_infinite (v : t) : bool =
     match v with
     | Var _ -> false
     | Mem RIC.Top -> true
-    | Mem RIC {stride = _; lower_bound = l; upper_bound = u; offset = _}
-        when ExtendedInt.equal l NegInfinity || ExtendedInt.equal u Infinity -> true
-    | Stack RIC {stride = _; lower_bound = l; upper_bound = u; offset = _}
-        when ExtendedInt.equal l NegInfinity || ExtendedInt.equal u Infinity -> true
+    | Mem RIC {lower_bound = l; upper_bound = u; _} ->
+      ExtendedInt.(l = NegInfinity || u = Infinity)
     | _ -> false
 
-  (** [is_finite v] is [true] when [v] is not infinite. *)
+  (** [is_finite v] is [true] iff [v] is not infinite. *)
   let is_finite (var : t) : bool = not (is_infinite var)
 
-  (** [is_singleton v] is [true] when [v] denotes at most one address (i.e. [lower = upper]
-      for addressed variants). *)
+  (** [is_singleton v] is [false] only for memory regions with distinct bounds.
+    Non-memory variables are considered singleton variables. *)
   let is_singleton (var : t) : bool =
     match var with
-    | Mem RIC {lower_bound = l; upper_bound = u; _} when not (ExtendedInt.equal l u) -> false
-    | Stack RIC {lower_bound = l; upper_bound = u; _} when not (ExtendedInt.equal l u) -> false
+    | Mem addr -> RIC.is_singleton addr
     | _ -> true
 
-  (** [share_addresses v1 v2] checks whether two addressed variables overlap.
-      Only [Mem]/[Mem] and [Stack]/[Stack] are considered; other combinations return [false].
-      Internally this is [meet ≠ Bottom]. *)
+  (** [share_addresses v1 v2] is [true] iff [v1] and [v2] overlap as memory regions. *)
   let share_addresses (var1 : t) (var2 : t) : bool =
     match var1, var2 with
-    | Mem ric1, Mem ric2 -> not (RIC.equal RIC.Bottom (RIC.meet ric1 ric2))
-    | Stack ric1, Stack ric2 -> not (RIC.equal RIC.Bottom (RIC.meet ric1 ric2))
+    | Mem ric1, Mem ric2 -> RIC.(meet ric1 ric2 <> Bottom)
     | _ -> false
 
-  (** [remove ~these_addresses ~from] subtracts a region from an addressed variable.
-      @return a list of residual addressed variables covering [from \ these_addresses].
-      Non‑addressed variants are left unchanged. *)
+  (** [remove ~these_addresses ~from] removes [these_addresses] from the address region
+      of [from] and returns the remaining variables. *)
   let remove ~(these_addresses : RIC.t) ~(from : t) : t list =
-    let address = get_address from in
-    let truncated_addresses = RIC.remove ~this:these_addresses ~from:address in
-    if is_linear_memory from then
-      List.map truncated_addresses ~f:(fun addr -> Mem addr)
-    else
-      List.map truncated_addresses ~f:(fun addr -> Stack addr)
+    RIC.remove 
+      ~this:these_addresses 
+      ~from:(get_address from)
+    |> List.map ~f:(fun addr -> Mem addr)
 
-  (** Iterated version of {!remove} for a list of regions. Order is left‑to‑right. *)
+  (** [remove_all ~these_addresses_list ~from] removes each region from [from] in order. *)
   let remove_all ~(these_addresses_list : RIC.t list) ~(from : t) : t list =
-    List.fold these_addresses_list ~init:[from] ~f:(fun acc ric ->
-      List.concat_map acc ~f:(fun var -> remove ~these_addresses:ric ~from:var)
-    )
+    these_addresses_list
+    |> List.fold
+        ~init:[from] 
+        ~f:(fun acc ric ->
+          List.concat_map acc ~f:(fun var -> remove ~these_addresses:ric ~from:var))
 
-  (** [comparable_offsets v1 v2] is [true] iff both are memory variables whose
-      offsets refer to the same symbolic base; non‑addressed variants return [true]. *)
+  (** [comparable_offsets v1 v2] checks whether two memory variables use comparable
+      symbolic offsets. Non-memory pairs are considered comparable. *)
   let comparable_offsets (v1 : t) (v2 : t) : bool =
     match v1, v2 with
     | Mem addr1, Mem addr2 -> RIC.comparable_offsets addr1 addr2
     | _ -> true
 
-  (** [is_covered ~by v] holds when the union of the addressed variables in [by]
-      completely covers [v]. The check is performed by successive set differences
-      against {!RIC.t} regions and emptiness testing. *)
+  (** [is_covered ~by v] is [true] iff the memory region [v] is fully covered by
+    the memory variables in [by]. Non-memory variables are ignored. *)
   let is_covered ~(by : t list) (v : t) : bool =
-    let not_covered =
-      match v with
-      | Mem v_addr ->
-        List.fold ~init:[v_addr]
-          ~f:(fun acc x ->
-            match x with
-            | Var _ | Stack _ | Accessed | MemorySize -> acc
+    (match v with
+    | Mem v_addr ->
+      by
+      |> List.fold 
+          ~init:[v_addr]
+          ~f:(fun not_covered_yet covering_var ->
+            match covering_var with
+            | Var _ | Accessed | MemorySize -> not_covered_yet
             | Mem addr -> 
-              List.concat (List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y) acc))
-          by
-      | Stack v_addr -> 
-        List.fold ~init:[v_addr]
-          ~f:(fun acc x ->
-            match x with
-            | Var _ | Mem _ | Accessed | MemorySize -> acc
-            | Stack addr -> 
-              List.concat (List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y) acc))
-          by
-      | _ -> assert false
-    in
-    let not_covered = List.filter ~f:(fun x -> not (RIC.equal RIC.Bottom x)) not_covered in
-    List.is_empty not_covered
+              not_covered_yet
+              |> List.map ~f:(fun y -> RIC.remove ~this:addr ~from:y)
+              |> List.concat)
+    | _ -> assert false)
+    |> List.filter ~f:(fun x -> RIC.(x <> Bottom))
+    |> List.is_empty
 
-  (** Rewrite the symbolic offset base of [var] using concrete values from [actual_values].
-      For [Stack], the resulting symbolic base {b must} remain ["g0"]; otherwise the
-      function raises [Failure] with an explanatory message. *)
-  let update_relative_offset ~(var : t) ~(actual_values : RIC.t String.Map.t) : t =
+  (** [update_relative_offset ~var ~actual_values] substitutes symbolic offset bases in [var]
+      using [actual_values]. The returned boolean records whether a substituted base was
+      associated with a non-singleton RIC. *)
+  let update_relative_offset ~(var : t) ~(actual_values : RIC.t String.Map.t) : t * bool =
     match var with
-    | Var _ | Accessed | MemorySize -> var
+    | Var _ | Accessed | MemorySize -> var, false
     | Mem address ->
-      let new_address = RIC.update_relative_offset ~ric_:address ~actual_values in
-      Mem new_address
-    | Stack address ->
-      let new_address = RIC.update_relative_offset ~ric_:address ~actual_values in
-      let new_stack_var = Stack new_address in
-      begin match new_stack_var with
-      | Stack RIC {offset = (o, _); _} -> 
-        if String.equal "g0" o then
-          new_stack_var
-        else
-          failwith "Inconsistent stack pointer. This analysis only works when global variable g0 is used as stack pointer."
-      | Stack RIC.Top -> new_stack_var
-      | _ -> assert false
-      end
+      let used_non_singleton_relative =
+        address
+        |> RIC.extract_relative_offset
+        |> String.split ~on:'+'
+        |> List.map ~f:(fun str -> String.substr_replace_all str ~pattern:"neg" ~with_:"")
+        |> List.fold ~init:false 
+                     ~f:(fun acc v -> acc || (String.(v <> "") && (Map.find_exn actual_values v |> RIC.is_singleton |> not)))
+      in
+      if used_non_singleton_relative then Log.warn "used relative offset that is not a singleton";
+      Mem (RIC.update_relative_offset ~ric_:address ~actual_values), used_non_singleton_relative
 end
 include T
 
 module Set = struct
   include Set
-  (** {2:set A set of variables}
-      Wrapper around {!Set.Make} with helpers for printing in tests. *)
+  (** Set of variables with test-friendly helpers. *)
   module S = struct
     include Set.Make(T)
-    (** Comma‑separated printer for sets of variables. *)
-    let to_string (v : t) : string =
-      String.concat ~sep:"," (List.map ~f:to_string (Set.to_list v))
 
-    (** Cardinality of a set. *)
-    let cardinal (v : t) : int =
-      List.length (Set.to_list v)
+    (** [to_string s] prints the variables in [s], separated by commas. *)
+    let to_string (v : t) : string =
+      v |> Set.to_list |> List.to_string ~f:to_string 
   end
   include Set
   include S
   include Test.Helpers(S)
-
-  let of_option (v : T.t option) : t =
-    match v with
-    | Some v -> singleton v
-    | None -> empty
 end
 
 module Map = struct
   include Map
   include Map.Make(T)
-  (** {2:map Maps keyed by variables}
-      Convenience printers and utilities to extract typed views of a store. *)
-  (** Pretty‑print a map as [k ↦ v] pairs using a value printer. *)
-  let to_string (m : 'a t) (f : 'a -> string) : string =
-    String.concat ~sep:", " (List.map (Map.to_alist m) ~f:(fun (k, v) -> Printf.sprintf "%s ↦ %s" (to_string k) (f v)))
 
-  (** Return all keys that denote linear‑memory regions. *)
+  (** Maps keyed by analysis variables. *)
+  let to_string (m : 'a t) ~(f : 'a -> string) : string =
+    "[" ^
+    (m
+    |> Map.to_alist
+    |> List.map ~f:(fun (k, v) ->
+      if String.equal (to_string k)  (f v) then
+        to_string k
+      else
+        Printf.sprintf "%s ↦ %s" (to_string k) (f v))
+    |> String.concat ~sep:";  ")
+    ^ "]"
+
+  (** [extract_memory_variables store] returns the memory keys of [store]. *)
   let extract_memory_variables (store : 'a t) : T.t list =
-    let all_vars = keys store in
-    List.filter ~f:T.is_linear_memory all_vars
+    store |> keys |> List.filter ~f:is_linear_memory
 
-  (** Return all keys that denote stack regions. *)
-  let extract_stack_variables (store : 'a t) : T.t list =
-    let all_vars = keys store in
-    List.filter ~f:T.is_stack all_vars
-
-  (** Return all keys that are locals or globals. *)
+  (** [extract_locals_and_globals store] returns local and global variable keys. *)
   let extract_locals_and_globals (store : 'a t) : T.t list =
-    let all_vars = keys store in
-    List.filter ~f:(fun v -> match v with | Var Var.Local _ | Var Var.Global _ -> true | _ -> false) all_vars
+    store |> keys |> List.filter ~f:(fun v -> match v with | Var Var.Local _ | Var Var.Global _ -> true | _ -> false)
 
-  (** [update_all store vars new_value] sets [new_value] for all [vars] in [store]. *)
+  (** [update_all store vars value] sets every variable in [vars] to [value]. *)
   let update_all (store : 'a t) (vars : Set.t) (new_value : 'a) : 'a t =
-    Set.fold vars ~init:store ~f:(fun acc v -> set acc ~key:v ~data:new_value)
+    vars |> Set.fold ~init:store ~f:(fun acc v -> set acc ~key:v ~data:new_value)
 
-  (** {3:compat Partition stores using common regions}
-      [make_compatible ~this ~relative_to ~get] refines [this] so that memory/stack keys
-      are split wherever they overlap with keys in [relative_to]. Overlaps are computed
-      via {!RIC.meet}; splits preserve values using [get] to fetch the existing payload.
-      The result contains only disjoint addressed keys also present (as partitions) in
-      the other store. *)
+  (** [make_compatible ~this ~relative_to ~get] splits memory keys in [this]
+    wherever they overlap memory keys in [relative_to]. Newly created keys
+    keep the value returned by [get]. *)
   let make_compatible ~(this : 'a t) ~(relative_to : 'a t) ~(get : 'a t -> var:T.t -> 'a) : 'a t =
     let store1 = this in
     let store2 = relative_to in
-    let mems1 = extract_memory_variables store1 in
     let mems2 = extract_memory_variables store2 in
-    let new_store =
-      List.fold
-        ~init:store1
-        ~f:(fun store m2 ->
-          match m2 with
-          | T.Mem addr_m2 -> 
-            List.fold
-              ~init:store
-              ~f:(fun store m1 ->
-                match m1 with
-                | T.Mem addr_m1 ->
-                  let met_addrs = RIC.meet addr_m2 addr_m1 in
-                  if RIC.equal RIC.Bottom met_addrs then
-                    store
-                  else
-                    let new_addresses = met_addrs :: (RIC.remove ~this:met_addrs ~from:addr_m1) in
-                    let new_mem_vars = List.map ~f:(fun addr -> T.Mem addr) new_addresses in
-                    let vs = get store ~var:m1 in
-                    let store = remove store m1 in
-                    update_all store (Set.of_list new_mem_vars) vs
-                | _ -> store )
-              mems1
-          | _ -> store)
-        mems2
-    in
-    let stack1 = extract_stack_variables new_store in
-    let stack2 = extract_stack_variables store2 in
-    List.fold
-      ~init:new_store
-      ~f:(fun store m2 ->
-        match m2 with
-        | T.Stack addr_m2 -> 
-          List.fold
-            ~init:store
-            ~f:(fun store m1 ->
-              match m1 with
-              | T.Stack addr_m1 ->
-                let met_addrs = RIC.meet addr_m2 addr_m1 in
-                if RIC.equal RIC.Bottom met_addrs then
-                  store
-                else
-                  let new_addresses = met_addrs :: (RIC.remove ~this:met_addrs ~from:addr_m1) in
-                  let new_stack_vars = List.map ~f:(fun addr -> T.Stack addr) new_addresses in
-                  let vs = get store ~var:m1 in
-                  let store = remove store m1 in
-                  update_all store (Set.of_list new_stack_vars) vs
-              | _ -> store )
-            stack1
-        | _ -> store)
-      stack2
+    mems2 |> List.fold
+              ~init:store1
+              ~f:(fun new_store1 m2 ->
+                let mems1 = extract_memory_variables new_store1 in
+                match m2 with
+                | T.Mem addr_m2 -> 
+                  mems1 |> List.fold
+                            ~init:new_store1
+                            ~f:(fun store m1 ->
+                              match m1 with
+                              | T.Mem addr_m1 ->
+                                let met_addrs = RIC.meet addr_m2 addr_m1 in
+                                if RIC.(met_addrs = Bottom) then
+                                  store
+                                else
+                                  let new_mem_vars = 
+                                    met_addrs :: (RIC.remove ~this:met_addrs ~from:addr_m1)
+                                    |> List.map ~f:(fun addr -> T.Mem addr) in
+                                  let vs = get store ~var:m1 in
+                                  let store = remove store m1 in
+                                  update_all store (Set.of_list new_mem_vars) vs
+                              | _ -> store )
+                | _ -> new_store1)
 end
 
 
@@ -366,6 +259,8 @@ let%test_module "Variable tests" = (module struct
   let mem addr lo hi offset =
     mem (Int32.of_int_exn addr, Int (Int32.of_int_exn lo), Int (Int32.of_int_exn hi), offset)
 
+  let test_label name = Printf.sprintf "%-34s" name
+
   let%test "Tests on variable module" =
     print_endline "_______ _______________ _______\n        Variable module        \n------- --------------- -------\n";
     true
@@ -375,25 +270,34 @@ let%test_module "Variable tests" = (module struct
     let v2 = mem 1 2 6 ("", 0l) in
     let actual = share_addresses v1 v2 in
     let expected = true in
-    let context = Printf.sprintf "%s, %s" (to_string v1) (to_string v2) in
-    print_endline (Printf.sprintf "[Variable.share_addresses] %s -> %s (expected %s)" context (Bool.to_string actual) (Bool.to_string expected));
-    actual
+    print_endline (Printf.sprintf "%s %s, %s -> %s (expected %s)"
+      (test_label "[Variable.share_addresses]")
+      (to_string v1)
+      (to_string v2)
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
 
   let%test "share_addresses no" =
     let v1 = mem 2 0 4 ("", 0l) in
     let v2 = mem 2 0 4 ("", 1l) in
     let actual = share_addresses v1 v2 in
     let expected = false in
-    let context = Printf.sprintf "%s, %s" (to_string v1) (to_string v2) in
-    print_endline (Printf.sprintf "[Variable.share_addresses] %s -> %s (expected %s)" context (Bool.to_string actual) (Bool.to_string expected));
-    not actual
+    print_endline (Printf.sprintf "%s %s, %s -> %s (expected %s)"
+      (test_label "[Variable.share_addresses]")
+      (to_string v1)
+      (to_string v2)
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
 
   let%test "remove full overlap" =
     let from = mem 1 0 4 ("", 0l) in
     let these = RIC.ric (1l, Int (-1l), Int 6l, ("", 0l)) in
     let actual = remove ~these_addresses:these ~from in
     let expected = [] in
-    print_endline (Printf.sprintf "[Variable.remove] these:%s from:%s -> [%s] (expected [%s])"
+    print_endline (Printf.sprintf "%s these:%s from:%s -> [%s] (expected [%s])"
+      (test_label "[Variable.remove]")
       (RIC.to_string these) (to_string from)
       (String.concat ~sep:", " (List.map ~f:to_string actual))
       (String.concat ~sep:", " (List.map ~f:to_string expected)));
@@ -404,7 +308,8 @@ let%test_module "Variable tests" = (module struct
     let these = RIC.ric (2l, Int (0l), Int 1l, ("", 0l)) in
     let actual = remove ~these_addresses:these ~from in
     let expected = [mem 2 0 1 ("", 1l); mem 0 0 0 ("", 4l)] in
-    print_endline (Printf.sprintf "[Variable.remove] these:%s from:%s -> [%s] (expected [%s])"
+    print_endline (Printf.sprintf "%s these:%s from:%s -> [%s] (expected [%s])"
+      (test_label "[Variable.remove]")
       (RIC.to_string these) (to_string from)
       (String.concat ~sep:", " (List.map ~f:to_string actual))
       (String.concat ~sep:", " (List.map ~f:to_string expected)));
@@ -415,7 +320,8 @@ let%test_module "Variable tests" = (module struct
     let these = RIC.ric (1l, Int 5l, Int 8l, ("", 0l)) in
     let actual = remove ~these_addresses:these ~from in
     let expected = [from] in
-    print_endline (Printf.sprintf "[Variable.remove] these:%s from:%s -> [%s] (expected [%s])"
+    print_endline (Printf.sprintf "%s these:%s from:%s -> [%s] (expected [%s])"
+      (test_label "[Variable.remove]")
       (RIC.to_string these) (to_string from)
       (String.concat ~sep:", " (List.map ~f:to_string actual))
       (String.concat ~sep:", " (List.map ~f:to_string expected)));
@@ -426,7 +332,8 @@ let%test_module "Variable tests" = (module struct
     let these = [RIC.ric (2l, Int (0l), Int 1l, ("", 0l)); RIC.ric (0l, Int 0l, Int 0l, ("", 3l)); RIC.ric (1l, Int 0l, Int 3l, ("", 37l))] in
     let actual = remove_all ~these_addresses_list:these ~from in
     let expected = [mem 0 0 0 ("", 1l); mem 0 0 0 ("", 4l)] in
-    print_endline (Printf.sprintf "[Variable.remove_all] these:%s from:%s -> [%s] (expected [%s])"
+    print_endline (Printf.sprintf "%s these:%s from:%s -> [%s] (expected [%s])"
+      (test_label "[Variable.remove_all]")
       (String.concat ~sep:"; " (List.map ~f:RIC.to_string these))
       (to_string from)
       (String.concat ~sep:", " (List.map ~f:to_string actual))
@@ -438,7 +345,8 @@ let%test_module "Variable tests" = (module struct
     let these = [RIC.ric (2l, Int (0l), Int 1l, ("a", 0l)); RIC.ric (0l, Int 0l, Int 0l, ("", 3l)); RIC.ric (1l, Int 0l, Int 3l, ("a", 37l))] in
     let actual = remove_all ~these_addresses_list:these ~from in
     let expected = [] in
-    print_endline (Printf.sprintf "[Variable.remove_all] these:%s from:%s -> [%s] (expected [%s])"
+    print_endline (Printf.sprintf "%s these:%s from:%s -> [%s] (expected [%s])"
+      (test_label "[Variable.remove_all]")
       (String.concat ~sep:"; " (List.map ~f:RIC.to_string these))
       (to_string from)
       (String.concat ~sep:", " (List.map ~f:to_string actual))
@@ -451,9 +359,13 @@ let%test_module "Variable tests" = (module struct
     let cover2 = mem 1 2 3 ("", 0l) in
     let actual = is_covered ~by:[cover1; cover2] target in
     let expected = true in
-    let context = Printf.sprintf "%s by:[%s]" (to_string target) (String.concat ~sep:", " (List.map ~f:to_string [cover1; cover2])) in
-    print_endline (Printf.sprintf "[Variable.is_covered] %s -> %s (expected %s)" context (Bool.to_string actual) (Bool.to_string expected));
-    actual
+    print_endline (Printf.sprintf "%s %s by:[%s] -> %s (expected %s)"
+      (test_label "[Variable.is_covered]")
+      (to_string target)
+      (String.concat ~sep:", " (List.map ~f:to_string [cover1; cover2]))
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
 
   let%test "is_covered partially" =
     let target = mem 1 0 2 ("", 0l) in
@@ -461,35 +373,613 @@ let%test_module "Variable tests" = (module struct
     let cover2 = mem 1 2 3 ("", 20l) in
     let actual = is_covered ~by:[cover1] target in
     let expected = false in
-    let context = Printf.sprintf "%s by:[%s]" (to_string target) (String.concat ~sep:", " (List.map ~f:to_string [cover1; cover2])) in
-    print_endline (Printf.sprintf "[Variable.is_covered] %s -> %s (expected %s)" context (Bool.to_string actual) (Bool.to_string expected));
-    not actual
+    print_endline (Printf.sprintf "%s %s by:[%s] -> %s (expected %s)"
+      (test_label "[Variable.is_covered]")
+      (to_string target)
+      (String.concat ~sep:", " (List.map ~f:to_string [cover1; cover2]))
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
 
   let%test "update_relative_offset" =
     let original = mem 1 0 2 ("rel", 1l) in
     let values = String.Map.of_alist_exn [("rel", RIC.ric (1l, Int 10l, Int 10l, ("x", 0l)))] in
-    let updated = update_relative_offset ~var:original ~actual_values:values in
-    let actual =
-      match updated with
-      | Mem RIC { offset = ("x", new_off); _ } -> Int32.(new_off = 1l + 10l)
-      | _ -> false
-    in
-    let expected = true in
-    let context = Printf.sprintf "%s -> %s" (to_string original) (to_string updated) in
-    print_endline (Printf.sprintf "[Variable.update_relative_offset] %s -> %s (expected %s)" context (Bool.to_string actual) (Bool.to_string expected));
-    actual
+    let actual_var, actual_flag = update_relative_offset ~var:original ~actual_values:values in
+    let expected_var = mem 1 0 2 ("x", 11l) in
+    let expected_flag = false in
+    print_endline (Printf.sprintf "%s %s -> (%s, %s) (expected (%s, %s))"
+      (test_label "[Variable.update_relative_offset]")
+      (to_string original)
+      (to_string actual_var)
+      (Bool.to_string actual_flag)
+      (to_string expected_var)
+      (Bool.to_string expected_flag));
+    equal actual_var expected_var && Bool.equal actual_flag expected_flag
 
   let%test "update_relative_offset_2" =
     let original = mem 1 0 2 ("rel", 1l) in
     let values = String.Map.of_alist_exn [("rel", RIC.ric (1l, Int 10l, Int 11l, ("", 0l)))] in
-    let updated = update_relative_offset ~var:original ~actual_values:values in
-    let actual =
-      match updated with
-      | Mem RIC { lower_bound = Int 0l; upper_bound = Int 3l; offset = ("", 11l); _ } -> true
-      | _ -> false
+    let actual_var, actual_flag = update_relative_offset ~var:original ~actual_values:values in
+    let expected_var = mem 1 0 3 ("", 11l) in
+    let expected_flag = true in
+    print_endline (Printf.sprintf "%s %s with rel:%s -> (%s, %s) (expected (%s, %s))"
+      (test_label "[Variable.update_relative_offset]")
+      (to_string original)
+      (RIC.to_string (Map.find_exn values "rel"))
+      (to_string actual_var)
+      (Bool.to_string actual_flag)
+      (to_string expected_var)
+      (Bool.to_string expected_flag));
+    equal actual_var expected_var && Bool.equal actual_flag expected_flag
+
+  let%test "update_relative_offset non-memory variable" =
+    let original = Var (Var.Local 0) in
+    let values = String.Map.of_alist_exn [("rel", RIC.ric (1l, Int 10l, Int 10l, ("", 0l)))] in
+    let actual_var, actual_flag = update_relative_offset ~var:original ~actual_values:values in
+    let expected_var = original in
+    let expected_flag = false in
+    print_endline (Printf.sprintf "%s %s with rel:%s -> (%s, %s) (expected (%s, %s))"
+      (test_label "[Variable.update_relative_offset]")
+      (to_string original)
+      (RIC.to_string (Map.find_exn values "rel"))
+      (to_string actual_var)
+      (Bool.to_string actual_flag)
+      (to_string expected_var)
+      (Bool.to_string expected_flag));
+    equal actual_var expected_var && Bool.equal actual_flag expected_flag
+
+  let%test "update_relative_offset no relative offset" =
+    let original = mem 1 0 2 ("", 5l) in
+    let values = String.Map.of_alist_exn [("rel", RIC.ric (1l, Int 10l, Int 10l, ("", 0l)))] in
+    let actual_var, actual_flag = update_relative_offset ~var:original ~actual_values:values in
+    let expected_var = original in
+    let expected_flag = false in
+    print_endline (Printf.sprintf "%s %s with rel:%s -> (%s, %s) (expected (%s, %s))"
+      (test_label "[Variable.update_relative_offset]")
+      (to_string original)
+      (RIC.to_string (Map.find_exn values "rel"))
+      (to_string actual_var)
+      (Bool.to_string actual_flag)
+      (to_string expected_var)
+      (Bool.to_string expected_flag));
+    equal actual_var expected_var && Bool.equal actual_flag expected_flag
+
+  let%test "update_relative_offset singleton concrete relative" =
+    let original = mem 1 0 2 ("rel", 4l) in
+    let values = String.Map.of_alist_exn [("rel", RIC.ric (1l, Int 7l, Int 7l, ("", 0l)))] in
+    let actual_var, actual_flag = update_relative_offset ~var:original ~actual_values:values in
+    let expected_var = mem 1 0 2 ("", 11l) in
+    let expected_flag = false in
+    print_endline (Printf.sprintf "%s %s with rel:%s -> (%s, %s) (expected (%s, %s))"
+      (test_label "[Variable.update_relative_offset]")
+      (to_string original)
+      (RIC.to_string (Map.find_exn values "rel"))
+      (to_string actual_var)
+      (Bool.to_string actual_flag)
+      (to_string expected_var)
+      (Bool.to_string expected_flag));
+    equal actual_var expected_var && Bool.equal actual_flag expected_flag
+
+  let%test "update_relative_offset negative singleton relative" =
+    let original = mem 1 0 2 ("negrel", 20l) in
+    let values = String.Map.of_alist_exn [("rel", RIC.ric (1l, Int 7l, Int 7l, ("", 0l)))] in
+    let actual_var, actual_flag = update_relative_offset ~var:original ~actual_values:values in
+    let expected_var = mem 1 0 2 ("", 13l) in
+    let expected_flag = false in
+    print_endline (Printf.sprintf "%s %s with rel:%s -> (%s, %s) (expected (%s, %s))"
+      (test_label "[Variable.update_relative_offset]")
+      (to_string original)
+      (RIC.to_string (Map.find_exn values "rel"))
+      (to_string actual_var)
+      (Bool.to_string actual_flag)
+      (to_string expected_var)
+      (Bool.to_string expected_flag));
+    equal actual_var expected_var && Bool.equal actual_flag expected_flag
+
+  let%test "update_relative_offset non-singleton symbolic relative" =
+    let original = mem 1 0 2 ("rel", 4l) in
+    let values = String.Map.of_alist_exn [("rel", RIC.ric (1l, Int 7l, Int 9l, ("x", 0l)))] in
+    let actual_var, actual_flag = update_relative_offset ~var:original ~actual_values:values in
+    let expected_var = mem 1 0 4 ("x", 11l) in
+    let expected_flag = true in
+    print_endline (Printf.sprintf "%s %s with rel:%s -> (%s, %s) (expected (%s, %s))"
+      (test_label "[Variable.update_relative_offset]")
+      (to_string original)
+      (RIC.to_string (Map.find_exn values "rel"))
+      (to_string actual_var)
+      (Bool.to_string actual_flag)
+      (to_string expected_var)
+      (Bool.to_string expected_flag));
+    equal actual_var expected_var && Bool.equal actual_flag expected_flag
+
+  let%test "update_relative_offset negative non-singleton concrete relative" =
+    let original = mem 1 0 2 ("negrel", 20l) in
+    let values = String.Map.of_alist_exn [("rel", RIC.ric (1l, Int 7l, Int 9l, ("", 0l)))] in
+    let actual_var, actual_flag = update_relative_offset ~var:original ~actual_values:values in
+    let expected_var = mem 1 0 4 ("", 11l) in
+    let expected_flag = true in
+    print_endline (Printf.sprintf "%s %s with rel:%s -> (%s, %s) (expected (%s, %s))"
+      (test_label "[Variable.update_relative_offset]")
+      (to_string original)
+      (RIC.to_string (Map.find_exn values "rel"))
+      (to_string actual_var)
+      (Bool.to_string actual_flag)
+      (to_string expected_var)
+      (Bool.to_string expected_flag));
+    equal actual_var expected_var && Bool.equal actual_flag expected_flag
+
+  let%test "update_relative_offset multiple singleton relatives" =
+    let original = mem 1 0 2 ("rel+other", 5l) in
+    let values =
+      String.Map.of_alist_exn
+        [ ("rel", RIC.ric (1l, Int 7l, Int 7l, ("", 0l)))
+        ; ("other", RIC.ric (1l, Int 3l, Int 3l, ("", 0l)))
+        ]
     in
+    let actual_var, actual_flag = update_relative_offset ~var:original ~actual_values:values in
+    let expected_var = mem 1 0 2 ("", 15l) in
+    let expected_flag = false in
+    print_endline (Printf.sprintf "%s %s with rel:%s, other:%s -> (%s, %s) (expected (%s, %s))"
+      (test_label "[Variable.update_relative_offset]")
+      (to_string original)
+      (RIC.to_string (Map.find_exn values "rel"))
+      (RIC.to_string (Map.find_exn values "other"))
+      (to_string actual_var)
+      (Bool.to_string actual_flag)
+      (to_string expected_var)
+      (Bool.to_string expected_flag));
+    equal actual_var expected_var && Bool.equal actual_flag expected_flag
+
+  let%test "make_compatible no overlap" =
+    let m1 = mem 1 0 2 ("", 0l) in
+    let m2 = mem 1 10 12 ("", 0l) in
+    let this = Map.of_alist_exn [(m1, RIC.ric (0l, Int 0l, Int 0l, ("", 42l)))] in
+    let relative_to = Map.of_alist_exn [(m2, RIC.Top)] in
+    let actual = Map.make_compatible ~this ~relative_to ~get:(fun store ~var -> Map.find_exn store var) in
+    let expected = this in
+    print_endline (Printf.sprintf "%s this:(%s) relative_to:(%s)   ->   %s   (expected %s)"
+      (test_label "[Variable.Map.make_compatible]")
+      (Map.to_string this ~f:RIC.to_string)
+      (Map.to_string relative_to ~f:RIC.to_string)
+      (Map.to_string actual ~f:RIC.to_string)
+      (Map.to_string expected ~f:RIC.to_string));
+    Map.equal RIC.equal actual expected
+
+  let%test "make_compatible partial overlap" =
+    let m1 = mem 1 0 4 ("", 0l) in
+    let m2 = mem 1 2 3 ("", 0l) in
+    let value = RIC.ric (0l, Int 0l, Int 0l, ("", 42l)) in
+    let this = Map.of_alist_exn [(m1, value)] in
+    let relative_to = Map.of_alist_exn [(m2, RIC.Top)] in
+    let actual = Map.make_compatible ~this ~relative_to ~get:(fun store ~var -> Map.find_exn store var) in
+    let expected =
+      Map.of_alist_exn
+        [ (mem 1 2 3 ("", 0l), value)
+        ; (mem 1 0 1 ("", 0l), value)
+        ; (mem 1 4 4 ("", 0l), value)
+        ]
+    in
+    print_endline (Printf.sprintf "%s this:(%s) relative_to:(%s)   ->   %s   (expected %s)"
+      (test_label "[Variable.Map.make_compatible]")
+      (Map.to_string this ~f:RIC.to_string)
+      (Map.to_string relative_to ~f:RIC.to_string)
+      (Map.to_string actual ~f:RIC.to_string)
+      (Map.to_string expected ~f:RIC.to_string));
+    Map.equal RIC.equal actual expected
+
+  let%test "make_compatible full overlap" =
+    let m = mem 1 0 4 ("", 0l) in
+    let value = RIC.ric (0l, Int 0l, Int 0l, ("", 42l)) in
+    let this = Map.of_alist_exn [(m, value)] in
+    let relative_to = Map.of_alist_exn [(m, RIC.Top)] in
+    let actual = Map.make_compatible ~this ~relative_to ~get:(fun store ~var -> Map.find_exn store var) in
+    let expected = this in
+    print_endline (Printf.sprintf "%s this:(%s) relative_to:(%s)   ->   %s   (expected %s)"
+      (test_label "[Variable.Map.make_compatible]")
+      (Map.to_string this ~f:RIC.to_string)
+      (Map.to_string relative_to ~f:RIC.to_string)
+      (Map.to_string actual ~f:RIC.to_string)
+      (Map.to_string expected ~f:RIC.to_string));
+    Map.equal RIC.equal actual expected
+
+  let%test "make_compatible left overlap" =
+    let m1 = mem 1 0 4 ("", 0l) in
+    let m2 = mem 1 0 2 ("", 0l) in
+    let value = RIC.ric (0l, Int 0l, Int 0l, ("", 42l)) in
+    let this = Map.of_alist_exn [(m1, value)] in
+    let relative_to = Map.of_alist_exn [(m2, RIC.Top)] in
+    let actual = Map.make_compatible ~this ~relative_to ~get:(fun store ~var -> Map.find_exn store var) in
+    let expected =
+      Map.of_alist_exn
+        [ (mem 1 0 2 ("", 0l), value)
+        ; (mem 1 3 4 ("", 0l), value)
+        ]
+    in
+    print_endline (Printf.sprintf "%s this:(%s) relative_to:(%s)   ->   %s   (expected %s)"
+      (test_label "[Variable.Map.make_compatible]")
+      (Map.to_string this ~f:RIC.to_string)
+      (Map.to_string relative_to ~f:RIC.to_string)
+      (Map.to_string actual ~f:RIC.to_string)
+      (Map.to_string expected ~f:RIC.to_string));
+    Map.equal RIC.equal actual expected
+
+  let%test "make_compatible right overlap" =
+    let m1 = mem 1 0 4 ("", 0l) in
+    let m2 = mem 1 2 4 ("", 0l) in
+    let value = RIC.ric (0l, Int 0l, Int 0l, ("", 42l)) in
+    let this = Map.of_alist_exn [(m1, value)] in
+    let relative_to = Map.of_alist_exn [(m2, RIC.Top)] in
+    let actual = Map.make_compatible ~this ~relative_to ~get:(fun store ~var -> Map.find_exn store var) in
+    let expected =
+      Map.of_alist_exn
+        [ (mem 1 2 4 ("", 0l), value)
+        ; (mem 1 0 1 ("", 0l), value)
+        ]
+    in
+    print_endline (Printf.sprintf "%s this:(%s) relative_to:(%s)   ->   %s   (expected %s)"
+      (test_label "[Variable.Map.make_compatible]")
+      (Map.to_string this ~f:RIC.to_string)
+      (Map.to_string relative_to ~f:RIC.to_string)
+      (Map.to_string actual ~f:RIC.to_string)
+      (Map.to_string expected ~f:RIC.to_string));
+    Map.equal RIC.equal actual expected
+
+  let%test "make_compatible preserves unrelated memory" =
+    let m1 = mem 1 0 4 ("", 0l) in
+    let m2 = mem 1 2 3 ("", 0l) in
+    let unrelated = mem 1 10 12 ("", 0l) in
+    let value1 = RIC.ric (0l, Int 0l, Int 0l, ("", 42l)) in
+    let value2 = RIC.ric (0l, Int 0l, Int 0l, ("", 99l)) in
+    let this = Map.of_alist_exn [(m1, value1); (unrelated, value2)] in
+    let relative_to = Map.of_alist_exn [(m2, RIC.Top)] in
+    let actual = Map.make_compatible ~this ~relative_to ~get:(fun store ~var -> Map.find_exn store var) in
+    let expected =
+      Map.of_alist_exn
+        [ (mem 1 2 3 ("", 0l), value1)
+        ; (mem 1 0 1 ("", 0l), value1)
+        ; (mem 1 4 4 ("", 0l), value1)
+        ; (unrelated, value2)
+        ]
+    in
+    print_endline (Printf.sprintf "%s this:(%s) relative_to:(%s)   ->   %s   (expected %s)"
+      (test_label "[Variable.Map.make_compatible]")
+      (Map.to_string this ~f:RIC.to_string)
+      (Map.to_string relative_to ~f:RIC.to_string)
+      (Map.to_string actual ~f:RIC.to_string)
+      (Map.to_string expected ~f:RIC.to_string));
+    Map.equal RIC.equal actual expected
+
+  let%test "make_compatible multiple relative memories" =
+    let m = mem 1 0 6 ("", 0l) in
+    let split1 = mem 1 1 2 ("", 0l) in
+    let split2 = mem 1 4 5 ("", 0l) in
+    let value = RIC.one in
+    let this = Map.of_alist_exn [(m, value)] in
+    let relative_to = Map.of_alist_exn [(split1, RIC.Top); (split2, RIC.Top)] in
+    let actual = Map.make_compatible ~this ~relative_to ~get:(fun store ~var -> Map.find_exn store var) in
+    let expected =
+      Map.of_alist_exn
+        [ (mem 1 1 2 ("", 0l), value)
+        ; (mem 1 4 5 ("", 0l), value)
+        ; (mem 0 0 0 ("", 0l), value)
+        ; (mem 0 0 0 ("", 3l), value)
+        ; (mem 0 0 0 ("", 6l), value)
+        ]
+    in
+    print_endline (Printf.sprintf "%s this:(%s) relative_to:(%s)   ->   %s   (expected %s)"
+      (test_label "[Variable.Map.make_compatible]")
+      (Map.to_string this ~f:RIC.to_string)
+      (Map.to_string relative_to ~f:RIC.to_string)
+      (Map.to_string actual ~f:RIC.to_string)
+      (Map.to_string expected ~f:RIC.to_string));
+    Map.equal RIC.equal actual expected
+
+  let%test "make_compatible splits multiple memories in this" =
+    let m1 = mem 1 0 4 ("", 0l) in
+    let m2 = mem 1 10 14 ("", 0l) in
+    let split = mem 1 2 12 ("", 0l) in
+    let value = RIC.ric (0l, Int 0l, Int 0l, ("", 1l)) in
+    let this = Map.of_alist_exn [(m1, value); (m2, value)] in
+    let relative_to = Map.of_alist_exn [(split, RIC.Top)] in
+    let actual = Map.make_compatible ~this ~relative_to ~get:(fun store ~var -> Map.find_exn store var) in
+    let expected =
+      Map.of_alist_exn
+        [ (mem 1 2 4 ("", 0l), value)
+        ; (mem 1 0 1 ("", 0l), value)
+        ; (mem 1 10 12 ("", 0l), value)
+        ; (mem 1 13 14 ("", 0l), value)
+        ]
+    in
+    print_endline (Printf.sprintf "%s this:(%s) relative_to:(%s)   ->   %s   (expected %s)"
+      (test_label "[Variable.Map.make_compatible]")
+      (Map.to_string this ~f:RIC.to_string)
+      (Map.to_string relative_to ~f:RIC.to_string)
+      (Map.to_string actual ~f:RIC.to_string)
+      (Map.to_string expected ~f:RIC.to_string));
+    Map.equal RIC.equal actual expected
+
+  let%test "make_compatible incompatible relative offsets" =
+    let m1 = mem 1 0 4 ("x", 0l) in
+    let m2 = mem 1 2 3 ("y", 0l) in
+    let value = RIC.ric (0l, Int 0l, Int 0l, ("", 1l)) in
+    let this = Map.of_alist_exn [(m1, value)] in
+    let relative_to = Map.of_alist_exn [(m2, RIC.Top)] in
+    let actual = Map.make_compatible ~this ~relative_to ~get:(fun _ ~var:_ -> value) in
+    let expected = this in
+    print_endline (Printf.sprintf "%s this:(%s) relative_to:(%s)   ->   %s   (expected %s)"
+      (test_label "[Variable.Map.make_compatible]")
+      (Map.to_string this ~f:RIC.to_string)
+      (Map.to_string relative_to ~f:RIC.to_string)
+      (Map.to_string actual ~f:RIC.to_string)
+      (Map.to_string expected ~f:RIC.to_string));
+    Map.equal RIC.equal actual expected
+
+  let%test "make_compatible symbolic overlap" =
+    let m1 = mem 1 0 4 ("x", 0l) in
+    let m2 = mem 1 2 3 ("x", 0l) in
+    let value = RIC.ric (0l, Int 0l, Int 0l, ("", 42l)) in
+    let this = Map.of_alist_exn [(m1, value)] in
+    let relative_to = Map.of_alist_exn [(m2, RIC.Top)] in
+    let actual = Map.make_compatible ~this ~relative_to ~get:(fun _ ~var:_ -> value) in
+    let expected =
+      Map.of_alist_exn
+        [ (mem 1 2 3 ("x", 0l), value)
+        ; (mem 1 0 1 ("x", 0l), value)
+        ; (mem 0 0 0 ("x", 4l), value)
+        ]
+    in
+    print_endline (Printf.sprintf "%s this:(%s) relative_to:(%s)   ->   %s   (expected %s)"
+      (test_label "[Variable.Map.make_compatible]")
+      (Map.to_string this ~f:RIC.to_string)
+      (Map.to_string relative_to ~f:RIC.to_string)
+      (Map.to_string actual ~f:RIC.to_string)
+      (Map.to_string expected ~f:RIC.to_string));
+    Map.equal RIC.equal actual expected
+    
+
+  let%test "make_compatible symbolic overlap with offset" =
+    let m1 = mem 1 0 4 ("x", 5l) in
+    let m2 = mem 1 2 3 ("x", 5l) in
+    let value = RIC.ric (0l, Int 0l, Int 0l, ("", 42l)) in
+    let this = Map.of_alist_exn [(m1, value)] in
+    let relative_to = Map.of_alist_exn [(m2, RIC.Top)] in
+    let actual = Map.make_compatible ~this ~relative_to ~get:(fun _ ~var:_ -> value) in
+    let expected =
+      Map.of_alist_exn
+        [ (mem 1 2 3 ("x", 5l), value)
+        ; (mem 1 0 1 ("x", 5l), value)
+        ; (mem 0 0 0 ("x", 9l), value)
+        ]
+    in
+    print_endline (Printf.sprintf "%s this:(%s) relative_to:(%s)   ->   %s   (expected %s)"
+      (test_label "[Variable.Map.make_compatible]")
+      (Map.to_string this ~f:RIC.to_string)
+      (Map.to_string relative_to ~f:RIC.to_string)
+      (Map.to_string actual ~f:RIC.to_string)
+      (Map.to_string expected ~f:RIC.to_string));
+    Map.equal RIC.equal actual expected
+
+  let%test "comparable_offsets same relative offset" =
+    let v1 = mem 1 0 4 ("x", 0l) in
+    let v2 = mem 1 2 6 ("x", 10l) in
+    let actual = comparable_offsets v1 v2 in
     let expected = true in
-    let context = Printf.sprintf "%s -> %s" (to_string original) (to_string updated) in
-    print_endline (Printf.sprintf "[Variable.update_relative_offset] %s -> %s (expected %s)" context (Bool.to_string actual) (Bool.to_string expected));
-    actual
+    print_endline (Printf.sprintf "%s %s, %s -> %s (expected %s)"
+      (test_label "[Variable.comparable_offsets]")
+      (to_string v1)
+      (to_string v2)
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
+
+  let%test "comparable_offsets different relative offsets" =
+    let v1 = mem 1 0 4 ("x", 0l) in
+    let v2 = mem 1 2 6 ("y", 0l) in
+    let actual = comparable_offsets v1 v2 in
+    let expected = false in
+    print_endline (Printf.sprintf "%s %s, %s -> %s (expected %s)"
+      (test_label "[Variable.comparable_offsets]")
+      (to_string v1)
+      (to_string v2)
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
+
+  let%test "is_infinite finite memory" =
+    let v = mem 1 0 4 ("", 0l) in
+    let actual = is_infinite v in
+    let expected = false in
+    print_endline (Printf.sprintf "%s %s -> %s (expected %s)"
+      (test_label "[Variable.is_infinite]")
+      (to_string v)
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
+
+  let%test "is_covered with overlap between cover variables" =
+    let target = mem 1 0 4 ("", 0l) in
+    let cover1 = mem 1 0 2 ("", 0l) in
+    let cover2 = mem 1 2 4 ("", 0l) in
+    let actual = is_covered ~by:[cover1; cover2] target in
+    let expected = true in
+    print_endline (Printf.sprintf "%s %s by:[%s] -> %s (expected %s)"
+      (test_label "[Variable.is_covered]")
+      (to_string target)
+      (String.concat ~sep:", " (List.map ~f:to_string [cover1; cover2]))
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
+
+  let%test "is_covered symbolic addresses" =
+    let target = mem 1 0 4 ("x", 0l) in
+    let cover1 = mem 1 0 1 ("x", 0l) in
+    let cover2 = mem 1 2 4 ("x", 0l) in
+    let actual = is_covered ~by:[cover1; cover2] target in
+    let expected = true in
+    print_endline (Printf.sprintf "%s %s by:[%s] -> %s (expected %s)"
+      (test_label "[Variable.is_covered]")
+      (to_string target)
+      (String.concat ~sep:", " (List.map ~f:to_string [cover1; cover2]))
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
+
+  let%test "is_covered symbolic addresses with gap" =
+    let target = mem 1 0 4 ("x", 0l) in
+    let cover1 = mem 1 0 1 ("x", 0l) in
+    let cover2 = mem 1 3 4 ("x", 0l) in
+    let actual = is_covered ~by:[cover1; cover2] target in
+    let expected = false in
+    print_endline (Printf.sprintf "%s %s by:[%s] -> %s (expected %s)"
+      (test_label "[Variable.is_covered]")
+      (to_string target)
+      (String.concat ~sep:", " (List.map ~f:to_string [cover1; cover2]))
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
+
+  let%test "is_covered ignores non-memory variables" =
+    let target = mem 1 0 4 ("", 0l) in
+    let cover = mem 1 0 2 ("", 0l) in
+    let actual =
+      is_covered
+        ~by:[cover; Var (Var.Local 0); Accessed; MemorySize]
+        target
+    in
+    let expected = false in
+    print_endline (Printf.sprintf "%s %s by:[%s] -> %s (expected %s)"
+      (test_label "[Variable.is_covered]")
+      (to_string target)
+      (String.concat ~sep:", "
+        (List.map ~f:to_string [cover; Var (Var.Local 0); Accessed; MemorySize]))
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
+
+  let%test "share_addresses symbolic overlap" =
+    let v1 = mem 1 0 4 ("x", 0l) in
+    let v2 = mem 1 2 6 ("x", 0l) in
+    let actual = share_addresses v1 v2 in
+    let expected = true in
+    print_endline (Printf.sprintf "%s %s, %s -> %s (expected %s)"
+      (test_label "[Variable.share_addresses]")
+      (to_string v1)
+      (to_string v2)
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
+
+  let%test "share_addresses symbolic no overlap" =
+    let v1 = mem 1 0 4 ("x", 0l) in
+    let v2 = mem 1 5 8 ("x", 0l) in
+    let actual = share_addresses v1 v2 in
+    let expected = false in
+    print_endline (Printf.sprintf "%s %s, %s -> %s (expected %s)"
+      (test_label "[Variable.share_addresses]")
+      (to_string v1)
+      (to_string v2)
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
+
+  let%test "share_addresses non-memory variable" =
+    let v1 = Var (Var.Local 0) in
+    let v2 = mem 1 0 4 ("", 0l) in
+    let actual = share_addresses v1 v2 in
+    let expected = false in
+    print_endline (Printf.sprintf "%s %s, %s -> %s (expected %s)"
+      (test_label "[Variable.share_addresses]")
+      (to_string v1)
+      (to_string v2)
+      (Bool.to_string actual)
+      (Bool.to_string expected));
+    Bool.equal actual expected
+
+  let%test "remove_all overlapping removals" =
+    let from = mem 1 0 6 ("", 0l) in
+    let these =
+      [ RIC.ric (1l, Int 1l, Int 3l, ("", 0l))
+      ; RIC.ric (1l, Int 3l, Int 5l, ("", 0l))
+      ]
+    in
+    let actual = remove_all ~these_addresses_list:these ~from in
+    let expected = [mem 0 0 0 ("", 0l); mem 0 0 0 ("", 6l)] in
+    print_endline (Printf.sprintf "%s these:%s from:%s -> [%s] (expected [%s])"
+      (test_label "[Variable.remove_all]")
+      (String.concat ~sep:"; " (List.map ~f:RIC.to_string these))
+      (to_string from)
+      (String.concat ~sep:", " (List.map ~f:to_string actual))
+      (String.concat ~sep:", " (List.map ~f:to_string expected)));
+    List.equal equal actual expected
+
+  let%test "remove_all empty removal list" =
+    let from = mem 1 0 4 ("", 0l) in
+    let these = [] in
+    let actual = remove_all ~these_addresses_list:these ~from in
+    let expected = [from] in
+    print_endline (Printf.sprintf "%s these:%s from:%s -> [%s] (expected [%s])"
+      (test_label "[Variable.remove_all]")
+      (String.concat ~sep:"; " (List.map ~f:RIC.to_string these))
+      (to_string from)
+      (String.concat ~sep:", " (List.map ~f:to_string actual))
+      (String.concat ~sep:", " (List.map ~f:to_string expected)));
+    List.equal equal actual expected
+
+  let%test "remove_all full coverage by pieces" =
+    let from = mem 1 0 4 ("", 0l) in
+    let these =
+      [ RIC.ric (1l, Int 0l, Int 1l, ("", 0l))
+      ; RIC.ric (1l, Int 2l, Int 4l, ("", 0l))
+      ]
+    in
+    let actual = remove_all ~these_addresses_list:these ~from in
+    let expected = [] in
+    print_endline (Printf.sprintf "%s these:%s from:%s -> [%s] (expected [%s])"
+      (test_label "[Variable.remove_all]")
+      (String.concat ~sep:"; " (List.map ~f:RIC.to_string these))
+      (to_string from)
+      (String.concat ~sep:", " (List.map ~f:to_string actual))
+      (String.concat ~sep:", " (List.map ~f:to_string expected)));
+    List.equal equal actual expected
+
+  let%test "remove_all symbolic removals" =
+    let from = mem 1 0 6 ("x", 0l) in
+    let these =
+      [ RIC.ric (1l, Int 1l, Int 2l, ("x", 0l))
+      ; RIC.ric (1l, Int 4l, Int 5l, ("x", 0l))
+      ]
+    in
+    let actual = remove_all ~these_addresses_list:these ~from in
+    let expected =
+      [ mem 0 0 0 ("x", 0l)
+      ; mem 0 0 0 ("x", 3l)
+      ; mem 0 0 0 ("x", 6l)
+      ]
+    in
+    print_endline (Printf.sprintf "%s these:%s from:%s -> [%s] (expected [%s])"
+      (test_label "[Variable.remove_all]")
+      (String.concat ~sep:"; " (List.map ~f:RIC.to_string these))
+      (to_string from)
+      (String.concat ~sep:", " (List.map ~f:to_string actual))
+      (String.concat ~sep:", " (List.map ~f:to_string expected)));
+    List.equal equal actual expected
+
+  let%test "update_all updates selected variables" =
+    let v1 = Var (Var.Local 0) in
+    let v2 = Var (Var.Local 1) in
+    let v3 = Var (Var.Local 2) in
+    let old_value = RIC.ric (0l, Int 0l, Int 0l, ("", 1l)) in
+    let new_value = RIC.ric (0l, Int 0l, Int 0l, ("", 42l)) in
+    let store = Map.of_alist_exn [(v1, old_value); (v2, old_value); (v3, old_value)] in
+    let vars = Set.of_list [v1; v3] in
+    let actual = Map.update_all store vars new_value in
+    let expected = Map.of_alist_exn [(v1, new_value); (v2, old_value); (v3, new_value)] in
+    print_endline (Printf.sprintf "%s store:(%s) vars:(%s) value:%s -> %s (expected %s)"
+      (test_label "[Variable.Map.update_all]")
+      (Map.to_string store ~f:RIC.to_string)
+      (Set.to_string vars)
+      (RIC.to_string new_value)
+      (Map.to_string actual ~f:RIC.to_string)
+      (Map.to_string expected ~f:RIC.to_string));
+    Map.equal RIC.equal actual expected
 end)

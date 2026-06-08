@@ -48,10 +48,10 @@ struct
             | Boolean _ -> true
             | ValueSet RIC { offset = (o,_); _ } when not (String.is_empty o) -> true
             | ValueSet _ ->
-                Value_set_abstractions.meet
+                Value_set_abstraction.meet
                   call_index
                   (ValueSet (Reduced_interval_congruence.RIC.of_int32 idx))
-                |> Value_set_abstractions.equal Value_set_abstractions.bottom
+                |> Value_set_abstraction.equal Value_set_abstraction.bottom
                 |> not)
       in
       if List.is_empty targets then (Log.error "indirect call index doesn't match any function"; failwith "invalid program: indirect call index doesn't match any function");
@@ -137,68 +137,3 @@ let run_pointer_analysis
   Spec_inference.propagate_globals := original_prop_globals;
   Spec_inference.propagate_locals := original_prop_locals;
   (cfg_pointers, instructions_from_pointer_cfg, summaries)
-
-(* module Test = struct
-  let%test "add.wat" =
-    let module_ = Wasm_module.of_string
-      "(module
-        (memory (export \"mem\") 1)
-        (global $g0 (mut i32) (i32.const 1024))
-
-        (func $main (export \"main\") (param $l0 i32) (result i32) (local $l1 i32)
-          i32.const 42
-          local.set $l0
-          local.get $l0
-          global.get $g0
-          i32.add
-          return
-        )
-      )" in
-      let actual = (Int32Map.find_exn (analyze_intra module_ [0l]) 0l) in
-      match actual with
-      | _, Some cfg ->
-        let instruction_labels = Cfg.all_instruction_labels cfg in
-        let instructions = Cfg.all_instructions cfg in
-        List.fold 
-        ~init:() 
-        ~f:(fun _ label -> 
-          print_endline ("instruction " ^ Instr.Label.to_string label
-          ^ ": " ^ Instr.to_string (Option.value_exn (Instr.Label.Map.find instructions label))))
-        (Set.to_list instruction_labels);
-        let value_sets = Cfg.all_annots cfg in
-        List.fold
-        ~init:()
-        ~f:(fun _ store -> 
-          print_endline (Abstract_store_domain.to_string store))
-        value_sets;
-        true
-      | _ -> false
-end *)
-
-
-(* module Test = struct
-  let%test "simple function g0 = g1" =
-    let module_ = Wasm_module.of_string 
-      "(module
-        (memory (export \"mem\") 1)
-        (global $__stack_pointer (mut i32) (i32.const 1024))
-        (global $part1Value i32 (i32.const 0))
-        (global $part2Value i32 (i32.const 1))
-
-        (func $main (export \"main\") (result i32)
-          i32.const 42
-          global.set $__stack_pointer
-          global.get $__stack_pointer
-          global.set $part1Value
-          global.get $part2Value
-          return
-        )
-      )" 
-    in
-    let actual = fst (Int32Map.find_exn (analyze_intra module_ [0l]) 0l) in
-    let expected = Summary.{ ret = Some Reduced_interval_congruence.RIC.Bottom; mem = Domain.bottom; globals = [Reduced_interval_congruence.RIC.relative_ric (Var.to_string (Var.Global 0)); 
-                                                                                    Reduced_interval_congruence.RIC.relative_ric (Var.to_string (Var.Global 0));
-                                                                                    Reduced_interval_congruence.RIC.relative_ric (Var.to_string (Var.Global 2))] } in
-    check expected actual
-
-end *)

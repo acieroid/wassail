@@ -23,8 +23,10 @@
    Value_set 
    Boolean
    Bitfield
+   Congruence
+   Interval
    Abstract_store_domain Reduced_interval_congruence Value_set_transfer Value_set_summary Value_set_options
-   Value_set_abstractions
+   Value_set_abstraction
    Print_trace
    Global_read_domain Global_read_transfer Global_read_summary Global_read Global_defs
    Global_deps

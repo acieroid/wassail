@@ -102,14 +102,14 @@ module Make (*: Transfer.TRANSFER *) = struct
       | None -> failwith "nothing on the stack" in
     match i.instr with
     (* TODO: is there a way to know the memory size? *)
-    (* | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstractions.ValueSet Top) *)
+    (* | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstraction.ValueSet Top) *)
     | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:Variable.MemorySize)
     | MemoryGrow -> 
       state 
         |> Abstract_store_domain.set ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:Variable.MemorySize)
         |> Abstract_store_domain.set 
           ~var:Variable.MemorySize 
-          ~vs:(Value_set_abstractions.plus 
+          ~vs:(Value_set_abstraction.plus 
             (Abstract_store_domain.get state ~var:Variable.MemorySize)
             (Abstract_store_domain.get state ~var:(Variable.Var (pop (Spec_domain.get_or_fail i.annotation_before).vstack))))
     | Nop | Drop -> state
@@ -390,7 +390,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       | { op = Add; typ = I32 } -> (* i32 addition *) 
         Abstract_store_domain.i32_add state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result
       | { op = Sub; typ = I32 } -> (* i32 subtraction *) 
-        Abstract_store_domain.i32_sub state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result
+        Abstract_store_domain.i32_sub state ~subtract_this:(Variable.Var x) ~from:(Variable.Var y) ~result
       | { typ = I32; _ } 
       | _ -> (* other operations result in a pointer that can point anywhere *)
         if !Value_set_options.print_trace then print_endline "\tthis type of binary operation results in a pointer that can point anywhere";
@@ -426,59 +426,40 @@ module Make (*: Transfer.TRANSFER *) = struct
         | { typ = I32; offset = offset; _ } ->
           let offset = Int32.of_int_exn offset in
           if Int32.(size = 4l) then
-            let is_stack = !Value_set_options.disjoint_stack
-              && String.equal "g0" (Abstract_store_domain.Value.extract_relative_offset vs) in
             match vs with
             | Abstract_store_domain.Value.ValueSet vs -> (* TODO: factoriser ce qui suit:*)
               let vs_plus_offset = RIC.add_offset vs offset in
               if !Value_set_options.print_trace then print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into variable " ^ Variable.to_string (ret i));
               let target_variable = 
-                if is_stack then
-                  Variable.Stack vs_plus_offset
-                else
                   Variable.Mem vs_plus_offset in
               if !Value_set_options.print_trace then print_endline ("\ttarget variable: " ^ Variable.to_string target_variable);
               let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
-              let all_stack_vars = Abstract_store_domain.extract_stack_variables state in
               if !Value_set_options.print_trace then 
                 (print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars));
-                if !Value_set_options.disjoint_stack then 
-                  print_endline ("\tall stack variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_stack_vars));
                 );
               Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:target_variable)
             | Abstract_store_domain.Value.Boolean {numeric_value = vs; _} -> 
               let vs_plus_offset = RIC.add_offset vs offset in
               if !Value_set_options.print_trace then print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into variable " ^ Variable.to_string (ret i));
               let target_variable = 
-                if is_stack then
-                  Variable.Stack vs_plus_offset
-                else
+               
                   Variable.Mem vs_plus_offset in
               if !Value_set_options.print_trace then print_endline ("\ttarget variable: " ^ Variable.to_string target_variable);
               let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
-              let all_stack_vars = Abstract_store_domain.extract_stack_variables state in
               if !Value_set_options.print_trace then 
-                (print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars));
-                if !Value_set_options.disjoint_stack then 
-                  print_endline ("\tall stack variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_stack_vars));
-                );
+                (print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars)););
               Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:target_variable)
             | Bitfield bf ->
               let vs = RIC.of_bitfield bf in
               let vs_plus_offset = RIC.add_offset vs offset in
               if !Value_set_options.print_trace then print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into variable " ^ Variable.to_string (ret i));
               let target_variable = 
-                if is_stack then
-                  Variable.Stack vs_plus_offset
-                else
                   Variable.Mem vs_plus_offset in
               if !Value_set_options.print_trace then print_endline ("\ttarget variable: " ^ Variable.to_string target_variable);
               let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
-              let all_stack_vars = Abstract_store_domain.extract_stack_variables state in
+              (* let all_stack_vars = Abstract_store_domain.extract_stack_variables state in *)
               if !Value_set_options.print_trace then 
                 (print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars));
-                if !Value_set_options.disjoint_stack then 
-                  print_endline ("\tall stack variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_stack_vars));
                 );
               Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:target_variable)
           else
@@ -648,7 +629,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         Abstract_store_domain.set
           state
           ~var:(ret i)
-          ~vs:(Value_set_abstractions.eqz ~var:(Variable.Var var) vs)
+          ~vs:(Value_set_abstraction.eqz ~var:(Variable.Var var) vs)
       | _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean {Boolean.true_or_false = Variable.Map.empty; numeric_value = RIC.Top})
       end
     | Unary { op = Clz; _ } ->
@@ -657,21 +638,21 @@ module Make (*: Transfer.TRANSFER *) = struct
       Abstract_store_domain.set
         state
         ~var:(ret i)
-        ~vs:(Value_set_abstractions.count_leading_zeros vs)
+        ~vs:(Value_set_abstraction.count_leading_zeros vs)
     | Unary { op = Ctz; _ } ->
       let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
       let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
       Abstract_store_domain.set
         state
         ~var:(ret i)
-        ~vs:(Value_set_abstractions.count_trailing_zeros vs)
+        ~vs:(Value_set_abstraction.count_trailing_zeros vs)
     | Unary { op = Popcnt; _ } ->
       let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
       let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
       Abstract_store_domain.set
         state
         ~var:(ret i)
-        ~vs:(Value_set_abstractions.population_count vs)
+        ~vs:(Value_set_abstraction.population_count vs)
     | Unary { op = ExtendS _; _} ->
       Abstract_store_domain.set
         state
@@ -684,7 +665,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         ~var:(ret i)
         ~vs:(ValueSet RIC.Top)
     | Convert _ ->
-      Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstractions.ValueSet Top)
+      Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstraction.ValueSet Top)
 
 
   let apply_condition 
@@ -698,7 +679,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         store_operations = state.store_operations } in
     let locals_and_globals = Abstract_store_domain.extract_locals_and_globals state in
     let true_ = 
-      if Boolean.can_be_true boolean then
+      if Boolean.may_be_true boolean then
         let true_ =
           Abstract_store_domain.make_compatible 
             ~this_store:
@@ -724,7 +705,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         Abstract_store_domain.bottom
     in
     let false_ = 
-      if Boolean.can_be_false boolean then
+      if Boolean.may_be_false boolean then
         let false_ =
           Abstract_store_domain.make_compatible 
             ~this_store:

@@ -49,7 +49,7 @@ let function_may_affect_global_variable
       Int32Map.find_exn summaries fct_index in
     let global_value_after_call = 
       Abstract_store_domain.get fct_summary ~var:(Variable.Var global_var) in
-    not (Value_set_abstractions.equal global_value_after_call (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, (Var.to_string global_var,0l)))))
+    not (Value_set_abstraction.equal global_value_after_call (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, (Var.to_string global_var,0l)))))
 
 (** Computes dependencies from [global.get] instructions to preceding calls.
 
