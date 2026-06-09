@@ -343,7 +343,15 @@ let rec population_count (vs : t) : t =
     ValueSet (RIC.ric (1l, Int (Int32.of_int_exn min), Int (Int32.of_int_exn max), ("", 0l)))
 
 
+let may_be_false : t -> bool = function
+  | ValueSet vs
+  | Boolean {numeric_value = vs; _} -> RIC.may_be_false vs
+  | Bitfield bf -> Bitfield.may_be_false bf
 
+let may_be_true : t -> bool = function
+  | ValueSet vs
+  | Boolean {numeric_value = vs; _} -> RIC.may_be_true vs
+  | Bitfield bf -> Bitfield.may_be_true bf
 
 
 (*

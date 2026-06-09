@@ -4,23 +4,13 @@ open Reduced_interval_congruence
 
 module Make (*: Transfer.TRANSFER *) = struct
   module State = Abstract_store_domain
+  module Summary = Value_set_summary
+  module Value = State.Value
 
-  module RIC = Reduced_interval_congruence.RIC
+  type summary = Summary.t
 
   (* We need the variable names as annotations *)
   type annot_expected = Spec_domain.t
-
-
-  (** The value-set specification for an imported function is an abstract store *)
-  type value_set_specification = Abstract_store_domain.t
-
-  (** The value-set specifications as a map from function name to specification.
-      Stored as a reference so that it can be extended *)
-  let value_set_specifications : value_set_specification StringMap.t ref =
-    let _bottom = Abstract_store_domain.bottom in
-    ref (StringMap.of_alist_exn [
-      (* TODO: add specifications for a few common imported functions *)
-    ])
 
   (** [init cfg] initializes the abstract state using the function argument and global variables from [cfg]. *)
   (* let init (cfg : 'a Cfg.t) : state = *)
@@ -30,59 +20,63 @@ module Make (*: Transfer.TRANSFER *) = struct
     let global_types = Wasm_module.get_global_types module_ in
     { abstract_store =
         Variable.Map.of_alist_exn (
-          (List.mapi arg_types ~f:(fun i _ -> 
-            let variable = Var.Local i in
-            let var_name = Var.to_string variable in
-            (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, (var_name, 0l)))))) @
-          (List.mapi global_types ~f:(fun i _ -> 
-            let variable = Var.Global i in
-            let var_name = Var.to_string variable in
-            (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, (var_name, 0l)))))) @
-          (List.mapi funcinst.code.locals ~f:(fun i _ -> 
-            let variable = Var.Local (i + nb_of_arguments) in
-            (Variable.Var variable, Abstract_store_domain.Value.ValueSet (RIC.ric (0l, Int 0l, Int 0l, ("", 0l)))))) @
-          [(Variable.Mem RIC.Top), Abstract_store_domain.Value.ValueSet RIC.Top]);
+          (* arguments *)
+          (List.mapi arg_types ~f:(fun i type_ -> 
+            let variable = Variable.Var (Var.Local i) in
+            match type_ with
+            | I32 ->
+              let var_name = Variable.to_string variable in
+              (variable, Value.ValueSet (RIC.relative_ric var_name))
+            | _ -> (variable, Value.top))) @
+          (* gloabls *)
+          (List.mapi global_types ~f:(fun i type_ -> 
+            let variable = Variable.Var (Var.Global i) in
+            match type_ with
+            | I32 ->
+              let var_name = Variable.to_string variable in
+              (variable, Value.ValueSet (RIC.relative_ric var_name))
+            | _ -> (variable, Value.top))) @
+          (* locals *)
+          (List.mapi funcinst.code.locals ~f:(fun i type_ -> 
+            let variable = Variable.Var (Var.Local (i + nb_of_arguments)) in
+            match type_ with
+            | I32 -> (variable, Value.ValueSet RIC.zero)
+            | _ -> (variable, Value.top))) @
+          [(Variable.entire_memory), Value.top]);
       store_operations = RICSet.empty }
 
-  (** [bottom_state cfg] returns the bottom abstract state. *)
-  let bottom (*_cfg : 'a Cfg.t*) : State.t = Abstract_store_domain.bottom (* TODO: check that I don't need to add globals *)
+  let bottom : State.t = State.bottom 
 
-  (** [state_to_string s] converts an abstract state [s] to its string representation. *)
-  let state_to_string (s : State.t) : string = Abstract_store_domain.to_string s
+  let state_to_string : State.t -> string = State.to_string
 
-  (** [join_state s1 s2] joins two abstract states [s1] and [s2]. *)
-  let join_state (s1 : State.t) (s2 : State.t) : State.t = Abstract_store_domain.join s1 s2
+  let join_state : State.t -> State.t -> State.t = State.join
 
-  (** [widen_state s1 s2] performs widening between abstract states [s1] and [s2]. *)
   let widen_state (s1 : State.t) (s2 : State.t) : State.t = 
-    let widened_state = Abstract_store_domain.widen s1 s2 in
-    if !Value_set_options.print_trace then 
-      (print_endline "\twidening:";
-      print_endline ("\t\tstate1: " ^ Abstract_store_domain.to_string s1);
-      print_endline ("\t\tstate2: " ^ Abstract_store_domain.to_string s2);
-      print_endline ("\t\twidened state: " ^ Abstract_store_domain.to_string widened_state););
-    if not (Abstract_store_domain.equal widened_state s1) then Intra.narrow_option := true;
+    let widened_state = State.widen s1 s2 in
+    Print_trace.print
+      "\twidening:\t\tstate1: %s\t\tstate2: %s\t\twidened state: %s"
+      (state_to_string s1)
+      (state_to_string s2)
+      (state_to_string widened_state);
+    if not (State.equal widened_state s1) then Intra.narrow_option := true;
     widened_state
-
-  type summary = Value_set_summary.t
 
   let is_this_the_value_of 
       (state : Spec_domain.SpecWithoutBottom.t) 
       ~(value : Variable.t) 
       ~(of_this_variable : Variable.t)
     : bool =
-    (* print_endline ("is " ^ Variable.to_string value ^ " the value of " ^ Variable.to_string of_this_variable ^ " ?"); *)
     match of_this_variable with
     | Var Var.Local l ->
       if l < List.length state.locals then
-        let value' = Variable.Var (Spec_inference.get (Option.value_exn (Int32.of_int l)) state.locals) in
-        Variable.equal value value'
+        Variable.Var (Spec_inference.get (Int32.of_int_exn l) state.locals)
+        |> Variable.equal value
       else
         false
     | Var Var.Global g ->
       if g < List.length state.globals then
-        let value' = Variable.Var (Spec_inference.get (Option.value_exn (Int32.of_int g)) state.globals) in
-        Variable.equal value value'
+        Variable.Var (Spec_inference.get (Int32.of_int_exn g) state.globals)
+        |> Variable.equal value
       else
         false
     | _ -> false
@@ -117,18 +111,34 @@ module Make (*: Transfer.TRANSFER *) = struct
     | MemoryCopy | MemoryFill | MemoryInit _ -> state
     | RefIsNull | RefNull _ | RefFunc _ -> state
     | Select _ ->
-      let x, y = (*pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in*)
-        match (Spec_domain.get_or_fail i.annotation_before).vstack with
-        | _ :: x :: y :: _ -> x, y
-        | _ -> failwith "not enough elements on the stack" in
-      let x_vs, y_vs = Abstract_store_domain.get state ~var:(Variable.Var x), Abstract_store_domain.get state ~var:(Variable.Var y) in
-      let joined_selection = Abstract_store_domain.Value.join x_vs y_vs in
+      let condition, x, y = (*pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in*)
+        (match (Spec_domain.get_or_fail i.annotation_before).vstack with
+        | condition :: x :: y :: _ -> condition, x, y
+        | _ -> failwith "not enough elements on the stack") in
+      let cond_vs = State.get state ~var:(Variable.Var condition) in
+      let result = 
+        if Value.may_be_false cond_vs then
+          Abstract_store_domain.get state ~var:(Variable.Var x)
+          |> Value.join
+            (if Value.may_be_true cond_vs then
+              Abstract_store_domain.get state ~var:(Variable.Var y)
+            else
+              Value.bottom)
+        else
+          if Value.may_be_true cond_vs then
+              Abstract_store_domain.get state ~var:(Variable.Var y)
+          else
+            (Log.error "invalid select condition"; failwith "")
+      in
+      (* let x_vs, y_vs = Abstract_store_domain.get state ~var:(Variable.Var x), Abstract_store_domain.get state ~var:(Variable.Var y) in
+      let joined_selection = Abstract_store_domain.Value.join x_vs y_vs in *)
       if !Value_set_options.print_trace then 
         Printf.printf "\tselecting from two options:\n\t\t%s   ⊔   %s   ->  %s\n"
-          (Abstract_store_domain.Value.to_string x_vs)
-          (Abstract_store_domain.Value.to_string y_vs) 
-          (Abstract_store_domain.Value.to_string joined_selection);
-        Abstract_store_domain.set state ~var:(ret i) ~vs:joined_selection
+          (* (Abstract_store_domain.Value.to_string x_vs)
+          (Abstract_store_domain.Value.to_string y_vs)  *)
+          "..." "..."
+          (Abstract_store_domain.Value.to_string result);
+        Abstract_store_domain.set state ~var:(ret i) ~vs:result
     | LocalGet l -> 
       let local_variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
       if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string local_variable ^ " (" ^ Variable.to_string (ret i) ^ ")");
@@ -965,7 +975,7 @@ module Make (*: Transfer.TRANSFER *) = struct
     state_after_call
 
   let imported
-      (_module : Wasm_module.t)
+      (module_ : Wasm_module.t)
       (desc : Wasm_module.func_desc)
       (annot_before : annot_expected)
       (annot_after : annot_expected)
@@ -973,14 +983,34 @@ module Make (*: Transfer.TRANSFER *) = struct
     : State.t =
     Spec_domain.wrap annot_before ~default:State.bottom ~f:(fun _annotation_before ->
       Spec_domain.wrap annot_after ~default:State.bottom ~f:(fun _annotation_after ->
-        match StringMap.find !value_set_specifications desc.name with
+        let summary = Summary.of_import
+                        desc.name
+                        module_.nglobals
+                        desc.arguments
+                        desc.returns
+        in
+        let return_variable =
+          match annot_after with
+          | Bottom -> assert false
+          | NotBottom x ->
+            if List.length desc.returns = 1 then 
+              List.hd x.vstack 
+            else 
+              None 
+        in
+        Summary.apply
+          ~summary
+          ~state
+          ~args:[]
+          ~return_variable
+        (* match StringMap.find !value_set_specifications desc.name with
         | None ->
           Log.warn (Printf.sprintf "No specification found for imported function %s (index: %ld): assuming abstract store is preserved" desc.name desc.idx);
           state
         | Some _spec ->
           (* TODO: implement this! *)
           Log.warn "Imported functions have not been implemented yet! It is assumed that the abstract store remains unchanged by the function call.";
-          state
+          state *)
       )
     )
 

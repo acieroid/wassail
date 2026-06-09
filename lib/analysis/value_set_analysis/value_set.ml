@@ -3,7 +3,7 @@ open Helpers
 
 module Options = Value_set_options
 module Domain = Abstract_store_domain
-(* module RIC = Reduced_interval_congruence.RIC *)
+module RIC = Reduced_interval_congruence.RIC
 module TransferFunction = Value_set_transfer.Make
 module Summary = Value_set_summary
 module ClassicalInter = Intra.MakeClassicalInter(TransferFunction)
@@ -137,3 +137,458 @@ let run_pointer_analysis
   Spec_inference.propagate_globals := original_prop_globals;
   Spec_inference.propagate_locals := original_prop_locals;
   (cfg_pointers, instructions_from_pointer_cfg, summaries)
+
+
+
+(*
+TTTTTTTTTTTTTTTTTTTTTTTEEEEEEEEEEEEEEEEEEEEEE   SSSSSSSSSSSSSSS TTTTTTTTTTTTTTTTTTTTTTT   SSSSSSSSSSSSSSS 
+T:::::::::::::::::::::TE::::::::::::::::::::E SS:::::::::::::::ST:::::::::::::::::::::T SS:::::::::::::::S
+T:::::::::::::::::::::TE::::::::::::::::::::ES:::::SSSSSS::::::ST:::::::::::::::::::::TS:::::SSSSSS::::::S
+T:::::TT:::::::TT:::::TEE::::::EEEEEEEEE::::ES:::::S     SSSSSSST:::::TT:::::::TT:::::TS:::::S     SSSSSSS
+TTTTTT  T:::::T  TTTTTT  E:::::E       EEEEEES:::::S            TTTTTT  T:::::T  TTTTTTS:::::S            
+        T:::::T          E:::::E             S:::::S                    T:::::T        S:::::S            
+        T:::::T          E::::::EEEEEEEEEE    S::::SSSS                 T:::::T         S::::SSSS         
+        T:::::T          E:::::::::::::::E     SS::::::SSSSS            T:::::T          SS::::::SSSSS    
+        T:::::T          E:::::::::::::::E       SSS::::::::SS          T:::::T            SSS::::::::SS  
+        T:::::T          E::::::EEEEEEEEEE          SSSSSS::::S         T:::::T               SSSSSS::::S 
+        T:::::T          E:::::E                         S:::::S        T:::::T                    S:::::S
+        T:::::T          E:::::E       EEEEEE            S:::::S        T:::::T                    S:::::S
+      TT:::::::TT      EE::::::EEEEEEEE:::::ESSSSSSS     S:::::S      TT:::::::TT      SSSSSSS     S:::::S
+      T:::::::::T      E::::::::::::::::::::ES::::::SSSSSS:::::S      T:::::::::T      S::::::SSSSSS:::::S
+      T:::::::::T      E::::::::::::::::::::ES:::::::::::::::SS       T:::::::::T      S:::::::::::::::SS 
+      TTTTTTTTTTT      EEEEEEEEEEEEEEEEEEEEEE SSSSSSSSSSSSSSS         TTTTTTTTTTT       SSSSSSSSSSSSSSS   
+*)
+
+let%test_module "value-set tests" = (module struct
+
+
+  let%test "value-set summary tests" =
+    print_endline "\n_______ _________________ _______\n        Integration tests        \n------- ----------------- -------\n"; true
+
+  let test_label name = Printf.printf "%s\n" name
+
+  let analyze (schedule : int32 list) (fct : int32) (program : string) : Domain.t =
+    let cfg =
+      ((program
+      |> Wasm_module.of_string
+      |> analyze_intra) schedule
+      |> Int32Map.find_exn) fct
+      |> snd
+      |> Option.value_exn 
+    in
+    match (Cfg.find_block_exn cfg cfg.exit_block).content with
+    | Control i -> i.annotation_after
+    | _ -> failwith "Cfg.exit_annotation_exn: exit block is not a control block"
+
+  let i_var (f : int32) (id : int) : Variable.t = Variable.Var (Var {section = Function f; id})
+
+  let check_value (state : Domain.t) (var : Variable.t) (value : Domain.Value.t) : bool =
+    state
+    |> Domain.get ~var
+    |> Domain.Value.equal value
+    || (Printf.printf "\tFailure: %s\n" (Domain.to_string state); false)
+
+
+  let () = Value_set_options.show_intermediates := true
+
+  let%test "add.wat" =
+    let exit_state = 
+      "(module
+        (memory (export \"mem\") 1)
+        (global $g0 (mut i32) (i32.const 1024))
+
+        (func $main (export \"main\") (param $l0 i32) (result i32) (local $l1 i32)
+    ;; add two constants:
+          i32.const 42
+          i32.const 14
+          i32.add 
+          drop
+
+    ;; add a constant and a global:
+          i32.const 99
+          global.get $g0
+          i32.add
+          drop
+
+    ;; add a constant and a parameter:
+          i32.const 77
+          local.get $l0
+          i32.add
+          drop
+
+    ;; add a constant and a local
+          i32.const 5
+          local.get $l1
+          i32.add
+          drop
+
+    ;; add a global and a parameter:
+          global.get $g0
+          local.get $l0
+          i32.add
+        )
+      )"
+    |> analyze [0l] 0l 
+    in
+    test_label "[add.wat]";
+    check_value exit_state (i_var 0l 2) (ValueSet (RIC.constant 56l))
+    && check_value exit_state (i_var 0l 6) (ValueSet (RIC.(constant 99l + relative_ric "g0")))
+    && check_value exit_state (i_var 0l 10) (ValueSet (RIC.(constant 77l + relative_ric "l0")))
+    && check_value exit_state (i_var 0l 14) (ValueSet (RIC.constant 5l))
+    && check_value exit_state (i_var 0l 18) (ValueSet (RIC.(relative_ric "g0" + relative_ric "l0")))
+
+  let%test "sub.wat" =
+    let exit_state = 
+      "(module
+        (memory (export \"mem\") 1)
+        (global $g0 (mut i32) (i32.const 1024))
+
+        (func $main (export \"main\") (param $l0 i32) (result i32) (local $l1 i32)
+          ;; constant - constant
+          i32.const 14
+          i32.const 3
+          i32.sub ;; 11
+          drop
+
+          ;; constant - (negative constant)
+          i32.const 42
+          i32.const -13
+          i32.sub ;; 55
+          drop
+
+          ;; constant - global
+          i32.const 26
+          global.get $g0
+          i32.sub ;; 26+negg0
+          drop
+
+          ;; constant - param
+          i32.const 126
+          local.get $l0
+          i32.sub ;; 126+negl0
+          drop
+
+          ;; constant - local
+          i32.const 1024
+          local.get $l1
+          i32.sub ;; 1024
+          drop
+
+          ;; global - cst
+          global.get $g0
+          i32.const 26
+          i32.sub ;; g0 - 26
+          drop
+
+          ;; param - cst
+          local.get $l0
+          i32.const 126
+          i32.sub ;; l0 - 126
+          drop
+
+          ;; local - cst
+          local.get $l1
+          i32.const 1024
+          i32.sub ;; - 1024
+          drop
+
+          ;; global - param
+          global.get $g0
+          local.get $l0
+          i32.sub ;; g0+negl0
+        )
+      )
+      "
+      |> analyze [0l] 0l 
+    in
+    test_label "[sub.wat]";
+       check_value exit_state (i_var 0l 2)  (ValueSet (RIC.constant 11l))
+    && check_value exit_state (i_var 0l 6)  (ValueSet (RIC.(constant 55l)))
+    && check_value exit_state (i_var 0l 10) (ValueSet (RIC.(constant 26l + relative_ric "negg0")))
+    && check_value exit_state (i_var 0l 14) (ValueSet (RIC.(constant 126l + relative_ric "negl0")))
+    && check_value exit_state (i_var 0l 18) (ValueSet (RIC.(constant 1024l)))
+    && check_value exit_state (i_var 0l 22) (ValueSet (RIC.(relative_ric "g0" - constant 26l)))
+    && check_value exit_state (i_var 0l 26) (ValueSet (RIC.(relative_ric "l0" - constant 126l)))
+    && check_value exit_state (i_var 0l 30) (ValueSet (RIC.(constant (-1024l))))
+    && check_value exit_state (i_var 0l 34) (ValueSet (RIC.(relative_ric "g0" + relative_ric "negl0")))
+
+  let%test "global.set.get.wat" =
+    let exit_state = 
+      "(module
+        (memory (export \"mem\") 1)
+        (global $g0 (mut i32) (i32.const 1024))
+        (global $g1 (mut i32) (i32.const 1024))
+
+        (func $main (export \"main\") (param $l0 i32) (result i32) (local $l1 i32)
+          ;; global = param
+          local.get $l0
+          global.set $g0
+          
+          ;; global = const
+          i32.const 14
+          global.set $g1
+
+          global.get $g1
+        )
+      )"
+      |> analyze [0l] 0l 
+    in
+    test_label "[global.set.get.wat]";
+       check_value exit_state (Variable.Var (Var.Global 0))  (ValueSet (RIC.relative_ric "l0"))
+    && check_value exit_state (Variable.Var (Var.Global 1))  (ValueSet (RIC.(constant 14l)))
+    && check_value exit_state (Variable.Var (Var.Return 0l)) (ValueSet (RIC.constant 14l))
+
+
+  let%test "local.set.get.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $l0 i32) (result i32) (local $l1 i32)
+          ;; local = const
+          i32.const 14
+          local.set $l1
+
+          ;; get local
+          local.get $l1
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[local.set.get.wat]";
+       check_value exit_state (Variable.Var (Var.Local 1)) (ValueSet (RIC.constant 14l))
+    && check_value exit_state (Variable.Var (Var.Return 0l)) (ValueSet (RIC.constant 14l))
+
+  let%test "local.tee.wat" =
+    let exit_state =
+      "(module
+      (memory (export \"mem\") 1)
+
+      (func $main (export \"main\") (param $l0 i32) (result i32) (local $l1 i32)
+        ;; local = const, but keep value on stack
+        i32.const 42
+        local.tee $l1
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[local.tee.wat]";
+       check_value exit_state (Variable.Var (Var.Local 1)) (ValueSet (RIC.constant 42l))
+    && check_value exit_state (Variable.Var (Var.Return 0l)) (ValueSet (RIC.constant 42l))
+
+  let%test "global.get.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+        (global $g0 (mut i32) (i32.const 1024))
+
+        (func $main (export \"main\") (result i32)
+          ;; get initial global value
+          global.get $g0
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[global.get.wat]";
+    check_value exit_state (Variable.Var (Var.Return 0l)) (ValueSet (RIC.relative_ric "g0"))
+
+
+  let%test "eqz.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          ;; zero is true
+          i32.const 0
+          i32.eqz
+          drop
+
+          ;; non-zero is false
+          i32.const 42
+          i32.eqz
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[eqz.wat]";
+       check_value exit_state (i_var 0l 1) (ValueSet RIC.one)
+    && check_value exit_state (Variable.Var (Var.Return 0l)) (ValueSet RIC.zero)
+
+  let%test "select.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          ;; true condition keeps first value
+          i32.const 10
+          i32.const 20
+          i32.const 1
+          select
+          drop
+
+          ;; false condition keeps second value
+          i32.const 10
+          i32.const 20
+          i32.const 0
+          select
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[select.wat]";
+       check_value exit_state (i_var 0l 3) (ValueSet (RIC.constant 10l))
+    && check_value exit_state (Variable.Var (Var.Return 0l)) (ValueSet (RIC.constant 20l))
+
+  let%test "select.unknown-condition.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $l0 i32) (result i32)
+          i32.const 10
+          i32.const 20
+          local.get $l0
+          select
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[select.unknown-condition.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
+
+  let%test "select.nonzero-condition.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          ;; condition is definitely nonzero
+          i32.const 10
+          i32.const 20
+          i32.const -7
+          select
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[select.nonzero-condition.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 10l))
+
+  let%test "select.zero-condition.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          ;; condition is definitely zero
+          i32.const 10
+          i32.const 20
+          i32.const 0
+          select
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[select.zero-condition.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 20l))
+
+  let%test "select.relative-value.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $l0 i32) (result i32)
+          local.get $l0
+          i32.const 42
+          i32.const 1
+          select
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[select.relative-value.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.relative_ric "l0"))
+  
+  let%test "if.constant-condition.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 1
+          if (result i32)
+            i32.const 10
+          else
+            i32.const 20
+          end
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[if.constant-condition.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 10l))
+
+  let%test "if.in-loop.accessible-branches.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32) (local $i i32) (local $res i32)
+          ;; i = 0
+          i32.const 0
+          local.set $i
+
+          block
+            loop
+              ;; if i == 0:
+              ;;   res = 10
+              ;; else:
+              ;;   res = 20
+              local.get $i
+              i32.eqz
+              if
+                i32.const 10
+                local.set $res
+              else
+                i32.const 20
+                local.set $res
+              end
+
+              ;; i++
+              local.get $i
+              i32.const 1
+              i32.add
+              local.tee $i
+
+              ;; continue while i < 2
+              i32.const 2
+              i32.lt_s
+              br_if 0
+            end
+          end
+
+          local.get $res
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[if.in-loop.accessible-branches.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
+
+  let%test "keep false when working" = false
+
+end)
