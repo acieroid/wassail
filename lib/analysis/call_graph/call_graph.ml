@@ -48,23 +48,28 @@ let indirect_call_targets (wasm_mod : Wasm_module.t) (typ : Int32.t) : Int32.t l
   | Some table ->
     (* XXX: this may be unsound, as the table may be modified at runtime by the host environment.
        If this is the case, we should only rely on the second case below *)
-    let funs = List.map (Table_inst.indices table) ~f:(fun idx -> Table_inst.get table idx) in
-    let funs_with_matching_type = List.filter_map funs ~f:(function
-        | Some fa -> if Stdlib.(ftype = Wasm_module.get_func_type wasm_mod fa) then Some fa else None
-        | None -> None) in
-    funs_with_matching_type
+   List.filter_map (Table_inst.indices table) ~f:(fun idx ->
+        match Table_inst.get table idx with
+        | Some fa when Stdlib.(ftype = Wasm_module.get_func_type wasm_mod fa) ->
+          Some fa
+        | _ ->
+          None)
   | None ->
     (* All functions with the proper type can be called. *)
-    let funs = List.map wasm_mod.imported_funcs ~f:(fun desc -> desc.idx) @ (List.map wasm_mod.funcs ~f:(fun f -> f.idx)) in
-    let ftype = Wasm_module.get_type wasm_mod typ in
-    (* These are all the functions with a valid type *)
-   List.filter funs ~f:(fun idx -> Stdlib.(ftype = (Wasm_module.get_func_type wasm_mod( idx))))
+     let collect_matching_func_indices ~f =
+       let imported =     
+         Array.fold wasm_mod.imported_funcs ~init:[] ~f:(fun acc desc ->
+             if f desc.idx then desc.idx :: acc else acc) in
+       List.fold wasm_mod.funcs ~init:imported ~f:(fun acc func ->
+           if f func.idx then func.idx :: acc else acc)  in
+     collect_matching_func_indices ~f:(fun idx ->
+         Stdlib.(ftype = Wasm_module.get_func_type wasm_mod idx))
 
 (** Builds a call graph for a module *)
 let make (wasm_mod : Wasm_module.t) : t =
   let find_targets = indirect_call_targets in
   (* Nodes of the call graph, i.e., all functions (imported and defined functions) *)
-  let nodes = Int32Set.of_list (List.init ((List.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> Int32.of_int_exn i)) in
+  let nodes = Int32Set.of_list (List.init ((Array.length wasm_mod.imported_funcs) + (List.length wasm_mod.funcs)) ~f:(fun i -> Int32.of_int_exn i)) in
   let rec collect_calls (f : Int32.t) (instr : 'a Instr.t) (edges : Edge.Set.t Int32Map.t) : Edge.Set.t Int32Map.t = match instr with
     | Call { instr = CallDirect (_, _, f'); _ } ->
       let edge : Edge.t = { target = f'; direct = true } in

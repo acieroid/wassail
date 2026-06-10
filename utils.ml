@@ -49,7 +49,7 @@ let imports =
       let%map_open file_in = anon ("in" %: string) in
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
-        List.iter wasm_mod.imported_funcs ~f:(fun desc ->
+        Array.iter wasm_mod.imported_funcs ~f:(fun desc ->
             Printf.printf "%ld\t%s\t%s\n"
               desc.idx desc.name (Type.funtype_to_string (desc.arguments, desc.returns))))
 

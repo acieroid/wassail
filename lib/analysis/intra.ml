@@ -400,7 +400,7 @@ module SummaryCallAdapter (Transfer : Transfer.SUMMARY_TRANSFER)
       match Map.find summaries f with
       | None ->
         if Int32.(f < module_.nfuncimports) then
-          let desc = List32.nth_exn module_.imported_funcs f in
+          let desc = Array32.get module_.imported_funcs f in
           Transfer.imported module_ desc instr.annotation_before instr.annotation_after state
         else
           (* This function depend on another function that has not been analyzed yet, so it is part of some recursive loop. It will eventually stabilize *)

@@ -85,13 +85,14 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
     { globals; ret; mem = Taint_domain.Taint.top }
 
 let initial_summaries (cfgs : 'a Cfg.t Int32Map.t) (module_ : Wasm_module.t) (typ : [`Bottom | `Top]) : t Int32Map.t =
-  List.fold_left module_.imported_funcs
+  let default_summary = match typ with | `Bottom -> bottom | `Top -> top in
+  Array.fold module_.imported_funcs
     ~init:(Int32Map.map cfgs ~f:(fun cfg ->
-        (match typ with
-         | `Bottom -> bottom
-         | `Top -> top) cfg Var.Set.empty))
+               default_summary cfg Var.Set.empty))
     ~f:(fun summaries desc ->
-        Int32Map.set summaries ~key:desc.idx ~data:(of_import desc.name module_.nglobals desc.arguments desc.returns))
+      Int32Map.set summaries
+        ~key:desc.idx
+        ~data:(of_import desc.name module_.nglobals desc.arguments desc.returns))
 
 let make (_cfg : 'a Cfg.t) (state : Taint_domain.t)
     (ret : Var.t option) (globals_post : Var.t list)

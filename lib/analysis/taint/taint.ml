@@ -52,7 +52,7 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
        (* Options.use_relational := false; *)
        let annotated_scc = scc (* Int32Map.map scc ~f:Relational.Transfer.dummy_annotate *) in
        let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_spec_cfg, _taint_cfg, summary) -> summary) in
-       let summaries' = List.fold_left wasm_mod.imported_funcs
+       let summaries' = Array.fold wasm_mod.imported_funcs
            ~init:summaries
            ~f:(fun summaries desc ->
                Int32Map.set summaries ~key:desc.idx ~data:(Summary.of_import desc.name wasm_mod.nglobals desc.arguments desc.returns)) in

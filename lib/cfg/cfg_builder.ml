@@ -419,11 +419,13 @@ let build_imported (module_ : Wasm_module.t) (desc : Wasm_module.func_desc) : un
   }
 
 let build_all (mod_ : Wasm_module.t) : unit Cfg.t Int32Map.t =
-  Int32Map.of_alist_exn
-    ((List.map mod_.imported_funcs ~f:(fun desc -> (desc.idx, build_imported mod_ desc))) @
-      (List.mapi mod_.funcs ~f:(fun i _ ->
-      let faddr = Int32.(mod_.nfuncimports + (Int32.of_int_exn i)) in
-      (faddr, build mod_ faddr))))
+  let entries = Array.fold mod_.imported_funcs ~init:[]
+                  ~f:(fun acc desc -> (desc.idx, build_imported mod_ desc) :: acc) in
+  let entries = List.foldi mod_.funcs ~init:entries
+                  ~f:(fun i acc _ ->
+                    let faddr = Int32.(mod_.nfuncimports + Int32.of_int_exn i) in
+                    (faddr, build mod_ faddr) :: acc) in
+  Int32Map.of_alist_exn entries
 
 module Test = struct
   (** Check that building the CFG for each function of a .wat file succeeds.

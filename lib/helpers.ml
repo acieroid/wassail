@@ -72,6 +72,12 @@ module List32 = struct
   let length = Wasm.Lib.List32.length
 end
 
+module Array32 = struct
+  let get array n =
+    (* We don't expect n to be a 32 bit number that can't be represented by an int *)
+    array.(Int32.to_int_exn n)
+end
+
 (** Get the nth element of a list *)
 let get_nth (l : 'a list) (n : Int32.t) : Var.t =
   match List.nth l (Int32.to_int_exn n) with
