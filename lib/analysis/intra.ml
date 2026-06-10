@@ -175,9 +175,9 @@ module Make
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = Set.min_elt_exn worklist in
-        Log.debug (Printf.sprintf "-----------------------\nAnalyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
+        Log.debug (fun () -> Printf.sprintf "-----------------------\nAnalyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
         let (in_state, out_state) = analyze_block block_idx in
-        Log.debug (Printf.sprintf "in_state was: %s, out_state is: %s\n" (Transfer.State.to_string in_state) (Result.to_string out_state));
+        Log.debug (fun () -> Printf.sprintf "in_state was: %s, out_state is: %s\n" (Transfer.State.to_string in_state) (Result.to_string out_state));
         (* Has out state changed? *)
         let previous_out_state = after_block block_idx in
         match previous_out_state with
@@ -329,9 +329,9 @@ module MakeSumm
         () (* No more elements to consider. We can stop here *)
       else
         let block_idx = Set.min_elt_exn worklist in
-        Log.debug (Printf.sprintf "-----------------------\n Analyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
+        Log.debug (fun () -> Printf.sprintf "-----------------------\n Analyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
         let (in_state, out_state) = analyze_block block_idx in
-        Log.debug (Printf.sprintf "out_state is: %s\n" (Result.to_string out_state));
+        Log.debug (fun () -> Printf.sprintf "out_state is: %s\n" (Result.to_string out_state));
         (* Has out state changed? *)
         let previous_out_state = after_block block_idx in
         match previous_out_state with
@@ -538,9 +538,9 @@ module MakeClassicalInter (Transfer : Transfer.CLASSICAL_INTER_TRANSFER) = struc
       else
         let block_idx = Set.min_elt_exn worklist in
         let block = Icfg.find_block_exn icfg block_idx in
-        Log.debug (Printf.sprintf "-----------------------\nAnalyzing block %s\n" (Icfg.BlockIdx.to_string block_idx));
+        Log.debug (fun () -> Printf.sprintf "-----------------------\nAnalyzing block %s\n" (Icfg.BlockIdx.to_string block_idx));
         let (in_state, out_state) = analyze_block block_idx block in
-        Log.debug (Printf.sprintf "in_state was: %s, out_state is: %s\n" (Transfer.State.to_string in_state) (Result.to_string out_state));
+        Log.debug (fun () -> Printf.sprintf "in_state was: %s, out_state is: %s\n" (Transfer.State.to_string in_state) (Result.to_string out_state));
         (* Has out state changed? *)
         let previous_out_state = after_block block_idx in
         match out_state with

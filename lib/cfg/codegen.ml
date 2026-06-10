@@ -24,7 +24,7 @@ module Test = struct
     if String.equal printed module_str then
       true
     else begin
-      Log.error (Printf.sprintf "Output does not match, got:\n%s\n" printed);
+      Log.error (fun () -> Printf.sprintf "Output does not match, got:\n%s\n" printed);
       false
     end
 

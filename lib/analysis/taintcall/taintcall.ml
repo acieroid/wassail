@@ -18,7 +18,7 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
        (Int32Map.map ~f:(fun x -> (x, None)) (initial_summaries cfgs module_)))
     (fun data module_ cfg ->
        Log.info
-         (Printf.sprintf "---------- Taint analysis of function %s ----------" (Int32.to_string cfg.idx));
+         (fun () -> Printf.sprintf "---------- Taint analysis of function %s ----------" (Int32.to_string cfg.idx));
        (* Run the taint analysis *)
        let annotated_cfg = (* Relational.Transfer.dummy_annotate *) cfg in
        let summaries = Int32Map.map data ~f:fst in
@@ -35,7 +35,7 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
     (fun _cfgs _wasm_mod -> Int32Map.empty)
     (fun module_ ~cfgs:scc ~summaries:cfgs_and_summaries ->
        Log.info
-         (Printf.sprintf "---------- CallTaint analysis of SCC {%s} ----------"
+         (fun () -> Printf.sprintf "---------- CallTaint analysis of SCC {%s} ----------"
             (String.concat ~sep:"," (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
        (* Run the taint analysis *)
        let annotated_scc = scc (* Int32Map.map scc ~f:Relational.Transfer.dummy_annotate *) in
@@ -51,7 +51,7 @@ let detect_unsafe_calls_from_exported_to_sinks (module_ : Wasm_module.t) (sinks 
   let cg = Call_graph.make module_ in
   let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
   let results = analyze_inter module_ schedule in
-  Log.warn "Analyzing unsafe flows in indirect calls is not yet implemented";
+  Log.warn (fun () -> "Analyzing unsafe flows in indirect calls is not yet implemented");
   let found = ref [] in
   Int32Map.iteri results ~f:(fun ~key:fidx ~data:(_spec_cfg, _taint_cfg, summary) ->
       if Wasm_module.is_exported module_ fidx then
@@ -65,7 +65,7 @@ let detect_unsafe_calls_from_exported_to_sinks (module_ : Wasm_module.t) (sinks 
                         | Local _ -> true
                         | _ -> false)) in
                   if unsafe then begin
-                    Log.info (Printf.sprintf "Function %ld is eventually calling sink %ld with the following taint: %s" fidx target (Taint_domain.Taint.to_string t));
+                    Log.info (fun () -> Printf.sprintf "Function %ld is eventually calling sink %ld with the following taint: %s" fidx target (Taint_domain.Taint.to_string t));
                       found := (fidx, target, t) :: !found
                   end)
             end));
@@ -89,17 +89,17 @@ let detect_flows_from_sources_to_sinks (module_ : Wasm_module.t) (sources : Stri
       match StringMap.find funcnames source_name with
       | Some source_idx -> Some (source_idx, Var.Other source_name)
       | None ->
-        Log.warn (Printf.sprintf "source does not exist in binary (this could be perfectly fine): %s" source_name);
+        Log.warn (fun () -> Printf.sprintf "source does not exist in binary (this could be perfectly fine): %s" source_name);
         None (* This source does not exist in the binary, so we ignore it *)
     )) in
   let sink_indices_to_names = Int32Map.of_alist_exn (List.filter_map (StringSet.to_list sinks) ~f:(fun sink_name ->
       match StringMap.find funcnames sink_name with
       | Some sink_idx -> Some (sink_idx, sink_name)
       | None ->
-        Log.warn (Printf.sprintf "sink does not exist in binary (this could be perfectly fine): %s" sink_name);
+        Log.warn (fun () -> Printf.sprintf "sink does not exist in binary (this could be perfectly fine): %s" sink_name);
         None (* This sink does not exist in the binary, so we ignore it *)
     )) in
-  Log.warn "source specification has been disabled";
+  Log.warn (fun () -> "source specification has been disabled");
   (* Taintcall_transfer.TaintTransfer.return_taint_specifications := sources_specifications; *)
   let results = analyze_inter module_ schedule in
   let found = ref TaintFlowSet.empty in
@@ -116,7 +116,7 @@ let detect_flows_from_sources_to_sinks (module_ : Wasm_module.t) (sources : Stri
                 if unsafe then found := TaintFlowSet.add !found (fidx, target, t))
           end));
   List.iter (TaintFlowSet.to_list !found) ~f:(fun (fidx, target, taint) ->
-      Log.info (Printf.sprintf "Function %ld is eventually calling sink %s with the following taint: %s" fidx (Int32Map.find_exn sink_indices_to_names target) (Taint_domain.Taint.to_string taint)));
+      Log.info (fun () -> Printf.sprintf "Function %ld is eventually calling sink %s with the following taint: %s" fidx (Int32Map.find_exn sink_indices_to_names target) (Taint_domain.Taint.to_string taint)));
   !found
 
 let detect_flows_from_exported_to_imported (module_ : Wasm_module.t) : TaintFlowSet.t =

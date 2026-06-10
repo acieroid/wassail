@@ -31,11 +31,11 @@ let control_deps_exact_block (cfg : Spec_domain.t Cfg.t) : IntSet.t IntMap.t =
     (* Traverse the post-dominator tree backwards until we reach y's parent.
        Return the list of nodes visited *)
     match Tree.nca pdom x y with
-    | None -> Log.warn "No nca found"; []
+    | None -> Log.warn (fun () -> "No nca found"); []
     | Some nca ->
       begin match Tree.nodes_between pdom x nca with
         | Some l -> l
-        | None -> Log.warn "No nodes found"; []
+        | None -> Log.warn (fun () -> "No nodes found"); []
       end in
   let edges = List.filter (Cfg.all_edges cfg) ~f:(fun (a, b) -> not (post_dominates b a)) in
   List.fold_left edges ~init:IntMap.empty
@@ -72,7 +72,7 @@ let control_deps_exact_instrs (cfg : Spec_domain.t Cfg.t) : Instr.Label.Set.t In
 (** Algorithm for control dependencies, adapted from https://homepages.dcc.ufmg.br/~fernando/classes/dcc888/ementa/slides/ProgramSlicing.pdf *)
 (* XXX: the results of this algorithm do not seem correct. The implementation may contain a mistake. (Since writing this comment, I lost the example of an incorrect result unfortunately) *)
 let control_dep (module_ : Wasm_module.t) (cfg : Spec_domain.t Cfg.t) (is_immediate_post_dom : int -> Var.t -> bool) : (Var.t * Pred.t) list =
-  Log.warn "using incorrect control_dep algorithm";
+  Log.warn (fun () -> "using incorrect control_dep algorithm");
   let tree : Tree.t = Dominance.cfg_dominator cfg in
   let push (block : Spec_domain.t Basic_block.t) (preds : Pred.t list) : Pred.t list =
     match Dominance.branch_condition block with
