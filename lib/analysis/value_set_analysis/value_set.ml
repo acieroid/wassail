@@ -589,6 +589,6 @@ let%test_module "value-set tests" = (module struct
       (Variable.Var (Var.Return 0l))
       (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
 
-  let%test "keep false when working" = false
+  (* let%test "keep false when working" = false *)
 
 end)

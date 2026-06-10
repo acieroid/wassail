@@ -192,13 +192,6 @@ module RIC = struct
     match r with
     | Bottom | Top -> ""
     | RIC {offset = (relative, _); _} -> relative
-
-  (** [is_stack r]
-      Heuristic predicate: [true] when the base symbol is ["g0"]. *)
-  let is_stack (r : t) : bool =
-    match r with
-    | RIC {offset = (relative, _); _} -> String.equal relative "g0"
-    | _ -> false
   
   (** [set_relative_offset r name]
       Attach base symbol [name] to an absolute RIC. *)
