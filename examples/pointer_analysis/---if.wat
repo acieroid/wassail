@@ -9,8 +9,12 @@
           i32.eqz
           if (result i32)
             i32.const 10
+            ;; i32.load
+            local.tee $l0
           else
             i32.const 20
+            local.tee $l0
           end
+          local.tee $l0
         )
       )

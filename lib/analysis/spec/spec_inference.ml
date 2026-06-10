@@ -396,6 +396,26 @@ let new_merge_variables (_module_ : Wasm_module.t) (cfg : State.t Cfg.t) (merge_
       else
         (State.extract_different_vars state_before state_after) @ acc)
 
+(** Extract vars that have been redefined in a merge block, keeping track of the predecessor block they came from. *)
+let new_merge_variables_with_origin
+    (_module_ : Wasm_module.t)
+    (cfg : State.t Cfg.t)
+    (merge_block : State.t Basic_block.t)
+  : (int * Var.t * Var.t) list =
+  (* The predecessors of merge_block *)
+  let preds = Cfg.predecessors cfg merge_block.idx in
+  let state_after = merge_block.annotation_after in
+  List.fold_left preds ~init:[] ~f:(fun acc (pred_idx, _) ->
+      let block_before = Cfg.find_block_exn cfg pred_idx in
+      let state_before = block_before.annotation_after in
+      if State.equal state_before Spec_inference.bottom then
+        (* Ignore bottom state *)
+        acc
+      else
+        State.extract_different_vars state_before state_after
+        |> List.map ~f:(fun (old_var, new_var) -> (pred_idx, old_var, new_var))
+        |> fun vars -> vars @ acc)
+
 (** Return the list of variables defined by an instruction *)
 let instr_def (module_ : Wasm_module.t) (cfg : State.t Cfg.t) (instr : State.t Instr.t) : Var.t list =
   let defs = match instr with

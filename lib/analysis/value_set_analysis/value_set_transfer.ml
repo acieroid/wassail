@@ -43,7 +43,8 @@ module Make (*: Transfer.TRANSFER *) = struct
             | I32 -> (variable, Value.ValueSet RIC.zero)
             | _ -> (variable, Value.top))) @
           [(Variable.entire_memory), Value.top]);
-      store_operations = RICSet.empty }
+      store_operations = RICSet.empty;
+      unreachable = false }
 
   let bottom : State.t = State.bottom 
 
@@ -88,67 +89,100 @@ module Make (*: Transfer.TRANSFER *) = struct
       (i : annot_expected Instr.labelled_data)
       (state : State.t)
     : State.t =
-    if !Value_set_options.print_trace then
-      (print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.data_to_string i.instr););
-    let ret (i : annot_expected Instr.labelled_data) : Variable.t = 
-      match List.hd (Spec_domain.get_or_fail i.annotation_after).vstack with
-      | Some r -> Variable.Var r
-      | None -> failwith "nothing on the stack" in
-    match i.instr with
-    (* TODO: is there a way to know the memory size? *)
-    (* | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstraction.ValueSet Top) *)
-    | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:Variable.MemorySize)
-    | MemoryGrow -> 
-      state 
-        |> Abstract_store_domain.set ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:Variable.MemorySize)
-        |> Abstract_store_domain.set 
-          ~var:Variable.MemorySize 
-          ~vs:(Value_set_abstraction.plus 
-            (Abstract_store_domain.get state ~var:Variable.MemorySize)
-            (Abstract_store_domain.get state ~var:(Variable.Var (pop (Spec_domain.get_or_fail i.annotation_before).vstack))))
-    | Nop | Drop -> state
-    (* TODO: these 3 operations may modify memory content: *)
-    | MemoryCopy | MemoryFill | MemoryInit _ -> state
-    | RefIsNull | RefNull _ | RefFunc _ -> state
-    | Select _ ->
-      let condition, x, y = (*pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in*)
-        (match (Spec_domain.get_or_fail i.annotation_before).vstack with
-        | condition :: x :: y :: _ -> condition, x, y
-        | _ -> failwith "not enough elements on the stack") in
-      let cond_vs = State.get state ~var:(Variable.Var condition) in
-      let result = 
-        if Value.may_be_false cond_vs then
-          Abstract_store_domain.get state ~var:(Variable.Var x)
-          |> Value.join
-            (if Value.may_be_true cond_vs then
-              Abstract_store_domain.get state ~var:(Variable.Var y)
-            else
-              Value.bottom)
-        else
-          if Value.may_be_true cond_vs then
-              Abstract_store_domain.get state ~var:(Variable.Var y)
+    if state.unreachable then
+      (if !Value_set_options.print_trace then
+        (print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.data_to_string i.instr ^ " (unreachable)"));
+      state)
+    else
+      (if !Value_set_options.print_trace then
+      (print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.data_to_string i.instr));
+      let ret (i : annot_expected Instr.labelled_data) : Variable.t = 
+        match List.hd (Spec_domain.get_or_fail i.annotation_after).vstack with
+        | Some r -> Variable.Var r
+        | None -> failwith "nothing on the stack" in
+      match i.instr with
+      (* TODO: is there a way to know the memory size? *)
+      (* | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstraction.ValueSet Top) *)
+      | MemorySize -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:Variable.MemorySize)
+      | MemoryGrow -> 
+        state 
+          |> Abstract_store_domain.set ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:Variable.MemorySize)
+          |> Abstract_store_domain.set 
+            ~var:Variable.MemorySize 
+            ~vs:(Value_set_abstraction.plus 
+              (Abstract_store_domain.get state ~var:Variable.MemorySize)
+              (Abstract_store_domain.get state ~var:(Variable.Var (pop (Spec_domain.get_or_fail i.annotation_before).vstack))))
+      | Nop | Drop -> state
+      (* TODO: these 3 operations may modify memory content: *)
+      | MemoryCopy | MemoryFill | MemoryInit _ -> state
+      | RefIsNull | RefNull _ | RefFunc _ -> state
+      | Select _ ->
+        let condition, x, y = (*pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in*)
+          (match (Spec_domain.get_or_fail i.annotation_before).vstack with
+          | condition :: x :: y :: _ -> condition, x, y
+          | _ -> failwith "not enough elements on the stack") in
+        let cond_vs = State.get state ~var:(Variable.Var condition) in
+        let result = 
+          if Value.may_be_false cond_vs then
+            Abstract_store_domain.get state ~var:(Variable.Var x)
+            |> Value.join
+              (if Value.may_be_true cond_vs then
+                Abstract_store_domain.get state ~var:(Variable.Var y)
+              else
+                Value.bottom)
           else
-            (Log.error "invalid select condition"; failwith "")
-      in
-      (* let x_vs, y_vs = Abstract_store_domain.get state ~var:(Variable.Var x), Abstract_store_domain.get state ~var:(Variable.Var y) in
-      let joined_selection = Abstract_store_domain.Value.join x_vs y_vs in *)
-      if !Value_set_options.print_trace then 
-        Printf.printf "\tselecting from two options:\n\t\t%s   ⊔   %s   ->  %s\n"
-          (* (Abstract_store_domain.Value.to_string x_vs)
-          (Abstract_store_domain.Value.to_string y_vs)  *)
-          "..." "..."
-          (Abstract_store_domain.Value.to_string result);
-        Abstract_store_domain.set state ~var:(ret i) ~vs:result
-    | LocalGet l -> 
-      let local_variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
-      if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string local_variable ^ " (" ^ Variable.to_string (ret i) ^ ")");
-      state
-    | LocalSet l ->
-      let variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
-      let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
+            if Value.may_be_true cond_vs then
+                Abstract_store_domain.get state ~var:(Variable.Var y)
+            else
+              (Log.error "invalid select condition"; failwith "")
+        in
+        (* let x_vs, y_vs = Abstract_store_domain.get state ~var:(Variable.Var x), Abstract_store_domain.get state ~var:(Variable.Var y) in
+        let joined_selection = Abstract_store_domain.Value.join x_vs y_vs in *)
+        if !Value_set_options.print_trace then 
+          Printf.printf "\tselecting from two options:\n\t\t%s   ⊔   %s   ->  %s\n"
+            (* (Abstract_store_domain.Value.to_string x_vs)
+            (Abstract_store_domain.Value.to_string y_vs)  *)
+            "..." "..."
+            (Abstract_store_domain.Value.to_string result);
+          Abstract_store_domain.set state ~var:(ret i) ~vs:result
+      | LocalGet l -> 
+        let local_variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
+        if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string local_variable ^ " (" ^ Variable.to_string (ret i) ^ ")");
+        state
+      | LocalSet l ->
+        let variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
+        let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
+          begin match top_of_stack with
+          | Var.Const (Prim_value.I32 n) ->
+            if !Value_set_options.print_trace then print_endline ("\tassigning constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
+            Abstract_store_domain.assign_constant_value state
+            ~const:n
+            ~to_:variable
+          | Var.Const (Prim_value.F32 n) ->
+            if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float32)" ^ Wasm.F32.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+            Abstract_store_domain.to_top_RIC state variable
+          | Var.Const (Prim_value.I64 n) ->
+            if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Int64)" ^ Int64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+            Abstract_store_domain.to_top_RIC state variable
+          | Var.Const (Prim_value.F64 n) ->
+            if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float64)" ^ Wasm.F64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+            Abstract_store_domain.to_top_RIC state variable
+          | Var.Local _ | Var.Global _ ->
+            let vs = Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
+            if !Value_set_options.print_trace then print_endline ("\tassigning value-set " ^ Abstract_store_domain.Value.to_string vs ^ " to variable " ^ Variable.to_string variable);
+            Abstract_store_domain.set state ~var:variable ~vs
+          | _ ->
+            if !Value_set_options.print_trace then print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to local variable " ^ Variable.to_string variable);
+            Abstract_store_domain.copy_value_set state 
+              ~from:(Variable.Var top_of_stack)
+              ~to_:variable
+          end
+      | LocalTee l -> (* TODO: Refactor a common function for LocalSet and LocalTee *)
+        let variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
+        let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
         begin match top_of_stack with
         | Var.Const (Prim_value.I32 n) ->
-          if !Value_set_options.print_trace then print_endline ("\tassigning constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
+          if !Value_set_options.print_trace then print_endline ("\tadding constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
           Abstract_store_domain.assign_constant_value state
           ~const:n
           ~to_:variable
@@ -162,379 +196,375 @@ module Make (*: Transfer.TRANSFER *) = struct
           if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float64)" ^ Wasm.F64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
           Abstract_store_domain.to_top_RIC state variable
         | Var.Local _ | Var.Global _ ->
-          let vs = Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
-          if !Value_set_options.print_trace then print_endline ("\tassigning value-set " ^ Abstract_store_domain.Value.to_string vs ^ " to variable " ^ Variable.to_string variable);
-          Abstract_store_domain.set state ~var:variable ~vs
+            let vs = Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
+            if !Value_set_options.print_trace then print_endline ("\tassigning value-set " ^ Abstract_store_domain.Value.to_string vs ^ " to variable " ^ Variable.to_string variable);
+            Abstract_store_domain.set state ~var:variable ~vs
         | _ ->
           if !Value_set_options.print_trace then print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to local variable " ^ Variable.to_string variable);
           Abstract_store_domain.copy_value_set state 
             ~from:(Variable.Var top_of_stack)
             ~to_:variable
         end
-    | LocalTee l -> (* TODO: Refactor a common function for LocalSet and LocalTee *)
-      let variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
-      let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
-      begin match top_of_stack with
-      | Var.Const (Prim_value.I32 n) ->
-        if !Value_set_options.print_trace then print_endline ("\tadding constant value " ^ Int32.to_string n ^ " to local variable " ^ Variable.to_string variable);
-        Abstract_store_domain.assign_constant_value state
-        ~const:n
-        ~to_:variable
-      | Var.Const (Prim_value.F32 n) ->
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float32)" ^ Wasm.F32.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
-        Abstract_store_domain.to_top_RIC state variable
-      | Var.Const (Prim_value.I64 n) ->
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Int64)" ^ Int64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
-        Abstract_store_domain.to_top_RIC state variable
-      | Var.Const (Prim_value.F64 n) ->
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float64)" ^ Wasm.F64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
-        Abstract_store_domain.to_top_RIC state variable
-      | Var.Local _ | Var.Global _ ->
-          let vs = Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
-          if !Value_set_options.print_trace then print_endline ("\tassigning value-set " ^ Abstract_store_domain.Value.to_string vs ^ " to variable " ^ Variable.to_string variable);
-          Abstract_store_domain.set state ~var:variable ~vs
-      | _ ->
-        if !Value_set_options.print_trace then print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to local variable " ^ Variable.to_string variable);
-        Abstract_store_domain.copy_value_set state 
-          ~from:(Variable.Var top_of_stack)
-          ~to_:variable
-      end
-    | GlobalGet g -> 
-      let global_variable = Variable.Var (Var.Global (Int32.to_int_exn g)) in
-      if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string global_variable ^ " (" ^ Variable.to_string (ret i) ^ ")");
-      if Variable.Map.mem state.abstract_store (ret i) then
-        Abstract_store_domain.copy_value_set state
-          ~from:(ret i)
-          ~to_:global_variable
-      else
-        state
-    | GlobalSet g ->
-      let variable = Variable.Var (Var.Global (Int32.to_int_exn g)) in
-      let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
-      (* let new_state = *)
-        begin match top_of_stack with
-        | Var.Const (Prim_value.I32 n) ->
-          if !Value_set_options.print_trace then print_endline ("\tassigning constant value " ^ Int32.to_string n ^ " to global variable " ^ Variable.to_string variable);
-          Abstract_store_domain.assign_constant_value state
-          ~const:n
-          ~to_:variable
-        | Var.Const (Prim_value.F32 n) ->
-          if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float32)" ^ Wasm.F32.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
-          Abstract_store_domain.to_top_RIC state variable
-        | Var.Const (Prim_value.I64 n) ->
-          if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Int64)" ^ Int64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
-          Abstract_store_domain.to_top_RIC state variable
-        | Var.Const (Prim_value.F64 n) ->
-          if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float64)" ^ Wasm.F64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
-          Abstract_store_domain.to_top_RIC state variable
-        | Var.Local _ | Var.Global _ ->
-          let vs = Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
-                    if Abstract_store_domain.Value.equal vs (Abstract_store_domain.Value.ValueSet RIC.Top) then
-                      (print_endline "SETTING GLOBAL TO TOP!!!!!!!!! press enter to continue";
-                let _ = In_channel.input_line_exn In_channel.stdin in
-                ());
-          if !Value_set_options.print_trace then print_endline ("\tassigning value-set " ^ Abstract_store_domain.Value.to_string vs ^ " to variable " ^ Variable.to_string variable);
-          Abstract_store_domain.set state ~var:variable ~vs
-        | _ ->
-          if !Value_set_options.print_trace then print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to global variable " ^ Variable.to_string variable);
-                    let vs = Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
-                    if Abstract_store_domain.Value.equal vs (Abstract_store_domain.Value.ValueSet RIC.Top) then
-                      (print_endline "SETTING GLOBAL TO TOP!!!!!!!!! press enter to continue";
-                    let _ = In_channel.input_line_exn In_channel.stdin in
-                    ());
-          Abstract_store_domain.copy_value_set state 
-            ~from:(Variable.Var top_of_stack)
+      | GlobalGet g -> 
+        let global_variable = Variable.Var (Var.Global (Int32.to_int_exn g)) in
+        if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string global_variable ^ " (" ^ Variable.to_string (ret i) ^ ")");
+        if Variable.Map.mem state.abstract_store (ret i) then
+          Abstract_store_domain.copy_value_set state
+            ~from:(ret i)
+            ~to_:global_variable
+        else
+          state
+      | GlobalSet g ->
+        let variable = Variable.Var (Var.Global (Int32.to_int_exn g)) in
+        let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
+        (* let new_state = *)
+          begin match top_of_stack with
+          | Var.Const (Prim_value.I32 n) ->
+            if !Value_set_options.print_trace then print_endline ("\tassigning constant value " ^ Int32.to_string n ^ " to global variable " ^ Variable.to_string variable);
+            Abstract_store_domain.assign_constant_value state
+            ~const:n
             ~to_:variable
+          | Var.Const (Prim_value.F32 n) ->
+            if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float32)" ^ Wasm.F32.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+            Abstract_store_domain.to_top_RIC state variable
+          | Var.Const (Prim_value.I64 n) ->
+            if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Int64)" ^ Int64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+            Abstract_store_domain.to_top_RIC state variable
+          | Var.Const (Prim_value.F64 n) ->
+            if !Value_set_options.print_trace then print_endline ("\t" ^ Variable.to_string variable ^ " = (Float64)" ^ Wasm.F64.to_string n ^ " -> not a valid pointer value: variable can point anywhere");
+            Abstract_store_domain.to_top_RIC state variable
+          | Var.Local _ | Var.Global _ ->
+            let vs = Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
+                      if Abstract_store_domain.Value.equal vs (Abstract_store_domain.Value.ValueSet RIC.Top) then
+                        (print_endline "SETTING GLOBAL TO TOP!!!!!!!!! press enter to continue";
+                  let _ = In_channel.input_line_exn In_channel.stdin in
+                  ());
+            if !Value_set_options.print_trace then print_endline ("\tassigning value-set " ^ Abstract_store_domain.Value.to_string vs ^ " to variable " ^ Variable.to_string variable);
+            Abstract_store_domain.set state ~var:variable ~vs
+          | _ ->
+            if !Value_set_options.print_trace then print_endline ("\ttransfering value-set of " ^ Var.to_string top_of_stack ^ " to global variable " ^ Variable.to_string variable);
+                      let vs = Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
+                      if Abstract_store_domain.Value.equal vs (Abstract_store_domain.Value.ValueSet RIC.Top) then
+                        (print_endline "SETTING GLOBAL TO TOP!!!!!!!!! press enter to continue";
+                      let _ = In_channel.input_line_exn In_channel.stdin in
+                      ());
+            Abstract_store_domain.copy_value_set state 
+              ~from:(Variable.Var top_of_stack)
+              ~to_:variable
+          end
+      | Const c ->
+        begin match c with
+        | Prim_value.I32 _ -> state
+        | _ -> if !Value_set_options.print_trace then print_endline "\tnon i32 constant!"; state
         end
-    | Const c ->
-      begin match c with
-      | Prim_value.I32 _ -> state
-      | _ -> if !Value_set_options.print_trace then print_endline "\tnon i32 constant!"; state
-      end
-    | Binary binop -> 
-      let x, y = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
-      (* let result = pop (Spec_domain.get_or_fail i.annotation_after).vstack in *)
+      | Binary binop -> 
+        let x, y = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
+        (* let result = pop (Spec_domain.get_or_fail i.annotation_after).vstack in *)
 
-      let result = ret i in
-      begin match binop with
-      | { op = ShrU; typ = I32 } ->
-        let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
-        let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
-        let result_value =
-          begin match x_value, y_value with
-          | ValueSet vs2, ValueSet vs1
-          | ValueSet vs2, Boolean {numeric_value = vs1; _} 
-          | Boolean {numeric_value = vs2; _}, ValueSet vs1 
-          | Boolean {numeric_value = vs2; _}, Boolean {numeric_value = vs1; _} ->
-            Abstract_store_domain.Value.ValueSet (RIC.shift_right_u vs1 vs2)
-          | Boolean {numeric_value = vs2; _}, Bitfield bf1
-          | ValueSet vs2, Bitfield bf1 -> ValueSet (RIC.of_bitfield (Bitfield.shift_right_unsigned bf1 (RIC.to_bitfield vs2)))
-          | Bitfield bf2, ValueSet vs1
-          | Bitfield bf2, Boolean {numeric_value = vs1; _} -> ValueSet (RIC.of_bitfield (Bitfield.shift_right_unsigned (RIC.to_bitfield vs1) bf2)) (* TODO : keep bitfield *)
-          | Bitfield bf2, Bitfield bf1 -> Bitfield (Bitfield.shift_right_unsigned bf1 bf2)
-          end in
-        (* let () =
-          print_endline ("result: " ^ Abstract_store_domain.Value.to_string result_value);
-          let _ = In_channel.input_line_exn In_channel.stdin in
-          () in *)
-        if !Value_set_options.print_trace then 
-          print_endline ("\t" ^ Var.to_string y ^ "(" ^ Abstract_store_domain.Value.to_string y_value ^ ") >> " ^ Var.to_string x ^ "(" ^ Abstract_store_domain.Value.to_string x_value ^ ") -> " ^ Variable.to_string result
-            ^ "(" ^ State.Value.to_string result_value ^ ")");
-        Abstract_store_domain.set state ~var:result ~vs:result_value
-      | { op = Shl; typ = I32 } ->
-        let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
-        let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
-        let result_value =
-          begin match x_value, y_value with
-          | ValueSet vs2, ValueSet vs1
-          | ValueSet vs2, Boolean {numeric_value = vs1; _} 
-          | Boolean {numeric_value = vs2; _}, ValueSet vs1 
-          | Boolean {numeric_value = vs2; _}, Boolean {numeric_value = vs1; _} ->
-            Abstract_store_domain.Value.ValueSet (RIC.shift_left vs1 vs2)
-          | Boolean {numeric_value = vs2; _}, Bitfield bf1
-          | ValueSet vs2, Bitfield bf1 -> ValueSet (RIC.of_bitfield (Bitfield.shift_left bf1 (RIC.to_bitfield vs2)))
-          | Bitfield bf2, ValueSet vs1
-          | Bitfield bf2, Boolean {numeric_value = vs1; _} -> ValueSet (RIC.of_bitfield (Bitfield.shift_left (RIC.to_bitfield vs1) bf2)) (* TODO : keep bitfield *)
-          | Bitfield bf2, Bitfield bf1 -> Bitfield (Bitfield.shift_left bf1 bf2)
-          end in
-        if !Value_set_options.print_trace then 
-          print_endline ("\t" ^ Var.to_string y ^ "(" ^ Abstract_store_domain.Value.to_string y_value ^ ") << " ^ Var.to_string x ^ "(" ^ Abstract_store_domain.Value.to_string x_value ^ ") -> " ^ Variable.to_string result
-            ^ "(" ^ State.Value.to_string result_value ^ ")");
-        (* let () =
-          print_endline ("result: " ^ Abstract_store_domain.Value.to_string result_value);
-          let _ = In_channel.input_line_exn In_channel.stdin in
-          () in *)
-        Abstract_store_domain.set state ~var:result ~vs:result_value
-      | { op = Or; typ = I32 } ->
-        let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
-        let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string x_value ^ " or " ^ Abstract_store_domain.Value.to_string y_value ^ " -> " ^ Variable.to_string result);
-        let result_value =
-          begin match x_value, y_value with
-          | ValueSet vs1, ValueSet vs2
-          | ValueSet vs1, Boolean {numeric_value = vs2; _}
-          | Boolean {numeric_value = vs1; _}, ValueSet vs2 -> 
-            (* Abstract_store_domain.Value.ValueSet (RIC.or_ vs1 vs2) *)
-            Abstract_store_domain.Value.ValueSet (RIC.or_ vs1 vs2)
-          | Boolean v1, Boolean v2 -> Boolean (Boolean.or_ v1 v2)
-          | Bitfield bf, ValueSet vs
-          | Bitfield bf, Boolean {numeric_value = vs; _}
-          | ValueSet vs, Bitfield bf
-          | Boolean {numeric_value = vs; _}, Bitfield bf -> ValueSet (RIC.of_bitfield (Bitfield.or_ (RIC.to_bitfield vs) bf))
-          | Bitfield bf1, Bitfield bf2 -> Bitfield (Bitfield.or_ bf1 bf2)
-          end in
-        Abstract_store_domain.set state ~var:result ~vs:result_value
-      | { op = And; typ = I32 } -> (* TODO: refactor function to Abstract_store_domain *)
-        let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
-        let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Var.to_string x ^ "(" ^ Abstract_store_domain.Value.to_string x_value ^ ") & " ^ Var.to_string y ^ "(" ^ Abstract_store_domain.Value.to_string y_value ^ ") -> " ^ Variable.to_string result);
-        let result_value =
-          begin match x_value, y_value with
-          | ValueSet vs1, ValueSet vs2
-          | ValueSet vs1, Boolean {numeric_value = vs2; _}
-          | Boolean {numeric_value = vs1; _}, ValueSet vs2 -> 
-            (* Abstract_store_domain.Value.ValueSet (RIC.and_ vs1 vs2) *)
-            Abstract_store_domain.Value.ValueSet (RIC.and_ vs1 vs2)
-          | Bitfield bf, ValueSet vs
-          | Bitfield bf, Boolean {numeric_value = vs; _}
-          | ValueSet vs, Bitfield bf
-          | Boolean {numeric_value = vs; _}, Bitfield bf -> ValueSet (RIC.of_bitfield (Bitfield.and_ bf (RIC.to_bitfield vs)))
-          | Bitfield bf1, Bitfield bf2 -> Bitfield (Bitfield.and_ bf1 bf2)
-          | Boolean v1, Boolean v2 -> Boolean (Boolean.and_ v1 v2)
-          end
-        in
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string result_value);
-        Abstract_store_domain.set state ~var:result ~vs:result_value
-      | { op = Xor; typ = I32 } -> (* TODO: refactor function to Abstract_store_domain *)
-        (* let next_power_of_2 n = (* TODO: refactor function in Maths module *)
-          if n < 1 then 
-            1
-          else
-            let log2 = log (float_of_int (n + 1)) /. log 2.0 in
-            int_of_float (2. ** (Float.round_up log2)) in *)
-        let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
-        let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string x_value ^ " xor " ^ Abstract_store_domain.Value.to_string y_value ^ " -> " ^ Variable.to_string result);
-        let result_value =
-          begin match x_value, y_value with
-          | ValueSet vs1, ValueSet vs2
-          | ValueSet vs1, Boolean {numeric_value = vs2; _}
-          | Boolean {numeric_value = vs1; _}, ValueSet vs2 -> 
-            (* Abstract_store_domain.Value.ValueSet (RIC.xor_ vs1 vs2) *)
-            Abstract_store_domain.Value.ValueSet (RIC.xor_ vs1 vs2)
-          | Bitfield bf, ValueSet vs
-          | Bitfield bf, Boolean {numeric_value = vs; _}
-          | ValueSet vs, Bitfield bf
-          | Boolean {numeric_value = vs; _}, Bitfield bf -> ValueSet (RIC.of_bitfield (Bitfield.xor_ bf (RIC.to_bitfield vs)))
-          | Bitfield bf1, Bitfield bf2 -> Bitfield (Bitfield.xor_ bf1 bf2)
-            (* let numeric_value = (RIC.xor_ vs1 vs2) in
-            begin match vs1, vs2 with
-            | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, vs2 when Int32.(n >= 1l) -> 
-              let false_ = RIC.meet vs2 (RIC.ric (0l, Int 0l, Int 0l, ("", n))) in
-              let true_ = RIC.remove ~this:(RIC.ric (0l, Int 0l, Int 0l, ("", n))) ~from:vs2 in
-              let true_ = List.fold true_ ~init:RIC.Bottom ~f:(fun acc r -> RIC.join acc r) in
-              let tf = (Variable.Map.set 
-                          Variable.Map.empty 
-                          ~key:(Variable.Var y) 
-                          ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
-              Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            | vs1, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)} when Int32.(n >= 1l) -> 
-              let false_ = RIC.meet vs1 (RIC.ric (0l, Int 0l, Int 0l, ("", n))) in
-              let true_ = RIC.remove ~this:(RIC.ric (0l, Int 0l, Int 0l, ("", n))) ~from:vs1 in
-              let true_ = List.fold true_ ~init:RIC.Bottom ~f:(fun acc r -> RIC.join acc r) in
-              let tf = (Variable.Map.set 
-                          Variable.Map.empty 
-                          ~key:(Variable.Var x) 
-                          ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
-              Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
-            | _ -> ValueSet numeric_value
-            end *)
-          | Boolean v1, Boolean v2 -> Boolean (Boolean.xor_ v1 v2)
-          end
-        in
-        if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string result_value);
-        (* let () =
-          let _ = In_channel.input_line_exn In_channel.stdin in
-          () in *)
-        Abstract_store_domain.set state ~var:result ~vs:result_value
-      | { op = Add; typ = I32 } -> (* i32 addition *) 
-        Abstract_store_domain.i32_add state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result
-      | { op = Sub; typ = I32 } -> (* i32 subtraction *) 
-        Abstract_store_domain.i32_sub state ~subtract_this:(Variable.Var x) ~from:(Variable.Var y) ~result
-      | { typ = I32; _ } 
-      | _ -> (* other operations result in a pointer that can point anywhere *)
-        if !Value_set_options.print_trace then print_endline "\tthis type of binary operation results in a pointer that can point anywhere";
-        Abstract_store_domain.to_top_RIC state result
-      end
-    | Load load ->
-      let size = Memoryop.size load in
-      let address = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
-      if !Value_set_options.print_trace then
-        print_endline ("\tAddress(" ^ Var.to_string address ^ ")");
-      let vs = Abstract_store_domain.get state ~var:(Variable.Var address) in
-      (* Update accessed address *)
-        let previously_accessed = Abstract_store_domain.get state ~var:Variable.Accessed in
-        let vs_plus_offset =
-          begin match load, vs with
-          | { offset = offset; _ }, Abstract_store_domain.Value.ValueSet vs ->
-            let offset = Int32.of_int_exn offset in
-            Abstract_store_domain.Value.ValueSet (RIC.add_offset vs offset)
-          | _ -> failwith "Trying to use boolean as an address"
-          end
-        in
-        (* TODO: maybe include all touched addresses depending on size? *)
-        let state = Abstract_store_domain.set state ~var:Variable.Accessed ~vs:(Abstract_store_domain.Value.join vs_plus_offset previously_accessed) 
-        in
-      (* begin match vs with
-      | Abstract_store_domain.Value.ValueSet RIC.Top ->
-        failwith "Trying to load from undefined (Top) address"
-      | _ -> *)
-        begin match load with
-        | { typ = F32; _ }
-        | { typ = F64; _ } -> Abstract_store_domain.to_top_RIC state (ret i)
-        | { typ = I64; _ } -> Abstract_store_domain.to_top_RIC state (ret i)
-        | { typ = I32; offset = offset; _ } ->
-          let offset = Int32.of_int_exn offset in
-          if Int32.(size = 4l) then
-            match vs with
-            | Abstract_store_domain.Value.ValueSet vs -> (* TODO: factoriser ce qui suit:*)
-              let vs_plus_offset = RIC.add_offset vs offset in
-              if !Value_set_options.print_trace then print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into variable " ^ Variable.to_string (ret i));
-              let target_variable = 
-                  Variable.Mem vs_plus_offset in
-              if !Value_set_options.print_trace then print_endline ("\ttarget variable: " ^ Variable.to_string target_variable);
-              let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
-              if !Value_set_options.print_trace then 
-                (print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars));
-                );
-              Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:target_variable)
-            | Abstract_store_domain.Value.Boolean {numeric_value = vs; _} -> 
-              let vs_plus_offset = RIC.add_offset vs offset in
-              if !Value_set_options.print_trace then print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into variable " ^ Variable.to_string (ret i));
-              let target_variable = 
-               
-                  Variable.Mem vs_plus_offset in
-              if !Value_set_options.print_trace then print_endline ("\ttarget variable: " ^ Variable.to_string target_variable);
-              let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
-              if !Value_set_options.print_trace then 
-                (print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars)););
-              Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:target_variable)
-            | Bitfield bf ->
-              let vs = RIC.of_bitfield bf in
-              let vs_plus_offset = RIC.add_offset vs offset in
-              if !Value_set_options.print_trace then print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into variable " ^ Variable.to_string (ret i));
-              let target_variable = 
-                  Variable.Mem vs_plus_offset in
-              if !Value_set_options.print_trace then print_endline ("\ttarget variable: " ^ Variable.to_string target_variable);
-              let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
-              (* let all_stack_vars = Abstract_store_domain.extract_stack_variables state in *)
-              if !Value_set_options.print_trace then 
-                (print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars));
-                );
-              Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:target_variable)
-          else
-            Abstract_store_domain.to_top_RIC state (ret i)
+        let result = ret i in
+        begin match binop with
+        | { op = ShrU; typ = I32 } ->
+          let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
+          let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
+          let result_value =
+            begin match x_value, y_value with
+            | ValueSet vs2, ValueSet vs1
+            | ValueSet vs2, Boolean {numeric_value = vs1; _} 
+            | Boolean {numeric_value = vs2; _}, ValueSet vs1 
+            | Boolean {numeric_value = vs2; _}, Boolean {numeric_value = vs1; _} ->
+              Abstract_store_domain.Value.ValueSet (RIC.shift_right_u vs1 vs2)
+            | Boolean {numeric_value = vs2; _}, Bitfield bf1
+            | ValueSet vs2, Bitfield bf1 -> ValueSet (RIC.of_bitfield (Bitfield.shift_right_unsigned bf1 (RIC.to_bitfield vs2)))
+            | Bitfield bf2, ValueSet vs1
+            | Bitfield bf2, Boolean {numeric_value = vs1; _} -> ValueSet (RIC.of_bitfield (Bitfield.shift_right_unsigned (RIC.to_bitfield vs1) bf2)) (* TODO : keep bitfield *)
+            | Bitfield bf2, Bitfield bf1 -> Bitfield (Bitfield.shift_right_unsigned bf1 bf2)
+            end in
+          (* let () =
+            print_endline ("result: " ^ Abstract_store_domain.Value.to_string result_value);
+            let _ = In_channel.input_line_exn In_channel.stdin in
+            () in *)
+          if !Value_set_options.print_trace then 
+            print_endline ("\t" ^ Var.to_string y ^ "(" ^ Abstract_store_domain.Value.to_string y_value ^ ") >> " ^ Var.to_string x ^ "(" ^ Abstract_store_domain.Value.to_string x_value ^ ") -> " ^ Variable.to_string result
+              ^ "(" ^ State.Value.to_string result_value ^ ")");
+          Abstract_store_domain.set state ~var:result ~vs:result_value
+        | { op = Shl; typ = I32 } ->
+          let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
+          let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
+          let result_value =
+            begin match x_value, y_value with
+            | ValueSet vs2, ValueSet vs1
+            | ValueSet vs2, Boolean {numeric_value = vs1; _} 
+            | Boolean {numeric_value = vs2; _}, ValueSet vs1 
+            | Boolean {numeric_value = vs2; _}, Boolean {numeric_value = vs1; _} ->
+              Abstract_store_domain.Value.ValueSet (RIC.shift_left vs1 vs2)
+            | Boolean {numeric_value = vs2; _}, Bitfield bf1
+            | ValueSet vs2, Bitfield bf1 -> ValueSet (RIC.of_bitfield (Bitfield.shift_left bf1 (RIC.to_bitfield vs2)))
+            | Bitfield bf2, ValueSet vs1
+            | Bitfield bf2, Boolean {numeric_value = vs1; _} -> ValueSet (RIC.of_bitfield (Bitfield.shift_left (RIC.to_bitfield vs1) bf2)) (* TODO : keep bitfield *)
+            | Bitfield bf2, Bitfield bf1 -> Bitfield (Bitfield.shift_left bf1 bf2)
+            end in
+          if !Value_set_options.print_trace then 
+            print_endline ("\t" ^ Var.to_string y ^ "(" ^ Abstract_store_domain.Value.to_string y_value ^ ") << " ^ Var.to_string x ^ "(" ^ Abstract_store_domain.Value.to_string x_value ^ ") -> " ^ Variable.to_string result
+              ^ "(" ^ State.Value.to_string result_value ^ ")");
+          (* let () =
+            print_endline ("result: " ^ Abstract_store_domain.Value.to_string result_value);
+            let _ = In_channel.input_line_exn In_channel.stdin in
+            () in *)
+          Abstract_store_domain.set state ~var:result ~vs:result_value
+        | { op = Or; typ = I32 } ->
+          let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
+          let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
+          if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string x_value ^ " or " ^ Abstract_store_domain.Value.to_string y_value ^ " -> " ^ Variable.to_string result);
+          let result_value =
+            begin match x_value, y_value with
+            | ValueSet vs1, ValueSet vs2
+            | ValueSet vs1, Boolean {numeric_value = vs2; _}
+            | Boolean {numeric_value = vs1; _}, ValueSet vs2 -> 
+              (* Abstract_store_domain.Value.ValueSet (RIC.or_ vs1 vs2) *)
+              Abstract_store_domain.Value.ValueSet (RIC.or_ vs1 vs2)
+            | Boolean v1, Boolean v2 -> Boolean (Boolean.or_ v1 v2)
+            | Bitfield bf, ValueSet vs
+            | Bitfield bf, Boolean {numeric_value = vs; _}
+            | ValueSet vs, Bitfield bf
+            | Boolean {numeric_value = vs; _}, Bitfield bf -> ValueSet (RIC.of_bitfield (Bitfield.or_ (RIC.to_bitfield vs) bf))
+            | Bitfield bf1, Bitfield bf2 -> Bitfield (Bitfield.or_ bf1 bf2)
+            end in
+          Abstract_store_domain.set state ~var:result ~vs:result_value
+        | { op = And; typ = I32 } -> (* TODO: refactor function to Abstract_store_domain *)
+          let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
+          let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
+          if !Value_set_options.print_trace then print_endline ("\t" ^ Var.to_string x ^ "(" ^ Abstract_store_domain.Value.to_string x_value ^ ") & " ^ Var.to_string y ^ "(" ^ Abstract_store_domain.Value.to_string y_value ^ ") -> " ^ Variable.to_string result);
+          let result_value =
+            begin match x_value, y_value with
+            | ValueSet vs1, ValueSet vs2
+            | ValueSet vs1, Boolean {numeric_value = vs2; _}
+            | Boolean {numeric_value = vs1; _}, ValueSet vs2 -> 
+              (* Abstract_store_domain.Value.ValueSet (RIC.and_ vs1 vs2) *)
+              Abstract_store_domain.Value.ValueSet (RIC.and_ vs1 vs2)
+            | Bitfield bf, ValueSet vs
+            | Bitfield bf, Boolean {numeric_value = vs; _}
+            | ValueSet vs, Bitfield bf
+            | Boolean {numeric_value = vs; _}, Bitfield bf -> ValueSet (RIC.of_bitfield (Bitfield.and_ bf (RIC.to_bitfield vs)))
+            | Bitfield bf1, Bitfield bf2 -> Bitfield (Bitfield.and_ bf1 bf2)
+            | Boolean v1, Boolean v2 -> Boolean (Boolean.and_ v1 v2)
+            end
+          in
+          if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string result_value);
+          Abstract_store_domain.set state ~var:result ~vs:result_value
+        | { op = Xor; typ = I32 } -> (* TODO: refactor function to Abstract_store_domain *)
+          (* let next_power_of_2 n = (* TODO: refactor function in Maths module *)
+            if n < 1 then 
+              1
+            else
+              let log2 = log (float_of_int (n + 1)) /. log 2.0 in
+              int_of_float (2. ** (Float.round_up log2)) in *)
+          let x_value = Abstract_store_domain.get state ~var:(Variable.Var x) in
+          let y_value = Abstract_store_domain.get state ~var:(Variable.Var y) in
+          if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string x_value ^ " xor " ^ Abstract_store_domain.Value.to_string y_value ^ " -> " ^ Variable.to_string result);
+          let result_value =
+            begin match x_value, y_value with
+            | ValueSet vs1, ValueSet vs2
+            | ValueSet vs1, Boolean {numeric_value = vs2; _}
+            | Boolean {numeric_value = vs1; _}, ValueSet vs2 -> 
+              (* Abstract_store_domain.Value.ValueSet (RIC.xor_ vs1 vs2) *)
+              Abstract_store_domain.Value.ValueSet (RIC.xor_ vs1 vs2)
+            | Bitfield bf, ValueSet vs
+            | Bitfield bf, Boolean {numeric_value = vs; _}
+            | ValueSet vs, Bitfield bf
+            | Boolean {numeric_value = vs; _}, Bitfield bf -> ValueSet (RIC.of_bitfield (Bitfield.xor_ bf (RIC.to_bitfield vs)))
+            | Bitfield bf1, Bitfield bf2 -> Bitfield (Bitfield.xor_ bf1 bf2)
+              (* let numeric_value = (RIC.xor_ vs1 vs2) in
+              begin match vs1, vs2 with
+              | RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)}, vs2 when Int32.(n >= 1l) -> 
+                let false_ = RIC.meet vs2 (RIC.ric (0l, Int 0l, Int 0l, ("", n))) in
+                let true_ = RIC.remove ~this:(RIC.ric (0l, Int 0l, Int 0l, ("", n))) ~from:vs2 in
+                let true_ = List.fold true_ ~init:RIC.Bottom ~f:(fun acc r -> RIC.join acc r) in
+                let tf = (Variable.Map.set 
+                            Variable.Map.empty 
+                            ~key:(Variable.Var y) 
+                            ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
+                Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
+              | vs1, RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = ("", n)} when Int32.(n >= 1l) -> 
+                let false_ = RIC.meet vs1 (RIC.ric (0l, Int 0l, Int 0l, ("", n))) in
+                let true_ = RIC.remove ~this:(RIC.ric (0l, Int 0l, Int 0l, ("", n))) ~from:vs1 in
+                let true_ = List.fold true_ ~init:RIC.Bottom ~f:(fun acc r -> RIC.join acc r) in
+                let tf = (Variable.Map.set 
+                            Variable.Map.empty 
+                            ~key:(Variable.Var x) 
+                            ~data:Boolean.{True_or_false.true_ = true_; false_ = false_}) in
+                Abstract_store_domain.Value.Boolean {true_or_false = tf; numeric_value = numeric_value}
+              | _ -> ValueSet numeric_value
+              end *)
+            | Boolean v1, Boolean v2 -> Boolean (Boolean.xor_ v1 v2)
+            end
+          in
+          if !Value_set_options.print_trace then print_endline ("\t" ^ Abstract_store_domain.Value.to_string result_value);
+          (* let () =
+            let _ = In_channel.input_line_exn In_channel.stdin in
+            () in *)
+          Abstract_store_domain.set state ~var:result ~vs:result_value
+        | { op = Add; typ = I32 } -> (* i32 addition *) 
+          Abstract_store_domain.i32_add state ~x:(Variable.Var x) ~y:(Variable.Var y) ~result
+        | { op = Sub; typ = I32 } -> (* i32 subtraction *) 
+          Abstract_store_domain.i32_sub state ~subtract_this:(Variable.Var x) ~from:(Variable.Var y) ~result
+        | { typ = I32; _ } 
+        | _ -> (* other operations result in a pointer that can point anywhere *)
+          if !Value_set_options.print_trace then print_endline "\tthis type of binary operation results in a pointer that can point anywhere";
+          Abstract_store_domain.to_top_RIC state result
         end
-      (* end *)
-    | Store store ->
-      let store = 
-        Abstract_store_domain.store 
-          ~state ~instruction:store ~annotation_before:(Some i.annotation_before) ~value:None ~address:None
-      in
-      (* let () =
-        let _ = In_channel.input_line_exn In_channel.stdin in
-        () in *)
-      store
-    | Compare comp ->
-      let var2, var1 = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
-      (* print_endline ("var1: " ^ Var.to_string var1 ^ ", var2: " ^ Var.to_string var2); *)
-      let vs1 = 
-        begin match var1 with
-        | Var.Local _
-        | Var.Global _ -> Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string var1))
-        | _ -> Abstract_store_domain.get state ~var:(Variable.Var var1) 
-        end in
-      let vs2 = 
-        begin match var1 with
-        | Var.Local _
-        | Var.Global _ -> Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string var2))
-        | _ -> Abstract_store_domain.get state ~var:(Variable.Var var2) 
-        end in
-      let vs1, vs2 =
-        begin match vs1, vs2 with
+      | Load load ->
+        let size = Memoryop.size load in
+        let address = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
+        if !Value_set_options.print_trace then
+          print_endline ("\tAddress(" ^ Var.to_string address ^ ")");
+        let vs = Abstract_store_domain.get state ~var:(Variable.Var address) in
+        (* Update accessed address *)
+          let previously_accessed = Abstract_store_domain.get state ~var:Variable.Accessed in
+          let vs_plus_offset =
+            begin match load, vs with
+            | { offset = offset; _ }, Abstract_store_domain.Value.ValueSet vs ->
+              let offset = Int32.of_int_exn offset in
+              Abstract_store_domain.Value.ValueSet (RIC.add_offset vs offset)
+            | _ -> failwith "Trying to use boolean as an address"
+            end
+          in
+          (* TODO: maybe include all touched addresses depending on size? *)
+          let state = Abstract_store_domain.set state ~var:Variable.Accessed ~vs:(Abstract_store_domain.Value.join vs_plus_offset previously_accessed) 
+          in
+        (* begin match vs with
+        | Abstract_store_domain.Value.ValueSet RIC.Top ->
+          failwith "Trying to load from undefined (Top) address"
+        | _ -> *)
+          begin match load with
+          | { typ = F32; _ }
+          | { typ = F64; _ } -> Abstract_store_domain.to_top_RIC state (ret i)
+          | { typ = I64; _ } -> Abstract_store_domain.to_top_RIC state (ret i)
+          | { typ = I32; offset = offset; _ } ->
+            let offset = Int32.of_int_exn offset in
+            if Int32.(size = 4l) then
+              match vs with
+              | Abstract_store_domain.Value.ValueSet vs -> (* TODO: factoriser ce qui suit:*)
+                let vs_plus_offset = RIC.add_offset vs offset in
+                if !Value_set_options.print_trace then print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into variable " ^ Variable.to_string (ret i));
+                let target_variable = 
+                    Variable.Mem vs_plus_offset in
+                if !Value_set_options.print_trace then print_endline ("\ttarget variable: " ^ Variable.to_string target_variable);
+                let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
+                if !Value_set_options.print_trace then 
+                  (print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars));
+                  );
+                Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:target_variable)
+              | Abstract_store_domain.Value.Boolean {numeric_value = vs; _} -> 
+                let vs_plus_offset = RIC.add_offset vs offset in
+                if !Value_set_options.print_trace then print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into variable " ^ Variable.to_string (ret i));
+                let target_variable = 
+                
+                    Variable.Mem vs_plus_offset in
+                if !Value_set_options.print_trace then print_endline ("\ttarget variable: " ^ Variable.to_string target_variable);
+                let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
+                if !Value_set_options.print_trace then 
+                  (print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars)););
+                Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:target_variable)
+              | Bitfield bf ->
+                let vs = RIC.of_bitfield bf in
+                let vs_plus_offset = RIC.add_offset vs offset in
+                if !Value_set_options.print_trace then print_endline ("\tloading content at address " ^ RIC.to_string vs_plus_offset ^ " into variable " ^ Variable.to_string (ret i));
+                let target_variable = 
+                    Variable.Mem vs_plus_offset in
+                if !Value_set_options.print_trace then print_endline ("\ttarget variable: " ^ Variable.to_string target_variable);
+                let all_mem_vars = Abstract_store_domain.extract_memory_variables state in
+                (* let all_stack_vars = Abstract_store_domain.extract_stack_variables state in *)
+                if !Value_set_options.print_trace then 
+                  (print_endline ("\tall memory variables in the current state: " ^ String.concat ~sep:", " (List.map ~f:Variable.to_string all_mem_vars));
+                  );
+                Abstract_store_domain.set state ~var:(ret i) ~vs:(Abstract_store_domain.get state ~var:target_variable)
+            else
+              Abstract_store_domain.to_top_RIC state (ret i)
+          end
+        (* end *)
+      | Store store ->
+        let store = 
+          Abstract_store_domain.store 
+            ~state ~instruction:store ~annotation_before:(Some i.annotation_before) ~value:None ~address:None
+        in
+        (* let () =
+          let _ = In_channel.input_line_exn In_channel.stdin in
+          () in *)
+        store
+      | Compare comp ->
+        let var2, var1 = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
+        (* print_endline ("var1: " ^ Var.to_string var1 ^ ", var2: " ^ Var.to_string var2); *)
+        let vs1 = 
+          begin match var1 with
+          | Var.Local _
+          | Var.Global _ -> Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string var1))
+          | _ -> Abstract_store_domain.get state ~var:(Variable.Var var1) 
+          end in
+        let vs2 = 
+          begin match var1 with
+          | Var.Local _
+          | Var.Global _ -> Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string var2))
+          | _ -> Abstract_store_domain.get state ~var:(Variable.Var var2) 
+          end in
+        let vs1, vs2 =
+          begin match vs1, vs2 with
+          | Boolean {numeric_value = vs1; _}, Boolean {numeric_value = vs2; _}
+          | Boolean {numeric_value = vs1; _}, ValueSet vs2
+          | ValueSet vs1, Boolean {numeric_value = vs2; _}
+          | ValueSet vs1, ValueSet vs2 -> vs1, vs2
+          | Bitfield bf, ValueSet vs2
+          | Bitfield bf, Boolean {numeric_value = vs2; _} -> (RIC.of_bitfield bf), vs2
+          | ValueSet vs1, Bitfield bf
+          | Boolean {numeric_value = vs1; _}, Bitfield bf -> vs1, (RIC.of_bitfield bf)
+          | Bitfield bf1, Bitfield bf2 -> RIC.of_bitfield bf1, RIC.of_bitfield bf2
+          end
+        in
+        (* begin match vs1, vs2 with
         | Boolean {numeric_value = vs1; _}, Boolean {numeric_value = vs2; _}
         | Boolean {numeric_value = vs1; _}, ValueSet vs2
         | ValueSet vs1, Boolean {numeric_value = vs2; _}
-        | ValueSet vs1, ValueSet vs2 -> vs1, vs2
-        | Bitfield bf, ValueSet vs2
-        | Bitfield bf, Boolean {numeric_value = vs2; _} -> (RIC.of_bitfield bf), vs2
-        | ValueSet vs1, Bitfield bf
-        | Boolean {numeric_value = vs1; _}, Bitfield bf -> vs1, (RIC.of_bitfield bf)
-        | Bitfield bf1, Bitfield bf2 -> RIC.of_bitfield bf1, RIC.of_bitfield bf2
-        end
-      in
-      (* begin match vs1, vs2 with
-      | Boolean {numeric_value = vs1; _}, Boolean {numeric_value = vs2; _}
-      | Boolean {numeric_value = vs1; _}, ValueSet vs2
-      | ValueSet vs1, Boolean {numeric_value = vs2; _}
-      | ValueSet vs1, ValueSet vs2 -> *)
-        begin match comp with
-        | {op = Eq; typ = I32} ->
-          if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " == " ^ RIC.to_string vs2);
-          let vs1_true = 
-            if RIC.comparable_offsets vs1 vs2 then
-              RIC.meet vs1 vs2
-            else
-              vs1
-          in
-          let vs1_false = 
-            if RIC.comparable_offsets vs1 vs2 then
-              let vs2' = RIC.complement vs2 in
-              List.fold vs2' ~init:RIC.Bottom ~f:(fun acc x -> RIC.join acc (RIC.meet vs1 x))
-            else
-              vs1
-          in
-          let state =
+        | ValueSet vs1, ValueSet vs2 -> *)
+          begin match comp with
+          | {op = Eq; typ = I32} ->
+            if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " == " ^ RIC.to_string vs2);
+            let vs1_true = 
+              if RIC.comparable_offsets vs1 vs2 then
+                RIC.meet vs1 vs2
+              else
+                vs1
+            in
+            let vs1_false = 
+              if RIC.comparable_offsets vs1 vs2 then
+                let vs2' = RIC.complement vs2 in
+                List.fold vs2' ~init:RIC.Bottom ~f:(fun acc x -> RIC.join acc (RIC.meet vs1 x))
+              else
+                vs1
+            in
+            let state =
+              begin match var1 with
+              (* | Var.Const _ -> state TODO: numeric value (0,1) *)
+              | _ ->
+                Abstract_store_domain.set 
+                  state 
+                  ~var:(ret i) 
+                  ~vs:(Boolean { Boolean.true_or_false = (Variable.Map.set 
+                                                            Variable.Map.empty 
+                                                            ~key:(Variable.Var var1) 
+                                                            ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
+                                numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
+              end in
+            (* let () =
+              print_endline ("result: " ^ Abstract_store_domain.Value.to_string (Abstract_store_domain.get state ~var:(ret i)));
+              let _ = In_channel.input_line_exn In_channel.stdin in
+              () in *)
+            state
+          | {op = LeU; typ = I32} -> 
+            if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " ≤ " ^ RIC.to_string vs2);
+            let vs2' = RIC.remove_lower_bound vs2 in
+            let vs2'' = RIC.add_offset (RIC.remove_upper_bound vs2) 1l in
+            let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
+            let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
+            if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
             begin match var1 with
             (* | Var.Const _ -> state TODO: numeric value (0,1) *)
             | _ ->
@@ -546,136 +576,112 @@ module Make (*: Transfer.TRANSFER *) = struct
                                                           ~key:(Variable.Var var1) 
                                                           ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
                               numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
-            end in
-          (* let () =
-            print_endline ("result: " ^ Abstract_store_domain.Value.to_string (Abstract_store_domain.get state ~var:(ret i)));
-            let _ = In_channel.input_line_exn In_channel.stdin in
-            () in *)
-          state
-        | {op = LeU; typ = I32} -> 
-          if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " ≤ " ^ RIC.to_string vs2);
-          let vs2' = RIC.remove_lower_bound vs2 in
-          let vs2'' = RIC.add_offset (RIC.remove_upper_bound vs2) 1l in
-          let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
-          let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
-          if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
-          begin match var1 with
-          (* | Var.Const _ -> state TODO: numeric value (0,1) *)
-          | _ ->
-            Abstract_store_domain.set 
-              state 
-              ~var:(ret i) 
-              ~vs:(Boolean { Boolean.true_or_false = (Variable.Map.set 
-                                                        Variable.Map.empty 
-                                                        ~key:(Variable.Var var1) 
-                                                        ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                             numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
-          end
-        | {op = LtU; typ = I32} ->
-          if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " < " ^ RIC.to_string vs2);
-          let vs2' = RIC.add_offset (RIC.remove_lower_bound vs2) (-1l) in
-          let vs2'' = RIC.remove_upper_bound vs2 in
-          let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
-          let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
-          if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ ",  false: " ^ RIC.to_string vs1_false);
-          begin match var1 with
-          (* | Var.Const _ -> state *)
-          | _ ->
-            Abstract_store_domain.set 
-              state 
-              ~var:(ret i) 
-              ~vs:(Boolean { Boolean.true_or_false = (Variable.Map.set 
-                                                        Variable.Map.empty 
-                                                        ~key:(Variable.Var var1) 
-                                                        ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                             numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
-          end
-        | {op = GeU; typ = I32} -> 
-          if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " ≥ " ^ RIC.to_string vs2);
-          let vs2' = RIC.remove_upper_bound vs2 in
-          let vs2'' = RIC.add_offset (RIC.remove_lower_bound vs2) (-1l) in
-          let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
-          let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
-          if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
-          begin match var1 with
-          (* | Var.Const _ -> state *)
-          | _ ->
-            Abstract_store_domain.set 
-              state 
-              ~var:(ret i) 
-              ~vs:(Boolean { Boolean.true_or_false = (Variable.Map.set 
-                                                        Variable.Map.empty 
-                                                        ~key:(Variable.Var var1) 
-                                                        ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                             numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
-          end
-        | {op = GtU; typ = I32} ->
-          if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " > " ^ RIC.to_string vs2);
-          let vs2' = RIC.add_offset (RIC.remove_upper_bound vs2) 1l in
-          let vs2'' = RIC.remove_lower_bound vs2 in
-          let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
-          let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
-          if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
-          begin match var1 with
-          (* | Var.Const _ -> state *)
-          | _ ->
-            Abstract_store_domain.set 
-              state 
-              ~var:(ret i) 
-              ~vs:(Boolean { Boolean.true_or_false = (Variable.Map.set 
-                                                        Variable.Map.empty 
-                                                        ~key:(Variable.Var var1) 
-                                                        ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                             numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
-          end
+            end
+          | {op = LtU; typ = I32} ->
+            if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " < " ^ RIC.to_string vs2);
+            let vs2' = RIC.add_offset (RIC.remove_lower_bound vs2) (-1l) in
+            let vs2'' = RIC.remove_upper_bound vs2 in
+            let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
+            let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
+            if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ ",  false: " ^ RIC.to_string vs1_false);
+            begin match var1 with
+            (* | Var.Const _ -> state *)
+            | _ ->
+              Abstract_store_domain.set 
+                state 
+                ~var:(ret i) 
+                ~vs:(Boolean { Boolean.true_or_false = (Variable.Map.set 
+                                                          Variable.Map.empty 
+                                                          ~key:(Variable.Var var1) 
+                                                          ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
+                              numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
+            end
+          | {op = GeU; typ = I32} -> 
+            if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " ≥ " ^ RIC.to_string vs2);
+            let vs2' = RIC.remove_upper_bound vs2 in
+            let vs2'' = RIC.add_offset (RIC.remove_lower_bound vs2) (-1l) in
+            let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
+            let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
+            if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
+            begin match var1 with
+            (* | Var.Const _ -> state *)
+            | _ ->
+              Abstract_store_domain.set 
+                state 
+                ~var:(ret i) 
+                ~vs:(Boolean { Boolean.true_or_false = (Variable.Map.set 
+                                                          Variable.Map.empty 
+                                                          ~key:(Variable.Var var1) 
+                                                          ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
+                              numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
+            end
+          | {op = GtU; typ = I32} ->
+            if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " > " ^ RIC.to_string vs2);
+            let vs2' = RIC.add_offset (RIC.remove_upper_bound vs2) 1l in
+            let vs2'' = RIC.remove_lower_bound vs2 in
+            let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
+            let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
+            if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
+            begin match var1 with
+            (* | Var.Const _ -> state *)
+            | _ ->
+              Abstract_store_domain.set 
+                state 
+                ~var:(ret i) 
+                ~vs:(Boolean { Boolean.true_or_false = (Variable.Map.set 
+                                                          Variable.Map.empty 
+                                                          ~key:(Variable.Var var1) 
+                                                          ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
+                              numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
+            end
+          | _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean {Boolean.true_or_false = Variable.Map.empty; numeric_value = RIC.Top})
+          (* end *)
+        end
+      | Test test -> 
+        let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
+        let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
+        begin match test with
+        | I32Eqz ->
+          Abstract_store_domain.set
+            state
+            ~var:(ret i)
+            ~vs:(Value_set_abstraction.eqz ~var:(Variable.Var var) vs)
         | _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean {Boolean.true_or_false = Variable.Map.empty; numeric_value = RIC.Top})
-        (* end *)
-      end
-    | Test test -> 
-      let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
-      let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
-      begin match test with
-      | I32Eqz ->
+        end
+      | Unary { op = Clz; _ } ->
+        let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
+        let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
         Abstract_store_domain.set
           state
           ~var:(ret i)
-          ~vs:(Value_set_abstraction.eqz ~var:(Variable.Var var) vs)
-      | _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean {Boolean.true_or_false = Variable.Map.empty; numeric_value = RIC.Top})
-      end
-    | Unary { op = Clz; _ } ->
-      let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
-      let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
-      Abstract_store_domain.set
-        state
-        ~var:(ret i)
-        ~vs:(Value_set_abstraction.count_leading_zeros vs)
-    | Unary { op = Ctz; _ } ->
-      let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
-      let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
-      Abstract_store_domain.set
-        state
-        ~var:(ret i)
-        ~vs:(Value_set_abstraction.count_trailing_zeros vs)
-    | Unary { op = Popcnt; _ } ->
-      let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
-      let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
-      Abstract_store_domain.set
-        state
-        ~var:(ret i)
-        ~vs:(Value_set_abstraction.population_count vs)
-    | Unary { op = ExtendS _; _} ->
-      Abstract_store_domain.set
-        state
-        ~var:(ret i)
-        ~vs:(ValueSet RIC.Top)
-    | Unary { typ = I32; _ } -> assert false (* No other unary operators on 32 bit integers *)
-    | Unary _ ->
-      Abstract_store_domain.set
-        state
-        ~var:(ret i)
-        ~vs:(ValueSet RIC.Top)
-    | Convert _ ->
-      Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstraction.ValueSet Top)
+          ~vs:(Value_set_abstraction.count_leading_zeros vs)
+      | Unary { op = Ctz; _ } ->
+        let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
+        let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
+        Abstract_store_domain.set
+          state
+          ~var:(ret i)
+          ~vs:(Value_set_abstraction.count_trailing_zeros vs)
+      | Unary { op = Popcnt; _ } ->
+        let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
+        let vs = Abstract_store_domain.get state ~var:(Variable.Var var) in
+        Abstract_store_domain.set
+          state
+          ~var:(ret i)
+          ~vs:(Value_set_abstraction.population_count vs)
+      | Unary { op = ExtendS _; _} ->
+        Abstract_store_domain.set
+          state
+          ~var:(ret i)
+          ~vs:(ValueSet RIC.Top)
+      | Unary { typ = I32; _ } -> assert false (* No other unary operators on 32 bit integers *)
+      | Unary _ ->
+        Abstract_store_domain.set
+          state
+          ~var:(ret i)
+          ~vs:(ValueSet RIC.Top)
+      | Convert _ ->
+        Abstract_store_domain.set state ~var:(ret i) ~vs:(Value_set_abstraction.ValueSet Top))
 
 
   let apply_condition 
@@ -686,7 +692,8 @@ module Make (*: Transfer.TRANSFER *) = struct
     let var, boolean = condition in
     let state = 
       { Abstract_store_domain.abstract_store = Variable.Map.remove state.abstract_store var;
-        store_operations = state.store_operations } in
+        store_operations = state.store_operations;
+        unreachable = state.unreachable } in
     let locals_and_globals = Abstract_store_domain.extract_locals_and_globals state in
     let true_ = 
       if Boolean.may_be_true boolean then
@@ -694,9 +701,9 @@ module Make (*: Transfer.TRANSFER *) = struct
           Abstract_store_domain.make_compatible 
             ~this_store:
               { Abstract_store_domain.abstract_store = (Variable.Map.map ~f:(fun x -> (Abstract_store_domain.Value.ValueSet x.true_)) boolean.true_or_false);
-                store_operations = state.store_operations }
+                store_operations = state.store_operations;
+                unreachable = false }
             ~relative_to:state in
-        (* let true_ = *)
           { Abstract_store_domain.abstract_store =
               Variable.Map.fold true_.abstract_store
                 ~init:state.abstract_store 
@@ -710,9 +717,10 @@ module Make (*: Transfer.TRANSFER *) = struct
                         Variable.Map.set ~key:v ~data acc
                       else
                         acc));
-            store_operations = state.store_operations }
+            store_operations = state.store_operations;
+            unreachable = false }
       else
-        Abstract_store_domain.bottom
+        { Abstract_store_domain.bottom with unreachable = true }
     in
     let false_ = 
       if Boolean.may_be_false boolean then
@@ -720,9 +728,9 @@ module Make (*: Transfer.TRANSFER *) = struct
           Abstract_store_domain.make_compatible 
             ~this_store:
               { Abstract_store_domain.abstract_store = (Variable.Map.map ~f:(fun x -> (Abstract_store_domain.Value.ValueSet x.false_)) boolean.true_or_false);
-                store_operations = state.store_operations }
+                store_operations = state.store_operations;
+                unreachable = false }
             ~relative_to:state in
-        (* let false_ = *)
           { Abstract_store_domain.abstract_store =
               Variable.Map.fold false_.abstract_store
                 ~init:state.abstract_store 
@@ -735,9 +743,10 @@ module Make (*: Transfer.TRANSFER *) = struct
                         Variable.Map.set ~key:v ~data acc
                       else
                         acc));
-            store_operations = state.store_operations }
+            store_operations = state.store_operations;
+            unreachable = false }
       else
-        Abstract_store_domain.bottom
+        { Abstract_store_domain.bottom with unreachable = true }
     in
     true_, false_
 
@@ -767,12 +776,12 @@ module Make (*: Transfer.TRANSFER *) = struct
           if RIC.may_be_false vs then
             state
           else
-            Abstract_store_domain.bottom
+            { Abstract_store_domain.bottom with unreachable = true }
         and true_ = 
           if RIC.may_be_true vs then
             state
           else
-            Abstract_store_domain.bottom
+            { Abstract_store_domain.bottom with unreachable = true }
         in
         `Branch (true_, false_)
       | Boolean boolean_value -> 
@@ -783,12 +792,12 @@ module Make (*: Transfer.TRANSFER *) = struct
           if Bitfield.may_be_false bf then
             state
           else
-            Abstract_store_domain.bottom
+            { Abstract_store_domain.bottom with unreachable = true }
         and true_ = 
           if Bitfield.may_be_true bf then
             state
           else
-            Abstract_store_domain.bottom
+            { Abstract_store_domain.bottom with unreachable = true }
         in
         `Branch (true_, false_)
       end
@@ -802,7 +811,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         `Simple (Abstract_store_domain.set state ~var:ret_var ~vs:vs)
         (* TODO: generalize for more than one return *)
       end
-    | Unreachable -> `Simple  Abstract_store_domain.bottom
+    | Unreachable -> `Simple  { Abstract_store_domain.bottom with unreachable = true }
     | _ -> `Simple state
 
   let apply_summary 
@@ -867,15 +876,35 @@ module Make (*: Transfer.TRANSFER *) = struct
       previous_annotations
 
   let merge_variables
-      (_module_ : Wasm_module.t)
+      (module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t) 
       (block : annot_expected Basic_block.t)
       (state : State.t)
+      (predecessors : ('a Basic_block.t * State.t) list)
       : State.t =
-    let merged_variables = List.rev (List.sort ~compare:(fun (v1, w1) (v2, w2) -> if Var.equal w1 w2 then Var.compare v1 v2 else Var.compare w1 w2) (Spec_inference.new_merge_variables _module_ cfg block)) in
-    let merged_variables = List.map ~f:(fun (a, b) -> (Variable.Var b, Abstract_store_domain.get state ~var:(Variable.Var a))) merged_variables in
-    let merged_variables =
-      List.fold merged_variables ~init:[] ~f:(fun acc (v, vs) -> 
+    let merged_variables = 
+      Spec_inference.new_merge_variables_with_origin module_ cfg block
+      (* |> fun l ->
+        (List.iter l ~f:(fun (pred_idx, old_var, merge_var) ->
+            print_endline
+              ("from block " ^ Int.to_string pred_idx
+               ^ ": value: " ^ Var.to_string old_var
+               ^ ".... merge_var: " ^ Var.to_string merge_var));
+        l) *)
+      (* |> List.map ~f:(fun (_pred_idx, old_var, merge_var) ->
+          (Variable.Var merge_var, Abstract_store_domain.get state ~var:(Variable.Var old_var)))  *)
+      (* |> List.map ~f:(fun (_pred_idx, old_var, merge_var) -> 
+        (* Here, I need to access the state at the end of block pred_idx, to make a decision as to keep this var or not *)
+        (Variable.Var merge_var, Abstract_store_domain.get state ~var:(Variable.Var old_var)))  *)
+      |> List.filter_map ~f:(fun (pred_idx, old_var, merge_var) ->
+        (* state at the end of predecessor block where [old_var] was created *)
+        match List.find_exn predecessors ~f:(fun (pred_block, _) -> pred_block.idx = pred_idx) with
+        | _, pred_state -> 
+          if pred_state.unreachable then
+            None
+          else
+            Some (Variable.Var merge_var, Abstract_store_domain.get state ~var:(Variable.Var old_var)))
+      |> List.fold ~init:[] ~f:(fun acc (v, vs) -> 
         match List.Assoc.find acc ~equal:Variable.equal v with
         | None -> (v, vs) :: acc
         | Some existing_vs ->
@@ -909,10 +938,10 @@ module Make (*: Transfer.TRANSFER *) = struct
       | Control { instr = Merge; _ }
       | Entry | Return _ ->
         if !Value_set_options.print_trace then print_endline ("======================================================= " ^ (if IntSet.mem cfg.loop_heads block.idx then "LOOP HEAD" else "MERGE") ^ ": Control block #" ^ string_of_int block.idx);
-        let states' = List.map ~f:(fun (_, s) -> s) predecessors in
+        let states' = List.map ~f:snd predecessors in
         (* Join all previous states: *)
         let new_state_without_merges = List.reduce_exn states' ~f:join_state in 
-        merge_variables module_ cfg block new_state_without_merges
+        merge_variables module_ cfg block new_state_without_merges predecessors
       | Control _ ->
         if !Value_set_options.print_trace then print_endline ("======================================================= CONTROL BLOCK #" ^ string_of_int block.idx);
         begin match predecessors with

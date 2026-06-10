@@ -29,19 +29,19 @@ let to_string (s : t) : string =
   (if Variable.Map.is_empty returns then
     []
   else
-    ["RETURNS: " ^ Abstract_store_domain.to_string {abstract_store = returns; store_operations = RICSet.empty}])
+    ["RETURNS: " ^ Abstract_store_domain.to_string {abstract_store = returns; store_operations = RICSet.empty; unreachable = false}])
   @
   (if Variable.Map.is_empty globals then
     []
   else
-    ["GLOBALS: " ^ Abstract_store_domain.to_string {abstract_store = globals; store_operations = RICSet.empty}])
+    ["GLOBALS: " ^ Abstract_store_domain.to_string {abstract_store = globals; store_operations = RICSet.empty; unreachable = false}])
   @
   (if Set.is_empty affected_memory then
     []
   else
     (["AFFECTED MEMORY: " ^ RICSet.to_string affected_memory]))
   @
-  (["LINEAR MEMORY: " ^ Abstract_store_domain.to_string {abstract_store = memory; store_operations = RICSet.empty}])
+  (["LINEAR MEMORY: " ^ Abstract_store_domain.to_string {abstract_store = memory; store_operations = RICSet.empty; unreachable = false}])
   @ 
   (match accessed with
   | None | Some (Abstract_store_domain.Value.ValueSet RIC.Bottom) -> 
@@ -62,7 +62,8 @@ let bottom (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
       List.fold global_indices
         ~init:Variable.Map.empty
         ~f:(fun store idx -> Variable.Map.set store ~key:(Variable.Var (Var.Global idx)) ~data:(Abstract_store_domain.Value.bottom));
-    store_operations = RICSet.empty }
+    store_operations = RICSet.empty;
+    unreachable = false }
   |> (match cfg.return_types with
       | [] -> Fun.id
       | [_] -> Abstract_store_domain.set ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.bottom)
@@ -84,7 +85,8 @@ let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
       List.fold global_indices
         ~init:Variable.Map.empty
         ~f:(fun store idx -> Variable.Map.set store ~key:(Variable.Var (Var.Global idx)) ~data:(Abstract_store_domain.Value.top));
-    store_operations = RICSet.singleton RIC.Top }
+    store_operations = RICSet.singleton RIC.Top;
+    unreachable = false }
   |> (match cfg.return_types with
       | [] -> Fun.id
       | _ :: [] -> Abstract_store_domain.set ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.top)
@@ -103,7 +105,7 @@ let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
 let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : Type.t list) : t =
   let globals = List.init (Int32.to_int_exn nglobals) ~f:(fun i -> Variable.Var (Var.Global i)) in
   let summary = 
-    {Abstract_store_domain.abstract_store = Variable.Map.empty; store_operations = RICSet.empty}
+    {Abstract_store_domain.abstract_store = Variable.Map.empty; store_operations = RICSet.empty; unreachable = false}
     |> Abstract_store_domain.set ~var:Variable.MemorySize ~vs:(Abstract_store_domain.Value.ValueSet RIC.positive_integers) in
   match name with
   | "fd_write" | "fd_seek" | "fd_fdstat_get" ->
@@ -125,7 +127,7 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
         summary 
         |> Abstract_store_domain.set ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.bottom)
         |> Abstract_store_domain.set ~var:(Variable.entire_memory) ~vs:(Abstract_store_domain.Value.bottom) in
-      {Abstract_store_domain.abstract_store = summary.abstract_store; store_operations = RICSet.empty}
+      {Abstract_store_domain.abstract_store = summary.abstract_store; store_operations = RICSet.empty; unreachable = false}
     else
       (* Linear memory has been modified/accessed, but we don't know how: *)
       let summary = 
@@ -133,7 +135,7 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
         |> Abstract_store_domain.set ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.top)
         |> Abstract_store_domain.set ~var:(Variable.entire_memory) ~vs:(Abstract_store_domain.Value.top)
       in
-      {Abstract_store_domain.abstract_store = summary.abstract_store; store_operations = RICSet.singleton RIC.Top}
+      {Abstract_store_domain.abstract_store = summary.abstract_store; store_operations = RICSet.singleton RIC.Top; unreachable = false}
   | "fd_close" | "proc_exit" ->
     (* Globals are unchanged *)
     List.fold globals 
@@ -173,7 +175,7 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
     else
       ((* Linear memory may have been modified, but we don't know how: *)
       let summary = Abstract_store_domain.set summary ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.top) in
-      {abstract_store = summary.abstract_store; store_operations = RICSet.singleton RIC.Top}))
+      {abstract_store = summary.abstract_store; store_operations = RICSet.singleton RIC.Top; unreachable = false}))
 
 (** Build the initial summary map for all functions.
 
@@ -205,7 +207,8 @@ let make (state : Abstract_store_domain.t) : t =
             | Variable.Accessed 
             | Variable.MemorySize -> true
             | _ -> false);
-    store_operations = state.store_operations }
+    store_operations = state.store_operations;
+    unreachable = state.unreachable }
 
 (** Substitute callee-relative origins with caller values.
 
@@ -228,7 +231,8 @@ let update_relative_offsets (summary : t) ~(actual_values : RIC.t String.Map.t) 
             ~key
             ~data);
     store_operations = 
-      summary.store_operations |> RICSet.map ~f:(fun ric_ -> RIC.update_relative_offset ~ric_ ~actual_values)}
+      summary.store_operations |> RICSet.map ~f:(fun ric_ -> RIC.update_relative_offset ~ric_ ~actual_values);
+    unreachable = summary.unreachable }
 
 
 (** Return the unique return value stored in a summary, if any. *)
@@ -279,7 +283,8 @@ let apply
         |> List.fold 
           ~init:Variable.Map.empty 
           ~f:(fun acc var -> acc |> Variable.Map.set ~key:var ~data:(Abstract_store_domain.Value.bottom));
-      store_operations = RICSet.empty } in
+      store_operations = RICSet.empty;
+      unreachable = false } in
   let state = Abstract_store_domain.make_compatible ~this_store:state ~relative_to:affected_state in
   let store = 
     Variable.Map.fold
@@ -306,7 +311,8 @@ let apply
             acc)
   in
   let state = { Abstract_store_domain.abstract_store = store; 
-                store_operations = RICSet.union summary.store_operations state.store_operations} in
+                store_operations = RICSet.union summary.store_operations state.store_operations;
+                unreachable = state.unreachable || summary.unreachable } in
   (* Up to this point, the affected memory areas have been earased and the lists of affected/accessed addresses have been updated *)
   (* Update globals: *)
   let state = 
@@ -373,7 +379,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.relative_ric "a"))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.(constant 42l + relative_ric "a")));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let actual_values =
       String.Map.empty
@@ -386,7 +393,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 4l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 46l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
@@ -403,7 +411,8 @@ let%test_module "value-set summary tests" = (module struct
   let%test "update_relative_offsets: rewrites store operations relative to argument" =
     let summary =
       { Abstract_store_domain.abstract_store = Variable.Map.empty;
-        store_operations = RICSet.singleton (RIC.relative_ric "a") }
+        store_operations = RICSet.singleton (RIC.relative_ric "a");
+        unreachable = false }
     in
     let actual_values =
       String.Map.empty
@@ -412,7 +421,8 @@ let%test_module "value-set summary tests" = (module struct
     let actual = update_relative_offsets summary ~actual_values in
     let expected =
       { Abstract_store_domain.abstract_store = Variable.Map.empty;
-        store_operations = RICSet.singleton (RIC.of_int32 8l) }
+        store_operations = RICSet.singleton (RIC.of_int32 8l);
+        unreachable = false }
     in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
@@ -431,7 +441,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.relative_ric "a"))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 42l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let actual_values =
       String.Map.empty
@@ -444,7 +455,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.ric (1l, Int 0l, Int 1l, ("", 0l))))
               ~data:Abstract_store_domain.Value.top;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
@@ -467,7 +479,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 8l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 9l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -481,7 +494,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 4l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 42l));
-        store_operations = RICSet.singleton (RIC.of_int32 4l) }
+        store_operations = RICSet.singleton (RIC.of_int32 4l);
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let mem4 = Abstract_store_domain.get actual ~var:(Variable.Mem (RIC.of_int32 4l)) in
@@ -512,7 +526,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 8l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 9l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -526,7 +541,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 4l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 42l));
-        store_operations = RICSet.singleton (RIC.ric (1l, Int 1l, Int 7l, ("", 0l))) }
+        store_operations = RICSet.singleton (RIC.ric (1l, Int 1l, Int 7l, ("", 0l)));
+        unreachable = false }
     in
     let expected =
       { Abstract_store_domain.abstract_store =
@@ -540,7 +556,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 8l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 9l));
-        store_operations = RICSet.singleton (RIC.ric (1l, Int 1l, Int 7l, ("", 0l))) }
+        store_operations = RICSet.singleton (RIC.ric (1l, Int 1l, Int 7l, ("", 0l)));
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let ok = Abstract_store_domain.equal actual expected in
@@ -566,7 +583,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 8l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 9l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -580,7 +598,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.relative_ric (Variable.to_string (Variable.Var (Var.Local 0)))))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.(constant 42l + relative_ric (Variable.to_string (Variable.Var (Var.Local 0))))));
-        store_operations = RICSet.singleton (RIC.relative_ric (Variable.to_string (Variable.Var (Var.Local 0)))) }
+        store_operations = RICSet.singleton (RIC.relative_ric (Variable.to_string (Variable.Var (Var.Local 0))));
+        unreachable = false }
     in
     let expected =
       { Abstract_store_domain.abstract_store =
@@ -597,7 +616,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 8l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 9l));
-        store_operations = RICSet.singleton (RIC.of_int32 4l) }
+        store_operations = RICSet.singleton (RIC.of_int32 4l);
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[Var.Other "arg"] ~return_variable:None in
     let ok = Abstract_store_domain.equal actual expected in
@@ -618,7 +638,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Var (Var.Other "ret"))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 7l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -632,7 +653,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Var (Var.Return 0l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 42l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let expected =
       { Abstract_store_domain.abstract_store =
@@ -646,7 +668,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.entire_memory)
               ~data:(Abstract_store_domain.Value.top);
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:(Some (Var.Other "ret")) in
     let ok = Abstract_store_domain.equal actual expected in
@@ -670,7 +693,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 4l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 7l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -681,7 +705,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let actual_accessed = Abstract_store_domain.get actual ~var:Variable.Accessed in
@@ -713,7 +738,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 4l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 7l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -724,7 +750,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let actual_accessed = Abstract_store_domain.get actual ~var:Variable.Accessed in
@@ -760,7 +787,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 4l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 7l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -771,7 +799,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:(Abstract_store_domain.Value.ValueSet summary_memory_size);
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let actual_memory_size = Abstract_store_domain.get actual ~var:Variable.MemorySize in
@@ -809,7 +838,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 4l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 9l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -823,7 +853,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let actual_global = Abstract_store_domain.get actual ~var:global in
@@ -861,7 +892,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 4l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 9l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary_global_value = RIC.(relative_ric global_origin + constant 5l) in
     let summary =
@@ -876,7 +908,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let actual_global = Abstract_store_domain.get actual ~var:global in
@@ -922,7 +955,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 16l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 999l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -936,7 +970,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.singleton (RIC.ric (1l, Int 0l, Int 6l, ("g0", 1l))) }
+        store_operations = RICSet.singleton (RIC.ric (1l, Int 0l, Int 6l, ("g0", 1l)));
+        unreachable = false }
     in
     let expected =
       { Abstract_store_domain.abstract_store =
@@ -956,7 +991,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 20l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 9l));
-        store_operations = RICSet.singleton (RIC.ric (1l, Int 0l, Int 6l, ("", 11l))) }
+        store_operations = RICSet.singleton (RIC.ric (1l, Int 0l, Int 6l, ("", 11l)));
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let ok = Abstract_store_domain.equal actual expected in
@@ -995,7 +1031,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem (RIC.of_int32 16l))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 999l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -1009,7 +1046,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.singleton (RIC.ric (1l, Int 0l, Int 6l, ("g0", 1l))) }
+        store_operations = RICSet.singleton (RIC.ric (1l, Int 0l, Int 6l, ("g0", 1l)));
+        unreachable = false }
     in
     let expected =
       { Abstract_store_domain.abstract_store =
@@ -1026,7 +1064,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem expected_address)
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 42l));
-        store_operations = RICSet.singleton (RIC.ric (1l, Int 0l, Int 6l, ("x", 1l))) }
+        store_operations = RICSet.singleton (RIC.ric (1l, Int 0l, Int 6l, ("x", 1l)));
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let ok = Abstract_store_domain.equal actual expected in
@@ -1056,7 +1095,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -1070,7 +1110,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let actual =
       apply ~summary ~state ~args:[caller_arg] ~return_variable:(Some (Var.Other "ret"))
@@ -1105,7 +1146,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -1119,7 +1161,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let expected =
       { Abstract_store_domain.abstract_store =
@@ -1136,7 +1179,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Var (Var.Other "ret"))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 15l));
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:(Some (Var.Other "ret")) in
     let ok = Abstract_store_domain.equal actual expected in
@@ -1167,7 +1211,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -1178,7 +1223,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let expected =
       { Abstract_store_domain.abstract_store =
@@ -1192,7 +1238,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:(Abstract_store_domain.Value.ValueSet RIC.positive_integers);
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[caller_arg] ~return_variable:None in
     let ok = Abstract_store_domain.equal actual expected in
@@ -1222,7 +1269,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -1233,7 +1281,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let expected =
       { Abstract_store_domain.abstract_store =
@@ -1247,7 +1296,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:(Abstract_store_domain.Value.ValueSet RIC.positive_integers);
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let ok = Abstract_store_domain.equal actual expected in
@@ -1286,7 +1336,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -1297,7 +1348,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.singleton written }
+        store_operations = RICSet.singleton written;
+        unreachable = false }
     in
     let expected =
       { Abstract_store_domain.abstract_store =
@@ -1311,7 +1363,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:(Abstract_store_domain.Value.ValueSet RIC.positive_integers);
-        store_operations = RICSet.singleton written }
+        store_operations = RICSet.singleton written;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let ok = Abstract_store_domain.equal actual expected in
@@ -1343,7 +1396,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -1354,7 +1408,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.singleton written }
+        store_operations = RICSet.singleton written;
+        unreachable = false }
     in
     let expected =
       { Abstract_store_domain.abstract_store =
@@ -1368,7 +1423,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:(Abstract_store_domain.Value.ValueSet RIC.positive_integers);
-        store_operations = RICSet.singleton written }
+        store_operations = RICSet.singleton written;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let ok = Abstract_store_domain.equal actual expected in
@@ -1397,7 +1453,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -1408,7 +1465,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.singleton RIC.Top }
+        store_operations = RICSet.singleton RIC.Top;
+        unreachable = false }
     in
     let expected =
       { Abstract_store_domain.abstract_store =
@@ -1419,7 +1477,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:(Abstract_store_domain.Value.ValueSet RIC.positive_integers);
-        store_operations = RICSet.singleton RIC.Top }
+        store_operations = RICSet.singleton RIC.Top;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let ok = Abstract_store_domain.equal actual expected in
@@ -1451,7 +1510,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.empty }
+        store_operations = RICSet.empty;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -1465,7 +1525,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.singleton summary_address }
+        store_operations = RICSet.singleton summary_address;
+        unreachable = false }
     in
     let expected =
       { Abstract_store_domain.abstract_store =
@@ -1482,7 +1543,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:(Variable.Mem expected_address)
               ~data:Abstract_store_domain.Value.top;
-        store_operations = RICSet.singleton expected_address }
+        store_operations = RICSet.singleton expected_address;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[caller_arg] ~return_variable:None in
     let ok = Abstract_store_domain.equal actual expected in
@@ -1507,7 +1569,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.singleton caller_written }
+        store_operations = RICSet.singleton caller_written;
+        unreachable = false }
     in
     let summary =
       { Abstract_store_domain.abstract_store =
@@ -1518,7 +1581,8 @@ let%test_module "value-set summary tests" = (module struct
           |> Variable.Map.set
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom;
-        store_operations = RICSet.singleton summary_written }
+        store_operations = RICSet.singleton summary_written;
+        unreachable = false }
     in
     let expected =
       { Abstract_store_domain.abstract_store =
@@ -1532,7 +1596,8 @@ let%test_module "value-set summary tests" = (module struct
         store_operations =
           RICSet.empty
           |> RICSet.add ~ric:caller_written
-          |> RICSet.add ~ric:summary_written }
+          |> RICSet.add ~ric:summary_written;
+        unreachable = false }
     in
     let actual = apply ~summary ~state ~args:[] ~return_variable:None in
     let ok = Abstract_store_domain.equal actual expected in
