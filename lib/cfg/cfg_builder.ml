@@ -55,7 +55,7 @@ let build (module_ : Wasm_module.t) (fidx : Int32.t) : unit Cfg.t =
   let rec check_no_rest (rest : 'a Instr.t list) : unit = match rest with
     | [] -> ()
     | Control { instr = Unreachable; _ } :: rest -> check_no_rest rest
-    | _ -> Log.info (Printf.sprintf "Ignoring unreachable instructions after jump: %s" (Instr.list_to_string rest (fun _ -> "")))
+    | _ -> Log.info (fun () -> Printf.sprintf "Ignoring unreachable instructions after jump: %s" (Instr.list_to_string rest (fun _ -> "")))
   in
   let simplify = true in
   let funcinst = Wasm_module.get_funcinst module_ fidx in
@@ -273,7 +273,7 @@ let build (module_ : Wasm_module.t) (fidx : Int32.t) : unit Cfg.t =
   let breaks_to_exit, remaining_breaks = List.partition_tf breaks ~f:(fun (_, lvl, _) -> Int32.(lvl = 0l)) in
   begin if not (List.is_empty remaining_breaks) then
       (* there shouldn't be any breaks outside the function *)
-      Log.warn (Printf.sprintf "There are %d breaks outside of function %ld" (List.length breaks) fidx)
+      Log.warn (fun () -> Printf.sprintf "There are %d breaks outside of function %ld" (List.length breaks) fidx)
   end;
   (* Connect the return block and the remaining breaks to it, and remove all edges that start from a return block (as they are unreachable) *)
   let edges' = (exit_idx, return_block.idx, None) ::
@@ -443,4 +443,3 @@ module Test = struct
   let%test_unit "CFG for loop.wat can be built" = test_cfgs "../../../test/loop.wat"
   let%test_unit "CFG for loop-brif.wat can be built" = test_cfgs "../../../test/loop-brif.wat"
 end
-
