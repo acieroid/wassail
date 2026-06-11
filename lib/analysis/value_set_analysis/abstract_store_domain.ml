@@ -277,23 +277,33 @@ let widen (store1 : t) (store2 : t) : t =
   if store2.unreachable then
     store1
   else
-    let store1 = make_compatible ~this_store:store1 ~relative_to:store2 in
-    let store2 = make_compatible ~this_store:store2 ~relative_to:store1 in
-    let store =
-      Variable.Map.merge store1.abstract_store store2.abstract_store ~f:(fun ~key:k v ->
-        match k, v with
-        | _, `Both (ValueSet x, ValueSet y) -> Some (Value.ValueSet (RIC.widen x ~relative_to:y))
-        | _, `Both _ -> Some (Value.ValueSet RIC.Top)
-        | Mem _, `Left ValueSet x -> Some (Value.ValueSet (RIC.widen x ~relative_to:RIC.Top))
-        | Var _, `Left ValueSet x -> Some (Value.ValueSet (RIC.widen x ~relative_to:RIC.Bottom))
-        | Mem _, `Right ValueSet y -> Some (Value.ValueSet (RIC.widen RIC.Top ~relative_to:y))
-        | Var _, `Right ValueSet y -> Some (Value.ValueSet (RIC.widen RIC.Bottom ~relative_to:y))
-        | _ -> Some (Value.ValueSet RIC.Top))
+    let widened_state =
+      let store1 = make_compatible ~this_store:store1 ~relative_to:store2 in
+      let store2 = make_compatible ~this_store:store2 ~relative_to:store1 in
+      let store =
+        Variable.Map.merge store1.abstract_store store2.abstract_store ~f:(fun ~key:k v ->
+          match k, v with
+          | _, `Both (ValueSet x, ValueSet y) -> Some (Value.ValueSet (RIC.widen x ~relative_to:y))
+          | _, `Both _ -> Some (Value.ValueSet RIC.Top)
+          | Mem _, `Left ValueSet x -> Some (Value.ValueSet (RIC.widen x ~relative_to:RIC.Top))
+          | Var _, `Left ValueSet x -> Some (Value.ValueSet (RIC.widen x ~relative_to:RIC.Bottom))
+          | Mem _, `Right ValueSet y -> Some (Value.ValueSet (RIC.widen RIC.Top ~relative_to:y))
+          | Var _, `Right ValueSet y -> Some (Value.ValueSet (RIC.widen RIC.Bottom ~relative_to:y))
+          | _ -> Some (Value.ValueSet RIC.Top))
+      in
+      { abstract_store = store; 
+        store_operations = Set.union store1.store_operations store2.store_operations; 
+        unreachable = store1.unreachable }
+      |> remove_pointers_to_top 
     in
-    { abstract_store = store; 
-      store_operations = Set.union store1.store_operations store2.store_operations; 
-      unreachable = store1.unreachable }
-    |> remove_pointers_to_top 
+    if not (equal widened_state store1) then 
+      (Intra.narrow_option := true;
+      Print_trace.print
+        "\twidening:\n\t\tstate1: %s\n\t\tstate2: %s\n\t\twidened state: %s\n"
+        (to_string store1)
+        (to_string store2)
+        (to_string widened_state));
+    widened_state
 
 (** [bottom] is the bottom store. Its linear memory is explicitly mapped to
     [Bottom]. *)

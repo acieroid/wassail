@@ -48,11 +48,11 @@ module Make (*: Transfer.TRANSFER *) = struct
 
   let bottom : State.t = State.bottom 
 
-  let state_to_string : State.t -> string = State.to_string
+  (* let state_to_string : State.t -> string = State.to_string *)
 
   let join_state : State.t -> State.t -> State.t = State.join
 
-  let widen_state (s1 : State.t) (s2 : State.t) : State.t = 
+  (* let widen_state (s1 : State.t) (s2 : State.t) : State.t = 
     let widened_state = State.widen s1 s2 in
     Print_trace.print
       "\twidening:\t\tstate1: %s\t\tstate2: %s\t\twidened state: %s"
@@ -60,7 +60,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       (state_to_string s2)
       (state_to_string widened_state);
     if not (State.equal widened_state s1) then Intra.narrow_option := true;
-    widened_state
+    widened_state *)
 
   let is_this_the_value_of 
       (state : Spec_domain.SpecWithoutBottom.t) 
@@ -492,20 +492,72 @@ module Make (*: Transfer.TRANSFER *) = struct
           () in *)
         store
       | Compare comp ->
+        let compare_result
+            (var1 : Var.t)
+            (var2 : Var.t)
+            (vs1_true : RIC.t)
+            (vs1_false : RIC.t)
+            (vs2_true : RIC.t)
+            (vs2_false : RIC.t)
+          : Value.t =
+          let numeric_value = RIC.(join
+            (if RIC.(vs1_false <> Bottom && vs2_false <> Bottom) then zero else Bottom)
+            (if RIC.(vs1_true <> Bottom && vs2_true <> Bottom) then one else Bottom))
+          in
+          let true_or_false =
+            List.fold [ var1, vs1_true, vs1_false; var2, vs2_true, vs2_false ]
+              ~init:Variable.Map.empty
+              ~f:(fun acc (var, true_, false_) ->
+                match var with
+                | Var.Const _ -> acc
+                | _ ->
+                  Variable.Map.set
+                    acc
+                    ~key:(Variable.Var var)
+                    ~data:Boolean.{True_or_false.true_; false_})
+          in
+          if Variable.Map.is_empty true_or_false then
+            Value.ValueSet numeric_value
+          else
+            Value.Boolean {true_or_false; numeric_value}
+        in
+        let less_or_equal (var1, vs1 : Var.t * RIC.t) (var2, vs2 : Var.t * RIC.t) : State.t =
+          if not (RIC.comparable_offsets vs1 vs2) then
+            (Print_trace.print "  ->  [0,1]\n";
+            state |> State.set ~var:(ret i) ~vs:(ValueSet RIC.(join one zero)))
+          else
+            let vs2_neg = RIC.remove_lower_bound vs2 in
+            let vs2_pos = RIC.(remove_upper_bound vs2  + one) in
+            let vs1_true = RIC.meet vs1 vs2_neg in
+            let vs1_false = RIC.meet vs1 vs2_pos in
+            let vs1_neg = RIC.(remove_lower_bound vs1 - one) in
+            let vs1_pos = RIC.remove_upper_bound vs1 in
+            let vs2_true = RIC.meet vs2 vs1_pos in
+            let vs2_false = RIC.meet vs2 vs1_neg in
+            let result = compare_result var1 var2 vs1_true vs1_false vs2_true vs2_false in
+            Print_trace.print "  ->  %s\n" (Value.to_string result);
+            state |> State.set ~var:(ret i) ~vs:result
+        in
+        let less_than (var1, vs1 : Var.t * RIC.t) (var2, vs2 : Var.t * RIC.t) : State.t =
+          if not (RIC.comparable_offsets vs1 vs2) then
+            (Print_trace.print "  ->  [0,1]\n";
+            state |> State.set ~var:(ret i) ~vs:(ValueSet RIC.(join one zero)))
+          else
+            let vs2_neg = RIC.(remove_lower_bound vs2 - one) in
+            let vs2_pos = RIC.remove_upper_bound vs2 in
+            let vs1_true = RIC.meet vs1 vs2_neg in
+            let vs1_false = RIC.meet vs1 vs2_pos in
+            let vs1_neg = RIC.remove_lower_bound vs1 in
+            let vs1_pos = RIC.(remove_upper_bound vs1 + one) in
+            let vs2_true = RIC.meet vs2 vs1_pos in
+            let vs2_false = RIC.meet vs2 vs1_neg in
+            let result = compare_result var1 var2 vs1_true vs1_false vs2_true vs2_false in
+            Print_trace.print "  ->  %s\n" (Value.to_string result);
+            state |> State.set ~var:(ret i) ~vs:result
+        in
         let var2, var1 = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
-        (* print_endline ("var1: " ^ Var.to_string var1 ^ ", var2: " ^ Var.to_string var2); *)
-        let vs1 = 
-          begin match var1 with
-          | Var.Local _
-          | Var.Global _ -> Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string var1))
-          | _ -> Abstract_store_domain.get state ~var:(Variable.Var var1) 
-          end in
-        let vs2 = 
-          begin match var1 with
-          | Var.Local _
-          | Var.Global _ -> Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Var.to_string var2))
-          | _ -> Abstract_store_domain.get state ~var:(Variable.Var var2) 
-          end in
+        let vs1 = State.get state ~var:(Variable.Var var1) in
+        let vs2 = State.get state ~var:(Variable.Var var2) in
         let vs1, vs2 =
           begin match vs1, vs2 with
           | Boolean {numeric_value = vs1; _}, Boolean {numeric_value = vs2; _}
@@ -519,123 +571,133 @@ module Make (*: Transfer.TRANSFER *) = struct
           | Bitfield bf1, Bitfield bf2 -> RIC.of_bitfield bf1, RIC.of_bitfield bf2
           end
         in
-        (* begin match vs1, vs2 with
-        | Boolean {numeric_value = vs1; _}, Boolean {numeric_value = vs2; _}
-        | Boolean {numeric_value = vs1; _}, ValueSet vs2
-        | ValueSet vs1, Boolean {numeric_value = vs2; _}
-        | ValueSet vs1, ValueSet vs2 -> *)
-          begin match comp with
-          | {op = Eq; typ = I32} ->
-            if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " == " ^ RIC.to_string vs2);
-            let vs1_true = 
-              if RIC.comparable_offsets vs1 vs2 then
-                RIC.meet vs1 vs2
+        begin match comp with
+        | {op = Ne; typ = I32} ->
+          Print_trace.print "\t%s != %s" (RIC.to_string vs1) (RIC.to_string vs2);
+          if not (RIC.comparable_offsets vs1 vs2) then
+            (Print_trace.print "  ->  [0,1]\n";
+            state |> State.set ~var:(ret i) ~vs:(ValueSet RIC.(join one zero)))
+          else
+            let vs1_true =
+              if RIC.is_singleton vs2 then
+                RIC.remove ~this:vs2 ~from:vs1
+                |> List.fold ~init:RIC.Bottom ~f:(fun acc x -> RIC.join acc x)
               else
                 vs1
             in
+            let vs2_true =
+              if RIC.is_singleton vs1 then
+                RIC.remove ~this:vs1 ~from:vs2
+                |> List.fold ~init:RIC.Bottom ~f:(fun acc x -> RIC.join acc x)
+              else
+                vs2
+            in
+            let vs1_false = RIC.meet vs1 vs2 in
+            let vs2_false = RIC.meet vs1 vs2 in
+            let result = compare_result var1 var2 vs1_true vs1_false vs2_true vs2_false in
+            Print_trace.print "  ->  %s\n" (Value.to_string result);
+            state |> State.set ~var:(ret i) ~vs:result
+        | {op = Eq; typ = I32} ->
+          Print_trace.print "\t%s == %s" (RIC.to_string vs1) (RIC.to_string vs2);
+          if not (RIC.comparable_offsets vs1 vs2) then
+            (Print_trace.print "  ->  [0,1]\n";
+            state |> State.set ~var:(ret i) ~vs:(ValueSet RIC.(join one zero)))
+          else
+            let vs1_true = RIC.meet vs1 vs2 in
             let vs1_false = 
-              if RIC.comparable_offsets vs1 vs2 then
-                let vs2' = RIC.complement vs2 in
-                List.fold vs2' ~init:RIC.Bottom ~f:(fun acc x -> RIC.join acc (RIC.meet vs1 x))
+              if RIC.is_singleton vs2 then
+                RIC.remove ~this:vs2 ~from:vs1
+                |> List.fold ~init:RIC.Bottom ~f:(fun acc x -> RIC.join acc x)
               else
                 vs1
             in
-            let state =
-              begin match var1 with
-              (* | Var.Const _ -> state TODO: numeric value (0,1) *)
-              | _ ->
-                Abstract_store_domain.set 
-                  state 
-                  ~var:(ret i) 
-                  ~vs:(Boolean { Boolean.true_or_false = (Variable.Map.set 
-                                                            Variable.Map.empty 
-                                                            ~key:(Variable.Var var1) 
-                                                            ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                                numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
-              end in
-            (* let () =
-              print_endline ("result: " ^ Abstract_store_domain.Value.to_string (Abstract_store_domain.get state ~var:(ret i)));
-              let _ = In_channel.input_line_exn In_channel.stdin in
-              () in *)
-            state
-          | {op = LeU; typ = I32} -> 
-            if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " ≤ " ^ RIC.to_string vs2);
-            let vs2' = RIC.remove_lower_bound vs2 in
-            let vs2'' = RIC.add_offset (RIC.remove_upper_bound vs2) 1l in
-            let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
-            let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
-            if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
-            begin match var1 with
-            (* | Var.Const _ -> state TODO: numeric value (0,1) *)
-            | _ ->
-              Abstract_store_domain.set 
-                state 
-                ~var:(ret i) 
-                ~vs:(Boolean { Boolean.true_or_false = (Variable.Map.set 
-                                                          Variable.Map.empty 
-                                                          ~key:(Variable.Var var1) 
-                                                          ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                              numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
-            end
-          | {op = LtU; typ = I32} ->
-            if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " < " ^ RIC.to_string vs2);
-            let vs2' = RIC.add_offset (RIC.remove_lower_bound vs2) (-1l) in
-            let vs2'' = RIC.remove_upper_bound vs2 in
-            let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
-            let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
-            if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ ",  false: " ^ RIC.to_string vs1_false);
-            begin match var1 with
-            (* | Var.Const _ -> state *)
-            | _ ->
-              Abstract_store_domain.set 
-                state 
-                ~var:(ret i) 
-                ~vs:(Boolean { Boolean.true_or_false = (Variable.Map.set 
-                                                          Variable.Map.empty 
-                                                          ~key:(Variable.Var var1) 
-                                                          ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                              numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
-            end
-          | {op = GeU; typ = I32} -> 
-            if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " ≥ " ^ RIC.to_string vs2);
-            let vs2' = RIC.remove_upper_bound vs2 in
-            let vs2'' = RIC.add_offset (RIC.remove_lower_bound vs2) (-1l) in
-            let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
-            let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
-            if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
-            begin match var1 with
-            (* | Var.Const _ -> state *)
-            | _ ->
-              Abstract_store_domain.set 
-                state 
-                ~var:(ret i) 
-                ~vs:(Boolean { Boolean.true_or_false = (Variable.Map.set 
-                                                          Variable.Map.empty 
-                                                          ~key:(Variable.Var var1) 
-                                                          ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                              numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
-            end
-          | {op = GtU; typ = I32} ->
-            if !Value_set_options.print_trace then print_endline ("\t" ^ RIC.to_string vs1 ^ " > " ^ RIC.to_string vs2);
-            let vs2' = RIC.add_offset (RIC.remove_upper_bound vs2) 1l in
-            let vs2'' = RIC.remove_lower_bound vs2 in
-            let vs1_true = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2' else vs1 in
-            let vs1_false = if RIC.comparable_offsets vs1 vs2' then RIC.meet vs1 vs2'' else vs1 in
-            if !Value_set_options.print_trace then print_endline ("\ttrue: " ^ RIC.to_string vs1_true ^ "\n\tfalse: " ^ RIC.to_string vs1_false);
-            begin match var1 with
-            (* | Var.Const _ -> state *)
-            | _ ->
-              Abstract_store_domain.set 
-                state 
-                ~var:(ret i) 
-                ~vs:(Boolean { Boolean.true_or_false = (Variable.Map.set 
-                                                          Variable.Map.empty 
-                                                          ~key:(Variable.Var var1) 
-                                                          ~data:Boolean.{True_or_false.true_ = vs1_true; false_ = vs1_false});
-                              numeric_value = RIC.ric (1l, Int 0l, Int 1l, ("", 0l)) })
-            end
-          | _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(Boolean {Boolean.true_or_false = Variable.Map.empty; numeric_value = RIC.Top})
-          (* end *)
+            let vs2_true = RIC.meet vs1 vs2 in
+            let vs2_false = 
+              if RIC.is_singleton vs1 then
+                RIC.remove ~this:vs1 ~from:vs2
+                |> List.fold ~init:RIC.Bottom ~f:(fun acc x -> RIC.join acc x)
+              else
+                vs2
+            in
+            let result = compare_result var1 var2 vs1_true vs1_false vs2_true vs2_false in
+            Print_trace.print "  ->  %s\n" (Value.to_string result);
+            state |> Abstract_store_domain.set ~var:(ret i) ~vs:result
+        | {op = LeS; typ = I32} -> 
+          Print_trace.print "\t%s ≤ %s" (RIC.to_string vs1) (RIC.to_string vs2);
+          less_or_equal (var1, vs1) (var2, vs2)
+        | {op = LtS; typ = I32} ->
+          less_than (var1, vs1) (var2, vs2)
+        | {op = GeS; typ = I32} -> 
+          Print_trace.print "\t%s ≥ %s" (RIC.to_string vs1) (RIC.to_string vs2);
+          less_or_equal (var2, vs2) (var1, vs1)
+        | {op = GtS; typ = I32} ->
+          Print_trace.print "\t%s > %s" (RIC.to_string vs1) (RIC.to_string vs2);
+          less_than (var2, vs2) (var1, vs1)
+        | {op = LeU; typ = I32} -> 
+          Print_trace.print "\t%s ≤ %s" (RIC.to_string vs1) (RIC.to_string vs2);
+          if not (RIC.comparable_offsets vs1 vs2) || (not (String.is_empty (RIC.extract_relative_offset vs1))) then
+            (Print_trace.print "  ->  [0,1]\n";
+            state |> State.set ~var:(ret i) ~vs:(ValueSet RIC.(join one zero)))
+          else if (* neg <= pos *) RIC.(positive_part vs1 = Bottom && negative_part vs2 = Bottom) then
+            less_or_equal (var2, vs2) (var1, vs1)
+          else if (* pos <= neg *) RIC.(negative_part vs1 = Bottom && positive_part vs2 = Bottom) then
+            less_or_equal (var2, vs2) (var1, vs1)
+          else if (* pos <= pos *) RIC.(negative_part vs1 = Bottom && negative_part vs2 = Bottom) then
+            less_or_equal (var1, vs1) (var2, vs2)
+          else if (* neg <= neg *) RIC.(positive_part vs1 = Bottom && positive_part vs2 = Bottom) then
+            less_or_equal (var1, vs1) (var2, vs2)
+          else (* Mix of positives and negatives *)
+            (Print_trace.print "  ->  [0,1]\n";
+            state |> State.set ~var:(ret i) ~vs:(ValueSet RIC.(join one zero)))
+        | {op = LtU; typ = I32} -> 
+          Print_trace.print "\t%s < %s" (RIC.to_string vs1) (RIC.to_string vs2);
+          if not (RIC.comparable_offsets vs1 vs2) || (not (String.is_empty (RIC.extract_relative_offset vs1))) then
+            (Print_trace.print "  ->  [0,1]\n";
+            state |> State.set ~var:(ret i) ~vs:(ValueSet RIC.(join one zero)))
+          else if (* neg < pos *) RIC.(positive_part vs1 = Bottom && negative_part vs2 = Bottom) then
+            less_than (var2, vs2) (var1, vs1)
+          else if (* pos < neg *) RIC.(negative_part vs1 = Bottom && positive_part vs2 = Bottom) then
+            less_than (var2, vs2) (var1, vs1)
+          else if (* pos < pos *) RIC.(negative_part vs1 = Bottom && negative_part vs2 = Bottom) then
+            less_than (var1, vs1) (var2, vs2)
+          else if (* neg < neg *) RIC.(positive_part vs1 = Bottom && positive_part vs2 = Bottom) then
+            less_than (var1, vs1) (var2, vs2)
+          else (* Mix of positives and negatives *)
+            (Print_trace.print "  ->  [0,1]\n";
+            state |> State.set ~var:(ret i) ~vs:(ValueSet RIC.(join one zero)))
+        | {op = GeU; typ = I32} -> 
+          Print_trace.print "\t%s ≥ %s" (RIC.to_string vs1) (RIC.to_string vs2);
+          if not (RIC.comparable_offsets vs1 vs2) || (not (String.is_empty (RIC.extract_relative_offset vs1))) then
+            (Print_trace.print "  ->  [0,1]\n";
+            state |> State.set ~var:(ret i) ~vs:(ValueSet RIC.(join one zero)))
+          else if (* neg >= pos *) RIC.(positive_part vs1 = Bottom && negative_part vs2 = Bottom) then
+            less_or_equal (var1, vs1) (var2, vs2)
+          else if (* pos >= neg *) RIC.(negative_part vs1 = Bottom && positive_part vs2 = Bottom) then
+            less_or_equal (var1, vs1) (var2, vs2)
+          else if (* pos >= pos *) RIC.(negative_part vs1 = Bottom && negative_part vs2 = Bottom) then
+            less_or_equal (var2, vs2) (var1, vs1)
+          else if (* neg >= neg *) RIC.(positive_part vs1 = Bottom && positive_part vs2 = Bottom) then
+            less_or_equal (var2, vs2) (var1, vs1)
+          else (* Mix of positives and negatives *)
+            (Print_trace.print "  ->  [0,1]\n";
+            state |> State.set ~var:(ret i) ~vs:(ValueSet RIC.(join one zero)))
+        | {op = GtU; typ = I32} -> 
+          Print_trace.print "\t%s > %s" (RIC.to_string vs1) (RIC.to_string vs2);
+          if not (RIC.comparable_offsets vs1 vs2) || (not (String.is_empty (RIC.extract_relative_offset vs1))) then
+            (Print_trace.print "  ->  [0,1]\n";
+            state |> State.set ~var:(ret i) ~vs:(ValueSet RIC.(join one zero)))
+          else if (* neg > pos *) RIC.(positive_part vs1 = Bottom && negative_part vs2 = Bottom) then
+            less_than (var1, vs1) (var2, vs2)
+          else if (* pos > neg *) RIC.(negative_part vs1 = Bottom && positive_part vs2 = Bottom) then
+            less_than (var1, vs1) (var2, vs2)
+          else if (* pos > pos *) RIC.(negative_part vs1 = Bottom && negative_part vs2 = Bottom) then
+            less_than (var2, vs2) (var1, vs1)
+          else if (* neg > neg *) RIC.(positive_part vs1 = Bottom && positive_part vs2 = Bottom) then
+            less_than (var2, vs2) (var1, vs1)
+          else (* Mix of positives and negatives *)
+            (Print_trace.print "  ->  [0,1]\n";
+            state |> State.set ~var:(ret i) ~vs:(ValueSet RIC.(join one zero)))
+        | _ -> Abstract_store_domain.set state ~var:(ret i) ~vs:(ValueSet RIC.(join one zero))
         end
       | Test test -> 
         let var = pop (Spec_domain.get_or_fail i.annotation_before).vstack in

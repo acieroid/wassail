@@ -185,8 +185,8 @@ let%test_module "value-set tests" = (module struct
   let check_value (state : Domain.t) (var : Variable.t) (value : Domain.Value.t) : bool =
     state
     |> Domain.get ~var
-    |> Domain.Value.equal value
-    || (Printf.printf "\tFailure: %s\n" (Domain.to_string state); false)
+    |> Domain.Value.equal value && (Printf.printf "\tSUCCESS: %s\n" (Domain.to_string state); true)
+    || (Printf.printf "\t\tFAILURE: %s\n" (Domain.to_string state); false)
 
 
   let () = Value_set_options.show_intermediates := true
@@ -589,6 +589,198 @@ let%test_module "value-set tests" = (module struct
       (Variable.Var (Var.Return 0l))
       (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
 
-  (* let%test "keep false when working" = false *)
+  let compare_test ~(name : string) ~(op : string) ~(lhs : int32) ~(rhs : int32) ~(expected : int32) : bool =
+    let exit_state =
+      Printf.sprintf
+        "(module
+          (memory (export \"mem\") 1)
+
+          (func $main (export \"main\") (result i32)
+            i32.const %ld
+            i32.const %ld
+            i32.%s
+          )
+        )"
+        lhs
+        rhs
+        op
+      |> analyze [0l] 0l
+    in
+    test_label ("[" ^ name ^ "]");
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant expected))
+
+  let%test "eq: equal constants" =
+    compare_test
+      ~name:"eq: 42 == 42"
+      ~op:"eq"
+      ~lhs:42l
+      ~rhs:42l
+      ~expected:1l
+
+  let%test "eq: distinct constants" =
+    compare_test
+      ~name:"eq: 42 == 43"
+      ~op:"eq"
+      ~lhs:42l
+      ~rhs:43l
+      ~expected:0l
+
+  let%test "ne: equal constants" =
+    compare_test
+      ~name:"ne: 42 != 42"
+      ~op:"ne"
+      ~lhs:42l
+      ~rhs:42l
+      ~expected:0l
+
+  let%test "ne: distinct constants" =
+    compare_test
+      ~name:"ne: 42 != 43"
+      ~op:"ne"
+      ~lhs:42l
+      ~rhs:43l
+      ~expected:1l
+
+  let%test "lt_s: signed negative is less than positive" =
+    compare_test
+      ~name:"lt_s: (-1) <s 1"
+      ~op:"lt_s"
+      ~lhs:(-1l)
+      ~rhs:1l
+      ~expected:1l
+
+  let%test "lt_s: equality is false" =
+    compare_test
+      ~name:"lt_s: 7 <s 7"
+      ~op:"lt_s"
+      ~lhs:7l
+      ~rhs:7l
+      ~expected:0l
+
+  let%test "lt_u: unsigned negative is greater than positive" =
+    compare_test
+      ~name:"lt_u: (-1) <u 1"
+      ~op:"lt_u"
+      ~lhs:(-1l)
+      ~rhs:1l
+      ~expected:0l
+
+  let%test "lt_u: small unsigned is less than large unsigned" =
+    compare_test
+      ~name:"lt_u: 1 <u (-1)"
+      ~op:"lt_u"
+      ~lhs:1l
+      ~rhs:(-1l)
+      ~expected:1l
+
+  let%test "le_s: signed negative is less or equal to positive" =
+    compare_test
+      ~name:"le_s: (-1) <=s 1"
+      ~op:"le_s"
+      ~lhs:(-1l)
+      ~rhs:1l
+      ~expected:1l
+
+  let%test "le_s: equality is true" =
+    compare_test
+      ~name:"le_s: 7 <=s 7"
+      ~op:"le_s"
+      ~lhs:7l
+      ~rhs:7l
+      ~expected:1l
+
+  let%test "le_u: unsigned negative is greater than positive" =
+    compare_test
+      ~name:"le_u: (-1) <=u 1"
+      ~op:"le_u"
+      ~lhs:(-1l)
+      ~rhs:1l
+      ~expected:0l
+
+  let%test "le_u: equality is true" =
+    compare_test
+      ~name:"le_u: (-1) <=u (-1)"
+      ~op:"le_u"
+      ~lhs:(-1l)
+      ~rhs:(-1l)
+      ~expected:1l
+
+  let%test "gt_s: signed negative is not greater than positive" =
+    compare_test
+      ~name:"gt_s: (-1) >s 1"
+      ~op:"gt_s"
+      ~lhs:(-1l)
+      ~rhs:1l
+      ~expected:0l
+
+  let%test "gt_s: signed positive is greater than negative" =
+    compare_test
+      ~name:"gt_s: 1 >s (-1)"
+      ~op:"gt_s"
+      ~lhs:1l
+      ~rhs:(-1l)
+      ~expected:1l
+
+  let%test "gt_u: unsigned negative is greater than positive" =
+    compare_test
+      ~name:"gt_u: (-1) >u 1"
+      ~op:"gt_u"
+      ~lhs:(-1l)
+      ~rhs:1l
+      ~expected:1l
+
+  let%test "gt_u: equality is false" =
+    compare_test
+      ~name:"gt_u: 7 >u 7"
+      ~op:"gt_u"
+      ~lhs:7l
+      ~rhs:7l
+      ~expected:0l
+
+  let%test "ge_s: signed positive is greater or equal to negative" =
+    compare_test
+      ~name:"ge_s: 1 >=s (-1)"
+      ~op:"ge_s"
+      ~lhs:1l
+      ~rhs:(-1l)
+      ~expected:1l
+
+  let%test "ge_s: signed negative is not greater or equal to positive" =
+    compare_test
+      ~name:"ge_s: (-1) >=s 1"
+      ~op:"ge_s"
+      ~lhs:(-1l)
+      ~rhs:1l
+      ~expected:0l
+
+  let%test "ge_s: equality is true" =
+    compare_test
+      ~name:"ge_s: (-1) >=s (-1)"
+      ~op:"ge_s"
+      ~lhs:(-1l)
+      ~rhs:(-1l)
+      ~expected:1l
+
+  let%test "ge_u: unsigned negative is greater or equal to positive" =
+    compare_test
+      ~name:"ge_u: (-1) >=u 1"
+      ~op:"ge_u"
+      ~lhs:(-1l)
+      ~rhs:1l
+      ~expected:1l
+
+  let%test "ge_u: equality is true" =
+    compare_test
+      ~name:"ge_u: 7 >=u 7"
+      ~op:"ge_u"
+      ~lhs:7l
+      ~rhs:7l
+      ~expected:1l
+
+      
+
+  let%test "keep false when working" = false
 
 end)
