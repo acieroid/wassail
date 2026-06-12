@@ -98,10 +98,10 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
     Spec_inference.use_const := false;
     let module_ = Wasm_module.of_file filename in
     let funcs = module_.funcs in
-    if List.is_empty funcs then
+    if Array.is_empty funcs then
       output_slicing_result filename (Ignored NoFunction)
     else
-      List.iteri funcs ~f:(fun _i func ->
+      Array.iteri funcs ~f:(fun _i func ->
           let labels = Instr.Label.Set.to_array (all_labels func.code.body) in
           if Array.length labels = 0 then
             output_slicing_result filename (Ignored (NoInstruction func.idx))
@@ -203,7 +203,7 @@ let generate_slice (filename : string) (output_file : string) =
   (* Find the function and slicing criterion: it should call printf with the string's position in the data segment as argument *)
   Spec_inference.use_const := true;
   Spec_inference.propagate_locals := true;
-  let (function_idx, slicing_criteria) = match List.find_map module_.funcs ~f:(fun func ->
+  let (function_idx, slicing_criteria) = match Array.find_map module_.funcs ~f:(fun func ->
       let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ func.idx) in
       match List.filter_map (Cfg.all_instructions_list cfg) ~f:(function
           | Instr.Call ({instr = CallDirect (_, _, idx); annotation_before; label; _ }) when Int32.(idx = printf_export_idx) ->
@@ -220,7 +220,7 @@ let generate_slice (filename : string) (output_file : string) =
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
   let actual_slicing_criteria =
-    match List.find_map module_.funcs ~f:(fun func ->
+    match Array.find_map module_.funcs ~f:(fun func ->
               if Int32.(func.idx = function_idx) then begin
                 Printf.printf "We are slicing function %ld\n" func.idx;
                 let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ func.idx) in
@@ -319,7 +319,7 @@ let count_instructions_in_slice (filename : string) (output_file : string) =
     Spec_inference.propagate_globals := false;
     Spec_inference.propagate_locals := false;
     (* Find the function and slicing criterion: it should call printf with the string's position in the data segment as argument *)
-    let (function_idx, _slicing_criterion) = match List.find_map module_.funcs ~f:(fun func ->
+    let (function_idx, _slicing_criterion) = match Array.find_map module_.funcs ~f:(fun func ->
         Spec_inference.use_const := true;
         Spec_inference.propagate_locals := true;
         Out_channel.with_file output_file
@@ -334,7 +334,7 @@ let count_instructions_in_slice (filename : string) (output_file : string) =
            | _ -> None)) with
     | Some r -> r
     | None -> failwith "cannot find function to slice" in
-    let f = List32.nth_exn module_.funcs Int32.(function_idx - module_.nfuncimports) in
+    let f = Array32.get module_.funcs Int32.(function_idx - module_.nfuncimports) in
     let all_labels = List.fold_left f.code.body ~init:Instr.Label.Set.empty ~f:(fun acc i ->
         Instr.Label.Set.union acc (Instr.all_labels_no_merge i)) in
     Printf.printf "%d\n" (Instr.Label.Set.length all_labels)

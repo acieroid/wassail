@@ -90,7 +90,7 @@ module ICFG = struct
       | _ -> ()
     and collect_calls_instrs (instrs : 'a Instr.t list) : unit =
       List.iter instrs ~f:collect_calls in
-    List.iter wasm_mod.funcs
+    Array.iter wasm_mod.funcs
       ~f:(fun f ->
           List.iter f.code.body
             ~f:collect_calls);

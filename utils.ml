@@ -127,7 +127,7 @@ let function_instruction_labels =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         let labels = List.fold_left
-            (List.find_exn wasm_mod.funcs ~f:(fun f -> Int32.(f.idx = fidx))).code.body
+            (Array.find_exn wasm_mod.funcs ~f:(fun f -> Int32.(f.idx = fidx))).code.body
             ~init:Instr.Label.Set.empty
             ~f:(fun acc instr ->
                 Instr.Label.Set.union acc (Instr.all_labels_no_blocks_no_merge instr)) in
@@ -143,7 +143,7 @@ let function_body =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         List.iter
-            (List.find_exn wasm_mod.funcs ~f:(fun f -> Int32.(f.idx = fidx))).code.body
+            (Array.find_exn wasm_mod.funcs ~f:(fun f -> Int32.(f.idx = fidx))).code.body
             ~f:(fun instr ->
                 Printf.printf "%s\n" (Instr.to_string instr)))
 
@@ -154,5 +154,5 @@ let functions =
       let%map_open file_in = anon ("in" %: string) in
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
-        List.iter wasm_mod.funcs
+        Array.iter wasm_mod.funcs
           ~f:(fun f -> Printf.printf "%ld\t%s\n" f.idx (Option.value (Wasm_module.get_funcname wasm_mod f.idx) ~default:"<no-name>")))

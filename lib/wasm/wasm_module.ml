@@ -25,7 +25,7 @@ module T = struct
     imported_funcs : func_desc array; (** The description of the imported function: their id, name, and type *)
     exports : Export.t list;
     exported_funcs : func_desc list; (** The description of the exported functions: the id, name, and type *)
-    funcs : Func_inst.t list; (** The functions defined in the module *)
+    funcs : Func_inst.t array; (** The functions defined in the module *)
     memories : Memory.t list; (** The memory types *)
     memory_insts : Memory_inst.t list; (** The memory instances *)
     tables : Table.t list; (** The table types *)
@@ -39,9 +39,10 @@ include T
 
 (** Get the function instance for the function with index fidx *)
 let get_funcinst (m : t) (fidx : Int32.t) : Func_inst.t =
-  match List32.nth m.funcs Int32.(fidx-m.nfuncimports) with
-  | Some v -> v
-  | None -> failwith (Printf.sprintf "get_funcinst: no funcinst for function %ld. Is it an imported function?" fidx)
+  if Int32.(fidx < m.nfuncimports) then
+    failwith (Printf.sprintf "get_funcinst: no funcinst for function %ld. Is it an imported function?" fidx)
+  else
+  Array32.get m.funcs Int32.(fidx-m.nfuncimports)
 
 let get_n_locals (m : t) (fidx : Int32.t) : int =
   let inst = get_funcinst m fidx in
@@ -57,8 +58,10 @@ let get_funcname (m : t) (fidx : Int32.t) : string option =
 
 (** Get the index and name of all functions that have names, as a map from function name to its index *)
 let get_funcnames (m : t) : int32 StringMap.t =
-  let alist = List.filter_map m.funcs ~f:(fun funcinst ->
-      Option.map funcinst.name ~f:(fun name -> (name, funcinst.idx))) in
+  let alist = Array.fold m.funcs ~init:[] ~f:(fun acc funcinst ->
+                  match funcinst.name with
+                  | Some name -> (name, funcinst.idx) :: acc
+                  | None -> acc) in
   let imported = List.mapi
       (List.filter m.imports ~f:(function
            | { idesc = Import.FuncImport _; _ } -> true
@@ -68,7 +71,7 @@ let get_funcnames (m : t) : int32 StringMap.t =
 
 (** Checks if a function is present *)
 let is_function (m : t) (fidx : Int32.t) : bool =
-  let nfuncs = Int32.((List32.length m.funcs) + m.nfuncimports) in
+  let nfuncs = Int32.((Array32.length m.funcs) + m.nfuncimports) in
   Int32.(fidx < nfuncs)
 
 (** Checks if a function is an imported function. *)
@@ -95,20 +98,19 @@ let get_type (m : t) (tid : Int32.t) : Type.t list * Type.t list =
 (** Get the type of the function with index fidx *)
 let get_func_type (m : t) (fidx : Int32.t) : Type.t list * Type.t list =
   if Int32.(fidx >= m.nfuncimports) then
-      match List32.nth m.funcs Int32.(fidx-m.nfuncimports) with
-      | Some v -> v.typ
-      | None -> failwith "get_func_type nth exception"
+    let func = Array32.get m.funcs Int32.(fidx-m.nfuncimports) in
+    func.typ
   else 
     let desc = Array32.get m.imported_funcs fidx in
     (desc.arguments, desc.returns)
 
 (** Remove a function from the module *)
 let remove_func (m : t) (fidx : Int32.t) : t =
-  { m with funcs = List.filter m.funcs ~f:(fun f -> Int32.(f.idx <> fidx)) }
+  { m with funcs = Array.filter m.funcs ~f:(fun f -> Int32.(f.idx <> fidx)) }
 
 (** Replace a function in the module *)
 let replace_func (m : t) (fidx : Int32.t) (finst : Func_inst.t) : t =
-  { m with funcs = List.map m.funcs ~f:(fun f ->
+  { m with funcs = Array.map m.funcs ~f:(fun f ->
         if Int32.(f.idx = fidx) then
           finst
         else
@@ -138,17 +140,15 @@ let of_wasm (m : Wasm.Ast.module_) : t =
   let nglobals = List32.length m.it.globals in
   let global_types = List.map m.it.globals ~f:(fun g -> match g.it.gtype with
       | Wasm.Types.GlobalType (t, _) -> Type.of_wasm t) in
-  let funcs = List32.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m Int32.(i+nfuncimports) f) in
+  let funcs = List32.mapi m.it.funcs ~f:(fun i f -> Func_inst.of_wasm m Int32.(i+nfuncimports) f) |> Array.of_list in
   let ftype (fidx : Int32.t) : Type.t list * Type.t list =
     if Int32.(fidx < nfuncimports) then
       let desc = Array32.get imported_funcs fidx in
       (desc.arguments, desc.returns)
     else
-      match List32.nth funcs Int32.(fidx-nfuncimports) with
-      | Some f ->
-        assert Int32.(f.idx = fidx);
-        f.typ
-      | None -> failwith (Printf.sprintf "of_wasm: nth error when looking for function type (function %ld unfound in type list of length %ld)" Int32.(fidx-nfuncimports) (List32.length funcs)) in
+      let f = Array32.get funcs Int32.(fidx-nfuncimports) in
+      assert Int32.(f.idx = fidx);
+      f.typ in
   let exports = List.map m.it.exports ~f:Export.of_wasm in
   let exported_funcs = List.filter_map m.it.exports ~f:(fun export -> match export.it.edesc.it with
       | FuncExport v ->
@@ -156,10 +156,7 @@ let of_wasm (m : Wasm.Ast.module_) : t =
         let arguments, returns = ftype idx in
         Some {
           idx;
-          type_idx = begin match List32.nth funcs Int32.(idx-nfuncimports) with
-            | Some f -> f.type_idx
-            | None -> failwith (Printf.sprintf "of_wasm: nth error when looking for function type (function %ld unfound in type list of length %ld)" Int32.(idx-nfuncimports) (List32.length funcs))
-          end;
+          type_idx = (Array32.get funcs Int32.(idx-nfuncimports)).type_idx;
           name = Wasm.Ast.string_of_name export.it.name;
           arguments;
           returns;
@@ -274,7 +271,7 @@ let to_string (m : t) : string =
     end;
     put (Instr.list_to_string f.code.body ?indent:(Some 4) ?sep:(Some "\n") (fun () -> ""));
     put ")\n" in
-  let funcs () = List.iteri m.funcs ~f:(fun i f -> func Int32.(m.nfuncimports + (of_int_exn i)) f) in
+  let funcs () = Array.iteri m.funcs ~f:(fun i f -> func Int32.(m.nfuncimports + (of_int_exn i)) f) in
   let table (i : int) (t : Table.t) =
     put (Printf.sprintf "  (table (;%d;) " i);
     limits t.ttype;

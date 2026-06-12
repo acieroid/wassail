@@ -76,6 +76,7 @@ module Array32 = struct
   let get array n =
     (* We don't expect n to be a 32 bit number that can't be represented by an int *)
     array.(Int32.to_int_exn n)
+  let length array = Int32.of_int_exn (Array.length array)
 end
 
 (** Get the nth element of a list *)

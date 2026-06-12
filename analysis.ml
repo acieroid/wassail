@@ -91,7 +91,7 @@ let find_indirect_calls =
       let%map_open filename = anon ("file" %: string) in
       fun () ->
         let module_ = Wasm_module.of_file filename in
-        List.iter module_.funcs ~f:(fun finst ->
+        Array.iter module_.funcs ~f:(fun finst ->
             let cfg = Spec_analysis.analyze_intra1 module_ finst.idx in
             let indirect_calls = Slicing.find_call_indirect_instructions cfg in
             List.iter indirect_calls ~f:(fun label ->

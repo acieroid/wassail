@@ -421,7 +421,7 @@ let build_imported (module_ : Wasm_module.t) (desc : Wasm_module.func_desc) : un
 let build_all (mod_ : Wasm_module.t) : unit Cfg.t Int32Map.t =
   let entries = Array.fold mod_.imported_funcs ~init:[]
                   ~f:(fun acc desc -> (desc.idx, build_imported mod_ desc) :: acc) in
-  let entries = List.foldi mod_.funcs ~init:entries
+  let entries = Array.foldi mod_.funcs ~init:entries
                   ~f:(fun i acc _ ->
                     let faddr = Int32.(mod_.nfuncimports + Int32.of_int_exn i) in
                     (faddr, build mod_ faddr) :: acc) in
@@ -432,7 +432,7 @@ module Test = struct
       Does not actually check that the CFG is correct. *)
   let test_cfgs file =
     let wasm_mod = Wasm_module.of_file file in
-    List.iteri wasm_mod.funcs
+    Array.iteri wasm_mod.funcs
       ~f:(fun i _ ->
           let faddr = Int32.(wasm_mod.nfuncimports + (Int32.of_int_exn i)) in
           let _ : unit Cfg.t = build wasm_mod faddr in

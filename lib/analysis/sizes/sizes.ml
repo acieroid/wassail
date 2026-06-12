@@ -503,14 +503,14 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
       u32 Wasm.Encode.version;
       let type_section = size (fun () -> type_section m.types) in
       let import_section = size (fun () -> import_section m.imports) in
-      let func_section = size (fun () -> func_section m.funcs) in
+      let func_section = size (fun () -> func_section (Array.to_list m.funcs)) in
       let table_section = size (fun () -> table_section m.tables) in
       let memory_section = size (fun () -> memory_section m.memories) in
       let global_section = size (fun () -> global_section m.globals) in
       let export_section = size (fun () -> export_section m.exports) in
       let start_section = size (fun () -> start_section m.start) in
       let elem_section = size (fun () -> elem_section m.elems) in
-      let code_section = size (fun () -> code_section m.funcs) in
+      let code_section = size (fun () -> code_section (Array.to_list m.funcs)) in
       let data_section = size (fun () -> data_section m.datas) in
       { type_section; import_section; func_section; table_section; memory_section;
         global_section; export_section; start_section; elem_section; code_section; data_section }

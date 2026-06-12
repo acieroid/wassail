@@ -34,7 +34,7 @@ let cfgs =
       fun () ->
         let wasm_mod = Wasm_module.of_file file_in in
         Core_unix.mkdir_p out_dir;
-        List.iteri wasm_mod.funcs
+        Array.iteri wasm_mod.funcs
           ~f:(fun i _ ->
               let fidx = Int32.(wasm_mod.nfuncimports + (Int32.of_int_exn i)) in
               let cfg = Cfg_builder.build wasm_mod fidx in

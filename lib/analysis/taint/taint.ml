@@ -63,11 +63,11 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
 
 (** Extracts the index of functions that are considered sinks, based on their names *)
 let find_sinks_from_names (module_ : Wasm_module.t) (names : StringSet.t) : Int32Set.t =
-  let funs = List.filter_map module_.funcs ~f:(fun f ->
+  let funs = Array.filter_map module_.funcs ~f:(fun f ->
       match Wasm_module.get_funcname module_ f.idx with
       | Some name when StringSet.mem names name -> Some f.idx
       | _ -> None) in
-  Int32Set.of_list funs
+  Int32Set.of_array funs
 
 module TestIntra = struct
   let%test "simple function has no taint" =
