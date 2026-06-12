@@ -501,7 +501,7 @@ let generate_binary (m : Wasm_module.t) (filename : string option) : t =
     let module_ (m : Wasm_module.t) =
       u32 0x6d736100l;
       u32 Wasm.Encode.version;
-      let type_section = size (fun () -> type_section m.types) in
+      let type_section = size (fun () -> type_section (Array.to_list m.types)) in
       let import_section = size (fun () -> import_section m.imports) in
       let func_section = size (fun () -> func_section (Array.to_list m.funcs)) in
       let table_section = size (fun () -> table_section m.tables) in

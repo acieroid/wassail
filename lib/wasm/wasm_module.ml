@@ -14,7 +14,7 @@ module T = struct
 
   type t = {
     start : Int32.t option;
-    types : (Type.t list * Type.t list) list; (** The types declared in the module *)
+    types : (Type.t list * Type.t list) array; (** The types declared in the module *)
     imported_globals : Global.t list; (** The imported globals *)
     imported_global_types : Type.t list; (** The types of the imported globals *)
     globals : Global.t list; (** The globals *)
@@ -91,9 +91,7 @@ let get_meminst (m : t) (idx : int) : Memory_inst.t =
 
 (** Get the type with index tid *)
 let get_type (m : t) (tid : Int32.t) : Type.t list * Type.t list =
-  match List.nth m.types (Int32.to_int_exn tid) with
-  | Some v -> v
-  | None -> failwith "get_type nth exception"
+  Array32.get m.types tid
 
 (** Get the type of the function with index fidx *)
 let get_func_type (m : t) (fidx : Int32.t) : Type.t list * Type.t list =
@@ -184,9 +182,9 @@ let of_wasm (m : Wasm.Ast.module_) : t =
     imported_globals; imported_global_types; global_types; nglobals; globals;
     memories; memory_insts;
     tables; table_insts;
-    types = List.map m.it.types ~f:(fun t -> match t.it with
+    types = Array.of_list (List.map m.it.types ~f:(fun t -> match t.it with
         | Wasm.Types.FuncType (a, b) -> (List.map a ~f:Type.of_wasm,
-                                         List.map b ~f:Type.of_wasm))
+                                         List.map b ~f:Type.of_wasm)))
   })
 
 let of_file (file : string) : t =
@@ -227,7 +225,7 @@ let to_string (m : t) : string =
              (String.concat ~sep:" " (List.map (snd t) ~f:Type.to_string)))
     end;
     put "))\n" in
-  let types () = List.iteri m.types ~f:type_ in
+  let types () = Array.iteri m.types ~f:type_ in
   let limits (l : Limits.t) = match l with
     | low, None -> put (Printf.sprintf "%ld" low)
     | low, Some high -> put (Printf.sprintf "%ld %ld" low high) in
