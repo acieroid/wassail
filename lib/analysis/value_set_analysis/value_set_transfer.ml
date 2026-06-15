@@ -529,18 +529,6 @@ module Make (*: Transfer.TRANSFER *) = struct
       : State.t =
     let merged_variables = 
       Spec_inference.new_merge_variables_with_origin module_ cfg block
-      (* |> fun l ->
-        (List.iter l ~f:(fun (pred_idx, old_var, merge_var) ->
-            print_endline
-              ("from block " ^ Int.to_string pred_idx
-               ^ ": value: " ^ Var.to_string old_var
-               ^ ".... merge_var: " ^ Var.to_string merge_var));
-        l) *)
-      (* |> List.map ~f:(fun (_pred_idx, old_var, merge_var) ->
-          (Variable.Var merge_var, Abstract_store_domain.get state ~var:(Variable.Var old_var)))  *)
-      (* |> List.map ~f:(fun (_pred_idx, old_var, merge_var) -> 
-        (* Here, I need to access the state at the end of block pred_idx, to make a decision as to keep this var or not *)
-        (Variable.Var merge_var, Abstract_store_domain.get state ~var:(Variable.Var old_var)))  *)
       |> List.filter_map ~f:(fun (pred_idx, old_var, merge_var) ->
         (* state at the end of predecessor block where [old_var] was created *)
         match List.find_exn predecessors ~f:(fun (pred_block, _) -> pred_block.idx = pred_idx) with
