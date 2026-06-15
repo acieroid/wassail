@@ -94,7 +94,7 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
       let summaries' = List.fold_left wasm_mod.imported_funcs
           ~init:summaries
           ~f:(fun summaries desc ->
-              Int32Map.set summaries ~key:desc.idx ~data:(Summary.of_import desc.name wasm_mod.nglobals desc.arguments desc.returns)) in
+              Int32Map.set summaries ~key:desc.idx ~data:(Summary.of_import desc.idx desc.name wasm_mod.nglobals desc.arguments desc.returns)) in
       let _ =
         let oc = Out_channel.create ~append:true "store_types.txt" in
         Out_channel.close oc
@@ -336,7 +336,7 @@ let%test_module "value-set tests" = (module struct
     test_label "[global.set.get.wat]";
        check_value exit_state (Variable.Var (Var.Global 0))  (ValueSet (RIC.relative_ric "l0"))
     && check_value exit_state (Variable.Var (Var.Global 1))  (ValueSet (RIC.(constant 14l)))
-    && check_value exit_state (Variable.Var (Var.Return 0l)) (ValueSet (RIC.constant 14l))
+    && check_value exit_state (Variable.Var (Var.Return (0l,0l))) (ValueSet (RIC.constant 14l))
 
 
   let%test "local.set.get.wat" =
@@ -357,7 +357,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[local.set.get.wat]";
        check_value exit_state (Variable.Var (Var.Local 1)) (ValueSet (RIC.constant 14l))
-    && check_value exit_state (Variable.Var (Var.Return 0l)) (ValueSet (RIC.constant 14l))
+    && check_value exit_state (Variable.Var (Var.Return (0l, 0l))) (ValueSet (RIC.constant 14l))
 
   let%test "local.tee.wat" =
     let exit_state =
@@ -374,7 +374,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[local.tee.wat]";
        check_value exit_state (Variable.Var (Var.Local 1)) (ValueSet (RIC.constant 42l))
-    && check_value exit_state (Variable.Var (Var.Return 0l)) (ValueSet (RIC.constant 42l))
+    && check_value exit_state (Variable.Var (Var.Return (0l, 0l))) (ValueSet (RIC.constant 42l))
 
   let%test "global.get.wat" =
     let exit_state =
@@ -390,7 +390,7 @@ let%test_module "value-set tests" = (module struct
       |> analyze [0l] 0l
     in
     test_label "[global.get.wat]";
-    check_value exit_state (Variable.Var (Var.Return 0l)) (ValueSet (RIC.relative_ric "g0"))
+    check_value exit_state (Variable.Var (Var.Return (0l, 0l))) (ValueSet (RIC.relative_ric "g0"))
 
 
   let%test "eqz.wat" =
@@ -413,7 +413,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[eqz.wat]";
        check_value exit_state (i_var 0l 1) (ValueSet RIC.one)
-    && check_value exit_state (Variable.Var (Var.Return 0l)) (ValueSet RIC.zero)
+    && check_value exit_state (Variable.Var (Var.Return (0l, 0l))) (ValueSet RIC.zero)
 
   let%test "select.wat" =
     let exit_state =
@@ -439,7 +439,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[select.wat]";
        check_value exit_state (i_var 0l 3) (ValueSet (RIC.constant 10l))
-    && check_value exit_state (Variable.Var (Var.Return 0l)) (ValueSet (RIC.constant 20l))
+    && check_value exit_state (Variable.Var (Var.Return (0l, 0l))) (ValueSet (RIC.constant 20l))
 
   let%test "select.unknown-condition.wat" =
     let exit_state =
@@ -457,7 +457,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[select.unknown-condition.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
 
   let%test "select.nonzero-condition.wat" =
@@ -477,7 +477,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[select.nonzero-condition.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 10l))
 
   let%test "select.zero-condition.wat" =
@@ -497,7 +497,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[select.zero-condition.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 20l))
 
   let%test "select.relative-value.wat" =
@@ -516,7 +516,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[select.relative-value.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.relative_ric "l0"))
   
   let%test "if.constant-condition.wat" =
@@ -537,7 +537,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[if.constant-condition.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 10l))
 
   let%test "if.in-loop.accessible-branches.wat" =
@@ -586,7 +586,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[if.in-loop.accessible-branches.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
 
   let compare_test ~(name : string) ~(op : string) ~(lhs : int32) ~(rhs : int32) ~(expected : int32) : bool =
@@ -608,7 +608,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label ("[" ^ name ^ "]");
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant expected))
 
   let%test "eq: equal constants" =
@@ -814,7 +814,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label ("[" ^ name ^ "]");
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet expected)
 
 
@@ -1126,7 +1126,7 @@ let%test_module "value-set tests" = (module struct
         (Variable.Var (Var.Local 0))
         (ValueSet (RIC.constant 42l))
     && check_value exit_state
-        (Variable.Var (Var.Return 0l))
+        (Variable.Var (Var.Return (0l, 0l)))
         (ValueSet (RIC.constant 42l))
 
   let%test "nop.wat" =
@@ -1150,7 +1150,7 @@ let%test_module "value-set tests" = (module struct
         (Variable.Var (Var.Local 0))
         (ValueSet (RIC.constant 42l))
     && check_value exit_state
-        (Variable.Var (Var.Return 0l))
+        (Variable.Var (Var.Return (0l, 0l)))
         (ValueSet (RIC.constant 42l))
 
   let%test "unreachable.wat" =
@@ -1188,7 +1188,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[br.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 42l))
 
   let%test "eqz.non-singleton.wat" =
@@ -1214,7 +1214,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[eqz.non-singleton.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join zero one))
 
   let%test "eqz.refines-local-in-if.wat" =
@@ -1285,7 +1285,7 @@ let%test_module "value-set tests" = (module struct
         (Variable.Var (Var.Local 1))
         (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
     && check_value exit_state
-        (Variable.Var (Var.Return 0l))
+        (Variable.Var (Var.Return (0l, 0l)))
         (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
 
   let%test "global.set.get.non-singleton.wat" =
@@ -1315,7 +1315,7 @@ let%test_module "value-set tests" = (module struct
         (Variable.Var (Var.Global 0))
         (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
     && check_value exit_state
-        (Variable.Var (Var.Return 0l))
+        (Variable.Var (Var.Return (0l, 0l)))
         (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
 
 
@@ -1344,7 +1344,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[select.non-singleton-nonzero-condition.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 10l))
 
   let%test "select.non-singleton-maybe-zero-condition.wat" =
@@ -1372,7 +1372,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[select.non-singleton-maybe-zero-condition.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (constant 10l) (constant 20l)))
 
   let%test "memory.store-load.singleton-address.wat" =
@@ -1393,7 +1393,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.store-load.singleton-address.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 42l))
 
   let%test "memory.load.unwritten-address.wat" =
@@ -1410,7 +1410,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.load.unwritten-address.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet Top)
 
   let%test "memory.store-overwrites-same-address.wat" =
@@ -1435,7 +1435,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.store-overwrites-same-address.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 20l))
 
   let%test "memory.store-keeps-distinct-address.wat" =
@@ -1460,7 +1460,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.store-keeps-distinct-address.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 10l))
 
   let%test "memory.store-load.non-singleton-value.wat" =
@@ -1486,7 +1486,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.store-load.non-singleton-value.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
 
   let%test "memory.store-load.with-offset.wat" =
@@ -1507,7 +1507,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.store-load.with-offset.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 42l))
 
   let%test "memory.store-load.with-load-offset.wat" =
@@ -1528,7 +1528,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.store-load.with-load-offset.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 42l))
 
   let%test "memory.store-load.non-singleton-address.wat" =
@@ -1557,7 +1557,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.store-load.non-singleton-address.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet Top)
 
   let%test "memory.weak-store-preserves-previous-value.wat" =
@@ -1590,7 +1590,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.weak-store-preserves-previous-value.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (constant 14l) (constant 42l)))
 
   let%test "memory.overlapping-store-invalidates-previous-load.wat" =
@@ -1615,7 +1615,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.overlapping-store-invalidates-previous-load.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet Top)
 
   let%test "memory.store8-invalidates-i32-load.wat" =
@@ -1640,7 +1640,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.store8-invalidates-i32-load.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet Top)
 
   let%test "memory.store8-disjoint-from-store.wat" =
@@ -1668,7 +1668,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.store8-disjoint-from-store.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 14l))
 
   let%test "memory.store16-invalidates-i32-load.wat" =
@@ -1693,7 +1693,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.store16-invalidates-i32-load.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet Top)
 
   let%test "memory.store16-invalidates-i32-load.wat" =
@@ -1718,7 +1718,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.store16-invalidates-i32-load.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet Top)
 
   let%test "memory.store16-disjoint.wat" =
@@ -1746,7 +1746,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.store16-invalidates-i32-load.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 14l))
 
   let%test "memory.load8-from-known-i32-is-top.wat" =
@@ -1767,7 +1767,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.load8-from-known-i32-is-top.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet Top)
 
   let%test "memory.load16-from-known-i32-is-top.wat" =
@@ -1788,7 +1788,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.load16-from-known-i32-is-top.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet Top)
 
   let%test "memory.store8-outside-i32-cell-keeps-load.wat" =
@@ -1813,7 +1813,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.store8-outside-i32-cell-keeps-load.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 14l))
 
   let%test "memory.load.non-singleton-address-joins-known-cells.wat" =
@@ -1849,7 +1849,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.load.non-singleton-address-joins-known-cells.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (constant 10l) (constant 20l)))
 
   let%test "and.non-singleton-value.wat" =
@@ -1875,7 +1875,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[and.non-singleton-value.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join zero (constant 2l)))
 
   let%test "or.non-singleton-value.wat" =
@@ -1901,7 +1901,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[or.non-singleton-value.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 11l))
 
   (* let%test "xor.non-singleton-value.wat" =
@@ -1927,7 +1927,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[xor.non-singleton-value.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (constant 9l) (constant 15l))) *)
 
   (* let%test "shl.non-singleton-value.wat" =
@@ -1956,7 +1956,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shl.non-singleton-value.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (constant 6l) (constant 10l))) *)
 
   let%test "shr_u.non-singleton-value.wat" =
@@ -1985,7 +1985,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shr_u.non-singleton-value.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (constant 4l) (constant 6l)))
 
   let%test "shr_s.non-singleton-negative-value.wat" =
@@ -2014,7 +2014,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shr_s.non-singleton-negative-value.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (constant (-4l)) (constant (-2l))))
 
   let%test "shift-left.relative-value.wat" =
@@ -2032,7 +2032,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-left.relative-value.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.ric (2l, NegInfinity, Infinity, ("", 0l))))
 
   let%test "shift-left.relative-value-by-two.wat" =
@@ -2050,7 +2050,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-left.relative-value-by-two.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.ric (4l, NegInfinity, Infinity, ("", 0l))))
 
   let%test "shift-left.relative-value-by-non-singleton.wat" =
@@ -2068,7 +2068,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-left.relative-value-by-non-singleton.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.Top)
 
   let%test "shift-right-unsigned.relative-value.wat" =
@@ -2086,7 +2086,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-right-unsigned.relative-value.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.positive_integers)
 
   let%test "shift-right-unsigned.relative-value>>30.wat" =
@@ -2104,7 +2104,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-right-unsigned.relative-value>>30.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(ric (1l, Int 0l, Int 3l, ("", 0l))))
 
 
@@ -2123,7 +2123,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-right-unsigned.relative-value-by-two.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.ric (1l, Int 0l, Int 1073741823l, ("", 0l))))
 
   (* let%test "shift-right-signed.relative-value.wat" =
@@ -2141,7 +2141,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-right-signed.relative-value.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.Top)
 
   let%test "shift-left-by-32-is-identity.wat" =
@@ -2159,7 +2159,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-left-by-32-is-identity.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 42l)) *)
 
   let%test "shift-right-unsigned-by-32-is-identity.wat" =
@@ -2177,7 +2177,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-right-unsigned-by-32-is-identity.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 42l))
 
   let%test "shift-left-by-33-is-shift-by-1.wat" =
@@ -2195,7 +2195,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-left-by-33-is-shift-by-1.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 42l))
 
   let%test "shift-right-unsigned-by-33-is-shift-by-1.wat" =
@@ -2213,7 +2213,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-right-unsigned-by-33-is-shift-by-1.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 42l))
 
   let%test "shift-right-signed-by-33-is-shift-by-1.wat" =
@@ -2231,7 +2231,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-right-signed-by-33-is-shift-by-1.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant (-42l)))
 
   let%test "shift-right-signed-negative-one.wat" =
@@ -2249,7 +2249,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-right-signed-negative-one.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant (-1l)))
 
   let%test "shift-right-unsigned-negative-one.wat" =
@@ -2267,7 +2267,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-right-unsigned-negative-one.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant 2147483647l))
 
   let%test "shift-right-signed-min-int.wat" =
@@ -2285,7 +2285,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[shift-right-signed-min-int.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.constant (-1073741824l)))
 
   let%test "memory.size.initial-page-count.wat" =
@@ -2301,7 +2301,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.size.initial-page-count.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.positive_integers)
 
   let%test "memory.grow.wat" =
@@ -2322,7 +2322,7 @@ let%test_module "value-set tests" = (module struct
         Variable.MemorySize
         (ValueSet RIC.(positive_integers + one))
     && check_value exit_state
-        (Variable.Var (Var.Return 0l))
+        (Variable.Var (Var.Return (0l, 0l)))
         (ValueSet RIC.positive_integers)
 
   let%test "comparison-refinement-survives-arithmetic.wat" =
@@ -2364,7 +2364,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[comparison-refinement-survives-arithmetic.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (constant 11l) (constant 22l)))
 
   let%test "comparison-refines-open-interval.wat" =
@@ -2414,7 +2414,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[comparison-refines-open-interval.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (constant 10l) (constant 100l)))
 
   let%test "comparison-refines-open-interval-through-and.wat" =
@@ -2472,7 +2472,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[comparison-refines-open-interval-through-and.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (constant 10l) (constant 100l)))
 
   let%test "comparison-refines-outside-interval-through-or.wat" =
@@ -2531,7 +2531,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[comparison-refines-outside-interval-through-or.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (join (constant 6l) (constant 14l)) (constant 100l)))
 
   let%test "comparison-refines-through-xor.wat" =
@@ -2588,7 +2588,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[comparison-refines-through-xor.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (join (constant 6l) (constant 14l)) (constant 100l)))
 
   let%test "comparison-refines-through-eqz.wat" =
@@ -2637,7 +2637,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[comparison-refines-through-eqz.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (join (constant 6l) (constant 14l)) (constant 100l)))
 
   let%test "comparison-refines-through-local-tee.wat" =
@@ -2683,7 +2683,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[comparison-refines-through-local-tee.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(join (constant 10l) (constant 100l)))
 
   let%test "f32_local.wat" =
@@ -2699,7 +2699,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[f32_local.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.Top)
 
   let%test "param.wat" =
@@ -2722,7 +2722,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[unknown param.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(relative_ric "l0"))
 
   let%test "add_local_set.wat" =
@@ -2740,7 +2740,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[add_local_set.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(constant 30l))
 
   let%test "memory.store large addresses.wat" =
@@ -2795,7 +2795,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[count leading zeros.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.ric (2l, Int 0l, Int 1l, ("", 28l))))
 
   let%test "count trailing zeros.wat" =
@@ -2815,7 +2815,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[count trailing zeros.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.ric (2l, Int 0l, Int 1l, ("", 1l))))
 
   let%test "population count.wat" =
@@ -2835,7 +2835,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[population count.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet (RIC.ric (1l, Int 0l, Int 1l, ("", 1l))))
 
   let%test "memory.copy.wat" =
@@ -2877,7 +2877,7 @@ let%test_module "value-set tests" = (module struct
     in
     test_label "[memory.copy.wat]";
     check_value exit_state
-      (Variable.Var (Var.Return 0l))
+      (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.Top)
 
   (* let%test "keep false when working" = false *)

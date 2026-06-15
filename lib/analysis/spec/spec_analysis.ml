@@ -482,7 +482,7 @@ module TestInter = struct
   (func (;2;) (type 0) (result i32) i32.const 0)
   (table (;0;) 5 5 funcref)
   (elem (;0;) (i32.const 1) 1 2))" 0l (Spec_domain.NotBottom {
-        vstack = [Var.Return 0l];
+        vstack = [Var.Return (0l, 0l)];
         locals = [];
         globals = [];
         memory = Var.OffsetMap.empty;

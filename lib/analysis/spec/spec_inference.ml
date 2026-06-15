@@ -200,7 +200,7 @@ module Spec_inference
     let rename_exit (s : State.SpecWithoutBottom.t) =
       (* If this is the exit block, rename the top of the stack to a new variable *)
       if Cfg.exit_block cfg = block.idx then
-        { s with vstack = List.mapi s.vstack ~f:(fun i _v -> (*if i = 0 then*) Var.Return (Int32.of_int_exn i)(*cfg.idx else v*)) }
+        { s with vstack = List.mapi s.vstack ~f:(fun i _ -> Var.Return (cfg.idx, Int32.of_int_exn i)) }
       else
         s in
     let is_entry, is_return = match block.content with
@@ -372,7 +372,7 @@ module Spec_inference
     State.lift ~f:(fun state ->
         (* XXX: unsound, we keep globals / memory from before. We probably shouldn't *)
         { state with
-          vstack = [Var.Return desc.idx];
+          vstack = [Var.Return (desc.idx, 0l)]; (* it's assumed that imported functions will only have one return *)
           locals = [];
         }
       )

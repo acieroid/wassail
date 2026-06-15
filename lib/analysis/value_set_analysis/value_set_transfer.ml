@@ -409,7 +409,7 @@ module Make (*: Transfer.TRANSFER *) = struct
   let control
       (_module_ : Wasm_module.t) (* The wasm module (read-only) *)
       (* (summaries : summary Int32Map.t) *)
-      (_cfg : annot_expected Cfg.t) (* The CFG analized *)
+      (cfg : annot_expected Cfg.t) (* The CFG analized *)
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : State.t) (* the pre-state *)
     : [`Simple of State.t | `Branch of State.t * State.t] =
@@ -452,7 +452,7 @@ module Make (*: Transfer.TRANSFER *) = struct
     | Return -> 
       `Simple 
         ((Spec_domain.get_or_fail i.annotation_before).vstack
-        |> List.mapi ~f:(fun i r -> Variable.Var (Var.Return (Int32.of_int_exn i)), state |> State.get ~var:(Variable.Var r))
+        |> List.mapi ~f:(fun i r -> Variable.Var (Var.Return (cfg.idx, Int32.of_int_exn i)), state |> State.get ~var:(Variable.Var r))
         |> List.fold ~init:state ~f:(fun state (ret, value) -> 
           Print_trace.print "\t\t%s: %s\n" (Variable.to_string ret) (Value.to_string value);
           state |> State.set ~var:ret ~vs:value))
@@ -646,6 +646,7 @@ module Make (*: Transfer.TRANSFER *) = struct
     Spec_domain.wrap annot_before ~default:State.bottom ~f:(fun _annotation_before ->
       Spec_domain.wrap annot_after ~default:State.bottom ~f:(fun _annotation_after ->
         let summary = Summary.of_import
+                        desc.idx
                         desc.name
                         module_.nglobals
                         desc.arguments
@@ -660,7 +661,7 @@ module Make (*: Transfer.TRANSFER *) = struct
             else 
               None 
         in
-        Summary.apply
+        Summary.apply 
           ~summary
           ~state
           ~args:[]

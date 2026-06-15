@@ -68,7 +68,7 @@ let bottom (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
   |> List.foldi ~init:state 
     ~f:(fun idx state _ -> 
       state |> Abstract_store_domain.set 
-                ~var:(Variable.Var (Var.Return (Int32.of_int_exn idx))) 
+                ~var:(Variable.Var (Var.Return (cfg.idx, Int32.of_int_exn idx))) 
                 ~vs:Abstract_store_domain.Value.bottom)
   |> Abstract_store_domain.set ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.bottom)
   |> Abstract_store_domain.set ~var:(Variable.MemorySize) ~vs:(Abstract_store_domain.Value.bottom)
@@ -91,7 +91,7 @@ let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
   |> List.foldi ~init:state 
     ~f:(fun idx state _ -> 
       state |> Abstract_store_domain.set 
-                ~var:(Variable.Var (Var.Return (Int32.of_int_exn idx))) 
+                ~var:(Variable.Var (Var.Return (cfg.idx, Int32.of_int_exn idx))) 
                 ~vs:Abstract_store_domain.Value.top)
   |> Abstract_store_domain.set ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.top)
   |> Abstract_store_domain.set ~var:(Variable.MemorySize) ~vs:(Abstract_store_domain.Value.ValueSet RIC.positive_integers)
@@ -103,7 +103,7 @@ let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
     according to [Value_set_options.ignore_imports]. Unknown imports preserve
     globals only when imports are ignored; otherwise globals and memory are
     treated as unknown. *)
-let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : Type.t list) : t =
+let of_import (fct_idx : int32) (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : Type.t list) : t =
   let globals = List.init (Int32.to_int_exn nglobals) ~f:(fun i -> Variable.Var (Var.Global i)) in
   let summary = 
     {Abstract_store_domain.abstract_store = Variable.Map.empty; store_operations = RICSet.empty; unreachable = false}
@@ -119,7 +119,7 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
     let summary =
       (* Return values are unknown *)
       ret |> List.foldi ~init:summary
-              ~f:(fun idx state _ -> state |> Abstract_store_domain.set ~var:(Variable.Var (Var.Return (Int32.of_int_exn idx))) ~vs:Abstract_store_domain.Value.top)
+              ~f:(fun idx state _ -> state |> Abstract_store_domain.set ~var:(Variable.Var (Var.Return (fct_idx, Int32.of_int_exn idx))) ~vs:Abstract_store_domain.Value.top)
     in
     if !Value_set_options.ignore_imports then 
       (* Linear memory is considered to be unchanged *)
@@ -145,7 +145,7 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
     in
     (* If present, return value is unknown: *)
     ret |> List.foldi ~init:summary
-            ~f:(fun idx state _ -> state |> Abstract_store_domain.set ~var:(Variable.Var (Var.Return (Int32.of_int_exn idx))) ~vs:Abstract_store_domain.Value.top)
+            ~f:(fun idx state _ -> state |> Abstract_store_domain.set ~var:(Variable.Var (Var.Return (fct_idx, Int32.of_int_exn idx))) ~vs:Abstract_store_domain.Value.top)
     (* Linear memory is unchanged, but we may have accessed all of it: *)
     |> Abstract_store_domain.set ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.top)
   | _ ->
@@ -166,7 +166,7 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
     let summary =
       (* If present, return value is unknown: *)
       ret |> List.foldi ~init:summary
-            ~f:(fun idx state _ -> state |> Abstract_store_domain.set ~var:(Variable.Var (Var.Return (Int32.of_int_exn idx))) ~vs:Abstract_store_domain.Value.top)
+            ~f:(fun idx state _ -> state |> Abstract_store_domain.set ~var:(Variable.Var (Var.Return (fct_idx, Int32.of_int_exn idx))) ~vs:Abstract_store_domain.Value.top)
     in
     (if !Value_set_options.ignore_imports then 
       ((* Linear memory is considered to be unchanged *)
@@ -191,7 +191,7 @@ let initial_summaries
          | `Bottom -> bottom
          | `Top -> top) cfg Var.Set.empty))
     ~f:(fun summaries desc ->
-        Int32Map.set summaries ~key:desc.idx ~data:(of_import desc.name module_.nglobals desc.arguments desc.returns))
+        Int32Map.set summaries ~key:desc.idx ~data:(of_import desc.idx desc.name module_.nglobals desc.arguments desc.returns))
 
 (** Extract the caller-visible part of an intraprocedural state. *)
 let make (state : Abstract_store_domain.t) : t =
@@ -650,7 +650,7 @@ let%test_module "value-set summary tests" = (module struct
               ~key:Variable.MemorySize
               ~data:Abstract_store_domain.Value.bottom
           |> Variable.Map.set
-              ~key:(Variable.Var (Var.Return 0l))
+              ~key:(Variable.Var (Var.Return (0l,0l)))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 42l));
         store_operations = RICSet.empty;
         unreachable = false }
@@ -1101,7 +1101,7 @@ let%test_module "value-set summary tests" = (module struct
       { Abstract_store_domain.abstract_store =
           Variable.Map.empty
           |> Variable.Map.set
-              ~key:(Variable.Var (Var.Return 0l))
+              ~key:(Variable.Var (Var.Return (0l,0l)))
               ~data:(Abstract_store_domain.Value.ValueSet summary_return)
           |> Variable.Map.set
               ~key:Variable.Accessed
@@ -1152,7 +1152,7 @@ let%test_module "value-set summary tests" = (module struct
       { Abstract_store_domain.abstract_store =
           Variable.Map.empty
           |> Variable.Map.set
-              ~key:(Variable.Var (Var.Return 0l))
+              ~key:(Variable.Var (Var.Return (0l,0l)))
               ~data:(Abstract_store_domain.Value.ValueSet summary_return)
           |> Variable.Map.set
               ~key:Variable.Accessed
