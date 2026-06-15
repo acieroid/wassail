@@ -779,8 +779,2065 @@ let%test_module "value-set tests" = (module struct
       ~rhs:7l
       ~expected:1l
 
-      
+  let () = Value_set_options.show_intermediates := false
 
-  let%test "keep false when working" = false
+  let compare_test_non_singleton ~(name : string) ~(op : string) ~(lhs : int32 * int32) ~(rhs : int32 * int32) ~(expected : RIC.t) : bool =
+    let exit_state =
+      Printf.sprintf
+        "(module
+          (memory (export \"mem\") 1)
+
+          (func $main (export \"main\") (param $x i32) (result i32) (local $l1 i32) (local $l2 i32)
+            local.get $x
+            if
+              i32.const %ld
+              local.set $l1
+              i32.const %ld
+              local.set $l2
+            else
+              i32.const %ld
+              local.set $l1
+              i32.const %ld
+              local.set $l2
+            end
+            local.get $l1
+            local.get $l2
+            i32.%s
+          )
+        )"
+        (fst lhs)
+        (fst rhs)
+        (snd lhs)
+        (snd rhs)
+        op
+      |> analyze [0l] 0l
+    in
+    test_label ("[" ^ name ^ "]");
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet expected)
+
+
+  let%test "non-singleton eq: disjoint values are always false" =
+    compare_test_non_singleton
+      ~name:"non-singleton eq: {1,2} == {3,4}"
+      ~op:"eq"
+      ~lhs:(1l, 2l)
+      ~rhs:(3l, 4l)
+      ~expected:RIC.zero
+
+  let%test "non-singleton eq: identical values may be true or false" =
+    compare_test_non_singleton
+      ~name:"non-singleton eq: {1,2} == {1,2}"
+      ~op:"eq"
+      ~lhs:(1l, 2l)
+      ~rhs:(1l, 2l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton eq: same singleton after both branches is always true" =
+    compare_test_non_singleton
+      ~name:"non-singleton eq: {7} == {7}"
+      ~op:"eq"
+      ~lhs:(7l, 7l)
+      ~rhs:(7l, 7l)
+      ~expected:RIC.one
+
+  let%test "non-singleton eq: non-disjoint sets" =
+    compare_test_non_singleton
+      ~name:"non-singleton eq: {7,8} == {8,12}"
+      ~op:"eq"
+      ~lhs:(7l, 8l)
+      ~rhs:(8l, 12l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton ne: disjoint values are always true" =
+    compare_test_non_singleton
+      ~name:"non-singleton ne: {1,2} != {3,4}"
+      ~op:"ne"
+      ~lhs:(1l, 2l)
+      ~rhs:(3l, 4l)
+      ~expected:RIC.one
+
+  let%test "non-singleton ne: identical values may be true or false" =
+    compare_test_non_singleton
+      ~name:"non-singleton ne: {1,2} != {1,2}"
+      ~op:"ne"
+      ~lhs:(1l, 2l)
+      ~rhs:(1l, 2l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton and singleton ne:" =
+    compare_test_non_singleton
+      ~name:"non-singleton ne: {1,2} != {2}"
+      ~op:"ne"
+      ~lhs:(1l, 2l)
+      ~rhs:(2l, 2l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton lt_s: all lhs values are below rhs values" =
+    compare_test_non_singleton
+      ~name:"non-singleton lt_s: {-4,-2} <s {1,3}"
+      ~op:"lt_s"
+      ~lhs:(-4l, -2l)
+      ~rhs:(1l, 3l)
+      ~expected:RIC.one
+
+  let%test "non-singleton lt_s: all lhs values are above rhs values" =
+    compare_test_non_singleton
+      ~name:"non-singleton lt_s: {4,6} <s {-1,0}"
+      ~op:"lt_s"
+      ~lhs:(4l, 6l)
+      ~rhs:(-1l, 0l)
+      ~expected:RIC.zero
+
+  let%test "non-singleton lt_s: overlapping values may be true or false" =
+    compare_test_non_singleton
+      ~name:"non-singleton lt_s: {1,3} <s {2,4}"
+      ~op:"lt_s"
+      ~lhs:(1l, 3l)
+      ~rhs:(2l, 4l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton le_s: equality boundary may be true or false" =
+    compare_test_non_singleton
+      ~name:"non-singleton le_s: {2,4} <=s {2,3}"
+      ~op:"le_s"
+      ~lhs:(2l, 4l)
+      ~rhs:(2l, 3l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton gt_s: all lhs values are above rhs values" =
+    compare_test_non_singleton
+      ~name:"non-singleton gt_s: {5,8} >s {1,4}"
+      ~op:"gt_s"
+      ~lhs:(5l, 8l)
+      ~rhs:(1l, 4l)
+      ~expected:RIC.one
+
+  let%test "non-singleton ge_s: all lhs values are below rhs values" =
+    compare_test_non_singleton
+      ~name:"non-singleton ge_s: {-3,-1} >=s {0,2}"
+      ~op:"ge_s"
+      ~lhs:(-3l, -1l)
+      ~rhs:(0l, 2l)
+      ~expected:RIC.zero
+
+  let%test "non-singleton lt_u: negative signed values are large unsigned values" =
+    compare_test_non_singleton
+      ~name:"non-singleton lt_u: {-2,-1} <u {1,2}"
+      ~op:"lt_u"
+      ~lhs:(-2l, -1l)
+      ~rhs:(1l, 2l)
+      ~expected:RIC.zero
+
+  let%test "non-singleton lt_u: small positives are below negative signed values" =
+    compare_test_non_singleton
+      ~name:"non-singleton lt_u: {1,2} <u {-2,-1}"
+      ~op:"lt_u"
+      ~lhs:(1l, 2l)
+      ~rhs:(-2l, -1l)
+      ~expected:RIC.one
+
+  let%test "non-singleton le_u: equality among large unsigned values may be true or false" =
+    compare_test_non_singleton
+      ~name:"non-singleton le_u: {-2,-1} <=u {-2,-1}"
+      ~op:"le_u"
+      ~lhs:(-2l, -1l)
+      ~rhs:(-2l, -1l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton gt_u: negative signed values are above positives" =
+    compare_test_non_singleton
+      ~name:"non-singleton gt_u: {-2,-1} >u {1,2}"
+      ~op:"gt_u"
+      ~lhs:(-2l, -1l)
+      ~rhs:(1l, 2l)
+      ~expected:RIC.one
+
+  let%test "non-singleton ge_u: positives are not above negative signed values" =
+    compare_test_non_singleton
+      ~name:"non-singleton ge_u: {1,2} >=u {-2,-1}"
+      ~op:"ge_u"
+      ~lhs:(1l, 2l)
+      ~rhs:(-2l, -1l)
+      ~expected:RIC.zero
+
+  let%test "non-singleton ge_u: negatives" =
+    compare_test_non_singleton
+      ~name:"non-singleton ge_u: {-6,-4} >=u {-7,-5}"
+      ~op:"ge_u"
+      ~lhs:(-6l, -4l)
+      ~rhs:(-7l, -5l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton ge_u: negatives disjoint" =
+    compare_test_non_singleton
+      ~name:"non-singleton ge_u: {-6,-4} >=u {-7,-9}"
+      ~op:"ge_u"
+      ~lhs:(-6l, -4l)
+      ~rhs:(-7l, -9l)
+      ~expected:RIC.one
+
+  let%test "non-singleton lt_s: same set may be true or false" =
+    compare_test_non_singleton
+      ~name:"non-singleton lt_s: {1,2} <s {1,2}"
+      ~op:"lt_s"
+      ~lhs:(1l, 2l)
+      ~rhs:(1l, 2l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton le_s: same set is not always true" =
+    compare_test_non_singleton
+      ~name:"non-singleton le_s: {1,2} <=s {1,2}"
+      ~op:"le_s"
+      ~lhs:(1l, 2l)
+      ~rhs:(1l, 2l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton gt_s: same set may be true or false" =
+    compare_test_non_singleton
+      ~name:"non-singleton gt_s: {1,2} >s {1,2}"
+      ~op:"gt_s"
+      ~lhs:(1l, 2l)
+      ~rhs:(1l, 2l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton ge_s: same set is not always true" =
+    compare_test_non_singleton
+      ~name:"non-singleton ge_s: {1,2} >=s {1,2}"
+      ~op:"ge_s"
+      ~lhs:(1l, 2l)
+      ~rhs:(1l, 2l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton lt_s: equality-only boundary is false" =
+    compare_test_non_singleton
+      ~name:"non-singleton lt_s: {2} <s {2}"
+      ~op:"lt_s"
+      ~lhs:(2l, 2l)
+      ~rhs:(2l, 2l)
+      ~expected:RIC.zero
+
+  let%test "non-singleton le_s: equality-only boundary is true" =
+    compare_test_non_singleton
+      ~name:"non-singleton le_s: {2} <=s {2}"
+      ~op:"le_s"
+      ~lhs:(2l, 2l)
+      ~rhs:(2l, 2l)
+      ~expected:RIC.one
+
+  let%test "non-singleton lt_u: mixed signs falls back to maybe" =
+    compare_test_non_singleton
+      ~name:"non-singleton lt_u: {-1,1} <u {0,2}"
+      ~op:"lt_u"
+      ~lhs:(-1l, 1l)
+      ~rhs:(0l, 2l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton gt_u: mixed signs falls back to maybe" =
+    compare_test_non_singleton
+      ~name:"non-singleton gt_u: {-1,1} >u {0,2}"
+      ~op:"gt_u"
+      ~lhs:(-1l, 1l)
+      ~rhs:(0l, 2l)
+      ~expected:RIC.(join zero one)
+
+  let%test "non-singleton le_u: positives below positives" =
+    compare_test_non_singleton
+      ~name:"non-singleton le_u: {1,2} <=u {3,4}"
+      ~op:"le_u"
+      ~lhs:(1l, 2l)
+      ~rhs:(3l, 4l)
+      ~expected:RIC.one
+
+  let%test "non-singleton ge_u: positives below positives is false" =
+    compare_test_non_singleton
+      ~name:"non-singleton ge_u: {1,2} >=u {3,4}"
+      ~op:"ge_u"
+      ~lhs:(1l, 2l)
+      ~rhs:(3l, 4l)
+      ~expected:RIC.zero
+
+  let%test "compare condition refines local in if branches" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          (local $l1 i32)
+          (local $true i32)
+          (local $false i32)
+
+          ;; l1 = {1,2}
+          local.get $x
+          if
+            i32.const 1
+            local.set $l1
+          else
+            i32.const 2
+            local.set $l1
+          end
+
+          ;; true branch should refine l1 to 1
+          ;; false branch should refine l1 to 2
+          local.get $l1
+          i32.const 1
+          i32.eq
+          if
+            local.get $l1
+            local.set $true
+          else
+            local.get $l1
+            local.set $false
+          end
+
+          i32.const 0
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[compare condition refines local in if branches]";
+      check_value exit_state
+        (Variable.Var (Var.Local 2))
+        (ValueSet RIC.(join zero one))
+    && check_value exit_state
+        (Variable.Var (Var.Local 3))
+        (ValueSet (RIC.(join (constant 2l) zero)))
+
+  let%test "drop.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32) (local $l0 i32)
+          i32.const 42
+          local.set $l0
+
+          local.get $l0
+
+          i32.const 10
+          drop
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[drop.wat]";
+      check_value exit_state
+        (Variable.Var (Var.Local 0))
+        (ValueSet (RIC.constant 42l))
+    && check_value exit_state
+        (Variable.Var (Var.Return 0l))
+        (ValueSet (RIC.constant 42l))
+
+  let%test "nop.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32) (local $l0 i32)
+          i32.const 42
+          local.set $l0
+
+          nop
+
+          local.get $l0
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[nop.wat]";
+      check_value exit_state
+        (Variable.Var (Var.Local 0))
+        (ValueSet (RIC.constant 42l))
+    && check_value exit_state
+        (Variable.Var (Var.Return 0l))
+        (ValueSet (RIC.constant 42l))
+
+  let%test "unreachable.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          unreachable
+
+          i32.const 42
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[unreachable.wat]";
+    Domain.equal exit_state Domain.bottom
+
+  let%test "br.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          block (result i32)
+            i32.const 42
+            br 0
+
+            ;; unreachable
+            i32.const 99
+          end
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[br.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 42l))
+
+  let%test "eqz.non-singleton.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32) (local $l0 i32)
+          local.get $x
+          if
+            i32.const 0
+            local.set $l0
+          else
+            i32.const 42
+            local.set $l0
+          end
+
+          local.get $l0
+          i32.eqz
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[eqz.non-singleton.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join zero one))
+
+  let%test "eqz.refines-local-in-if.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          (local $l0 i32)
+          (local $true i32)
+          (local $false i32)
+
+          ;; l0 = {0,42}
+          local.get $x
+          if
+            i32.const 0
+            local.set $l0
+          else
+            i32.const 42
+            local.set $l0
+          end
+
+          local.get $l0
+          i32.eqz
+          if
+            ;; true branch: l0 == 0
+            local.get $l0
+            local.set $true
+          else
+            ;; false branch: l0 != 0
+            local.get $l0
+            local.set $false
+          end
+
+          i32.const 0
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[eqz.refines-local-in-if.wat]";
+      check_value exit_state
+        (Variable.Var (Var.Local 2))
+        (ValueSet RIC.zero)
+    && check_value exit_state
+        (Variable.Var (Var.Local 3))
+        (ValueSet RIC.(join zero (constant 42l)))
+
+  let%test "local.tee.non-singleton.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32) (local $l1 i32)
+          local.get $x
+          if (result i32)
+            i32.const 10
+          else
+            i32.const 20
+          end
+
+          local.tee $l1
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[local.tee.non-singleton.wat]";
+      check_value exit_state
+        (Variable.Var (Var.Local 1))
+        (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
+    && check_value exit_state
+        (Variable.Var (Var.Return 0l))
+        (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
+
+  let%test "global.set.get.non-singleton.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (global $g0 (mut i32) (i32.const 0))
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          local.get $x
+          if (result i32)
+            i32.const 10
+          else
+            i32.const 20
+          end
+
+          global.set $g0
+
+          global.get $g0
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[global.set.get.non-singleton.wat]";
+      check_value exit_state
+        (Variable.Var (Var.Global 0))
+        (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
+    && check_value exit_state
+        (Variable.Var (Var.Return 0l))
+        (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
+
+
+  let%test "select.non-singleton-nonzero-condition.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32) (local $cond i32)
+          ;; cond = {1,2}
+          local.get $x
+          if (result i32)
+            i32.const 1
+          else
+            i32.const 2
+          end
+          local.set $cond
+
+          i32.const 10
+          i32.const 20
+          local.get $cond
+          select
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[select.non-singleton-nonzero-condition.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 10l))
+
+  let%test "select.non-singleton-maybe-zero-condition.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32) (local $cond i32)
+          ;; cond = {0,2}
+          local.get $x
+          if (result i32)
+            i32.const 0
+          else
+            i32.const 2
+          end
+          local.set $cond
+
+          i32.const 10
+          i32.const 20
+          local.get $cond
+          select
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[select.non-singleton-maybe-zero-condition.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (constant 10l) (constant 20l)))
+
+  let%test "memory.store-load.singleton-address.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.const 42
+          i32.store
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store-load.singleton-address.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 42l))
+
+  let%test "memory.load.unwritten-address.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.load.unwritten-address.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet Top)
+
+  let%test "memory.store-overwrites-same-address.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.const 10
+          i32.store
+
+          i32.const 4
+          i32.const 20
+          i32.store
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store-overwrites-same-address.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 20l))
+
+  let%test "memory.store-keeps-distinct-address.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.const 10
+          i32.store
+
+          i32.const 8
+          i32.const 20
+          i32.store
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store-keeps-distinct-address.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 10l))
+
+  let%test "memory.store-load.non-singleton-value.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          i32.const 4
+          local.get $x
+          if (result i32)
+            i32.const 10
+          else
+            i32.const 20
+          end
+          i32.store
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store-load.non-singleton-value.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.join (RIC.constant 10l) (RIC.constant 20l)))
+
+  let%test "memory.store-load.with-offset.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 0
+          i32.const 42
+          i32.store offset=4
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store-load.with-offset.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 42l))
+
+  let%test "memory.store-load.with-load-offset.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.const 42
+          i32.store
+
+          i32.const 0
+          i32.load offset=4
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store-load.with-load-offset.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 42l))
+
+  let%test "memory.store-load.non-singleton-address.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32) (local $addr i32)
+          local.get $x
+          if (result i32)
+            i32.const 4
+          else
+            i32.const 8
+          end
+          local.set $addr
+
+          local.get $addr
+          i32.const 42
+          i32.store
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store-load.non-singleton-address.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet Top)
+
+  let%test "memory.weak-store-preserves-previous-value.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32) (local $addr i32)
+          i32.const 4
+          i32.const 14
+          i32.store
+
+          local.get $x
+          if (result i32)
+            i32.const 4
+          else
+            i32.const 8
+          end
+          local.set $addr
+
+          local.get $addr
+          i32.const 42
+          i32.store
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.weak-store-preserves-previous-value.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (constant 14l) (constant 42l)))
+
+  let%test "memory.overlapping-store-invalidates-previous-load.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.const 14
+          i32.store
+
+          i32.const 5
+          i32.const 42
+          i32.store
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.overlapping-store-invalidates-previous-load.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet Top)
+
+  let%test "memory.store8-invalidates-i32-load.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.const 14
+          i32.store
+
+          i32.const 7
+          i32.const 42
+          i32.store8
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store8-invalidates-i32-load.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet Top)
+
+  let%test "memory.store8-disjoint-from-store.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.const 14
+          i32.store
+
+          i32.const 3
+          i32.const 42
+          i32.store8
+          i32.const 8
+          i32.const 42
+          i32.store8
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store8-disjoint-from-store.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 14l))
+
+  let%test "memory.store16-invalidates-i32-load.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.const 14
+          i32.store
+
+          i32.const 3
+          i32.const 42
+          i32.store16
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store16-invalidates-i32-load.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet Top)
+
+  let%test "memory.store16-invalidates-i32-load.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.const 14
+          i32.store
+
+          i32.const 7
+          i32.const 42
+          i32.store16
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store16-invalidates-i32-load.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet Top)
+
+  let%test "memory.store16-disjoint.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.const 14
+          i32.store
+
+          i32.const 8
+          i32.const 42
+          i32.store16
+          i32.const 2
+          i32.const 42
+          i32.store16
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store16-invalidates-i32-load.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 14l))
+
+  let%test "memory.load8-from-known-i32-is-top.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.const 14
+          i32.store
+
+          i32.const 4
+          i32.load8_s
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.load8-from-known-i32-is-top.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet Top)
+
+  let%test "memory.load16-from-known-i32-is-top.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.const 14
+          i32.store
+
+          i32.const 4
+          i32.load16_s
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.load16-from-known-i32-is-top.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet Top)
+
+  let%test "memory.store8-outside-i32-cell-keeps-load.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          i32.const 14
+          i32.store
+
+          i32.const 8
+          i32.const 42
+          i32.store8
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store8-outside-i32-cell-keeps-load.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 14l))
+
+  let%test "memory.load.non-singleton-address-joins-known-cells.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32) (local $addr i32)
+          ;; mem[4] = 10
+          i32.const 4
+          i32.const 10
+          i32.store
+
+          ;; mem[8] = 20
+          i32.const 8
+          i32.const 20
+          i32.store
+
+          ;; addr = {4,8}
+          local.get $x
+          if (result i32)
+            i32.const 4
+          else
+            i32.const 8
+          end
+          local.set $addr
+
+          local.get $addr
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.load.non-singleton-address-joins-known-cells.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (constant 10l) (constant 20l)))
+
+  let%test "and.non-singleton-value.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32) (local $l0 i32)
+          local.get $x
+          if (result i32)
+            i32.const 10
+          else
+            i32.const 12
+          end
+          local.set $l0
+
+          local.get $l0
+          i32.const 3
+          i32.and
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[and.non-singleton-value.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join zero (constant 2l)))
+
+  let%test "or.non-singleton-value.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32) (local $l0 i32)
+          local.get $x
+          if (result i32)
+            i32.const 8
+          else
+            i32.const 10
+          end
+          local.set $l0
+
+          local.get $l0
+          i32.const 3
+          i32.or
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[or.non-singleton-value.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 11l))
+
+  (* let%test "xor.non-singleton-value.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32) (local $l0 i32)
+          local.get $x
+          if (result i32)
+            i32.const 10
+          else
+            i32.const 12
+          end
+          local.set $l0
+
+          local.get $l0
+          i32.const 3
+          i32.xor
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[xor.non-singleton-value.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (constant 9l) (constant 15l))) *)
+
+  (* let%test "shl.non-singleton-value.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32) (local $l0 i32)
+          ;; l0 = {3,5}
+          local.get $x
+          if (result i32)
+            i32.const 3
+          else
+            i32.const 5
+          end
+          local.set $l0
+
+          ;; 3 << 1 = 6
+          ;; 5 << 1 = 10
+          local.get $l0
+          i32.const 1
+          i32.shl
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shl.non-singleton-value.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (constant 6l) (constant 10l))) *)
+
+  let%test "shr_u.non-singleton-value.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32) (local $l0 i32)
+          ;; l0 = {8,12}
+          local.get $x
+          if (result i32)
+            i32.const 8
+          else
+            i32.const 12
+          end
+          local.set $l0
+
+          ;; 8 >>u 1 = 4
+          ;; 12 >>u 1 = 6
+          local.get $l0
+          i32.const 1
+          i32.shr_u
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shr_u.non-singleton-value.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (constant 4l) (constant 6l)))
+
+  let%test "shr_s.non-singleton-negative-value.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32) (local $l0 i32)
+          ;; l0 = {-8,-4}
+          local.get $x
+          if (result i32)
+            i32.const -8
+          else
+            i32.const -4
+          end
+          local.set $l0
+
+          ;; -8 >>s 1 = -4
+          ;; -4 >>s 1 = -2
+          local.get $l0
+          i32.const 1
+          i32.shr_s
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shr_s.non-singleton-negative-value.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (constant (-4l)) (constant (-2l))))
+
+  let%test "shift-left.relative-value.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          local.get $x
+          i32.const 1
+          i32.shl
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-left.relative-value.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.ric (2l, NegInfinity, Infinity, ("", 0l))))
+
+  let%test "shift-left.relative-value-by-two.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          local.get $x
+          i32.const 2
+          i32.shl
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-left.relative-value-by-two.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.ric (4l, NegInfinity, Infinity, ("", 0l))))
+
+  let%test "shift-left.relative-value-by-non-singleton.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (param $y i32) (result i32)
+          local.get $x
+          local.get $y
+          i32.shl
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-left.relative-value-by-non-singleton.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.Top)
+
+  let%test "shift-right-unsigned.relative-value.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          local.get $x
+          i32.const 1
+          i32.shr_u
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-right-unsigned.relative-value.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.positive_integers)
+
+  let%test "shift-right-unsigned.relative-value>>30.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          local.get $x
+          i32.const 30
+          i32.shr_u
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-right-unsigned.relative-value>>30.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(ric (1l, Int 0l, Int 3l, ("", 0l))))
+
+
+  let%test "shift-right-unsigned.relative-value-by-two.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          local.get $x
+          i32.const 2
+          i32.shr_u
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-right-unsigned.relative-value-by-two.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.ric (1l, Int 0l, Int 1073741823l, ("", 0l))))
+
+  (* let%test "shift-right-signed.relative-value.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          local.get $x
+          i32.const 1
+          i32.shr_s
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-right-signed.relative-value.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.Top)
+
+  let%test "shift-left-by-32-is-identity.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 42
+          i32.const 32
+          i32.shl
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-left-by-32-is-identity.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 42l)) *)
+
+  let%test "shift-right-unsigned-by-32-is-identity.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 42
+          i32.const 32
+          i32.shr_u
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-right-unsigned-by-32-is-identity.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 42l))
+
+  let%test "shift-left-by-33-is-shift-by-1.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 21
+          i32.const 33
+          i32.shl
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-left-by-33-is-shift-by-1.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 42l))
+
+  let%test "shift-right-unsigned-by-33-is-shift-by-1.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 84
+          i32.const 33
+          i32.shr_u
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-right-unsigned-by-33-is-shift-by-1.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 42l))
+
+  let%test "shift-right-signed-by-33-is-shift-by-1.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const -84
+          i32.const 33
+          i32.shr_s
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-right-signed-by-33-is-shift-by-1.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant (-42l)))
+
+  let%test "shift-right-signed-negative-one.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const -1
+          i32.const 1
+          i32.shr_s
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-right-signed-negative-one.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant (-1l)))
+
+  let%test "shift-right-unsigned-negative-one.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const -1
+          i32.const 1
+          i32.shr_u
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-right-unsigned-negative-one.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant 2147483647l))
+
+  let%test "shift-right-signed-min-int.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const -2147483648
+          i32.const 1
+          i32.shr_s
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[shift-right-signed-min-int.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.constant (-1073741824l)))
+
+  let%test "memory.size.initial-page-count.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          memory.size
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.size.initial-page-count.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.positive_integers)
+
+  let%test "memory.grow.wat" =
+    Value_set_options.show_intermediates := true;
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 1
+          memory.grow
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.grow.wat]";
+      check_value exit_state
+        Variable.MemorySize
+        (ValueSet RIC.(positive_integers + one))
+    && check_value exit_state
+        (Variable.Var (Var.Return 0l))
+        (ValueSet RIC.positive_integers)
+
+  let%test "comparison-refinement-survives-arithmetic.wat" =
+    Value_set_options.show_intermediates := false;
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          (local $l0 i32)
+
+          ;; l0 = {1,2}
+          local.get $x
+          if
+            i32.const 1
+            local.set $l0
+          else
+            i32.const 2
+            local.set $l0
+          end
+
+          local.get $l0
+          i32.const 1
+          i32.eq
+          if (result i32)
+            ;; true branch: l0 = 1
+            local.get $l0
+            i32.const 10
+            i32.add
+          else
+            ;; false branch: l0 = 2
+            local.get $l0
+            i32.const 20
+            i32.add
+          end
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[comparison-refinement-survives-arithmetic.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (constant 11l) (constant 22l)))
+
+  let%test "comparison-refines-open-interval.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $a i32) (param $b i32) (result i32)
+          (local $x i32)
+
+          ;; x = {-4,0,4} = 4[0,2]-4
+          local.get $a
+          if (result i32)
+            i32.const -4
+          else
+            local.get $b
+            if (result i32)
+              i32.const 0
+            else
+              i32.const 4
+            end
+          end
+          local.set $x
+
+          ;; Keep only values satisfying -1 < x < 1.
+          local.get $x
+          i32.const -1
+          i32.gt_s
+          if (result i32)
+            local.get $x
+            i32.const 1
+            i32.lt_s
+            if (result i32)
+              ;; Here x should be refined to 0.
+              local.get $x
+              i32.const 10
+              i32.add
+            else
+              i32.const 100
+            end
+          else
+            i32.const 100
+          end
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[comparison-refines-open-interval.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (constant 10l) (constant 100l)))
+
+  let%test "comparison-refines-open-interval-through-and.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $a i32) (param $b i32) (result i32)
+          (local $x i32)
+          (local $gt_minus_one i32)
+          (local $lt_one i32)
+
+          ;; x = {-4,0,4} = 4[0,2]-4
+          local.get $a
+          if (result i32)
+            i32.const -4
+          else
+            local.get $b
+            if (result i32)
+              i32.const 0
+            else
+              i32.const 4
+            end
+          end
+          local.set $x
+
+          ;; gt_minus_one = (-1 < x)
+          i32.const -1
+          local.get $x
+          i32.lt_s
+          local.set $gt_minus_one
+
+          ;; lt_one = (x < 1)
+          local.get $x
+          i32.const 1
+          i32.lt_s
+          local.set $lt_one
+
+          ;; (-1 < x) && (x < 1)
+          local.get $gt_minus_one
+          local.get $lt_one
+          i32.and
+
+          if (result i32)
+            ;; Here x should be refined to 0.
+            local.get $x
+            i32.const 10
+            i32.add
+          else
+            i32.const 100
+          end
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[comparison-refines-open-interval-through-and.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (constant 10l) (constant 100l)))
+
+  let%test "comparison-refines-outside-interval-through-or.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $a i32) (param $b i32) (result i32)
+          (local $x i32)
+          (local $lt_minus_one i32)
+          (local $gt_one i32)
+
+          ;; x = {-4,0,4} = 4[0,2]-4
+          local.get $a
+          if (result i32)
+            i32.const -4
+          else
+            local.get $b
+            if (result i32)
+              i32.const 0
+            else
+              i32.const 4
+            end
+          end
+          local.set $x
+
+          ;; lt_minus_one = x < -1
+          local.get $x
+          i32.const -1
+          i32.lt_s
+          local.set $lt_minus_one
+
+          ;; gt_one = x > 1
+          local.get $x
+          i32.const 1
+          i32.gt_s
+          local.set $gt_one
+
+          ;; (x < -1) || (x > 1)
+          local.get $lt_minus_one
+          local.get $gt_one
+          i32.or
+
+          if (result i32)
+            ;; Here x should be refined to {-4,4}.
+            local.get $x
+            i32.const 10
+            i32.add
+          else
+            ;; Here x should be refined to 0.
+            i32.const 100
+          end
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[comparison-refines-outside-interval-through-or.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (join (constant 6l) (constant 14l)) (constant 100l)))
+
+  let%test "comparison-refines-through-xor.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $a i32) (param $b i32) (result i32)
+          (local $x i32)
+          (local $lt_one i32)
+          (local $gt_minus_one i32)
+
+          ;; x = {-4,0,4}
+          local.get $a
+          if (result i32)
+            i32.const -4
+          else
+            local.get $b
+            if (result i32)
+              i32.const 0
+            else
+              i32.const 4
+            end
+          end
+          local.set $x
+
+          ;; x < 1
+          local.get $x
+          i32.const 1
+          i32.lt_s
+          local.set $lt_one
+
+          ;; x > -1
+          local.get $x
+          i32.const -1
+          i32.gt_s
+          local.set $gt_minus_one
+
+          ;; Exactly one of these is true iff x = {-4,4}
+          local.get $lt_one
+          local.get $gt_minus_one
+          i32.xor
+
+          if (result i32)
+            local.get $x
+            i32.const 10
+            i32.add
+          else
+            i32.const 100
+          end
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[comparison-refines-through-xor.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (join (constant 6l) (constant 14l)) (constant 100l)))
+
+  let%test "comparison-refines-through-eqz.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $a i32) (param $b i32) (result i32)
+          (local $x i32)
+          (local $is_zero i32)
+
+          ;; x = {-4,0,4}
+          local.get $a
+          if (result i32)
+            i32.const -4
+          else
+            local.get $b
+            if (result i32)
+              i32.const 0
+            else
+              i32.const 4
+            end
+          end
+          local.set $x
+
+          ;; is_zero = (x == 0)
+          local.get $x
+          i32.const 0
+          i32.eq
+          local.set $is_zero
+
+          ;; condition = not is_zero, so true branch keeps {-4,4}
+          local.get $is_zero
+          i32.eqz
+
+          if (result i32)
+            local.get $x
+            i32.const 10
+            i32.add
+          else
+            i32.const 100
+          end
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[comparison-refines-through-eqz.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (join (constant 6l) (constant 14l)) (constant 100l)))
+
+  let%test "comparison-refines-through-local-tee.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $a i32) (param $b i32) (result i32)
+          (local $x i32)
+          (local $cond i32)
+
+          ;; x = {-4,0,4}
+          local.get $a
+          if (result i32)
+            i32.const -4
+          else
+            local.get $b
+            if (result i32)
+              i32.const 0
+            else
+              i32.const 4
+            end
+          end
+          local.set $x
+
+          ;; cond = (x == 0), using local.tee
+          local.get $x
+          i32.const 0
+          i32.eq
+          local.tee $cond
+
+          if (result i32)
+            ;; x should be refined to 0.
+            local.get $x
+            i32.const 10
+            i32.add
+          else
+            i32.const 100
+          end
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[comparison-refines-through-local-tee.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(join (constant 10l) (constant 100l)))
+
+  let%test "f32_local.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (result f32) (local $x f32)
+          f32.const 3.1416
+          local.set $x
+          local.get $x
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[f32_local.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.Top)
+
+  let%test "param.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (param $x i32) (result i32) (local $y i32)
+          local.get $x
+          local.set $y
+
+          i32.const 14
+          local.set $x
+
+          local.get $y
+          local.set $x
+
+          local.get $x
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[unknown param.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(relative_ric "l0"))
+
+  let%test "add_local_set.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (result i32) (local $x i32)
+          i32.const 14
+          i32.const 16
+          i32.add
+          local.set $x
+          local.get $x
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[add_local_set.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.(constant 30l))
+
+  let%test "memory.store large addresses.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 65536)
+
+        (func $main (export \"main\") 
+          i32.const 0x7FFFFFFF
+          i32.const 14
+          i32.store
+          i32.const 0x7FFFFFFF
+          i32.load
+          drop
+
+          i32.const 0x7FFFFFFE
+          i32.const 26
+          i32.store
+          i32.const 0x80000000
+          i32.const 42
+          i32.store
+
+          i32.const 0x7FFFFFFF
+          i32.load
+          drop
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store-large-addresses.wat]";
+    check_value exit_state
+      (i_var 0l 4)
+      (ValueSet (RIC.constant 14l))
+    && check_value exit_state
+      (i_var 0l 13)
+      (ValueSet RIC.Top)
+
+  let%test "count leading zeros.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (param $x i32) (result i32)
+          local.get $x
+          if (result i32)
+            i32.const 10
+          else
+            i32.const 2
+          end
+          i32.clz
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[count leading zeros.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.ric (2l, Int 0l, Int 1l, ("", 28l))))
+
+  let%test "count trailing zeros.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (param $x i32) (result i32)
+          local.get $x
+          if (result i32)
+            i32.const 8
+          else
+            i32.const 10
+          end
+          i32.ctz
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[count trailing zeros.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.ric (2l, Int 0l, Int 1l, ("", 1l))))
+
+  let%test "population count.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (param $x i32) (result i32)
+          local.get $x
+          if (result i32)
+            i32.const 8
+          else
+            i32.const 10
+          end
+          i32.popcnt
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[population count.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet (RIC.ric (1l, Int 0l, Int 1l, ("", 1l))))
+
+  (* let%test "keep false when working" = false *)
 
 end)

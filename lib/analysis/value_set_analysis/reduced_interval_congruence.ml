@@ -73,9 +73,9 @@ module RIC = struct
     match r with 
     | Top -> Top 
     | Bottom -> Bottom 
-    | RIC {stride = s; lower_bound = Int l; upper_bound = u; offset = ("", o)} when Int32.(s*l+o < 0b11000000000000000000000000000000l) ->
+    | RIC {stride = s; lower_bound = Int l; upper_bound = u; offset = ("", o)} when Int32.(s*l+o<min_value+s) ->
       reduce (RIC {stride = s; lower_bound = NegInfinity; upper_bound = u; offset = ("", o)})
-    | RIC {stride = s; lower_bound = l; upper_bound = Int u; offset = ("", o)} when Int32.(s*u+o > 0b01100000000000000000000000000000l) ->
+    | RIC {stride = s; lower_bound = l; upper_bound = Int u; offset = ("", o)} when Int32.(s*u+o>max_value-s) ->
       reduce (RIC {stride = s; lower_bound = l; upper_bound = Infinity; offset = ("", o)})
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = o} ->
       if ExtendedInt.(u < l) then Bottom else 
@@ -135,12 +135,19 @@ module RIC = struct
       let offset = 
         match o with 
         | (var, i) -> 
-          if Int32.(i = 0l) then
-            (if String.(var <> "") then "+" else "") ^ var
-          else if String.is_empty var then
-            Int32.(if i > 0l then "+" else if i < 0l then "-" else "") ^ Int32.to_string (Int32.abs i)
+          if String.is_empty var then
+            if Int32.(i>0l) then 
+              Printf.sprintf "+%ld" i
+            else if Int32.(i<0l) then
+              Int32.to_string i
+            else
+              ""
+          else if Int32.(i=0l) then
+            Printf.sprintf "+%s" var
+          else if Int32.(i>0l) then
+            Printf.sprintf "+(%s+%ld)" var i
           else
-            "+(" ^ var ^ ((if Int32.compare i 0l > 0 then "+" else "") ^ Int32.to_string i) ^ ")"
+            Printf.sprintf "+(%s%ld)" var i
       in
       let interval = Interval.to_string ~no_reduction ((l, u) |>> Interval.make) in
       let stride = if Int32.(s = 1l) then "" else Int32.to_string s in
@@ -366,10 +373,20 @@ module RIC = struct
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = (v, o)} ->
       let inferior_RIC = 
         if ExtendedInt.(l = NegInfinity) then []
+        else if ExtendedInt.((Int s)*l+(Int o) = Int Int32.min_value) then
+          if String.(v = "") then 
+            []
+          else
+            [Top]
         else [ric (1l, NegInfinity, ExtendedInt.(l - Int 1l), (v, o))]
       in
       let superior_RIC =
         if ExtendedInt.equal u Infinity then []
+        else if ExtendedInt.((Int s)*u+(Int o) = Int Int32.max_value) then
+          if String.(v = "") then 
+            []
+          else
+            [Top]
         else [ric (1l,
                    ExtendedInt.(Int (Int32.(o + if s = 0l then 1l else s)) + (Int s * u)),
                    Infinity,
@@ -550,10 +567,16 @@ module RIC = struct
   (** [remove ~this ~from]
       Set difference returned as a small list of RICs. *)
   let remove ~(this : t) ~(from : t) : t list =
-    if comparable_offsets this from then
-      this |> complement 
-      |> List.map ~f:(meet from)
-      |> List.filter ~f:(fun r -> r <> Bottom)
+    if this = Bottom then 
+      [from] |> List.filter ~f:(fun r -> r <> Bottom)
+    else if comparable_offsets this from then
+      let compl = this |> complement in
+      if compl |> List.exists ~f:(equal Top) then
+        []
+      else
+        compl
+        |> List.map ~f:(meet from)
+        |> List.filter ~f:(fun r -> r <> Bottom)
     else
       []
 
@@ -2284,6 +2307,14 @@ let%test_module "RIC tests" = (module struct
     print_endline ("[RIC.remove]     " ^ to_string from ^ " \\ " ^ to_string this ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
     List.equal equal result expected
 
+  let%test "remove {2147483647} from {2147483647}" =
+    let this = constant Int32.max_value in
+    let from = constant Int32.max_value in
+    let result = remove ~this ~from in
+    let expected = [] in
+    print_endline ("[RIC.remove]     " ^ to_string from ^ " \\ " ^ to_string this ^ " = [" ^ String.concat ~sep:"; " (List.map result ~f:to_string) ^ "]");
+    List.equal equal result expected
+
   let actual_values =
     String.Map.empty
     |> Map.set ~key:"x" ~data:(of_int32 4l)
@@ -2755,6 +2786,12 @@ let%test_module "RIC tests" = (module struct
     (RIC.to_string RIC.zero)
     (string_of_bool result);
     result
+
+  let%test "complement of {2147483647}" =
+    let r = constant Int32.max_value in
+    let compl = complement r in
+    print_endline ("[RIC.complement]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
+    compl |> List.fold ~init:Bottom ~f:(fun acc x -> join acc x) |> equal (ric (1l, NegInfinity, Int Int32.(max_value - 1l), ("", 0l)))
 end)
 
     

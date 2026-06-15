@@ -285,12 +285,11 @@ let rec may_overlap ~(store_size : int32) ~(load_size : int32) ~(store_vs : t) ~
 
 (** [eqz ?var x] implements Wasm [i32.eqz]. The optional variable is used
     when a non-Boolean value must be lifted to the Boolean domain. *)
-let eqz ?(var : Variable.t option) (x : t) : t =
-  match var, x with
-  | None, Boolean x -> Boolean (Boolean.eqz x)
-  | Some var, ValueSet ric -> Boolean Boolean.(ric |> of_RIC ~var |> eqz)
-  | Some var, Bitfield bf -> Boolean Boolean.(bf |> of_bitfield ~var |> eqz)
-  | _ -> assert false
+let eqz ~(var : Variable.t) (x : t) : t =
+  match x with
+  | Boolean x -> Boolean (Boolean.eqz x)
+  | ValueSet ric -> Boolean Boolean.(ric |> of_RIC ~var |> eqz)
+  | Bitfield bf -> Boolean Boolean.(bf |> of_bitfield ~var |> eqz)
 
 
 (** [count_trailing_zeros vs] implements Wasm [i32.ctz]. *)
@@ -352,6 +351,90 @@ let may_be_true : t -> bool = function
   | ValueSet vs
   | Boolean {numeric_value = vs; _} -> RIC.may_be_true vs
   | Bitfield bf -> Bitfield.may_be_true bf
+
+
+let compare_values
+    (var1 : Var.t)
+    (var2 : Var.t)
+    (vs1_true : RIC.t)
+    (vs1_false : RIC.t)
+    (vs2_true : RIC.t)
+    (vs2_false : RIC.t)
+  : t =
+  let numeric_value = RIC.(join
+    (if vs1_false <> Bottom && vs2_false <> Bottom then zero else Bottom)
+    (if vs1_true <> Bottom && vs2_true <> Bottom then one else Bottom))
+  in
+  let true_or_false =
+    List.fold [ var1, vs1_true, vs1_false; var2, vs2_true, vs2_false ]
+      ~init:Variable.Map.empty
+      ~f:(fun acc (var, true_, false_) ->
+        match var with
+        | Var.Const _ -> acc
+        | _ ->
+          Variable.Map.set
+            acc
+            ~key:(Variable.Var var)
+            ~data:Boolean.{True_or_false.true_; false_})
+  in
+  if Variable.Map.is_empty true_or_false then
+    ValueSet numeric_value
+  else
+    Boolean {true_or_false; numeric_value}
+
+
+let less_or_equal (var1, vs1 : Var.t * RIC.t) (var2, vs2 : Var.t * RIC.t) : t =
+  if not (RIC.comparable_offsets vs1 vs2) then
+    ValueSet RIC.(join one zero)
+  else
+    let vs2_neg = RIC.remove_lower_bound vs2 in
+    let vs2_pos = RIC.(remove_upper_bound vs2  + one) in
+    let vs1_true = RIC.meet vs1 vs2_neg in
+    let vs1_false = RIC.meet vs1 vs2_pos in
+    let vs1_neg = RIC.(remove_lower_bound vs1 - one) in
+    let vs1_pos = RIC.remove_upper_bound vs1 in
+    let vs2_true = RIC.meet vs2 vs1_pos in
+    let vs2_false = RIC.meet vs2 vs1_neg in
+    compare_values var1 var2 vs1_true vs1_false vs2_true vs2_false
+
+let less_than (var1, vs1 : Var.t * RIC.t) (var2, vs2 : Var.t * RIC.t) : t =
+  if not (RIC.comparable_offsets vs1 vs2) then
+    ValueSet RIC.(join one zero)
+  else
+    let vs2_neg = RIC.(remove_lower_bound vs2 - one) in
+    let vs2_pos = RIC.remove_upper_bound vs2 in
+    let vs1_true = RIC.meet vs1 vs2_neg in
+    let vs1_false = RIC.meet vs1 vs2_pos in
+    let vs1_neg = RIC.remove_lower_bound vs1 in
+    let vs1_pos = RIC.(remove_upper_bound vs1 + one) in
+    let vs2_true = RIC.meet vs2 vs1_pos in
+    let vs2_false = RIC.meet vs2 vs1_neg in
+    compare_values var1 var2 vs1_true vs1_false vs2_true vs2_false
+
+let are_equal_or_not ?(not_equal : bool = false) (var1, vs1 : Var.t * RIC.t) (var2, vs2 : Var.t * RIC.t) : t =
+  if not (RIC.comparable_offsets vs1 vs2) then
+    ValueSet RIC.(join one zero)
+  else
+    let vs1_true = RIC.meet vs1 vs2 in
+    let vs1_false = 
+      if RIC.is_singleton vs2 then
+        RIC.remove ~this:vs2 ~from:vs1
+        |> List.fold ~init:RIC.Bottom ~f:(fun acc x -> RIC.join acc x)
+      else
+        vs1
+    in
+    let vs2_true = RIC.meet vs1 vs2 in
+    let vs2_false = 
+      if RIC.is_singleton vs1 then
+        RIC.remove ~this:vs1 ~from:vs2
+        |> List.fold ~init:RIC.Bottom ~f:(fun acc x -> RIC.join acc x)
+      else
+        vs2
+    in
+    if not_equal then
+      compare_values var1 var2 vs1_false vs1_true vs2_false vs2_true
+    else
+      compare_values var1 var2 vs1_true vs1_false vs2_true vs2_false
 
 
 (*

@@ -3,6 +3,9 @@ open Reduced_interval_congruence
 module Value = Value_set_abstraction
 open Helpers
 
+type ric = RIC.t
+type boolean = Boolean.t
+
 (* TODO: put this somewhere else *)
 let (|>>) (c, i : 'a * 'b) (f : 'a -> 'b -> 'c) : 'c = f c i
 
@@ -44,9 +47,7 @@ let get (store : t) ~(var : Variable.t) : Value.t =
         | MemorySize -> RIC.positive_integers
         | Var Const I32 n -> RIC.constant n
         | Var Const _ -> RIC.Top
-        | Var _ -> 
-          (* Log.warn (Printf.sprintf "variable %s is not in scope" (Variable.to_string var)); *)
-          RIC.Bottom
+        | Var _ -> RIC.Bottom
         | Mem _ ->
           let mems = extract_memory_variables store in
           if Variable.is_covered ~by:mems var then
@@ -55,7 +56,7 @@ let get (store : t) ~(var : Variable.t) : Value.t =
                 ~init:RIC.Bottom
                 ~f:(fun acc m -> 
                   if Variable.share_addresses m var then
-                    match (Option.value_exn (Variable.Map.find store.abstract_store m)) with
+                    match (Variable.Map.find_exn store.abstract_store m) with
                     | ValueSet vs -> RIC.join acc vs
                     | Boolean b -> RIC.join acc (b.numeric_value)
                     | Bitfield bf -> RIC.(bf |> of_bitfield |> join acc)
@@ -197,8 +198,7 @@ let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : R
         | Mem addr ->
             (List.fold 
               ~init:[addr]
-              ~f:(fun acc x -> List.concat (List.map ~f:(fun y -> 
-                RIC.remove ~this:x ~from:y) acc))
+              ~f:(fun acc x -> List.concat (List.map ~f:(fun y -> RIC.remove ~this:x ~from:y) acc)) 
               accessed)
       in
       Variable.Set.of_list (List.map ~f:(fun x -> Variable.Mem x) untouched_addresses)
@@ -409,53 +409,138 @@ let copy_value_set (store : t) ~(from : Variable.t) ~(to_ : Variable.t) : t =
   | Var Var.Const _ -> store
   | _ -> set store ~var:to_ ~vs:(get store ~var:from)
 
-(** [i32_add store ~x ~y ~result] assigns [x + y] to [result]. *)
-let i32_add (store : t) ~(x : Variable.t) ~(y : Variable.t) ~(result : Variable.t) : t =
-  let vs =
-    match x, y with
-    | Var Var.Const Prim_value.I32 x, Var Var.Const Prim_value.I32 y -> 
-      Print_trace.print "\t%ld + %ld -> %s\n" x y (Variable.to_string result);
-      Value.add_consts x y
-    | Var Var.Const Prim_value.I32 x, Var y 
-    | Var y, Var Var.Const Prim_value.I32 x ->
-      (let vs_y = get store ~var:(Variable.Var y) in
-      Print_trace.print "\t%ld + %s(%s) -> %s\n" x (Var.to_string y) (Value.to_string vs_y) (Variable.to_string result);
-      Value.add_const vs_y x)
-    | Var x, Var y ->
-      (let vs_x = get store ~var:(Variable.Var x) in
-      let vs_y = get store ~var:(Variable.Var y) in
-      Print_trace.print "\t%s(%s) + %s(%s) -> %s\n" (Var.to_string x) (Value.to_string vs_x) (Var.to_string y) (Value.to_string vs_y) (Variable.to_string result);
-      Value.i32_add vs_x vs_y)
-    | _ -> assert false
-  in
-  Print_trace.print "\tResult: %s\n" (Value.to_string vs);
-  set store ~var:result ~vs:vs
+(** [i32_binary_op store ~lhs ~rhs ~result ~symbol ~eval] evaluates a
+    binary i32 operation on [lhs] and [rhs], stores the result in [result],
+    and emits a trace using [symbol].
 
-(** [i32_sub store ~subtract_this ~from ~result] assigns [from - subtract_this]
+    [eval] receives the abstract values of [lhs] and [rhs] and computes the
+    resulting abstract value. *)
+let i32_binary_op
+    (symbol : string)
+    (eval : Value.t -> Value.t -> Value.t)
+    (store : t)
+    (lhs : Variable.t)
+    (rhs : Variable.t)
+    (result : Variable.t)
+  : t =
+  let lhs_value = get store ~var:lhs in
+  let rhs_value = get store ~var:rhs in
+  let vs = eval lhs_value rhs_value in
+  Print_trace.print "\t%s(%s) %s %s(%s) -> %s(%s)\n"
+    (Variable.to_string lhs)
+    (Value.to_string lhs_value)
+    symbol
+    (Variable.to_string rhs)
+    (Value.to_string rhs_value)
+    (Variable.to_string result)
+    (Value.to_string vs);
+  set store ~var:result ~vs
+
+(** [i32_add store x y result] assigns [x + y] to [result]. *)
+let i32_add = i32_binary_op "+" Value.i32_add
+
+(** [i32_sub store ~subtract_this ~from result] assigns [from - subtract_this]
     to [result]. *)
-let i32_sub (store : t) ~(subtract_this : Variable.t) ~(from : Variable.t) ~(result : Variable.t) : t =
-  let vs =
-      match subtract_this, from with
-      | Var Var.Const Prim_value.I32 subtract_this, Var Var.Const Prim_value.I32 y -> 
-        Print_trace.print "\t%ld - %ld -> %s\n" y subtract_this (Variable.to_string result);
-        Value.sub_consts ~subtract_this ~from:y
-      | Var Var.Const Prim_value.I32 subtract_this, Var y -> 
-        (let vs_y = get store ~var:(Variable.Var y) in
-        Print_trace.print "\t%s(%s) - %ld -> %s\n" (Var.to_string y) (Value.to_string vs_y) subtract_this (Variable.to_string result);
-        Value.sub_const ~subtract_this ~from:vs_y)
-      | Var x, Var Var.Const Prim_value.I32 y -> 
-        (let vs_x = get store ~var:(Variable.Var x) in
-        Print_trace.print "\t%ld - %s(%s) -> %s\n" y (Var.to_string x) (Value.to_string vs_x) (Variable.to_string result);
-        Value.negative (Value.sub_const ~subtract_this:y ~from:vs_x))
-      | Var x, Var y ->
-        (let subtract_this = get store ~var:(Variable.Var x) in
-        let from = get store ~var:(Variable.Var y) in
-        Print_trace.print "\t%s(%s) - %s(%s) -> %s\n" (Var.to_string y) (Value.to_string from) (Var.to_string x) (Value.to_string subtract_this) (Variable.to_string result);
-        Value.i32_sub ~subtract_this ~from)
-      | _ -> assert false
+let i32_sub (store : t) ~(subtract_this : Variable.t) ~(from : Variable.t) (result : Variable.t) : t =
+  i32_binary_op "-" (fun from subtract_this -> Value.i32_sub ~subtract_this ~from) store from subtract_this result
+
+(** [shift op ric_shift bitfield_shift store x y result] applies the shift
+    operation [op] to [y] using [x] as the shift amount, stores the result in
+    [result], and emits a trace. *)
+let shift 
+    (op : string) 
+    (ric_shift : ric -> ric -> ric) 
+    (bitfield_shift : bitfield -> bitfield -> bitfield) 
+    (store : t)
+    (x : Variable.t)
+    (y : Variable.t)
+    (result : Variable.t)
+  : t =
+  let x_value = get store ~var:x in
+  let y_value = get store ~var:y in
+  let result_value =
+    match x_value, y_value with
+    | ValueSet vs2, ValueSet vs1
+    | ValueSet vs2, Boolean {numeric_value = vs1; _} 
+    | Boolean {numeric_value = vs2; _}, ValueSet vs1 
+    | Boolean {numeric_value = vs2; _}, Boolean {numeric_value = vs1; _} -> 
+      Value.ValueSet (ric_shift vs1 vs2)
+    | Boolean {numeric_value = vs2; _}, Bitfield bf1
+    | ValueSet vs2, Bitfield bf1 -> 
+      ValueSet RIC.(vs2 |> to_bitfield |> bitfield_shift bf1 |> of_bitfield)
+    | Bitfield bf2, ValueSet vs1
+    | Bitfield bf2, Boolean {numeric_value = vs1; _} -> 
+      ValueSet RIC.(bitfield_shift (vs1 |> to_bitfield) bf2 |> of_bitfield)
+    | Bitfield bf2, Bitfield bf1 -> Bitfield (bitfield_shift bf1 bf2)
   in
-  Print_trace.print "\tResult: %s\n" (Value.to_string vs);
-  set store ~var:result ~vs:vs
+  Print_trace.print "\t%s(%s) %s %s(%s) -> %s(%s)"
+    (Variable.to_string y)
+    (Value.to_string y_value)
+    op
+    (Variable.to_string x)
+    (Value.to_string x_value)
+    (Variable.to_string result)
+    (Value.to_string result_value);
+  set store ~var:result ~vs:result_value
+
+(** [shr_u store x y result] assigns the logical right shift [y >>> x] to [result]. *)
+let shr_u = shift ">>u" RIC.(>>.) Bitfield.(>>.)
+
+(** [shr_s store x y result] assigns the arithmetic right shift [y >> x] to [result]. *)
+let shr_s = shift ">>s" RIC.(>>-) Bitfield.(>>-)
+
+(** [shl store x y result] assigns the left shift [y << x] to [result]. *)
+let shl = shift "<<" RIC.(<<) Bitfield.(<<)
+
+(** [logical_op op ric_op boolean_op bitfield_op store x y result]
+    applies a bitwise/logical operation between [x] and [y] and stores the
+    result in [result]. *)
+let logical_op 
+    (op : string)
+    (ric_op : ric -> ric -> ric) 
+    (boolean_op : boolean -> boolean -> boolean)
+    (bitfield_op : bitfield -> bitfield -> bitfield) 
+    (store : t)
+    (x : Variable.t)
+    (y : Variable.t)
+    (result : Variable.t)
+  : t =
+  let x_value = get store ~var:x in
+  let y_value = get store ~var:y in
+  let result_value =
+    match x_value, y_value with
+    | ValueSet vs1, ValueSet vs2
+    | ValueSet vs1, Boolean {numeric_value = vs2; _}
+    | Boolean {numeric_value = vs1; _}, ValueSet vs2 -> Value.ValueSet (ric_op vs1 vs2)
+    | Boolean v1, Boolean v2 -> Boolean (boolean_op v1 v2)
+    | Bitfield bf, ValueSet vs
+    | Bitfield bf, Boolean {numeric_value = vs; _}
+    | ValueSet vs, Bitfield bf
+    | Boolean {numeric_value = vs; _}, Bitfield bf -> 
+      ValueSet RIC.(bitfield_op (vs |> to_bitfield) bf |> of_bitfield)
+    | Bitfield bf1, Bitfield bf2 -> Bitfield (bitfield_op bf1 bf2)
+  in
+  Print_trace.print "\t%s(%s) %s %s(%s) -> %s(%s)"
+    (Variable.to_string y)
+    (Value.to_string y_value)
+    op
+    (Variable.to_string x)
+    (Value.to_string x_value)
+    (Variable.to_string result)
+    (Value.to_string result_value);
+  set store ~var:result ~vs:result_value
+
+(** [and_ store x y result] assigns the bitwise/logical conjunction
+    [x AND y] to [result]. *)
+let and_ = logical_op "and" RIC.(&.) Boolean.(&.) Bitfield.(&.)
+
+(** [or_ store x y result] assigns the bitwise/logical disjunction
+    [x OR y] to [result]. *)
+let or_ = logical_op "or" RIC.(|.) Boolean.(|.) Bitfield.(|.)
+
+(** [xor_ store x y result] assigns the bitwise/logical exclusive OR
+    [x XOR y] to [result]. *)
+let xor_ = logical_op "xor" RIC.(<+>) Boolean.(<+>) Bitfield.(<+>)
 
 (** [access_memory store ~addresses] adds [addresses] to the set of accessed
     addresses tracked by the store. *)
@@ -498,7 +583,7 @@ let store_debug (address : Value.t) : unit =
       | _ -> () 
     else ()
     
-(** [store ~state ~instruction ~annotation_before ~value ~address] interprets a
+(** [store ~instruction ?annotation_before ?value ?address state] interprets a
     Wasm store instruction.
 
     The stored value and target address are read either from
@@ -510,11 +595,11 @@ let store_debug (address : Value.t) : unit =
     while non-singleton addresses are updated weakly. Affected memory regions are
     recorded in [store_operations]. *)
 let store
-    ~(state : t) 
     ~(instruction : Memoryop.t) 
-    ~(annotation_before : Spec_domain.t option) 
-    ~(value : Var.t option)
-    ~(address : Var.t option)
+    ?(annotation_before : Spec_domain.t option) 
+    ?(value : Var.t option)
+    ?(address : Var.t option)
+    (state : t) 
   : t =
   if state.unreachable then
     state
@@ -551,7 +636,7 @@ let store
           "\tfully accessed memory: %s\n\tpartially accessed memory: %s\n"
           (RIC.to_string accessed.fully)
           (String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially));
-        let new_state =     truncate_accessed_memory state accessed in
+        let new_state = truncate_accessed_memory state accessed in
         let added_store_operations = 
           RICSet.filter 
             ~f:(fun addr -> not (RIC.equal addr RIC.Bottom)) 
@@ -615,6 +700,64 @@ let store
     in
     remove_pointers_to_top new_state
 
+  (** [load state ~instruction ~annotation_before ~result] interprets a Wasm
+    load instruction.
+
+    The load address is taken from the top of the value stack and adjusted by
+    the instruction offset. The accessed address is recorded in
+    [Variable.Accessed].
+
+    Only 4-byte [i32.load] instructions are considered pointer material. Other
+    load types assign [RIC.Top] to [result].
+
+    For [i32.load], the abstract value stored at the computed memory address is
+    loaded into [result]. *)
+let load 
+    (state : t) 
+    ~(instruction : Memoryop.t) 
+    ~(annotation_before : Spec_domain.t) 
+    ~(result : Variable.t)
+  : t =
+  let size = Memoryop.size instruction in
+  let address = pop (Spec_domain.get_or_fail annotation_before).vstack in
+  let address_value = get state ~var:(Variable.Var address) in
+  let address_plus_offset =
+    match address_value with
+    | ValueSet vs
+    | Boolean {numeric_value = vs; _} -> RIC.(add_offset vs (Int32.of_int_exn instruction.offset))
+    | Bitfield bf -> RIC.(add_offset (of_bitfield bf) (Int32.of_int_exn instruction.offset))
+  in
+  (* Update accessed address *)
+  let previously_accessed = get state ~var:Variable.Accessed in
+  let state = set state ~var:Variable.Accessed ~vs:(Value.join (ValueSet address_plus_offset) previously_accessed) 
+  in
+  if Int32.(size <> 4l) || not (Type.equal instruction.typ I32) then
+    (* loaded value is not pointer material *)
+    (Print_trace.print "\tloaded value is not an i32 integer: it is assumed it won't be used as a pointer.\n";
+    to_top_RIC state result)
+  else
+    let loaded_value = get state ~var:(Variable.Mem address_plus_offset) in
+    Print_trace.print "\taddress: %s(%s)\n\toffset: %d\n\tloading content of %s into variable %s\n\tloaded value: %s\n" 
+      (Var.to_string address)
+      (Value.to_string address_value)
+      (instruction.offset)
+      Variable.(Mem address_plus_offset |> to_string)
+      (Variable.to_string result)
+      (Value.to_string loaded_value);
+    set state ~var:result ~vs:loaded_value
+
+let unary_op 
+    (state : t) 
+    (annotation_before : Spec_domain.t) 
+    (op : Value.t -> Value.t) 
+    (op_string : string)
+    (return : Variable.t)
+  : t =
+  let var = pop (Spec_domain.get_or_fail annotation_before).vstack in
+  let vs = get state ~var:(Variable.Var var) in
+  let result = op vs in
+  Print_trace.print "\t%s (%s) -> %s\n" op_string (Value.to_string vs) (Value.to_string result);
+  state |> set ~var:return ~vs:result
 
 (** [find_value_set cfg ~label ~var] returns [var]'s abstract value before the
     instruction identified by [label]. *)
@@ -1119,7 +1262,7 @@ let%test_module "abstract store tests" = (module struct
       { abstract_store = Variable.Map.empty; store_operations = RICSet.empty; unreachable = false }
       |> set ~var:x ~vs:x_value
     in
-    let actual_store = i32_add store ~x ~y ~result in
+    let actual_store = i32_add store x y result in
     let actual = get actual_store ~var:result in
     let expected = Value.ValueSet (RIC.ric (2l, Int 0l, Int 3l, ("", 12l))) in
     let passed = Value.equal actual expected in
@@ -1141,7 +1284,7 @@ let%test_module "abstract store tests" = (module struct
       { abstract_store = Variable.Map.empty; store_operations = RICSet.empty; unreachable = false }
       |> set ~var:from ~vs:from_value
     in
-    let actual_store = i32_sub store ~subtract_this ~from ~result in
+    let actual_store = i32_sub store ~subtract_this ~from result in
     let actual = get actual_store ~var:result in
     let expected = Value.ValueSet (RIC.ric (2l, Int 2l, Int 5l, ("", -3l))) in
     let passed = Value.equal actual expected in
@@ -1159,7 +1302,7 @@ let%test_module "abstract store tests" = (module struct
     let y = Variable.Var (Var.Const (Prim_value.I32 32l)) in
     let result = Variable.Var (Var.Local 0) in
     let store = { abstract_store = Variable.Map.empty; store_operations = RICSet.empty; unreachable = false } in
-    let actual_store = i32_add store ~x ~y ~result in
+    let actual_store = i32_add store x y result in
     let actual = get actual_store ~var:result in
     let expected = Value.ValueSet (RIC.constant 42l) in
     let passed = Value.equal actual expected in
@@ -1177,7 +1320,7 @@ let%test_module "abstract store tests" = (module struct
     let subtract_this = Variable.Var (Var.Const (Prim_value.I32 8l)) in
     let result = Variable.Var (Var.Local 0) in
     let store = { abstract_store = Variable.Map.empty; store_operations = RICSet.empty; unreachable = false } in
-    let actual_store = i32_sub store ~subtract_this ~from ~result in
+    let actual_store = i32_sub store ~subtract_this ~from result in
     let actual = get actual_store ~var:result in
     let expected = Value.ValueSet (RIC.constant 42l) in
     let passed = Value.equal actual expected in
@@ -1847,11 +1990,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let expected =
@@ -1901,11 +2043,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let expected =
@@ -1952,11 +2093,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let store_operations =
@@ -2012,11 +2152,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let store_operations =
@@ -2075,11 +2214,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let store_operations =
@@ -2139,11 +2277,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let store_operations =
@@ -2198,11 +2335,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let store_operations =
@@ -2264,11 +2400,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let store_operations =
@@ -2328,11 +2463,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let expected = state in
@@ -2373,11 +2507,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let store_operations =
@@ -2435,11 +2568,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let store_operations =
@@ -2502,11 +2634,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let expected_store_operations =
@@ -2565,11 +2696,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let store_operations =
@@ -2634,11 +2764,10 @@ let%test_module "abstract store tests" = (module struct
 
     let actual =
       store
-        ~state
         ~instruction
-        ~annotation_before:None
-        ~value:(Some (Var.Local 1))
-        ~address:(Some (Var.Local 0))
+        ~value:(Var.Local 1)
+        ~address:(Var.Local 0)
+        state
     in
 
     let store_operations =
