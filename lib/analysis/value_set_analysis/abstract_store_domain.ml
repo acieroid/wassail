@@ -759,6 +759,23 @@ let unary_op
   Print_trace.print "\t%s (%s) -> %s\n" op_string (Value.to_string vs) (Value.to_string result);
   state |> set ~var:return ~vs:result
 
+let memory_copy (state : t) (annotation_before : Spec_domain.t) : t =
+  let _dest, _src, len =
+    match (Spec_domain.get_or_fail annotation_before).vstack with
+    | dest :: src :: len :: _ -> 
+      state |> get ~var:(Variable.Var dest),
+      state |> get ~var:(Variable.Var src),
+      state |> get ~var:(Variable.Var len)
+    | _ -> assert false
+  in
+  if not (Value.is_singleton len && len |> Value.extract_relative_offset |> String.is_empty) then
+    (* Hard to precisely track which addresses have been affected. *)
+    { (state |> set ~var:Variable.entire_memory ~vs:Value.top
+             |> set ~var:Variable.Accessed ~vs:Value.top)
+        with store_operations = RICSet.singleton RIC.Top }
+  else (* the size of copied memory is well known *)
+    failwith "not yet implemented"
+
 (** [find_value_set cfg ~label ~var] returns [var]'s abstract value before the
     instruction identified by [label]. *)
 let find_value_set

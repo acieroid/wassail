@@ -127,8 +127,17 @@ module Make (*: Transfer.TRANSFER *) = struct
               (State.get state ~var:Variable.MemorySize)
               (State.get state ~var:(Variable.Var (pop (Spec_domain.get_or_fail i.annotation_before).vstack))))
       | Nop | Drop -> state
-      (* TODO: these 3 operations may modify memory content: *)
-      | MemoryCopy | MemoryFill | MemoryInit _ -> state
+      | MemoryCopy -> 
+        (* TODO: if needed, we could eventually increase precision. See 
+           Abstract_store_domain.memory_copy for implementation stub *)
+        Print_trace.print "\t\tnot yet implemented: this operation is treated conservatively.\n";
+        { (state |> State.set ~var:Variable.entire_memory ~vs:Value.top
+                 |> State.set ~var:Variable.Accessed ~vs:Value.top)
+            with store_operations = RICSet.singleton RIC.Top }
+      | MemoryInit _ | MemoryFill ->
+        (* TODO: if needed, we could eventually increase precision. *)
+        { (state |> State.set ~var:Variable.entire_memory ~vs:Value.top)
+            with store_operations = RICSet.singleton RIC.Top }
       | RefIsNull | RefNull _ | RefFunc _ -> state
       | Select _ ->
         let condition, x, y =
@@ -325,7 +334,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         end
       | Unary { typ = I64 | F32 | F64; _ }
       | Unary { op = ExtendS _; typ = I32; _ } ->
-        state |> State.set ~var:(ret i) ~vs:(ValueSet Top)
+        state |> State.set ~var:(ret i) ~vs:top
       | Unary { op=(Neg|Abs|Ceil|Floor|Trunc|Nearest|Sqrt); _ } -> assert false
       | Unary { op = Clz; typ = I32; _ } ->
         State.unary_op state i.annotation_before Value.count_leading_zeros "CLZ" (ret i)
@@ -334,72 +343,62 @@ module Make (*: Transfer.TRANSFER *) = struct
       | Unary { op = Popcnt; typ = I32; _ } ->
         State.unary_op state i.annotation_before Value.population_count "POP COUNT" (ret i)
       | Convert _ ->
-        state |> State.set ~var:(ret i) ~vs:(ValueSet Top))
+        state |> State.set ~var:(ret i) ~vs:top)
 
 
   let apply_condition 
       (state : State.t) 
       ~(condition : Variable.t * Boolean.t)
       (spec_state : Spec_domain.SpecWithoutBottom.t) 
-      : State.t * State.t =
+    : State.t * State.t =
     let var, boolean = condition in
-    let state = 
-      { Abstract_store_domain.abstract_store = Variable.Map.remove state.abstract_store var;
-        store_operations = state.store_operations;
-        unreachable = state.unreachable } in
-    let locals_and_globals = Abstract_store_domain.extract_locals_and_globals state in
+    let state = { state with abstract_store = Variable.Map.remove state.abstract_store var } in
+    let locals_and_globals = state |> State.extract_locals_and_globals in
     let true_ = 
       if Boolean.may_be_true boolean then
         let true_ =
-          Abstract_store_domain.make_compatible 
+          State.make_compatible 
             ~this_store:
-              { Abstract_store_domain.abstract_store = (Variable.Map.map ~f:(fun x -> (Abstract_store_domain.Value.ValueSet x.true_)) boolean.true_or_false);
-                store_operations = state.store_operations;
-                unreachable = false }
-            ~relative_to:state in
-          { Abstract_store_domain.abstract_store =
-              Variable.Map.fold true_.abstract_store
-                ~init:state.abstract_store 
-                ~f:(fun ~key ~data acc -> 
-                  let acc = Variable.Map.set ~key ~data acc in
-                  List.fold locals_and_globals
-                    ~init:acc
-                    ~f:(fun acc v -> 
-                      (* print_endline ("v: " ^ Variable.to_string v); *)
-                      if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
-                        Variable.Map.set ~key:v ~data acc
-                      else
-                        acc));
-            store_operations = state.store_operations;
-            unreachable = false }
+              { state with abstract_store = (Variable.Map.map ~f:(fun x -> (Value.ValueSet x.true_)) boolean.true_or_false) }
+            ~relative_to:state
+        in
+        { state with abstract_store =
+            Variable.Map.fold true_.abstract_store
+              ~init:state.abstract_store 
+              ~f:(fun ~key ~data acc -> 
+                let acc = Variable.Map.set ~key ~data acc in
+                List.fold locals_and_globals
+                  ~init:acc
+                  ~f:(fun acc v -> 
+                    if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
+                      Variable.Map.set ~key:v ~data acc
+                    else
+                      acc)) }
       else
-        { Abstract_store_domain.bottom with unreachable = true }
+        { State.bottom with unreachable = true }
     in
     let false_ = 
       if Boolean.may_be_false boolean then
         let false_ =
-          Abstract_store_domain.make_compatible 
+          State.make_compatible 
             ~this_store:
-              { Abstract_store_domain.abstract_store = (Variable.Map.map ~f:(fun x -> (Abstract_store_domain.Value.ValueSet x.false_)) boolean.true_or_false);
-                store_operations = state.store_operations;
-                unreachable = false }
-            ~relative_to:state in
-          { Abstract_store_domain.abstract_store =
-              Variable.Map.fold false_.abstract_store
-                ~init:state.abstract_store 
-                ~f:(fun ~key ~data acc -> 
-                  let acc = Variable.Map.set ~key ~data acc in
-                  List.fold locals_and_globals
-                    ~init:acc
-                    ~f:(fun acc v -> 
-                      if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
-                        Variable.Map.set ~key:v ~data acc
-                      else
-                        acc));
-            store_operations = state.store_operations;
-            unreachable = false }
+              { state with abstract_store = (Variable.Map.map ~f:(fun x -> (Value.ValueSet x.false_)) boolean.true_or_false) }
+            ~relative_to:state
+        in
+        { state with abstract_store =
+            Variable.Map.fold false_.abstract_store
+              ~init:state.abstract_store 
+              ~f:(fun ~key ~data acc -> 
+                let acc = Variable.Map.set ~key ~data acc in
+                List.fold locals_and_globals
+                  ~init:acc
+                  ~f:(fun acc v -> 
+                    if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
+                      Variable.Map.set ~key:v ~data acc
+                    else
+                      acc)) }
       else
-        { Abstract_store_domain.bottom with unreachable = true }
+        { State.bottom with unreachable = true }
     in
     true_, false_
 
@@ -414,57 +413,50 @@ module Make (*: Transfer.TRANSFER *) = struct
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : State.t) (* the pre-state *)
     : [`Simple of State.t | `Branch of State.t * State.t] =
-    if !Value_set_options.print_trace then (
-      print_endline (string_of_int i.line_number ^ ":\t" ^ Instr.control_to_short_string i.instr);
-    );
+    Print_trace.print "%d:\t%s %s\n" i.line_number (Instr.control_to_short_string i.instr) (if state.unreachable then "(unreachable)" else "");
     match i.instr with
     | Br _ -> `Simple state
     | BrIf _ | If _ -> 
       let condition = Variable.Var (pop (Spec_domain.get_or_fail i.annotation_before).vstack) in
-      let boolean_value = Abstract_store_domain.get state ~var:condition in
-      (* print_endline ("boolean value: " ^ State.Value.to_string boolean_value); *)
+      let boolean_value = state |> State.get ~var:condition in
       begin match boolean_value with
       | ValueSet vs -> 
         let false_ = 
           if RIC.may_be_false vs then
             state
           else
-            { Abstract_store_domain.bottom with unreachable = true }
+            { State.bottom with unreachable = true }
         and true_ = 
           if RIC.may_be_true vs then
             state
           else
-            { Abstract_store_domain.bottom with unreachable = true }
+            { State.bottom with unreachable = true }
         in
         `Branch (true_, false_)
       | Boolean boolean_value -> 
-        let state_if_true, state_if_false = apply_condition state ~condition:(condition, boolean_value) (Spec_domain.get_or_fail i.annotation_after)  in
-        `Branch (state_if_true, state_if_false)
+        `Branch (apply_condition state ~condition:(condition, boolean_value) (Spec_domain.get_or_fail i.annotation_after))
       | Bitfield bf ->
         let false_ = 
           if Bitfield.may_be_false bf then
             state
           else
-            { Abstract_store_domain.bottom with unreachable = true }
+            { State.bottom with unreachable = true }
         and true_ = 
           if Bitfield.may_be_true bf then
             state
           else
-            { Abstract_store_domain.bottom with unreachable = true }
+            { State.bottom with unreachable = true }
         in
         `Branch (true_, false_)
       end
     | Return -> 
-      begin match (Spec_domain.get_or_fail i.annotation_before).vstack with
-      | [] -> `Simple state
-      | top_of_stack :: _ ->
-        let ret_var = Variable.Var ((Spec_domain.get_or_fail i.annotation_after).vstack |> pop) in
-        let vs = Abstract_store_domain.get state ~var:(Variable.Var top_of_stack) in
-        if !Value_set_options.print_trace then print_endline ("\treturned value-set: " ^ Abstract_store_domain.Value.to_string vs);
-        `Simple (Abstract_store_domain.set state ~var:ret_var ~vs:vs)
-        (* TODO: generalize for more than one return *)
-      end
-    | Unreachable -> `Simple  { Abstract_store_domain.bottom with unreachable = true }
+      `Simple 
+        ((Spec_domain.get_or_fail i.annotation_before).vstack
+        |> List.mapi ~f:(fun i r -> Variable.Var (Var.Return (Int32.of_int_exn i)), state |> State.get ~var:(Variable.Var r))
+        |> List.fold ~init:state ~f:(fun state (ret, value) -> 
+          Print_trace.print "\t\t%s: %s\n" (Variable.to_string ret) (Value.to_string value);
+          state |> State.set ~var:ret ~vs:value))
+    | Unreachable -> `Simple  { State.bottom with unreachable = true }
     | _ -> `Simple state
 
   let apply_summary 

@@ -2838,6 +2838,48 @@ let%test_module "value-set tests" = (module struct
       (Variable.Var (Var.Return 0l))
       (ValueSet (RIC.ric (1l, Int 0l, Int 1l, ("", 1l))))
 
+  let%test "memory.copy.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        ;; Copy 12 bytes from address 0 to address 32.
+        (func (export \"main\") (result i32)
+          ;; Initialize memory[0..3]
+          i32.const 0
+          i32.const 42
+          i32.store
+
+          i32.const 4
+          i32.const 43
+          i32.store
+
+          i32.const 8
+          i32.const 44
+          i32.store
+
+          i32.const 32
+          i32.const 45
+          i32.store
+
+          ;; memory.copy(dest=8, src=0, len=4)
+          i32.const 32
+          i32.const 0
+          i32.const 12
+          memory.copy
+
+          ;; load what's been copied
+          i32.const 32
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.copy.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return 0l))
+      (ValueSet RIC.Top)
+
   (* let%test "keep false when working" = false *)
 
 end)

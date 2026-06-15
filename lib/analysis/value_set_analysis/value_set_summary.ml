@@ -56,42 +56,43 @@ let to_string (s : t) : string =
   
 (** Initial bottom summary for a defined function. *)
 let bottom (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
-  let nb_of_globals = List.length (cfg.global_types) in
-  let global_indices = List.init nb_of_globals ~f:Fun.id in
-  { Abstract_store_domain.abstract_store =
-      List.fold global_indices
-        ~init:Variable.Map.empty
-        ~f:(fun store idx -> Variable.Map.set store ~key:(Variable.Var (Var.Global idx)) ~data:(Abstract_store_domain.Value.bottom));
-    store_operations = RICSet.empty;
-    unreachable = false }
-  |> (match cfg.return_types with
-      | [] -> Fun.id
-      | [_] -> Abstract_store_domain.set ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.bottom)
-      | _ -> Log.error "This analysis does not support more than one return value";
-             failwith "more than one return value")
+  let state =
+    { Abstract_store_domain.abstract_store =
+        List.foldi cfg.global_types
+          ~init:Variable.Map.empty
+          ~f:(fun idx store _ -> Variable.Map.set store ~key:(Variable.Var (Var.Global idx)) ~data:Abstract_store_domain.Value.bottom);
+      store_operations = RICSet.empty;
+      unreachable = false }
+  in
+  cfg.return_types
+  |> List.foldi ~init:state 
+    ~f:(fun idx state _ -> 
+      state |> Abstract_store_domain.set 
+                ~var:(Variable.Var (Var.Return (Int32.of_int_exn idx))) 
+                ~vs:Abstract_store_domain.Value.bottom)
   |> Abstract_store_domain.set ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.bottom)
   |> Abstract_store_domain.set ~var:(Variable.MemorySize) ~vs:(Abstract_store_domain.Value.bottom)
 
-(* TODO: set value depending on type (e.g. f64 is always bottom) *)
 (** Initial top summary for a defined function.
 
     Globals and return values are unknown, all memory may have been written, all
     memory may have been accessed, and memory size is any positive number of
     pages. *)
 let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
-  let nb_of_globals = List.length (cfg.global_types) in
-  let global_indices = List.init nb_of_globals ~f:Fun.id in
-  { Abstract_store_domain.abstract_store = 
-      List.fold global_indices
-        ~init:Variable.Map.empty
-        ~f:(fun store idx -> Variable.Map.set store ~key:(Variable.Var (Var.Global idx)) ~data:(Abstract_store_domain.Value.top));
-    store_operations = RICSet.singleton RIC.Top;
-    unreachable = false }
-  |> (match cfg.return_types with
-      | [] -> Fun.id
-      | _ :: [] -> Abstract_store_domain.set ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.top)
-      | _ -> Log.error "This analysis does not support more than one return value";
-              failwith "more than one return value")
+  let state =
+    { Abstract_store_domain.abstract_store = 
+        List.foldi cfg.global_types
+          ~init:Variable.Map.empty
+          ~f:(fun idx store _ -> Variable.Map.set store ~key:(Variable.Var (Var.Global idx)) ~data:(Abstract_store_domain.Value.top));
+      store_operations = RICSet.singleton RIC.Top;
+      unreachable = false }
+  in
+  cfg.return_types
+  |> List.foldi ~init:state 
+    ~f:(fun idx state _ -> 
+      state |> Abstract_store_domain.set 
+                ~var:(Variable.Var (Var.Return (Int32.of_int_exn idx))) 
+                ~vs:Abstract_store_domain.Value.top)
   |> Abstract_store_domain.set ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.top)
   |> Abstract_store_domain.set ~var:(Variable.MemorySize) ~vs:(Abstract_store_domain.Value.ValueSet RIC.positive_integers)
 
@@ -111,15 +112,14 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
   | "fd_write" | "fd_seek" | "fd_fdstat_get" ->
     let summary =
       (* Globals are unchanged *)
-      List.fold globals 
+      globals |> List.fold 
         ~init:summary 
         ~f:(fun acc var -> Abstract_store_domain.set acc ~var:var ~vs:(Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Variable.to_string var))))
-      (* If present, return value is unknown: *)
-      |> (match ret with
-        | [] -> Fun.id
-        | _ :: [] -> Abstract_store_domain.set ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.top)
-        | _ -> Log.error "This analysis does not support more than one return value";
-              failwith "more than one return value")
+    in
+    let summary =
+      (* Return values are unknown *)
+      ret |> List.foldi ~init:summary
+              ~f:(fun idx state _ -> state |> Abstract_store_domain.set ~var:(Variable.Var (Var.Return (Int32.of_int_exn idx))) ~vs:Abstract_store_domain.Value.top)
     in
     if !Value_set_options.ignore_imports then 
       (* Linear memory is considered to be unchanged *)
@@ -127,7 +127,7 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
         summary 
         |> Abstract_store_domain.set ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.bottom)
         |> Abstract_store_domain.set ~var:(Variable.entire_memory) ~vs:(Abstract_store_domain.Value.bottom) in
-      {Abstract_store_domain.abstract_store = summary.abstract_store; store_operations = RICSet.empty; unreachable = false}
+      { summary with store_operations = RICSet.empty }
     else
       (* Linear memory has been modified/accessed, but we don't know how: *)
       let summary = 
@@ -135,17 +135,17 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
         |> Abstract_store_domain.set ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.top)
         |> Abstract_store_domain.set ~var:(Variable.entire_memory) ~vs:(Abstract_store_domain.Value.top)
       in
-      {Abstract_store_domain.abstract_store = summary.abstract_store; store_operations = RICSet.singleton RIC.Top; unreachable = false}
+      { summary with store_operations = RICSet.singleton RIC.Top }
   | "fd_close" | "proc_exit" ->
     (* Globals are unchanged *)
-    List.fold globals 
-      ~init:summary 
-      ~f:(fun acc var -> Abstract_store_domain.set acc ~var ~vs:(Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Variable.to_string var))))
+    let summary =
+      List.fold globals 
+        ~init:summary 
+        ~f:(fun acc var -> Abstract_store_domain.set acc ~var ~vs:(Abstract_store_domain.Value.ValueSet (RIC.relative_ric (Variable.to_string var))))
+    in
     (* If present, return value is unknown: *)
-    |> (match ret with
-        | [] -> Fun.id
-        | _ :: [] -> Abstract_store_domain.set ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.top)
-        | _ -> failwith "more than one return value")
+    ret |> List.foldi ~init:summary
+            ~f:(fun idx state _ -> state |> Abstract_store_domain.set ~var:(Variable.Var (Var.Return (Int32.of_int_exn idx))) ~vs:Abstract_store_domain.Value.top)
     (* Linear memory is unchanged, but we may have accessed all of it: *)
     |> Abstract_store_domain.set ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.top)
   | _ ->
@@ -162,12 +162,11 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
         List.fold globals 
           ~init:summary 
           ~f:(fun acc var -> Abstract_store_domain.set acc ~var ~vs:(Abstract_store_domain.Value.top)))
+    in
+    let summary =
       (* If present, return value is unknown: *)
-      |> (match ret with
-        | [] -> Fun.id
-        | _ :: [] -> Abstract_store_domain.set ~var:(Variable.Var (Var.Return 0l)) ~vs:(Abstract_store_domain.Value.top)
-        | _ -> Log.error "This analysis does not support more than one return value";
-               failwith "more than one return value")
+      ret |> List.foldi ~init:summary
+            ~f:(fun idx state _ -> state |> Abstract_store_domain.set ~var:(Variable.Var (Var.Return (Int32.of_int_exn idx))) ~vs:Abstract_store_domain.Value.top)
     in
     (if !Value_set_options.ignore_imports then 
       ((* Linear memory is considered to be unchanged *)
@@ -175,7 +174,7 @@ let of_import (name : string) (nglobals : Int32.t) (_args : Type.t list) (ret : 
     else
       ((* Linear memory may have been modified, but we don't know how: *)
       let summary = Abstract_store_domain.set summary ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.top) in
-      {abstract_store = summary.abstract_store; store_operations = RICSet.singleton RIC.Top; unreachable = false}))
+      { summary with store_operations = RICSet.singleton RIC.Top }))
 
 (** Build the initial summary map for all functions.
 
