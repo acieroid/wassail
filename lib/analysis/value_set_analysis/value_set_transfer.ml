@@ -372,7 +372,7 @@ module Make (*: Transfer.TRANSFER *) = struct
                   ~f:(fun acc v -> 
                     if is_this_the_value_of spec_state ~value:key ~of_this_variable:v then
                       Variable.Map.set ~key:v ~data acc
-                    else
+                    else 
                       acc)) }
       else
         { State.bottom with unreachable = true }
@@ -452,7 +452,10 @@ module Make (*: Transfer.TRANSFER *) = struct
     | Return -> 
       `Simple 
         ((Spec_domain.get_or_fail i.annotation_before).vstack
-        |> List.mapi ~f:(fun i r -> Variable.Var (Var.Return (cfg.idx, Int32.of_int_exn i)), state |> State.get ~var:(Variable.Var r))
+        |> List.mapi 
+            ~f:(fun i r -> 
+              Variable.Var (Var.Return (cfg.idx, Int32.of_int_exn i)), 
+              state |> State.get ~var:(Variable.Var r))
         |> List.fold ~init:state ~f:(fun state (ret, value) -> 
           Print_trace.print "\t\t%s: %s\n" (Variable.to_string ret) (Value.to_string value);
           state |> State.set ~var:ret ~vs:value))
@@ -460,65 +463,24 @@ module Make (*: Transfer.TRANSFER *) = struct
     | _ -> `Simple state
 
   let apply_summary 
-      (module_ : Wasm_module.t)
+      (_module_ : Wasm_module.t)
       (f : Int32.t) 
       (arity : int * int) 
       (i : annot_expected Instr.labelled_call)
       (state : State.t)
       (summary : summary)
     : State.t =
-    if !Value_set_options.print_trace then 
-      (Log.info (Printf.sprintf "applying summary of function %ld" f);
-      print_endline ("\tState before the call: " ^ Abstract_store_domain.to_string state);
-      print_endline ("\tSummary of function " ^ Int32.to_string f ^ ":\n" ^ Value_set_summary.to_string summary));
+    Print_trace.print "\tstate before the call: %s\n\tsummary of function %ld:%s\n"
+      (State.to_string state) f (Summary.to_string summary) ;
     let spec_before = Spec_domain.get_or_fail i.annotation_before in
     let args = List.take spec_before.vstack (fst arity) in
     let spec_after = Spec_domain.get_or_fail i.annotation_after in
-    let return_variable = if snd arity = 1 then List.hd spec_after.vstack else None in
-    let value_set_after_call = Value_set_summary.apply
+    let return_variables = List.take spec_after.vstack (snd arity) in
+    Value_set_summary.apply
       ~summary
       ~state
       ~args
-      ~return_variable in
-    (* let export = List.find module_.exported_funcs ~f:(fun (id, _, _) -> Int32.(id = f)) in *)
-    let export = List.find module_.exported_funcs ~f:(fun descr -> Int32.(descr.idx = f)) in
-    match export with
-    (* | Some (_, fname, _) -> *)
-    | Some descr ->
-      if !Value_set_options.print_trace then 
-        (Log.info (Printf.sprintf "function is named %s" descr.name); 
-        Log.warn "Exports have not been implemented yet!");
-      value_set_after_call
-    | None -> value_set_after_call
-
-  (** [get_predecessors cfg block] returns the list of predecessor blocks for [block] in [cfg]. *)
-  let get_direct_predecessors 
-      (cfg : annot_expected Cfg.t) 
-      (block : annot_expected Basic_block.t) 
-    : annot_expected Basic_block.t list =
-    let predecessors = Cfg.predecessors cfg block.idx in
-    let predecessors = List.map predecessors ~f:(fun (idx, _) -> idx) in
-    List.filter ~f:(fun blk -> List.mem predecessors blk.idx ~equal:Int.equal) 
-                         (Cfg.all_predecessors cfg block)
-
-  (** [get_previous_stacks cfg predecessors] returns the annotated stacks for a list of predecessor blocks. *)
-  let get_previous_stacks
-      (_cfg : annot_expected Cfg.t)
-      (predecessors : annot_expected Basic_block.t list)
-    : (int * Var.t list) list =
-    let previous_annotations = 
-      List.fold ~init:[] 
-                ~f:(fun acc blk ->
-                  (* (blk.idx, Cfg.state_after_block cfg blk.idx (Spec_inference.init_state cfg)) :: acc) *)
-                  (blk.idx, blk.annotation_after) :: acc)
-                predecessors
-    in
-    List.map 
-      ~f:(fun x ->
-        match x with
-        | idx, Spec_domain.Bottom -> idx, []
-        | idx, NotBottom x -> idx, x.vstack)
-      previous_annotations
+      ~return_variables
 
   let merge_variables
       (module_ : Wasm_module.t)
@@ -526,27 +488,23 @@ module Make (*: Transfer.TRANSFER *) = struct
       (block : annot_expected Basic_block.t)
       (state : State.t)
       (predecessors : ('a Basic_block.t * State.t) list)
-      : State.t =
-    let merged_variables = 
-      Spec_inference.new_merge_variables_with_origin module_ cfg block
-      |> List.filter_map ~f:(fun (pred_idx, old_var, merge_var) ->
-        (* state at the end of predecessor block where [old_var] was created *)
-        match List.find_exn predecessors ~f:(fun (pred_block, _) -> pred_block.idx = pred_idx) with
-        | _, pred_state -> 
-          if pred_state.unreachable then
-            None
-          else
-            Some (Variable.Var merge_var, Abstract_store_domain.get state ~var:(Variable.Var old_var)))
-      |> List.fold ~init:[] ~f:(fun acc (v, vs) -> 
-        match List.Assoc.find acc ~equal:Variable.equal v with
-        | None -> (v, vs) :: acc
-        | Some existing_vs ->
-          let acc = List.Assoc.remove acc ~equal:Variable.equal v in
-          (v, Abstract_store_domain.Value.join vs existing_vs) :: acc)
-    in
-    let str_list = List.map ~f:(fun (a,b) -> Variable.to_string a ^ "->" ^ Abstract_store_domain.Value.to_string b) merged_variables in
-    if !Value_set_options.print_trace then print_endline ("\tmerged variables: [" ^ String.concat ~sep:"; " str_list ^ "]");
-    List.fold merged_variables ~init:state ~f:(fun acc (v, vs) -> Abstract_store_domain.set acc ~var:v ~vs)
+    : State.t =
+    Spec_inference.new_merge_variables_with_origin module_ cfg block
+    |> List.filter_map ~f:(fun (pred_idx, old_var, merge_var) ->
+      (* state at the end of predecessor block where [old_var] was created *)
+      match List.find_exn predecessors ~f:(fun (pred_block, _) -> pred_block.idx = pred_idx) with
+      | _, pred_state -> 
+        if pred_state.unreachable then
+          None
+        else
+          Some (Variable.Var merge_var, State.get state ~var:(Variable.Var old_var)))
+    |> List.fold ~init:[] ~f:(fun acc (v, vs) -> 
+      match List.Assoc.find acc ~equal:Variable.equal v with
+      | None -> (v, vs) :: acc
+      | Some existing_vs ->
+        let acc = List.Assoc.remove acc ~equal:Variable.equal v in
+        (v, Value.join vs existing_vs) :: acc)
+    |> List.fold ~init:state ~f:(fun acc (v, vs) -> State.set acc ~var:v ~vs)
 
 
   (** [merge_flows m cfg block states] merges incoming flows into [block], handling stack merging at control points. *)
@@ -554,18 +512,12 @@ module Make (*: Transfer.TRANSFER *) = struct
       (module_ : Wasm_module.t) 
       (cfg : annot_expected Cfg.t) 
       (block : annot_expected Basic_block.t)
-      (* (states : (int * State.t) list)  *)
       (predecessors : ('a Basic_block.t * State.t) list)
     : State.t =
-    (* let current_function = 
-      match (List.filter module_.funcs ~f:(fun func -> Int32.(func.idx = block.fidx))) with
-      | [f] -> f
-      | _ -> assert false in *)
     match predecessors with
     | [] -> 
-      if !Value_set_options.print_trace then print_endline ("================ START OF FUNCTION ==================== DATA BLOCK #" ^ string_of_int block.idx);
-      (* init_state cfg *)
-      (* init module_ current_function *) bottom
+      Print_trace.print "================ START OF FUNCTION ==================== DATA BLOCK #%d" block.idx;
+      bottom
     | _ ->
       begin match block.content with
       | Control { instr = Merge; _ }
@@ -652,28 +604,17 @@ module Make (*: Transfer.TRANSFER *) = struct
                         desc.arguments
                         desc.returns
         in
-        let return_variable =
+        let return_variables =
           match annot_after with
           | Bottom -> assert false
-          | NotBottom x ->
-            if List.length desc.returns = 1 then 
-              List.hd x.vstack 
-            else 
-              None 
+          | NotBottom spec_after ->
+            List.take spec_after.vstack (List.length desc.returns) 
         in
         Summary.apply 
           ~summary
           ~state
           ~args:[]
-          ~return_variable
-        (* match StringMap.find !value_set_specifications desc.name with
-        | None ->
-          Log.warn (Printf.sprintf "No specification found for imported function %s (index: %ld): assuming abstract store is preserved" desc.name desc.idx);
-          state
-        | Some _spec ->
-          (* TODO: implement this! *)
-          Log.warn "Imported functions have not been implemented yet! It is assumed that the abstract store remains unchanged by the function call.";
-          state *)
+          ~return_variables
       )
     )
 

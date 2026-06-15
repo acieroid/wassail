@@ -2,6 +2,9 @@ open Core
 open Helpers
 open Reduced_interval_congruence
 
+(* TODO: put this somewhere else *)
+let (|>>) (c, i : 'a * 'b) (f : 'a -> 'b -> 'c) : 'c = f c i
+
 (** Function summaries for the value-set analysis.
 
     A summary keeps only the effects that can be observed by callers: globals,
@@ -235,18 +238,21 @@ let update_relative_offsets (summary : t) ~(actual_values : RIC.t String.Map.t) 
 
 
 (** Return the unique return value stored in a summary, if any. *)
-let extract_return_value (store : Value_set_abstraction.t Variable.Map.t) : Value_set_abstraction.t option =
-  let ret_vars = 
-    store
-    |> Map.keys
-    |> List.filter 
-      ~f:(function
-          | Variable.Var Var.Return _ -> true
-          | _ -> false) in
-  match ret_vars with
+let extract_return_values 
+    (store : Value_set_abstraction.t Variable.Map.t) 
+  : Value_set_abstraction.t list =
+  store
+  |> Map.keys
+  |> List.filter_map 
+      ~f:(fun v -> match v with
+          | Variable.Var Var.Return _ -> Variable.Map.find store v
+          | _ -> None)
+        
+  
+  (* match ret_vars with
   | [] -> None
   | [ret] -> Variable.Map.find store ret
-  | _ -> Log.error "Functions with multiple returns not yet implemented"; failwith ""
+  | _ -> Log.error "Functions with multiple returns not yet implemented"; failwith "" *)
 
 (** Apply a callee summary to a caller state.
 
@@ -258,7 +264,7 @@ let apply
     ~(summary : t) 
     ~(state : Abstract_store_domain.t) 
     ~(args : Var.t list)
-    ~(return_variable : Var.t option)
+    ~(return_variables : Var.t list)
   : Abstract_store_domain.t =
   let globals = Abstract_store_domain.extract_global_values state in
   let arguments = Abstract_store_domain.extract_argument_values state ~args in
@@ -330,12 +336,20 @@ let apply
         Abstract_store_domain.set acc ~var:key ~vs:data)
     |> Abstract_store_domain.remove_pointers_to_top in
   (* Set return values: *)
-  (* TODO: This next part assumes only one return value is possible: could be generalized in the future *)
-  (match extract_return_value summary.abstract_store, return_variable with
+  (* (match extract_return_value summary.abstract_store, return_variable with
   | Some vs, Some return_variable -> Abstract_store_domain.set state ~var:(Variable.Var return_variable) ~vs
   | None, None -> state
   | None, Some _ -> (Log.error "Summary is providing no return variable, but the calling state is expecting one."; assert false)
-  | Some _, None -> (Log.error "Summary is providing a return variable, but the calling state is expecting none."; assert false))
+  | Some _, None -> (Log.error "Summary is providing a return variable, but the calling state is expecting none."; assert false)) *)
+  (return_variables,
+  summary.abstract_store |> extract_return_values)
+  |>> List.fold2_exn
+    ~init:state 
+    ~f:(fun state ret value -> state |> Abstract_store_domain.set ~var:(Variable.Var ret) ~vs:value)
+  (* let test = (summary.abstract_store |> extract_return_values,
+  return_variables) in
+  test
+  |>>   *)
   (* | _ -> assert false TODO: error message? *)
   |> Abstract_store_domain.update_memory_size ~summary
 
@@ -496,7 +510,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.singleton (RIC.of_int32 4l);
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let mem4 = Abstract_store_domain.get actual ~var:(Variable.Mem (RIC.of_int32 4l)) in
     let mem8 = Abstract_store_domain.get actual ~var:(Variable.Mem (RIC.of_int32 8l)) in
     let ok =
@@ -558,7 +572,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.singleton (RIC.ric (1l, Int 1l, Int 7l, ("", 0l)));
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
       (Printf.sprintf "%s caller mem[%s] overlaps summary write at %s   ->   %s%s"
@@ -618,7 +632,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.singleton (RIC.of_int32 4l);
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[Var.Other "arg"] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[Var.Other "arg"] ~return_variables:[] in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
       (Printf.sprintf "%s initial state:%s,    arg0 = %s, summary: %s   ->   %s%s"
@@ -670,7 +684,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.empty;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:(Some (Var.Other "ret")) in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[Var.Other "ret"] in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
       (Printf.sprintf "%s caller ret = %s, summary return = %s   ->   %s%s"
@@ -678,7 +692,7 @@ let%test_module "value-set summary tests" = (module struct
         (Value_set_abstraction.to_string (Abstract_store_domain.Value.ValueSet (RIC.of_int32 7l)))
         (Value_set_abstraction.to_string (Abstract_store_domain.Value.ValueSet (RIC.of_int32 42l)))
         (Abstract_store_domain.to_string actual)
-        (if ok then "" else Printf.sprintf " (expected %s)" (to_string expected)));
+        (if ok then "" else Printf.sprintf " (expected %s)" (Abstract_store_domain.to_string expected)));
     ok
 
   let%test "apply: records accessed memory from summary" =
@@ -707,7 +721,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.empty;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let actual_accessed = Abstract_store_domain.get actual ~var:Variable.Accessed in
     let mem4 = Abstract_store_domain.get actual ~var:(Variable.Mem (RIC.of_int32 4l)) in
     let ok =
@@ -752,7 +766,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.empty;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let actual_accessed = Abstract_store_domain.get actual ~var:Variable.Accessed in
     let mem4 = Abstract_store_domain.get actual ~var:(Variable.Mem (RIC.of_int32 4l)) in
     let ok =
@@ -801,7 +815,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.empty;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let actual_memory_size = Abstract_store_domain.get actual ~var:Variable.MemorySize in
     let mem4 = Abstract_store_domain.get actual ~var:(Variable.Mem (RIC.of_int32 4l)) in
     let ok =
@@ -855,7 +869,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.empty;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let actual_global = Abstract_store_domain.get actual ~var:global in
     let mem4 = Abstract_store_domain.get actual ~var:(Variable.Mem (RIC.of_int32 4l)) in
     let ok =
@@ -910,7 +924,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.empty;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let actual_global = Abstract_store_domain.get actual ~var:global in
     let mem4 = Abstract_store_domain.get actual ~var:(Variable.Mem (RIC.of_int32 4l)) in
     let ok =
@@ -993,7 +1007,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.singleton (RIC.ric (1l, Int 0l, Int 6l, ("", 11l)));
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
       (Printf.sprintf "%s caller: %s, \n\t\t\t\t\t      summary: %s   ->   %s%s"
@@ -1066,7 +1080,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.singleton (RIC.ric (1l, Int 0l, Int 6l, ("x", 1l)));
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
       (Printf.sprintf "%s caller: %s, \n\t\t\t\t\t      summary: %s   ->   %s%s"
@@ -1113,9 +1127,9 @@ let%test_module "value-set summary tests" = (module struct
         unreachable = false }
     in
     let actual =
-      apply ~summary ~state ~args:[caller_arg] ~return_variable:(Some (Var.Other "ret"))
+      apply ~summary ~state ~args:[caller_arg] ~return_variables:[Var.Return (0l,0l)]
     in
-    let actual_ret = Abstract_store_domain.get actual ~var:(Variable.Var (Var.Other "ret")) in
+    let actual_ret = Abstract_store_domain.get actual ~var:(Variable.Var (Var.Return (0l,0l))) in
     let ok =
       Value_set_abstraction.equal actual_ret (Abstract_store_domain.Value.ValueSet (RIC.of_int32 15l))
       && RICSet.is_empty actual.store_operations
@@ -1176,12 +1190,12 @@ let%test_module "value-set summary tests" = (module struct
               ~key:Variable.MemorySize
               ~data:(Abstract_store_domain.Value.ValueSet RIC.positive_integers)
           |> Variable.Map.set
-              ~key:(Variable.Var (Var.Other "ret"))
+              ~key:(Variable.Var (Var.Return (0l,0l)))
               ~data:(Abstract_store_domain.Value.ValueSet (RIC.of_int32 15l));
         store_operations = RICSet.empty;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:(Some (Var.Other "ret")) in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[Var.Return (0l,0l)] in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
       (Printf.sprintf "%s caller: %s, \n\t\t\t\t\t      summary: %s   ->   %s%s"
@@ -1240,7 +1254,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.empty;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[caller_arg] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[caller_arg] ~return_variables:[] in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
       (Printf.sprintf "%s caller: %s, \n\t\t\t\t\t      summary: %s   ->   %s%s"
@@ -1298,7 +1312,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.empty;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
       (Printf.sprintf "%s caller: %s, \n\t\t\t\t\t      summary: %s   ->   %s%s"
@@ -1365,7 +1379,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.singleton written;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
       (Printf.sprintf "%s caller: %s, \n\t\t\t\t\t      summary's store_operations: %s   ->   %s%s"
@@ -1425,7 +1439,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.singleton written;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
       (Printf.sprintf "%s caller: %s, \n\t\t\t\t\t      summary's store_operations: %s   ->   %s%s"
@@ -1479,7 +1493,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.singleton RIC.Top;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
       (Printf.sprintf "%s caller: %s, \n\t\t\t\t\t      summary's store_operations: %s   ->   %s%s"
@@ -1545,7 +1559,7 @@ let%test_module "value-set summary tests" = (module struct
         store_operations = RICSet.singleton expected_address;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[caller_arg] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[caller_arg] ~return_variables:[] in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
       (Printf.sprintf "%s caller: %s, \n\t\t\t\t\t      summary: %s   ->   %s%s"
@@ -1598,7 +1612,7 @@ let%test_module "value-set summary tests" = (module struct
           |> RICSet.add ~ric:summary_written;
         unreachable = false }
     in
-    let actual = apply ~summary ~state ~args:[] ~return_variable:None in
+    let actual = apply ~summary ~state ~args:[] ~return_variables:[] in
     let ok = Abstract_store_domain.equal actual expected in
     print_endline
       (Printf.sprintf "%s caller's store_operations: %s, summary's store_operations: %s   ->   %s%s"
