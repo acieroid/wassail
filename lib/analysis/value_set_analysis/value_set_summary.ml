@@ -7,12 +7,12 @@ let (|>>) (c, i : 'a * 'b) (f : 'a -> 'b -> 'c) : 'c = f c i
 
 (** Function summaries for the value-set analysis.
 
-    A summary keeps only the effects that can be observed by callers: globals,
-    return values, linear-memory cells, accessed memory, memory size, and the set
-    of memory areas written by the function. *)
+    A summary keeps the effects visible from callers: globals, return values,
+    linear memory, accessed memory, memory size, written memory areas, and
+    reachability. *)
 type t = Abstract_store_domain.t
 
-(** Pretty-print the caller-observable parts of a summary. *)
+(** [to_string s] pretty-prints the caller-visible parts of [s]. *)
 let to_string (s : t) : string =
   let affected_memory = s.store_operations in
   let accessed = Variable.Map.find s.abstract_store Variable.Accessed in
@@ -57,7 +57,7 @@ let to_string (s : t) : string =
   | Some size -> ["MEMORY SIZE (nb of pages):" ^ Value_set_abstraction.to_string size])
   |> String.concat ~sep:"\n\t\t"
   
-(** Initial bottom summary for a defined function. *)
+(** [bottom cfg vars] returns the bottom summary for [cfg]. *)
 let bottom (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
   let state =
     { Abstract_store_domain.abstract_store =
@@ -76,11 +76,11 @@ let bottom (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
   |> Abstract_store_domain.set ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.bottom)
   |> Abstract_store_domain.set ~var:(Variable.MemorySize) ~vs:(Abstract_store_domain.Value.bottom)
 
-(** Initial top summary for a defined function.
+(** [top cfg vars] returns a conservative top summary for [cfg].
 
-    Globals and return values are unknown, all memory may have been written, all
-    memory may have been accessed, and memory size is any positive number of
-    pages. *)
+    Globals and return values are unknown, all memory may have been written,
+    all memory may have been accessed, and memory size is any non-negative
+    number of pages. *)
 let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
   let state =
     { Abstract_store_domain.abstract_store = 
@@ -100,7 +100,8 @@ let top (cfg : 'a Cfg.t) (_vars : Var.Set.t) : t =
   |> Abstract_store_domain.set ~var:(Variable.MemorySize) ~vs:(Abstract_store_domain.Value.ValueSet RIC.positive_integers)
 
 
-(** Summary used for an imported function.
+(** [of_import fct_idx name nglobals args ret] returns the summary used for an
+    imported function.
 
     Modelled WASI imports preserve globals and either preserve or havoc memory
     according to [Value_set_options.ignore_imports]. Unknown imports preserve
@@ -179,10 +180,10 @@ let of_import (fct_idx : int32) (name : string) (nglobals : Int32.t) (_args : Ty
       let summary = Abstract_store_domain.set summary ~var:(Variable.Accessed) ~vs:(Abstract_store_domain.Value.top) in
       { summary with store_operations = RICSet.singleton RIC.Top }))
 
-(** Build the initial summary map for all functions.
+(** [initial_summaries cfgs module_ typ] builds the initial summary map.
 
-    Defined functions receive either [bottom] or [top], while imported functions
-    receive their import model. *)
+    Defined functions are initialized to [bottom] or [top], according to
+    [typ]. Imported functions are initialized with [of_import]. *)
 let initial_summaries 
     (cfgs : 'a Cfg.t Int32Map.t) 
     (module_ : Wasm_module.t)
@@ -196,27 +197,27 @@ let initial_summaries
     ~f:(fun summaries desc ->
         Int32Map.set summaries ~key:desc.idx ~data:(of_import desc.idx desc.name module_.nglobals desc.arguments desc.returns))
 
-(** Extract the caller-visible part of an intraprocedural state. *)
+(** [make state] extracts the caller-visible part of [state]. *)
 let make (state : Abstract_store_domain.t) : t =
-  { abstract_store =
-      state.abstract_store
-      |> Variable.Map.filter_keys 
-          ~f:(fun key -> 
-            match key with
-            | Variable.Var Var.Global _
-            | Variable.Var Var.Return _
-            | Variable.Mem _
-            | Variable.Accessed 
-            | Variable.MemorySize -> true
-            | _ -> false);
-    store_operations = state.store_operations;
-    unreachable = state.unreachable }
+  { state with
+      abstract_store =
+        state.abstract_store
+        |> Variable.Map.filter_keys 
+            ~f:(fun key -> 
+              match key with
+              | Variable.Var Var.Global _
+              | Variable.Var Var.Return _
+              | Variable.Mem _
+              | Variable.Accessed 
+              | Variable.MemorySize -> true
+              | _ -> false) }
 
-(** Substitute callee-relative origins with caller values.
+(** [update_relative_offsets summary ~actual_values] rewrites callee-relative
+    origins using caller values.
 
     Relative globals, arguments, memory variables, and written-memory addresses
-    are rewritten using [actual_values]. If rewriting a variable makes its
-    address invalid, the associated value is set to top. *)
+    are rewritten. If rewriting a memory variable produces an imprecise
+    address, the associated value is set to top. *)
 let update_relative_offsets (summary : t) ~(actual_values : RIC.t String.Map.t) : t =
   { abstract_store =
       Variable.Map.fold summary.abstract_store 
@@ -237,7 +238,7 @@ let update_relative_offsets (summary : t) ~(actual_values : RIC.t String.Map.t) 
     unreachable = summary.unreachable }
 
 
-(** Return the unique return value stored in a summary, if any. *)
+(** [extract_return_values store] returns the return values stored in [store]. *)
 let extract_return_values 
     (store : Value_set_abstraction.t Variable.Map.t) 
   : Value_set_abstraction.t list =
@@ -247,19 +248,14 @@ let extract_return_values
       ~f:(fun v -> match v with
           | Variable.Var Var.Return _ -> Variable.Map.find store v
           | _ -> None)
-        
-  
-  (* match ret_vars with
-  | [] -> None
-  | [ret] -> Variable.Map.find store ret
-  | _ -> Log.error "Functions with multiple returns not yet implemented"; failwith "" *)
 
-(** Apply a callee summary to a caller state.
+(** [apply ~summary ~state ~args ~return_variables] applies a callee summary to
+    a caller state.
 
-    The summary is first rewritten with the caller's actual globals and
-    arguments. Accessed memory is recorded, memory areas written by the summary
-    are removed from the caller state, then summary globals, memory cells,
-    return value, and memory size are merged into the caller state. *)
+    The summary is rewritten with caller globals and arguments. Written memory
+    invalidates overlapping caller memory, accessed memory is recorded, and
+    summary globals, memory cells, return values, and memory size are merged
+    into the caller state. *)
 let apply 
     ~(summary : t) 
     ~(state : Abstract_store_domain.t) 
@@ -318,7 +314,7 @@ let apply
   let state = { Abstract_store_domain.abstract_store = store; 
                 store_operations = RICSet.union summary.store_operations state.store_operations;
                 unreachable = state.unreachable || summary.unreachable } in
-  (* Up to this point, the affected memory areas have been earased and the lists of affected/accessed addresses have been updated *)
+  (* Affected memory areas have been erased, and affected/accessed addresses have been updated. *)
   (* Update globals: *)
   let state = 
     summary.abstract_store 
@@ -335,22 +331,11 @@ let apply
       ~f:(fun ~key ~data acc -> 
         Abstract_store_domain.set acc ~var:key ~vs:data)
     |> Abstract_store_domain.remove_pointers_to_top in
-  (* Set return values: *)
-  (* (match extract_return_value summary.abstract_store, return_variable with
-  | Some vs, Some return_variable -> Abstract_store_domain.set state ~var:(Variable.Var return_variable) ~vs
-  | None, None -> state
-  | None, Some _ -> (Log.error "Summary is providing no return variable, but the calling state is expecting one."; assert false)
-  | Some _, None -> (Log.error "Summary is providing a return variable, but the calling state is expecting none."; assert false)) *)
   (return_variables,
   summary.abstract_store |> extract_return_values)
   |>> List.fold2_exn
     ~init:state 
     ~f:(fun state ret value -> state |> Abstract_store_domain.set ~var:(Variable.Var ret) ~vs:value)
-  (* let test = (summary.abstract_store |> extract_return_values,
-  return_variables) in
-  test
-  |>>   *)
-  (* | _ -> assert false TODO: error message? *)
   |> Abstract_store_domain.update_memory_size ~summary
 
 

@@ -342,17 +342,24 @@ let rec population_count (vs : t) : t =
     ValueSet (RIC.ric (1l, Int (Int32.of_int_exn min), Int (Int32.of_int_exn max), ("", 0l)))
 
 
+(** [may_be_false x] returns [true] when [x] may represent zero. *)
 let may_be_false : t -> bool = function
   | ValueSet vs
   | Boolean {numeric_value = vs; _} -> RIC.may_be_false vs
   | Bitfield bf -> Bitfield.may_be_false bf
 
+(** [may_be_true x] returns [true] when [x] may represent a non-zero value. *)
 let may_be_true : t -> bool = function
   | ValueSet vs
   | Boolean {numeric_value = vs; _} -> RIC.may_be_true vs
   | Bitfield bf -> Bitfield.may_be_true bf
 
 
+(** [compare_values var1 var2 vs1_true vs1_false vs2_true vs2_false]
+    builds the abstract boolean result of a comparison. The result is true
+    when both true refinements are non-bottom, and false when both false
+    refinements are non-bottom. Non-constant variables keep their branch
+    refinements in the Boolean domain. *)
 let compare_values
     (var1 : Var.t)
     (var2 : Var.t)
@@ -383,6 +390,9 @@ let compare_values
     Boolean {true_or_false; numeric_value}
 
 
+(** [less_or_equal (var1, vs1) (var2, vs2)] implements [var1 <= var2].
+    Comparable offsets produce a Boolean with branch refinements; otherwise
+    the result is approximated as either true or false. *)
 let less_or_equal (var1, vs1 : Var.t * RIC.t) (var2, vs2 : Var.t * RIC.t) : t =
   if not (RIC.comparable_offsets vs1 vs2) then
     ValueSet RIC.(join one zero)
@@ -397,6 +407,9 @@ let less_or_equal (var1, vs1 : Var.t * RIC.t) (var2, vs2 : Var.t * RIC.t) : t =
     let vs2_false = RIC.meet vs2 vs1_neg in
     compare_values var1 var2 vs1_true vs1_false vs2_true vs2_false
 
+(** [less_than (var1, vs1) (var2, vs2)] implements [var1 < var2].
+    Comparable offsets produce a Boolean with branch refinements; otherwise
+    the result is approximated as either true or false. *)
 let less_than (var1, vs1 : Var.t * RIC.t) (var2, vs2 : Var.t * RIC.t) : t =
   if not (RIC.comparable_offsets vs1 vs2) then
     ValueSet RIC.(join one zero)
@@ -411,6 +424,9 @@ let less_than (var1, vs1 : Var.t * RIC.t) (var2, vs2 : Var.t * RIC.t) : t =
     let vs2_false = RIC.meet vs2 vs1_neg in
     compare_values var1 var2 vs1_true vs1_false vs2_true vs2_false
 
+(** [are_equal_or_not ~not_equal (var1, vs1) (var2, vs2)] implements equality
+    when [not_equal] is [false], and disequality when [not_equal] is [true].
+    Singleton operands refine the false branch by removing the compared value. *)
 let are_equal_or_not ?(not_equal : bool = false) (var1, vs1 : Var.t * RIC.t) (var2, vs2 : Var.t * RIC.t) : t =
   if not (RIC.comparable_offsets vs1 vs2) then
     ValueSet RIC.(join one zero)

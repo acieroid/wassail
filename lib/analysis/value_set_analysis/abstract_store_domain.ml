@@ -746,6 +746,10 @@ let load
       (Value.to_string loaded_value);
     set state ~var:result ~vs:loaded_value
 
+
+(** [unary_op state annotation_before op op_string result] applies the unary
+    operation [op] to the value at the top of the stack and stores the result in
+    [result]. *)
 let unary_op 
     (state : t) 
     (annotation_before : Spec_domain.t) 
@@ -759,7 +763,12 @@ let unary_op
   Print_trace.print "\t%s (%s) -> %s\n" op_string (Value.to_string vs) (Value.to_string result);
   state |> set ~var:return ~vs:result
 
-let memory_copy (state : t) (annotation_before : Spec_domain.t) : t =
+(** [memory_copy state annotation_before] interprets Wasm [memory.copy].
+
+    Precise memory-copy semantics are not implemented yet. This function is
+    currently unused by the analysis and exists only as a placeholder for a
+    future implementation. *)
+  let memory_copy (state : t) (annotation_before : Spec_domain.t) : t =
   let _dest, _src, len =
     match (Spec_domain.get_or_fail annotation_before).vstack with
     | dest :: src :: len :: _ -> 

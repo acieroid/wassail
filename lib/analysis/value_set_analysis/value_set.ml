@@ -1,3 +1,9 @@
+(** Entry points for the value-set analysis.
+
+    This module wires the value-set transfer function to the generic intra- and
+    interprocedural analysis engines, initializes summaries, applies summaries at
+    call sites, and exposes the main analysis functions used by Wassail. *)
+
 open Core
 open Helpers
 
@@ -14,6 +20,8 @@ struct
   module Transfer = TransferFunction
   type extra = TransferFunction.summary Int32Map.t
 
+  (** [analyze_call module_ cfg instr state summaries] applies the effect of
+    [instr] to [state] using the available function summaries. *)
   let analyze_call
       (module_ : Wasm_module.t)
       (_cfg : Transfer.annot_expected Cfg.t)
@@ -62,6 +70,11 @@ end
 module Intra = Intra.MakeSumm(TransferFunction)(ValueSetCallAdapter)
 module Inter = Inter.MakeSummaryBased(TransferFunction)(Intra)
 
+(** [analyze_intra module_ schedule] runs the summary-based intraprocedural
+    value-set analysis following [schedule].
+
+    Each analyzed function returns its summary and, when available, its annotated
+    value-set CFG. *)
 let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t option) Int32Map.t =
   Analysis_helpers.mk_intra
     (fun cfgs wasm_mod ->
@@ -72,15 +85,15 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
       (* Run the value-set analysis *)
       let annotated_cfg = (* Relational.Transfer.dummy_annotate  *) cfg in
       let summaries = Int32Map.map data ~f:fst in
-      (* let (result_cfg, value_set_summary) = Intra.analyze wasm_mod annotated_cfg summaries in *)
       let result_cfg = Intra.analyze wasm_mod annotated_cfg summaries in
       let value_set_summary = TransferFunction.extract_summary wasm_mod annotated_cfg result_cfg in
       (value_set_summary, Some result_cfg))
 
-(* let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec_cfg : Spec_domain.t Cfg.t) : Domain.t Cfg.t =
-  let rel_cfg = (* Relational.Transfer.dummy_annotate *) spec_cfg in
-  Intra.analyze wasm_mod rel_cfg summaries *)
+(** [analyze_inter module_ schedule] runs the summary-based interprocedural
+    value-set analysis over the SCCs in [schedule].
 
+    Each result contains the original spec CFG, the value-set CFG, and the final
+    summary. *)
 let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t * Abstract_store_domain.t Cfg.t * Summary.t) Int32Map.t =
   Analysis_helpers.mk_inter
     (fun _cfgs _wasm_mod -> Int32Map.empty)
@@ -95,22 +108,25 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
           ~init:summaries
           ~f:(fun summaries desc ->
               Int32Map.set summaries ~key:desc.idx ~data:(Summary.of_import desc.idx desc.name wasm_mod.nglobals desc.arguments desc.returns)) in
-      let _ =
-        let oc = Out_channel.create ~append:true "store_types.txt" in
-        Out_channel.close oc
-      in
-      let results = Inter.analyze wasm_mod ~cfgs:annotated_scc ~summaries:summaries' in
-      Int32Map.mapi results ~f:(fun ~key:idx ~data:(value_set_cfg, summary) ->
+      Inter.analyze wasm_mod ~cfgs:annotated_scc ~summaries:summaries'
+      |> Int32Map.mapi ~f:(fun ~key:idx ~data:(value_set_cfg, summary) ->
           let spec_cfg = Int32Map.find_exn scc idx in
           (spec_cfg, value_set_cfg, summary)))
       
+(** [analyze_inter_classical module_ entry] runs the classical interprocedural
+    value-set analysis from [entry]. *)
 let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Domain.t Icfg.t =
   ClassicalInter.analyze module_ (Analysis_helpers.mk_inter_classical module_ entry)
 
-
+(** Result of [run_pointer_analysis]: the value-set CFG, the propagated spec
+    instructions, and the computed summaries. 
+    
+    This type is used by the slicer. *)
 type pointer_analysis = 
   Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Domain.t Int32Map.t
 
+(** [run_pointer_analysis module_ cfg funidx] runs the analysis on function [funidx], 
+    needed by other WASSAIL tools, namely the slicer. *)
 let run_pointer_analysis 
     (module_ : Wasm_module.t) 
     (cfg : unit Cfg.t) 

@@ -17,8 +17,9 @@ module Make (*: Transfer.TRANSFER *) = struct
   (* We need the variable names as annotations *)
   type annot_expected = Spec_domain.t
 
-  (** [init cfg] initializes the abstract state using the function argument and global variables from [cfg]. *)
-  (* let init (cfg : 'a Cfg.t) : state = *)
+  (** [init module_ funcinst] builds the initial value-set state for [funcinst].
+      I32 arguments and globals receive relative RIC values, I32 locals start at
+      zero, other values are set to top, and memory is initialized to top. *)
   let init (module_ : Wasm_module.t) (funcinst : Func_inst.t) : State.t =
     let arg_types, _ = funcinst.typ in
     let nb_of_arguments = Func_inst.nargs funcinst in
@@ -51,8 +52,12 @@ module Make (*: Transfer.TRANSFER *) = struct
       store_operations = RICSet.empty;
       unreachable = false }
 
+  (** [join_state s1 s2] joins two abstract states. *)
   let join_state : State.t -> State.t -> State.t = State.join
 
+  (** [is_this_the_value_of spec_state ~value ~of_this_variable] checks whether
+      [value] is the current SSA value associated with the given local or global
+      in [spec_state]. *)
   let is_this_the_value_of 
       (state : Spec_domain.SpecWithoutBottom.t) 
       ~(value : Variable.t) 
@@ -71,7 +76,9 @@ module Make (*: Transfer.TRANSFER *) = struct
         false
     | _ -> false
 
-  (** [data_instr_transfer m cfg i state] performs the abstract transfer function for a data instruction [i] on [state]. *)
+  (** [data module_ cfg i state] applies the value-set transfer function for one
+      data instruction. It updates variables, memory, and traces according to
+      the instruction semantics. *)
   let data
       (_module_ : Wasm_module.t)
       (_cfg : annot_expected Cfg.t)
@@ -83,15 +90,19 @@ module Make (*: Transfer.TRANSFER *) = struct
       state)
     else
       (Print_trace.print "%d:\t%s\n" i.line_number (Instr.data_to_string i.instr);
+      (** [ret i] returns the SSA variable produced by data instruction [i]. *)
       let ret (i : annot_expected Instr.labelled_data) : Variable.t = 
         match (Spec_domain.get_or_fail i.annotation_after).vstack with
         | ret :: _ -> Variable.Var ret
         | [] -> assert false
       in
+      (** [invalid_pointer_value type_ variable] assigns top to [variable] when the
+      value is a non-I32 value. *)
       let invalid_pointer_value (type_ : string) (variable : Variable.t) : State.t =
         Print_trace.print "\tinvalid pointer type: %s\n" type_;
         State.to_top_RIC state variable
       in
+      (** [set variable] assigns the top stack value to [variable]. *)
       let set (variable : Variable.t) : State.t =
         let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
         begin match top_of_stack with
@@ -160,8 +171,8 @@ module Make (*: Transfer.TRANSFER *) = struct
             if Value.may_be_true cond_vs then
               y_vs
             else
-              (Log.error "Select: condition can't be true nor false";
-              assert false )(* bottom condition is unreachable *)
+              (* bottom condition is unreachable *)
+              (Log.error "Select: condition can't be true nor false"; assert false )
         in
         Print_trace.print "\t\tcondition: %s\n\t\tvalue if false: %s\n\t\tvalue if true: %s\n\t\tresult: %s\n"
           (Value.to_string cond_vs)
@@ -201,7 +212,6 @@ module Make (*: Transfer.TRANSFER *) = struct
         | { op = Xor; typ = I32 } -> State.xor_ state (Variable.Var x) (Variable.Var y) result
         | { op = Add; typ = I32 } -> State.i32_add state (Variable.Var x) (Variable.Var y) result
         | { op = Sub; typ = I32 } -> State.i32_sub state ~subtract_this:(Variable.Var x) ~from:(Variable.Var y) result
-        | { typ = I32; _ } 
         | _ -> (* other operations result in a pointer that can point anywhere *)
           Print_trace.print "\tthis type of binary operation results in a pointer that can point anywhere";
           State.to_top_RIC state result
@@ -346,6 +356,9 @@ module Make (*: Transfer.TRANSFER *) = struct
         state |> State.set ~var:(ret i) ~vs:top)
 
 
+  (** [apply_condition state ~condition spec_state] splits [state] according to
+      a boolean condition. It returns the states for the true and false branches,
+      applying the refinements carried by the boolean value. *)
   let apply_condition 
       (state : State.t) 
       ~(condition : Variable.t * Boolean.t)
@@ -405,10 +418,11 @@ module Make (*: Transfer.TRANSFER *) = struct
 
 
 
-  (** [control_instr_transfer m summaries cfg i state] performs the abstract transfer function for a control instruction [i]. *)
+  (** [control module_ cfg i state] applies the value-set transfer function for
+      one control instruction. Branching instructions return refined true and
+      false states; other instructions return a single successor state. *)
   let control
       (_module_ : Wasm_module.t) (* The wasm module (read-only) *)
-      (* (summaries : summary Int32Map.t) *)
       (cfg : annot_expected Cfg.t) (* The CFG analized *)
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : State.t) (* the pre-state *)
@@ -462,6 +476,8 @@ module Make (*: Transfer.TRANSFER *) = struct
     | Unreachable -> `Simple  { State.bottom with unreachable = true }
     | _ -> `Simple state
 
+  (** [apply_summary module_ f arity i state summary] applies [summary] at a call
+      to function [f], using the current stack arguments and return variables. *)
   let apply_summary 
       (_module_ : Wasm_module.t)
       (f : Int32.t) 
@@ -482,12 +498,15 @@ module Make (*: Transfer.TRANSFER *) = struct
       ~args
       ~return_variables
 
+  (** [merge_variables module_ cfg block predecessors state] assigns merged SSA
+      variables at [block]. Values coming from unreachable predecessors are
+      ignored. *)
   let merge_variables
       (module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t) 
       (block : annot_expected Basic_block.t)
-      (state : State.t)
       (predecessors : ('a Basic_block.t * State.t) list)
+      (state : State.t)
     : State.t =
     Spec_inference.new_merge_variables_with_origin module_ cfg block
     |> List.filter_map ~f:(fun (pred_idx, old_var, merge_var) ->
@@ -507,7 +526,9 @@ module Make (*: Transfer.TRANSFER *) = struct
     |> List.fold ~init:state ~f:(fun acc (v, vs) -> State.set acc ~var:v ~vs)
 
 
-  (** [merge_flows m cfg block states] merges incoming flows into [block], handling stack merging at control points. *)
+  (** [merge_flows module_ cfg block predecessors] computes the input state of
+      [block] from its predecessor states. Merge, entry, and return blocks join
+      their predecessors; ordinary blocks must have a single predecessor. *)
   let merge_flows 
       (module_ : Wasm_module.t) 
       (cfg : annot_expected Cfg.t) 
@@ -522,72 +543,78 @@ module Make (*: Transfer.TRANSFER *) = struct
       begin match block.content with
       | Control { instr = Merge; _ }
       | Entry | Return _ ->
-        if !Value_set_options.print_trace then print_endline ("======================================================= " ^ (if IntSet.mem cfg.loop_heads block.idx then "LOOP HEAD" else "MERGE") ^ ": Control block #" ^ string_of_int block.idx);
-        let states' = List.map ~f:snd predecessors in
-        (* Join all previous states: *)
-        let new_state_without_merges = List.reduce_exn states' ~f:join_state in 
-        merge_variables module_ cfg block new_state_without_merges predecessors
+        Print_trace.print "======================================================= %s: Control block #%d\n"
+          (if IntSet.mem cfg.loop_heads block.idx then "LOOP HEAD" else "MERGE") block.idx;
+        predecessors
+        |> List.map ~f:snd
+        |> List.reduce_exn ~f:join_state
+        |> merge_variables module_ cfg block predecessors
       | Control _ ->
-        if !Value_set_options.print_trace then print_endline ("======================================================= CONTROL BLOCK #" ^ string_of_int block.idx);
+        Print_trace.print "======================================================= CONTROL BLOCK #%d\n" block.idx;
         begin match predecessors with
-        | (_, s) :: [] -> s
-        | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
+        | [(_, s)] -> s
+        | _ -> Log.error (Printf.sprintf "Invalid block with multiple input states: %d" block.idx); assert false
         end
       | _ -> 
-        if !Value_set_options.print_trace then print_endline ("======================================================= DATA BLOCK #" ^ string_of_int block.idx);
+        Print_trace.print "======================================================= DATA BLOCK #%d\n" block.idx;
         begin match predecessors with
-        | (_, s) :: [] -> s
-        | _ -> failwith (Printf.sprintf "Invalid block with multiple input states: %d" block.idx)
+        | [(_, s)] -> s
+        | _ -> Log.error (Printf.sprintf "Invalid block with multiple input states: %d" block.idx); assert false
         end
       end
     
 
 
-  (** [summary cfg out_state] computes the value-set summary for a function using its [cfg] and final [out_state]. *)
-  (* TODO: refactor this into value_set_summary *)
+  (** [summary cfg out_state] builds the summary of [cfg] from its final state.
+      If the exit annotation is bottom, the function summary is bottom. *)
   let summary (cfg : annot_expected Cfg.t) (out_state : State.t) : summary =
-    if !Value_set_options.print_trace then print_endline "======================================================= SUMMARY";
-    if !Value_set_options.print_trace then print_endline ("END STATE:\t" ^ Abstract_store_domain.to_string out_state);
-    (* let init_spec = (Spec_inference.init_state cfg) in *)
     let function_summary =
-      (* match Cfg.state_after_block cfg cfg.exit_block init_spec with *)
       match (Cfg.find_block_exn cfg cfg.exit_block).annotation_after with
       | Bottom ->
         (* The function exit is likely unreachable, so we use a bottom summary *)
-        Value_set_summary.bottom cfg Var.Set.empty
+        Summary.bottom cfg Var.Set.empty
       | NotBottom _ ->
-        Value_set_summary.make out_state
+        Summary.make out_state
     in
-    if !Value_set_options.print_trace then print_endline ("SUMMARY:\n" ^ Value_set_summary.to_string function_summary);
+    Print_trace.print "======================================================= SUMMARY\nEND STATE:\t%s\nSUMMARY:%s\n"
+      (State.to_string out_state) (Summary.to_string function_summary);
     function_summary
 
-  (** [extract_summary cfg analyzed_cfg] extracts a value-set summary from the final result of the analysis. *)
+  (** [extract_summary module_ cfg analyzed_cfg] extracts the final abstract
+      state of [cfg] from [analyzed_cfg] and turns it into a summary. *)
   let extract_summary 
       (_module_ : Wasm_module.t)
       (cfg : annot_expected Cfg.t)
       (analyzed_cfg : State.t Cfg.t)
     : summary =
-    (* let out_state = Cfg.state_after_block analyzed_cfg cfg.exit_block (init_state cfg) in *)
-    let out_state = (Cfg.find_block_exn analyzed_cfg cfg.exit_block).annotation_after in
-    summary cfg out_state
+    (Cfg.find_block_exn analyzed_cfg cfg.exit_block).annotation_after
+    |> summary cfg
 
-  (** This is only used in a classical inter analysis. The state doesn't change upon calling a function. *)
+  (** [call_inter module_ cfg instr state] handles calls in the classical
+      interprocedural analysis. It only logs the call and leaves [state]
+      unchanged. *)
   let call_inter
       (_module_ : Wasm_module.t)
       (_cfg : annot_expected Cfg.t)
       (instr : annot_expected Instr.labelled_call)
       (state : State.t)
     : State.t =
-    let instr_string = Instr.call_to_string instr.instr in
-    if !Value_set_options.print_trace then print_endline (string_of_int instr.line_number ^ ":\t" ^ instr_string);
+    instr.instr
+    |> Instr.call_to_string
+    |> Print_trace.print "%d:\t%s" instr.line_number;
     state
   
+  (** [entry module_ cfg state] propagates the state at function entry. *)
   let entry (_module_ : Wasm_module.t) (_cfg : annot_expected Cfg.t) (state : State.t) : State.t =
-    state (* Everything is actually already done by spec analysis! We can just propagate the state *)
+    state (* Everything is actually already done by spec analysis! We can simply propagate the state *)
 
+  (** [return module_ cfg instr state_before_call state_after_call] propagates the
+      state after returning from a call. *)
   let return (_module : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : annot_expected Instr.labelled_call) (_state_before_call : State.t) (state_after_call : State.t) : State.t =
     state_after_call
 
+  (** [imported module_ desc annot_before annot_after state] applies a conservative
+      summary for an imported function. *)
   let imported
       (module_ : Wasm_module.t)
       (desc : Wasm_module.func_desc)
@@ -608,14 +635,9 @@ module Make (*: Transfer.TRANSFER *) = struct
           match annot_after with
           | Bottom -> assert false
           | NotBottom spec_after ->
-            List.take spec_after.vstack (List.length desc.returns) 
+            desc.returns |> List.length |> List.take spec_after.vstack 
         in
-        Summary.apply 
-          ~summary
-          ~state
-          ~args:[]
-          ~return_variables
+        Summary.apply ~summary ~state ~args:[] ~return_variables
       )
     )
-
 end
