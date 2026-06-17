@@ -81,6 +81,12 @@ let to_string (x : t) : string =
     use their own join; mixed-domain operands fall back to RIC. *)
 let join (x : t) (y : t) : t =
   match x, y with
+  | ValueSet Bottom, other
+  | Bitfield Bottom, other 
+  | Boolean {numeric_value=RIC.Bottom; _}, other
+  | other, ValueSet Bottom 
+  | other, Bitfield Bottom
+  | other, Boolean {numeric_value=RIC.Bottom; _} -> other
   | ValueSet x, ValueSet y
   | ValueSet x, Boolean {numeric_value = y; _} 
   | Boolean {numeric_value = x; _}, ValueSet y -> ValueSet (RIC.join x y)

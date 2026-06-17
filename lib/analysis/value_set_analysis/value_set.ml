@@ -29,7 +29,7 @@ struct
       (state : Transfer.State.t)
       (summaries : extra)
     : Transfer.State.t =
-    if !Value_set_options.print_trace then print_endline (string_of_int instr.line_number ^ ":\t" ^ Instr.call_to_string instr.instr);
+    Print_trace.print "%d:\t%s\n" instr.line_number (Instr.call_to_string instr.instr);
     let apply_summary f arity state =
       match Map.find summaries f with
       | None ->
@@ -2895,6 +2895,282 @@ let%test_module "value-set tests" = (module struct
     check_value exit_state
       (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.Top)
+
+  let%test "store.records.store_operations.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 0
+          i32.const 42
+          i32.store
+
+          i32.const 0
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[store.records.store_operations.wat]";
+    let actual = Domain.store_operations_to_string exit_state in
+    let passed = String.(actual = "-3; -2; -1; 0; 1; 2; 3") in
+    Printf.printf "\tstore_operations: %s\n" actual;
+    passed
+
+
+  let%test "i32.load" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          i32.const 0
+          i32.const 14
+          i32.store
+
+          i32.const 4
+          local.get $x
+          i32.eqz
+          i32.store
+
+          i32.const 8
+          i32.const 67
+          i32.store
+
+          local.get $x
+          if (result i32)
+            i32.const 0
+          else
+            i32.const 4
+          end
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[i32.load]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.(ric (1l, Int 0l, Int 14l, ("", 0l))))
+
+  let%test "i32.load->Top" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          i32.const 0
+          i32.const 14
+          i32.store
+
+          i32.const 4
+          local.get $x
+          i32.eqz
+          i32.store
+
+          local.get $x
+          if (result i32)
+            i32.const 0
+          else
+            i32.const 5
+          end
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[i32.load->Top]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.Top)
+
+  let%test "unreachable branch" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+          i32.const 0
+          i32.eqz
+          if (result i32)
+            i32.const 14
+          else
+            i32.const 42
+          end
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[unreachable branch]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.(constant 14l))
+
+  let%test "unknown eqz" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $x i32) (result i32)
+            local.get $x
+            i32.eqz
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[unknown eqz]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (Boolean {numeric_value=RIC.(join one zero); 
+                true_or_false = Variable.Map.empty |> Variable.Map.set ~key:(Variable.Var (Var.Local 0)) ~data:{Boolean.True_or_false.true_=RIC.zero; false_=RIC.(relative_ric "l0")} })
+
+  let%test "boolean join" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $y i32) (result i32) (local $x i32)
+          local.get $y
+          if 
+            i32.const 14
+            local.set $x
+          else
+            i32.const 0
+            local.set $x
+          end
+
+          local.get $y
+          if (result i32)
+            local.get $x
+            i32.eqz
+          else
+            local.get $x
+            if (result i32)
+              i32.const 26
+            else
+              i32.const 3
+            end
+            local.get $x
+            i32.lt_s
+          end
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[boolean join]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.(ric (1l, Int 0l, Int 1l, ("", 0l))))
+
+  let%test "function_call.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+        (global $g (mut i32) (i32.const 0))
+
+        ;; Function that increments g by 166, stores 14 at address g, and adds 42 to its argument
+        (func $add42 (param $x i32) (result i32)
+          ;; Increment global g by 166
+          global.get $g
+          i32.const 166
+          i32.add
+          global.set $g
+
+          ;; store 14 at address 14
+          ;; i32.const 42
+          global.get $g
+          i32.const 14
+          i32.store
+
+          ;; Add 42 to the argument and return
+          local.get $x
+          i32.const 42
+          i32.add
+          return)
+
+        ;; Main function that increments global g and calls add42(10)
+        (func $main (result i32)
+          global.get $g
+          i32.const 99
+          i32.store
+
+          ;; Call add42 with 10
+          i32.const 10
+          call $add42
+          return)
+
+        ;; Export the main function
+        (export \"main\" (func $main))
+      )"
+      |> analyze [0l; 1l] 1l
+    in
+    test_label "[function_call.wat]";
+    check_value exit_state
+      (Variable.Mem RIC.(ric (0l, Int 0l, Int 0l, ("g0", 166l))))
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (Variable.Var (Var.Return (1l, 0l)))
+      (ValueSet RIC.(constant 52l))
+    && check_value exit_state
+      (Variable.Var (Var.Global 0))
+      (ValueSet RIC.(constant 166l + relative_ric "g0"))
+
+  let%test "function_call.wat main only" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+        (global $g (mut i32) (i32.const 0))
+        (global $g1 (mut i32) (i32.const 0))
+
+        ;; Function that increments g by 166, stores 14 at address g, and adds 42 to its argument
+        (func $add42 (param $x i32) (result i32)
+          ;; Increment global g by 166
+          global.get $g
+          i32.const 166
+          i32.add
+          global.set $g
+
+          ;; store 14 at address 14
+          ;; i32.const 42
+          global.get $g
+          i32.const 14
+          i32.store
+
+          ;; Add 42 to the argument and return
+          local.get $x
+          i32.const 42
+          i32.add
+          return)
+
+        ;; Main function that increments global g and calls add42(10)
+        (func $main (result i32)
+          global.get $g
+          i32.const 99
+          i32.store
+
+          ;; Call add42 with 10
+          i32.const 10
+          call $add42
+          return)
+
+        ;; Export the main function
+        (export \"main\" (func $main))
+      )"
+      |> analyze [1l] 1l
+    in
+    test_label "[function_call.wat main only]";
+    check_value exit_state
+      (Variable.Mem RIC.(ric (0l, Int 0l, Int 0l, ("g0", 166l))))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Var (Var.Return (1l, 0l)))
+      (ValueSet RIC.(constant 52l))
+    && check_value exit_state
+      (Variable.Var (Var.Global 0))
+      (ValueSet RIC.(constant 166l + relative_ric "g0"))
+    
+
+  (* Add next test here *)
 
   (* let%test "keep false when working" = false *)
 

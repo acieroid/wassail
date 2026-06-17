@@ -128,7 +128,7 @@ module ExtendedInt = struct
     | Int 0l, _ | _, Int 0l -> Int 0l
     | Infinity, i | i, Infinity -> if is_positive i then Infinity else NegInfinity
     | NegInfinity, i | i, NegInfinity -> if is_negative i then Infinity else NegInfinity
-    | Int x, Int y -> Int (Int32.(x * y))
+    | Int x, Int y -> Int Int32.(x * y)
 
   let ( * ) = times
   
@@ -190,10 +190,10 @@ let rec gcd (a : int32) (b : int32) : int32 =
     arithmetic, so intermediate products may overflow.  In the intended use
     cases, moduli are expected to be positive. *)
 let lcm (a : int32) (b : int32) : int32 =
-  if Int32.equal a 0l || Int32.equal b 0l then 
+  if Int32.(a = 0l) || Int32.(b = 0l) then 
     0l
   else 
-    Int32.abs (Int32.((a * b) / (gcd a b)))
+    Int32.(abs ((a * b) / (gcd a b)))
 
 
 (** Extended Euclid.
@@ -203,7 +203,7 @@ let lcm (a : int32) (b : int32) : int32 =
     @return a triple [(d, x, y)]. *)
 let extended_gcd (a : int32) (b : int32) : int32 * int32 * int32 =
   let rec aux (a : int32) (b : int32) x0 x1 y0 y1 =
-    if Int32.equal b 0l then 
+    if Int32.(b = 0l) then 
       (a, x0, y0)
     else
       let q = Int32.(a / b) in
@@ -220,7 +220,7 @@ let extended_gcd (a : int32) (b : int32) : int32 * int32 * int32 =
     @raise Division_by_zero if one of the moduli is zero. *)
 let chinese_remainder (a : int32) (b : int32) (a' : int32) (b' : int32) : int32 * int32 =
   let d = gcd a a' in
-  if not (Int32.equal (Int32.((b - b') % d)) 0l) then
+  if Int32.((b - b') % d <> 0l) then
     failwith "Incompatible congruences"
   else
     let a1 = Int32.(a / d) in

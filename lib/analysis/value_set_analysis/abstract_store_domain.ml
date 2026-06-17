@@ -21,7 +21,7 @@ type t = {
   store_operations : RICSet.t;
   unreachable : bool
 }
-[@@deriving sexp, compare, equal]
+[@@deriving sexp, compare]
 
 (** [extract_memory_variables store] returns the memory variables present in [store]. *)
 let extract_memory_variables (store : t) : Variable.t list =
@@ -41,31 +41,28 @@ let get (store : t) ~(var : Variable.t) : Value.t =
   match Variable.Map.find store.abstract_store var with
     | Some value -> value
     | None ->
-      ValueSet 
-        (match var with
-        | Accessed -> RIC.Bottom
-        | MemorySize -> RIC.positive_integers
-        | Var Const I32 n -> RIC.constant n
-        | Var Const _ -> RIC.Top
-        | Var _ -> RIC.Bottom
-        | Mem _ ->
-          let mems = extract_memory_variables store in
-          if Variable.is_covered ~by:mems var then
-            mems
-            |> List.fold 
-                ~init:RIC.Bottom
-                ~f:(fun acc m -> 
-                  if Variable.share_addresses m var then
-                    match (Variable.Map.find_exn store.abstract_store m) with
-                    | ValueSet vs -> RIC.join acc vs
-                    | Boolean b -> RIC.join acc (b.numeric_value)
-                    | Bitfield bf -> RIC.(bf |> of_bitfield |> join acc)
-                  else if Variable.comparable_offsets m var then
-                    acc
-                  else
-                    RIC.Top)
-          else
-            RIC.Top)
+      (match var with
+      | Accessed -> ValueSet RIC.Bottom
+      | MemorySize -> ValueSet RIC.positive_integers
+      | Var Const I32 n -> ValueSet (RIC.constant n)
+      | Var Const _ -> ValueSet RIC.Top
+      | Var _ -> ValueSet RIC.Bottom
+      | Mem _ ->
+        let mems = extract_memory_variables store in
+        if Variable.is_covered ~by:mems var then
+          mems
+          |> List.fold 
+              ~init:(Value.ValueSet RIC.Bottom)
+              ~f:(fun acc m -> 
+                if Variable.share_addresses m var then
+                  (Variable.Map.find_exn store.abstract_store m)
+                  |> Value.join acc
+                else if Variable.comparable_offsets m var then
+                  acc
+                else
+                  ValueSet RIC.Top)
+        else
+          ValueSet RIC.Top)
 
 (** [equal store1 store2] returns [true] iff [store1] and [store2]
     represent the same abstract state.
@@ -78,7 +75,7 @@ let equal (store1 : t) (store2 : t) : bool =
   (store1.abstract_store |> Variable.Map.key_set,
     store2.abstract_store |> Variable.Map.key_set)
   |>> Set.union
-  |> Set.fold ~init:true ~f:(fun acc var -> acc && Value_set_abstraction.(get store1 ~var = get store2 ~var))
+  |> Set.fold ~init:true ~f:(fun acc var -> acc && Value.(get store1 ~var = get store2 ~var))
   &&
   RICSet.equal store1.store_operations store2.store_operations
   
@@ -144,8 +141,8 @@ let to_string_without_bottoms (vs : t) : string =
       ~f:(fun d ->
         match d with
         | Boolean _ -> true
-        | ValueSet d -> not (RIC.equal RIC.Bottom d)
-        | Bitfield bf -> not (Bitfield.equal Bitfield.Bottom bf)) in
+        | ValueSet d -> RIC.(d <> Bottom)
+        | Bitfield bf -> Bitfield.(bf <> Bottom)) in
     to_string { abstract_store = restricted; store_operations = vs.store_operations; unreachable = vs.unreachable }
 
 let store_operations_to_string (s : t) : string =
@@ -244,8 +241,7 @@ let set (store : t) ~(var : Variable.t) ~(vs : Value.t) : t =
         Variable.(k <> var && share_addresses k var))
   in
   if is_invalid then
-    (Log.error "trying to update a memory variable that overlaps with other memory variables";
-    failwith "error: trying to update a memory variable that overlaps with other memory variables")
+    (Log.error "trying to update a memory variable that overlaps with other memory variables"; assert false)
   else
     let store = 
       if Variable.is_linear_memory var then
@@ -333,17 +329,10 @@ let join (store1 : t) (store2 : t) : t =
     let store1 = make_compatible ~this_store:store1 ~relative_to:store2 in
     let store2 = make_compatible ~this_store:store2 ~relative_to:store1 in
     { abstract_store =
-      Variable.Map.merge store1.abstract_store store2.abstract_store ~f:(fun ~key:var v -> 
-          match v with
-          | `Both (ValueSet x, ValueSet y) -> Some (Value.ValueSet (RIC.join x y))
-          | `Both (Boolean x, Boolean y) -> Some (Boolean (Boolean.join x y))
-          | `Both (Bitfield x, Bitfield y) -> Some (Bitfield (Bitfield.join x y))
-          | `Both _ | `Left Boolean _ | `Right Boolean _ | `Left Bitfield _ | `Right Bitfield _ -> Some (Value.ValueSet RIC.Top)
-          | `Left ValueSet _ | `Right ValueSet _ ->
-            Some (
-              match (get store1 ~var), (get store2 ~var) with
-              | ValueSet a, ValueSet b -> ValueSet (RIC.join a b)
-              | _ -> assert false));
+      Variable.Map.merge store1.abstract_store store2.abstract_store ~f:(fun ~key:var value -> 
+          match value with
+          | `Both (x, y) -> Some (Value.join x y)
+          | _ -> Some (Value.join (get store1 ~var) (get store2 ~var)));
       store_operations = RICSet.union store1.store_operations store2.store_operations;
       unreachable = false }
     |> remove_pointers_to_top
@@ -378,7 +367,7 @@ let weak_update (store : t) ~(previous_state : t) ~(var : Variable.t) ~(vs : Val
   in
   let memory_variables = extract_memory_variables previous_state in
   let affected_variables = 
-    List.filter ~f:(fun (v, _) -> not (Variable.equal v (Mem RIC.Bottom)))
+    List.filter ~f:(fun (v, _) -> Variable.(v <> Mem RIC.Bottom))
       (List.map ~f:(fun v -> 
           match v with 
           | Var _ | Accessed | MemorySize -> assert false
@@ -572,11 +561,11 @@ let update_memory_size (store : t) ~(summary : t) : t =
 let store_debug (address : Value.t) : unit =
   if !Value_set_options.debug then
       match address with
-      | ValueSet r when RIC.equal RIC.Bottom r -> 
+      | ValueSet r when RIC.(r = Bottom) -> 
         print_endline "Warning: trying to store at address BOTTOM... press enter to continue.";
         let _ = In_channel.input_line_exn In_channel.stdin in
         ()
-      | ValueSet r when RIC.equal r RIC.Top ->
+      | ValueSet r when RIC.(r = Top) ->
         print_endline "Warning: trying to store at address TOP... press enter to continue.";
         let _ = In_channel.input_line_exn In_channel.stdin in
         ()
@@ -639,7 +628,7 @@ let store
         let new_state = truncate_accessed_memory state accessed in
         let added_store_operations = 
           RICSet.filter 
-            ~f:(fun addr -> not (RIC.equal addr RIC.Bottom)) 
+            ~f:(fun addr -> RIC.(addr <> Bottom)) 
             (RICSet.of_list (accessed.fully :: accessed.partially)) 
         in
         let new_state = { abstract_store = new_state.abstract_store; 
@@ -665,7 +654,7 @@ let store
           let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
           let added_store_operations = 
             RICSet.filter 
-              ~f:(fun addr -> not (RIC.equal addr RIC.Bottom)) 
+              ~f:(fun addr -> RIC.(addr <> Bottom)) 
               (RICSet.of_list (accessed.fully :: accessed.partially)) 
           in
           let state = 
@@ -685,7 +674,7 @@ let store
           let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
           let added_store_operations = 
             RICSet.filter 
-              ~f:(fun addr -> not (RIC.equal addr RIC.Bottom)) 
+              ~f:(fun addr -> RIC.(addr <> Bottom)) 
               (RICSet.of_list (accessed.fully :: accessed.partially)) 
           in
           let state = 

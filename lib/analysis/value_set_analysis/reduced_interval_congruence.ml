@@ -120,9 +120,15 @@ module RIC = struct
       | s, l, u, o -> RIC {stride = s; lower_bound = l; upper_bound = u; offset = o}
     )
 
-  let zero = ric (0l, Int 0l, Int 0l, ("", 0l))
+  (** [relative_ric var]
+      Singleton [0] expressed relative to base symbol [var]. *)
+  let relative_ric (var : string) : t =
+    ric (0l, Int 0l, Int 0l, (var, 0l))
 
-  let one = ric (0l, Int 0l, Int 0l, ("", 1l))
+  let of_int32 (i : int32) : t = ric (0l, Int 0l, Int 0l, ("", i))
+  let constant : int32 -> t = of_int32 
+  let zero = constant 0l
+  let one = constant 1l
 
   (** [to_string r]
       Normalized math‑style printer: e.g. ["2[0,3]+(x+1)"] or ["⊤"/"⊥"]. *)
@@ -168,14 +174,6 @@ module RIC = struct
 
   (** All non‑negative integers. *)
   let positive_integers = ric (1l, Int 0l, Infinity, ("", 0l))
-
-  (** [relative_ric var]
-      Singleton [0] expressed relative to base symbol [var]. *)
-  let relative_ric (var : string) : t =
-    ric (0l, Int 0l, Int 0l, (var, 0l))
-
-  let of_int32 (i : int32) : t = ric (0l, Int 0l, Int 0l, ("", i))
-  let constant : int32 -> t = of_int32 
 
   (** [spans_neg_inf_to_pos_inf r]
       [true] iff [r] covers ]−∞,∞[ (or is [Top]). *)
@@ -231,27 +229,27 @@ module RIC = struct
     | Congruence {stride = 0l; offset = o}, Interval {lower_bound = NegInfinity; upper_bound = Infinity} -> ric (0l, Int 0l, Int 0l, o)
     | Congruence {stride = 0l; offset = ("", o)}, Interval {lower_bound = NegInfinity; upper_bound = Int u} -> 
       if Int32.(u >= o) then
-        ric (0l, Int 0l, Int 0l, ("", o))
+        constant o
       else
         Bottom
     | Congruence {stride = 0l; offset = ("", o)}, Interval {lower_bound = Int l; upper_bound = Infinity} -> 
       if Int32.(l <= o) then
-        ric (0l, Int 0l, Int 0l, ("", o))
+        constant o
       else
         Bottom
     | Congruence {stride = 0l; offset = ("", o)}, Interval {lower_bound = Int l; upper_bound = Int u} -> 
       if Int32.(l <= o) && Int32.(u >= o) then
-        ric (0l, Int 0l, Int 0l, ("", o))
+        constant o
       else
         Bottom
-    | Congruence {stride = 0l; offset = (var, _)}, _ when String.is_empty var -> Top
+    | Congruence {stride = 0l; offset = (var, _)}, _ when String.(var <> "") -> Top
     | Congruence {stride = s; offset = (var, o)}, Top -> ric (s, ExtendedInt.NegInfinity, ExtendedInt.Infinity, (var, o))
     | Congruence {stride = s; offset = (var, o)}, Interval {lower_bound = l; upper_bound = u} ->
       if String.is_empty var then
         let lower = 
-          ExtendedInt.divide_ceiling ExtendedInt.(l - Int o) (ExtendedInt.Int s) in
+          ExtendedInt.(divide_ceiling (l - Int o) (ExtendedInt.Int s)) in
         let upper = 
-          ExtendedInt.divide_floor ExtendedInt.(u - Int o) (ExtendedInt.Int s) in
+          ExtendedInt.(divide_floor (u - Int o) (ExtendedInt.Int s)) in
         ric (s, lower, upper, (var, o))
       else
         (* Since the congruence is unknown due to the variable offset, we must include
@@ -2445,7 +2443,7 @@ let%test_module "RIC tests" = (module struct
     let expected = Bitfield.join (Bit {ones = (-8l); zeros = (Int32.shift_right_logical (Int32.shift_left (-8l) 1)1)}) (Bitfield.singleton (-5l)) in
     let result = to_bitfield r in
     print_endline ("[RIC.to_bitfield]     " ^ to_string r ^ " ---to-bitfield---> " ^ Bitfield.to_string result);
-    Bitfield.equal result expected
+    Bitfield.(result = expected)
   
   let%test "to_bitfield_neg_infinity_power_of_two_stride_span_neg_and_pos" =
     let s = 8l and o = -5l in
@@ -2453,7 +2451,7 @@ let%test_module "RIC tests" = (module struct
     let expected = Bitfield.join (Bit {ones = (-8l); zeros = -8l}) (Bitfield.singleton (-5l)) in
     let result = to_bitfield r in
     print_endline ("[RIC.to_bitfield]     " ^ to_string r ^ " ---to-bitfield---> " ^ Bitfield.to_string result);
-    Bitfield.equal result expected
+    Bitfield.(result = expected)
 
   let%test "to_bitfield_neg_infinity_not_power_of_two_stride" =
     let s = 12l and o = -7l in
@@ -2461,7 +2459,7 @@ let%test_module "RIC tests" = (module struct
     let expected = Bitfield.Bit {zeros = 0b01111111111111111111111111111110l; ones = 0b11111111111111111111111111111101l} in
     let result = to_bitfield r in
     print_endline ("[RIC.to_bitfield]     " ^ to_string r ^ " ---to-bitfield---> " ^ Bitfield.to_string result);
-    Bitfield.equal result expected
+    Bitfield.(result = expected)
 
   let%test "to_bitfield_pos_infinity_power_of_two_stride" =
     let s = 8l and o = 3l in
@@ -2469,7 +2467,7 @@ let%test_module "RIC tests" = (module struct
     let expected = Bitfield.Bit {zeros = 0b11111111111111111111111111111100l; ones = 0b01111111111111111111111111111011l} in
     let result = to_bitfield r in
     print_endline ("[RIC.to_bitfield]     " ^ to_string r ^ " ---to-bitfield---> " ^ Bitfield.to_string result);
-    Bitfield.equal result expected
+    Bitfield.(result = expected)
 
 
   let%test "to_bitfield_pos_infinity_power_of_two_stride" =
@@ -2478,7 +2476,7 @@ let%test_module "RIC tests" = (module struct
     let expected = Bitfield.Bit {zeros = 0b1111_1111_1111_1111_1111_1111_1111_1010l; ones = 0b1111_1111_1111_1111_1111_1111_1111_1101l} in
     let result = to_bitfield r in
     print_endline ("[RIC.to_bitfield]     " ^ to_string r ^ " ---to-bitfield---> " ^ Bitfield.to_string result);
-    Bitfield.equal result expected
+    Bitfield.(result = expected)
 
   let%test "to_bitfield_pos_infinity_not_power_of_two_stride" =
     let s = 10l and o = 5l in
@@ -2486,7 +2484,7 @@ let%test_module "RIC tests" = (module struct
     let expected = Bitfield.Bit {zeros = 0b11111111111111111111111111111110l; ones = 0b01111111111111111111111111111111l} in
     let result = to_bitfield r in
     print_endline ("[RIC.to_bitfield]     " ^ to_string r ^ " ---to-bitfield---> " ^ Bitfield.to_string result);
-    Bitfield.equal result expected
+    Bitfield.(result = expected)
 
 
   let%test "to_bitfield then of_bitfield 2[0,2] + 1024 = 2[0,3] + 1024" =

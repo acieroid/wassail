@@ -23,10 +23,7 @@ module True_or_false = struct
   type t = true_or_false Variable.Map.t
   [@@deriving sexp, compare, equal]
 
-  let get (tf : t) ~(var : Variable.t) : true_or_false =
-    match Variable.Map.find tf var with
-    | None -> assert false
-    | Some tf -> tf
+  let get (tf : t) ~(var : Variable.t) : true_or_false = Variable.Map.find_exn tf var
 
   let set (tf : t) ~(var : Variable.t) ~data : t = Variable.Map.set tf ~key:var ~data
 
@@ -236,7 +233,10 @@ let of_RIC ~(var : Variable.t) (ric : RIC.t) : t =
       RIC.Bottom in
   let true_ = 
     if RIC.may_be_true ric then 
-      RIC.remove ~this:RIC.zero ~from:ric |> List.fold ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) 
+      if ric |> RIC.extract_relative_offset |> String.is_empty then
+        RIC.remove ~this:RIC.zero ~from:ric |> List.fold ~init:RIC.Bottom ~f:(fun acc vs -> RIC.join acc vs) 
+      else
+        ric
     else 
       RIC.Bottom in
   { true_or_false = Variable.Map.empty |> True_or_false.set ~var ~data:{ true_; false_ }; 
@@ -994,5 +994,22 @@ let y = Variable.Var (Var.Other "y")
   let%test "is_singleton: non-singleton" =
     let boolean = of_RIC (RIC.join RIC.zero (RIC.constant 5l)) ~var:x in
     Bool.equal (is_singleton boolean) false
+
+  let%test "of_RIC: relative RIC" =
+    let ric = RIC.relative_ric "l0" in
+    let expected =
+      { true_or_false =
+          Variable.Map.empty
+          |> True_or_false.set
+               ~var:x
+               ~data:{ true_=RIC.relative_ric "l0"; false_ = RIC.zero };
+        numeric_value = ric }
+    in
+    let actual = of_RIC ~var:x ric in
+    expect_equal_boolean
+      ~test_name:"of_RIC: relative RIC"
+      ~expected
+      ~actual
+      ()
 
 end)

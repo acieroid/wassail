@@ -93,8 +93,6 @@ let (|>>) (c, i : 'a * 'b) (f : 'a -> 'b -> 'c) : 'c = f c i
     match c1, c2 with 
     | Top, _ | _, Top -> Top 
     | Bottom, c | c, Bottom -> c 
-    (* | Congruence { offset = (_, o1); _ }, Congruence { offset = (_, o2); _ } 
-      when Int32.(o1 = (-2147483648l)) || Int32.(o2 = (-2147483648l)) -> Top *)
     | Congruence { stride = s1; offset = (v1, o1) }, Congruence { stride = s2; offset = (v2, o2) } ->
       if String.equal v1 v2 then
         let difference = Int64.abs Int64.(Int64.of_int32_exn o1 - Int64.of_int32_exn o2) in
