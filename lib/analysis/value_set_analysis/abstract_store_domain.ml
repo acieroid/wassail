@@ -294,11 +294,7 @@ let widen (store1 : t) (store2 : t) : t =
     in
     if not (equal widened_state store1) then 
       (Intra.narrow_option := true;
-      Print_trace.print
-        "\twidening:\n\t\tstate1: %s\n\t\tstate2: %s\n\t\twidened state: %s\n"
-        (to_string store1)
-        (to_string store2)
-        (to_string widened_state));
+      Print_trace.widening store1 store2 widened_state to_string);
     widened_state
 
 (** [bottom] is the bottom store. Its linear memory is explicitly mapped to
@@ -339,7 +335,7 @@ let join (store1 : t) (store2 : t) : t =
 
 (** [truncate_accessed_memory store accessed_addresses] removes accessed regions from
     all memory variables in [store]. *)
-let truncate_accessed_memory (store : t) (accessed_addresses : RIC.accessed_memory) : t =
+let truncate_accessed_memory (accessed_addresses : RIC.accessed_memory) (store : t) : t =
   let memory_vars = extract_memory_variables store in
   match memory_vars with
   | x :: _ when Variable.(entire_memory = x) -> store
@@ -414,16 +410,9 @@ let i32_binary_op
   : t =
   let lhs_value = get store ~var:lhs in
   let rhs_value = get store ~var:rhs in
-  let vs = eval lhs_value rhs_value in
-  Print_trace.print "\t%s(%s) %s %s(%s) -> %s(%s)\n"
-    (Variable.to_string lhs)
-    (Value.to_string lhs_value)
-    symbol
-    (Variable.to_string rhs)
-    (Value.to_string rhs_value)
-    (Variable.to_string result)
-    (Value.to_string vs);
-  set store ~var:result ~vs
+  let result_value = eval lhs_value rhs_value in
+  Print_trace.binop lhs lhs_value symbol rhs rhs_value result result_value;
+  set store ~var:result ~vs:result_value
 
 (** [i32_add store x y result] assigns [x + y] to [result]. *)
 let i32_add = i32_binary_op "+" Value.i32_add
@@ -462,14 +451,7 @@ let shift
       ValueSet RIC.(bitfield_shift (vs1 |> to_bitfield) bf2 |> of_bitfield)
     | Bitfield bf2, Bitfield bf1 -> Bitfield (bitfield_shift bf1 bf2)
   in
-  Print_trace.print "\t%s(%s) %s %s(%s) -> %s(%s)"
-    (Variable.to_string y)
-    (Value.to_string y_value)
-    op
-    (Variable.to_string x)
-    (Value.to_string x_value)
-    (Variable.to_string result)
-    (Value.to_string result_value);
+  Print_trace.binop y y_value op x x_value result result_value;
   set store ~var:result ~vs:result_value
 
 (** [shr_u store x y result] assigns the logical right shift [y >>> x] to [result]. *)
@@ -509,14 +491,7 @@ let logical_op
       ValueSet RIC.(bitfield_op (vs |> to_bitfield) bf |> of_bitfield)
     | Bitfield bf1, Bitfield bf2 -> Bitfield (bitfield_op bf1 bf2)
   in
-  Print_trace.print "\t%s(%s) %s %s(%s) -> %s(%s)"
-    (Variable.to_string y)
-    (Value.to_string y_value)
-    op
-    (Variable.to_string x)
-    (Value.to_string x_value)
-    (Variable.to_string result)
-    (Value.to_string result_value);
+  Print_trace.binop y y_value op x x_value result result_value;
   set store ~var:result ~vs:result_value
 
 (** [and_ store x y result] assigns the bitwise/logical conjunction
@@ -556,21 +531,6 @@ let update_memory_size (store : t) ~(summary : t) : t =
     store |> set ~var:Variable.MemorySize ~vs:(ValueSet RIC.(RIC r + positive_integers))
   | _ ->
     store |> set ~var:Variable.MemorySize ~vs:(ValueSet RIC.positive_integers)
-
-(** [store_debug address] pauses in debug mode when storing to [Bottom] or [Top]. *)
-let store_debug (address : Value.t) : unit =
-  if !Value_set_options.debug then
-      match address with
-      | ValueSet r when RIC.(r = Bottom) -> 
-        print_endline "Warning: trying to store at address BOTTOM... press enter to continue.";
-        let _ = In_channel.input_line_exn In_channel.stdin in
-        ()
-      | ValueSet r when RIC.(r = Top) ->
-        print_endline "Warning: trying to store at address TOP... press enter to continue.";
-        let _ = In_channel.input_line_exn In_channel.stdin in
-        ()
-      | _ -> () 
-    else ()
     
 (** [store ~instruction ?annotation_before ?value ?address state] interprets a
     Wasm store instruction.
@@ -595,99 +555,67 @@ let store
   else
     let value, address = 
       match annotation_before, value, address with
-      | Some annotation_before, None, None ->
-        pop2 (Spec_domain.get_or_fail annotation_before).vstack 
+      | Some annotation_before, None, None -> pop2 (Spec_domain.get_or_fail annotation_before).vstack 
       | None, Some value, Some address -> value, address
       | _ -> assert false
     in
-    let vs_address = get state ~var:(Variable.Var address) in
-    Print_trace.print "\tAddress(%s)\tValue(%s)\n" (Var.to_string address) (Var.to_string value);
-    store_debug vs_address;
+    let vs_address =
+      match state |> get ~var:(Variable.Var address) with
+      | ValueSet vs -> vs
+      | Boolean b -> b.numeric_value
+      | Bitfield bf -> RIC.of_bitfield bf
+    in
     let vs_value = get state ~var:(Variable.Var value) in
     let size = Memoryop.size instruction in
-    let new_state =
-      let vs_address =
-        match vs_address with
-        | ValueSet vs -> vs
-        | Boolean b -> b.numeric_value
-        | Bitfield bf -> RIC.of_bitfield bf
-    in
-      begin match instruction with
-      | { typ = I32; offset = offset; _ } ->
-        let offset = Int32.of_int_exn offset in
-        let vs_value = if Int32.(size = 4l) then vs_value else Value.ValueSet RIC.Top in
-        Print_trace.print "\tstoring value-set %s into memory variable %s\n"
-          (Value.to_string vs_value)
-          (Variable.to_string
-            (Variable.Mem (RIC.add_offset vs_address offset)));
-        let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
-        Print_trace.print
-          "\tfully accessed memory: %s\n\tpartially accessed memory: %s\n"
-          (RIC.to_string accessed.fully)
-          (String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially));
-        let new_state = truncate_accessed_memory state accessed in
-        let added_store_operations = 
-          RICSet.filter 
-            ~f:(fun addr -> RIC.(addr <> Bottom)) 
-            (RICSet.of_list (accessed.fully :: accessed.partially)) 
-        in
-        let new_state = { abstract_store = new_state.abstract_store; 
-                          store_operations = RICSet.union added_store_operations new_state.store_operations;
-                          unreachable = false } in
-        let variable_to_update = Variable.Mem accessed.fully in
-        Print_trace.print "\tvariable to update: %s\n" (Variable.to_string variable_to_update);
-        if RIC.equal accessed.fully RIC.Bottom then
-          (Print_trace.print "\tno update necessary\n";
-          new_state)
-        else
-          if RIC.is_singleton (accessed.fully) then
-            (Print_trace.print "\tperforming STRONG update\n";
-            set new_state ~var:variable_to_update ~vs:vs_value)
-          else
-            (Print_trace.print "\tperforming WEAK update\n";
-            weak_update new_state ~previous_state:state ~var:variable_to_update ~vs:vs_value)
-        | { typ = F32; offset = offset; _ } ->
-          let offset = Int32.of_int_exn offset in
-          Print_trace.print "\tstoring value-set ⊤ into memory variable %s\n"
-            (Variable.to_string
-              (Variable.Mem (RIC.add_offset vs_address offset)));
-          let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
-          let added_store_operations = 
-            RICSet.filter 
-              ~f:(fun addr -> RIC.(addr <> Bottom)) 
-              (RICSet.of_list (accessed.fully :: accessed.partially)) 
-          in
-          let state = 
-            { abstract_store = state.abstract_store; 
-              store_operations = RICSet.union added_store_operations state.store_operations;
-              unreachable = false } in
-          (Print_trace.print "\tfully accessed memory: %s\n\tpartially accessed memory: %s\n"
-            (RIC.to_string accessed.fully)
-            (String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially)));
-              truncate_accessed_memory state accessed
-        | { typ = I64; offset = offset; _ }
-        | { typ = F64; offset = offset; _ } ->
-          let offset = Int32.of_int_exn offset in
-          Print_trace.print "\tstoring value-set ⊤ into memory variable %s\n"
-            (Variable.to_string
-              (Variable.Mem (RIC.add_offset vs_address offset)));
-          let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
-          let added_store_operations = 
-            RICSet.filter 
-              ~f:(fun addr -> RIC.(addr <> Bottom)) 
-              (RICSet.of_list (accessed.fully :: accessed.partially)) 
-          in
-          let state = 
-            { abstract_store = state.abstract_store;
-              store_operations = RICSet.union added_store_operations state.store_operations;
-              unreachable = false } in
-          Print_trace.print "\tfully accessed memory: %s\n\tpartially accessed memory: %s\n"
-            (RIC.to_string accessed.fully)
-            (String.concat ~sep:", " (List.map ~f:RIC.to_string accessed.partially));
-              truncate_accessed_memory state accessed
-        end
-    in
-    remove_pointers_to_top new_state
+    begin match instruction with
+    | { typ = I32; offset = offset; _ } ->
+      let offset = Int32.of_int_exn offset in
+      let vs_value = if Int32.(size = 4l) then vs_value else Value.ValueSet RIC.Top in
+      let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
+      Print_trace.store address vs_address value vs_value offset accessed;
+      let added_store_operations = 
+        (accessed.fully :: accessed.partially)
+        |> RICSet.of_list
+        |> RICSet.filter ~f:(fun addr -> RIC.(addr <> Bottom)) 
+      in
+      let new_state = state |> truncate_accessed_memory accessed in
+      let new_state = { new_state with 
+                        store_operations = RICSet.union added_store_operations new_state.store_operations } in
+      let variable_to_update = Variable.Mem accessed.fully in
+      if RIC.((=) Bottom) accessed.fully then
+        (* Nothing to update *)
+        new_state
+      else if RIC.is_singleton accessed.fully then
+        (* Strong update *)
+        new_state |> set ~var:variable_to_update ~vs:vs_value
+      else
+        (* Weak update *)
+        new_state |> weak_update ~previous_state:state ~var:variable_to_update ~vs:vs_value
+    | { typ = F32; offset = offset; _ } ->
+      let offset = Int32.of_int_exn offset in
+      let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
+      Print_trace.store address vs_address value vs_value offset accessed;
+      let added_store_operations = 
+        (accessed.fully :: accessed.partially)
+        |> RICSet.of_list
+        |> RICSet.filter ~f:(fun addr -> RIC.(addr <> Bottom)) 
+      in
+      { state with store_operations = RICSet.union added_store_operations state.store_operations }
+      |> truncate_accessed_memory accessed
+    | { typ = I64; offset = offset; _ }
+    | { typ = F64; offset = offset; _ } ->
+      let offset = Int32.of_int_exn offset in
+      let accessed = RIC.accessed ~value_set:(RIC.add_offset vs_address offset) ~size in
+      Print_trace.store address vs_address value vs_value offset accessed;
+      let added_store_operations = 
+        (accessed.fully :: accessed.partially)
+        |> RICSet.of_list
+        |> RICSet.filter ~f:(fun addr -> RIC.(addr <> Bottom))
+      in
+      { state with store_operations = RICSet.union added_store_operations state.store_operations }
+      |> truncate_accessed_memory accessed
+    end
+    |> remove_pointers_to_top
 
   (** [load state ~instruction ~annotation_before ~result] interprets a Wasm
     load instruction.
@@ -722,17 +650,11 @@ let load
   in
   if Int32.(size <> 4l) || not (Type.equal instruction.typ I32) then
     (* loaded value is not pointer material *)
-    (Print_trace.print "\tloaded value is not an i32 integer: it is assumed it won't be used as a pointer.\n";
+    (Print_trace.not_i32 ();
     to_top_RIC state result)
   else
     let loaded_value = get state ~var:(Variable.Mem address_plus_offset) in
-    Print_trace.print "\taddress: %s(%s)\n\toffset: %d\n\tloading content of %s into variable %s\n\tloaded value: %s\n" 
-      (Var.to_string address)
-      (Value.to_string address_value)
-      (instruction.offset)
-      Variable.(Mem address_plus_offset |> to_string)
-      (Variable.to_string result)
-      (Value.to_string loaded_value);
+    Print_trace.load address address_value instruction.offset address_plus_offset result loaded_value;
     set state ~var:result ~vs:loaded_value
 
 
@@ -749,7 +671,7 @@ let unary_op
   let var = pop (Spec_domain.get_or_fail annotation_before).vstack in
   let vs = get state ~var:(Variable.Var var) in
   let result = op vs in
-  Print_trace.print "\t%s (%s) -> %s\n" op_string (Value.to_string vs) (Value.to_string result);
+  Print_trace.unop op_string vs result;
   state |> set ~var:return ~vs:result
 
 (** [memory_copy state annotation_before] interprets Wasm [memory.copy].
@@ -1576,7 +1498,7 @@ let%test_module "abstract store tests" = (module struct
         partially = [] }
     in
 
-    let actual =     truncate_accessed_memory store accessed in
+    let actual =     truncate_accessed_memory accessed store in
 
     let expected =
       { abstract_store = Variable.Map.empty; store_operations = RICSet.empty; unreachable = false }
@@ -1604,7 +1526,7 @@ let%test_module "abstract store tests" = (module struct
         partially = [] }
     in
 
-    let actual = truncate_accessed_memory store accessed in
+    let actual = truncate_accessed_memory accessed store in
     let expected = store in
 
     let passed = equal actual expected in
@@ -1630,7 +1552,7 @@ let%test_module "abstract store tests" = (module struct
         partially = [RIC.ric (1l, Int 5l, Int 5l, ("", 0l))] }
     in
 
-    let actual = truncate_accessed_memory store accessed in
+    let actual = truncate_accessed_memory accessed store in
 
     let expected =
       { abstract_store = Variable.Map.empty; store_operations = RICSet.empty; unreachable = false }

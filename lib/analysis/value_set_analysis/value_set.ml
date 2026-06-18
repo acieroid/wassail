@@ -29,7 +29,7 @@ struct
       (state : Transfer.State.t)
       (summaries : extra)
     : Transfer.State.t =
-    Print_trace.print "%d:\t%s\n" instr.line_number (Instr.call_to_string instr.instr);
+    Print_trace.instruction instr.line_number (Call instr) state.unreachable;
     let apply_summary f arity state =
       match Map.find summaries f with
       | None ->
