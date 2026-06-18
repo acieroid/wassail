@@ -95,15 +95,8 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
     Each result contains the original spec CFG, the value-set CFG, and the final
     summary. *)
 let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t * Domain.t Cfg.t * Summary.t) Int32Map.t =
-  let dummy_spec_cfg : Spec_domain.t Cfg.t = Cfg.dummy_cfg in
-  let dummy_domain_cfg : Domain.t Cfg.t = Cfg.dummy_cfg in
   Analysis_helpers.mk_inter
-    (fun _cfgs wasm_mod ->
-      wasm_mod.imported_funcs
-      |> List.fold ~init:Int32Map.empty
-        ~f:(fun acc fct ->
-          acc |> Int32Map.set ~key:fct.idx 
-            ~data:(dummy_spec_cfg, dummy_domain_cfg, Summary.of_import fct.idx fct.name wasm_mod.nglobals fct.arguments fct.returns)))
+    (fun _cfgs _wasm_mod -> Int32Map.empty)
     (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
       Log.info
         (Printf.sprintf "---------- Value-set analysis of SCC {%s} ----------"
