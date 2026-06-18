@@ -430,4 +430,3 @@ let summary
     print_summary state print_state summary print_summary_
   else
     ()
->>>>>>> lazy-print
