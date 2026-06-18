@@ -36,6 +36,14 @@ let to_string ?annot_str:(annot_str : 'a -> string = fun _ -> "") (b : 'a t) : s
             ~f:(fun instr ->
                 Printf.sprintf "%s" (Instr.data_to_string instr.instr)))))
 
+let annot_to_dot_row annot =
+  if String.is_empty annot then
+    ""
+  else if String.is_prefix annot ~prefix:"<tr" then
+    annot
+  else
+    Printf.sprintf "<tr><td colspan=\"2\">%s</td></tr>" annot
+
 (** Convert a basic block to its dot representation *)
 let to_dot
     ?prefix:(prefix : string = "")
@@ -46,7 +54,7 @@ let to_dot
   | Data instrs ->
     let first_annot = match List.hd instrs with
       | Some instr ->
-        annot_str instr.annotation_before
+        annot_str instr.annotation_before |> annot_to_dot_row
       | None -> "" in
     Printf.sprintf "block%s%d [shape=none, color=%s, label=<<table><tr><td colspan=\"2\">Data block %s%d</td></tr>%s%s</table>>];"
       prefix b.idx
@@ -56,19 +64,19 @@ let to_dot
       (String.concat ~sep:"|"
          (List.map instrs
             ~f:(fun instr ->
-                Printf.sprintf "<tr><td>%s</td><td>%s</td></tr><tr><td colspan=\"2\">%s</td></tr>"
+              Printf.sprintf "<tr><td>%s</td><td>%s</td></tr>%s"
                   (Instr.Label.to_string instr.label)
                   (Instr.data_to_string instr.instr)
-                  (annot_str instr.annotation_after))))
+                  (instr.annotation_after |> annot_str |> annot_to_dot_row))))
   | Call instr ->
-    Printf.sprintf "block%s%d [shape=none, color=%s, label=<<table><tr><td colspan=\"2\">Call block %s%d</td></tr>%s<tr><td>%s</td><td>%s</td></tr><tr><td colspan=\"2\">%s</td></tr></table>>];"
-      prefix b.idx
-      color
-      prefix b.idx
-      (annot_str instr.annotation_before)
-      (Instr.Label.to_string instr.label)
-      (Instr.call_to_string instr.instr)
-      (annot_str instr.annotation_after)
+  Printf.sprintf "block%s%d [shape=none, color=%s, label=<<table><tr><td colspan=\"2\">Call block %s%d</td></tr>%s<tr><td>%s</td><td>%s</td></tr>%s</table>>];"
+    prefix b.idx
+    color
+    prefix b.idx
+    (instr.annotation_before |> annot_str |> annot_to_dot_row)
+    (Instr.Label.to_string instr.label)
+    (Instr.call_to_string instr.instr)
+    (instr.annotation_after |> annot_str |> annot_to_dot_row)
   | Imported desc ->
     Printf.sprintf "block%s%d [shape=none, color=%s, label=<<table><tr><td>Imported function %ld</td></tr></table>>];"
       prefix b.idx
@@ -76,14 +84,14 @@ let to_dot
       desc.idx
   | Entry | Return _ -> "" (* not represented here *)
   | Control instr ->
-    Printf.sprintf "block%s%d [shape=none, color=%s, label=<<table><tr><td colspan=\"2\">Control block %s%d</td></tr>%s<tr><td>%s</td><td>%s</td></tr><tr><td colspan=\"2\">%s</td></tr></table>>];"
-      prefix b.idx
-      color
-      prefix b.idx
-      (annot_str instr.annotation_before)
-      (Instr.Label.to_string instr.label)
-      (Instr.control_to_short_string instr.instr)
-      (annot_str instr.annotation_after)
+  Printf.sprintf "block%s%d [shape=none, color=%s, label=<<table><tr><td colspan=\"2\">Control block %s%d</td></tr>%s<tr><td>%s</td><td>%s</td></tr>%s</table>>];"
+    prefix b.idx
+    color
+    prefix b.idx
+    (instr.annotation_before |> annot_str |> annot_to_dot_row)
+    (Instr.Label.to_string instr.label)
+    (Instr.control_to_short_string instr.instr)
+    (instr.annotation_after |> annot_str |> annot_to_dot_row)
 
 (** Return all the labels of the instructions directly contained in this block *)
 let all_direct_instruction_labels (b : 'a t) : Instr.Label.Set.t =
