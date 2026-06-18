@@ -139,11 +139,9 @@ let value_set_inter =
         if narrow then Intra.narrow_option := true;
         if trace then (Log.enable_info (); Value_set.Options.print_trace := true);
         if ignore_imports then Value_set.Options.ignore_imports := true;
-        let _ =
-        let oc = Out_channel.create ~append:false "store_types.txt" in
-          Out_channel.close oc
-        in
-        let results = Value_set.analyze_inter (Wasm_module.of_file filename) sccs in
+        let module_ = filename |> Wasm_module.of_file in
+        let sccs = sccs |> List.map ~f:(fun l -> l |> List.filter ~f:(fun i -> Int32.(i >= module_.nfuncimports))) in
+        let results = Value_set.analyze_inter module_ sccs in
         let function_name (summary : Spec_domain.t Wassail.Cfg.t * Value_set.Domain.t Wassail.Cfg.t * Value_set.Domain.t) : string =
           let name =
             match summary with

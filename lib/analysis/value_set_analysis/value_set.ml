@@ -94,9 +94,16 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
 
     Each result contains the original spec CFG, the value-set CFG, and the final
     summary. *)
-let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t * Abstract_store_domain.t Cfg.t * Summary.t) Int32Map.t =
+let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t * Domain.t Cfg.t * Summary.t) Int32Map.t =
+  let dummy_spec_cfg : Spec_domain.t Cfg.t = Cfg.dummy_cfg in
+  let dummy_domain_cfg : Domain.t Cfg.t = Cfg.dummy_cfg in
   Analysis_helpers.mk_inter
-    (fun _cfgs _wasm_mod -> Int32Map.empty)
+    (fun _cfgs wasm_mod ->
+      wasm_mod.imported_funcs
+      |> List.fold ~init:Int32Map.empty
+        ~f:(fun acc fct ->
+          acc |> Int32Map.set ~key:fct.idx 
+            ~data:(dummy_spec_cfg, dummy_domain_cfg, Summary.of_import fct.idx fct.name wasm_mod.nglobals fct.arguments fct.returns)))
     (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
       Log.info
         (Printf.sprintf "---------- Value-set analysis of SCC {%s} ----------"
@@ -196,13 +203,24 @@ let%test_module "value-set tests" = (module struct
     | Control i -> i.annotation_after
     | _ -> failwith "Cfg.exit_annotation_exn: exit block is not a control block"
 
+  let analyze_inter' (program : string) ~(fct_idx : int32) : Summary.t =
+    let module_ = program |> Wasm_module.of_string in
+    let cg = module_ |> Call_graph.make in
+    let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
+    let final_annotation (cfg : 'a Cfg.t) : 'a =
+      let exit_block = Cfg.find_block_exn cfg (Cfg.exit_block cfg) in
+      exit_block.annotation_after in
+    analyze_inter module_ schedule 
+    |> (fun a -> Int32Map.find_exn a fct_idx)
+    |> (fun (_,cfg,_) -> cfg)
+    |> final_annotation
+
   let i_var (f : int32) (id : int) : Variable.t = Variable.Var (Var {section = Function f; id})
 
   let check_value (state : Domain.t) (var : Variable.t) (value : Domain.Value.t) : bool =
-    state
-    |> Domain.get ~var
-    |> Domain.Value.equal value && (Printf.printf "\tSUCCESS: %s\n" (Domain.to_string state); true)
-    || (Printf.printf "\t\tFAILURE: %s\n" (Domain.to_string state); false)
+    let actual_value = state |> Domain.get ~var in
+    actual_value |> Domain.Value.equal value && (Printf.printf "\tSUCCESS: %s = %s\n" (Variable.to_string var) (Domain.Value.to_string actual_value); true)
+    || (Printf.printf "\t\tFAILURE: %s = [expected: %s; actual: %s]\n" (Variable.to_string var) (Domain.Value.to_string value) (Domain.Value.to_string actual_value); false)
 
 
   let () = Value_set_options.show_intermediates := true
@@ -3102,7 +3120,7 @@ let%test_module "value-set tests" = (module struct
         ;; Export the main function
         (export \"main\" (func $main))
       )"
-      |> analyze [0l; 1l] 1l
+      |> analyze_inter' ~fct_idx:1l
     in
     test_label "[function_call.wat]";
     check_value exit_state
@@ -3115,59 +3133,118 @@ let%test_module "value-set tests" = (module struct
       (Variable.Var (Var.Global 0))
       (ValueSet RIC.(constant 166l + relative_ric "g0"))
 
-  let%test "function_call.wat main only" =
+  let%test "mutually_recursive_functions.wat" =
     let exit_state =
       "(module
         (memory (export \"mem\") 1)
         (global $g (mut i32) (i32.const 0))
-        (global $g1 (mut i32) (i32.const 0))
 
-        ;; Function that increments g by 166, stores 14 at address g, and adds 42 to its argument
-        (func $add42 (param $x i32) (result i32)
-          ;; Increment global g by 166
-          global.get $g
-          i32.const 166
-          i32.add
-          global.set $g
-
-          ;; store 14 at address 14
-          ;; i32.const 42
-          global.get $g
-          i32.const 14
-          i32.store
-
-          ;; Add 42 to the argument and return
+        (func $is_even (param $x i32) (result i32)
           local.get $x
-          i32.const 42
-          i32.add
-          return)
+          i32.eqz
+          if (result i32)
+            i32.const 1
+          else
+            local.get $x
+            i32.const 1
+            i32.sub
+            call $is_odd
+          end
+        )
 
-        ;; Main function that increments global g and calls add42(10)
+        (func $is_odd (param $x i32) (result i32)
+          local.get $x
+          i32.eqz
+          if (result i32)
+            i32.const 0
+          else
+            local.get $x
+            i32.const 1
+            i32.sub
+            call $is_even
+          end
+        )
+
         (func $main (result i32)
-          global.get $g
-          i32.const 99
-          i32.store
-
-          ;; Call add42 with 10
-          i32.const 10
-          call $add42
-          return)
+          i32.const 14
+          call $is_even)
 
         ;; Export the main function
         (export \"main\" (func $main))
       )"
-      |> analyze [1l] 1l
+      |> analyze_inter' ~fct_idx:2l
     in
-    test_label "[function_call.wat main only]";
+    test_label "[mutually recursive functions.wat]";
     check_value exit_state
-      (Variable.Mem RIC.(ric (0l, Int 0l, Int 0l, ("g0", 166l))))
+      (Variable.Var (Var.Return (2l, 0l)))
+      (ValueSet RIC.(join zero one))
+
+
+  let%test "imported.wat" =
+    let exit_state =
+      "(module
+        (import \"env\" \"random_function\"
+          (func $random_function (param i32) (result i32)))
+
+        (import \"env\" \"fd_close\"
+          (func $fd_close (param i32) (result i32)))
+
+        (memory (export \"mem\") 1)
+        (global $g (mut i32) (i32.const 0))
+
+        (func (export \"main\") (result i32)
+          i32.const 42
+          global.set $g
+
+          i32.const 14
+          global.get $g
+          i32.store
+          i32.const 14
+          i32.load       ;; this value should be 42
+
+          call $fd_close
+          drop
+          i32.const 14
+          i32.load       ;; this value should be 42
+          drop
+          i32.const 14
+          global.get $g
+          i32.store
+          i32.const 14
+          i32.load       ;; this value should be 42
+
+          call $random_function
+          drop
+          i32.const 14
+          i32.load       ;; this value should be Top
+          drop
+          i32.const 14
+          global.get $g
+          i32.store
+          i32.const 14
+          i32.load       ;; this value should be Top
+        )
+      )"
+      |> analyze_inter' ~fct_idx:2l
+    in
+    test_label "[imported.wat]";
+    check_value exit_state
+      (i_var 2l 6)
+      (ValueSet RIC.(constant 42l))
+    && check_value exit_state
+      (i_var 2l 10)
+      (ValueSet RIC.(constant 42l))
+    && check_value exit_state
+      (i_var 2l 16)
+      (ValueSet RIC.(constant 42l))
+    && check_value exit_state
+      (i_var 2l 20)
       (ValueSet RIC.Top)
     && check_value exit_state
-      (Variable.Var (Var.Return (1l, 0l)))
-      (ValueSet RIC.(constant 52l))
-    && check_value exit_state
-      (Variable.Var (Var.Global 0))
-      (ValueSet RIC.(constant 166l + relative_ric "g0"))
+      (i_var 2l 26)
+      (ValueSet RIC.Top)
+
+  
     
 
   (* Add next test here *)

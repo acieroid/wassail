@@ -383,7 +383,6 @@ module Spec_inference
         | _ ->
           (* These functions may modify globals (we don't know) *)
           (* XXX: unsound, we keep memory from before. We probably shouldn't *)
-          let () = print_endline "unknown import" in
           { state with
             vstack = [Var.Return (desc.idx, 0l)]; (* it's assumed that imported functions will only have one return *)
             locals = [];
