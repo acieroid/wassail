@@ -176,7 +176,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       | LocalTee l -> Variable.Var (Var.Local (Int32.to_int_exn l)) |> set
       | GlobalGet g -> 
         Print_trace.get ~global:true g state ~get:(fun state var -> State.get state ~var);
-        state
+        state |> State.set ~var:(ret i) ~vs:(state |> State.get ~var:(Variable.Var (Var.Global (Int32.to_int_exn g))))
       | GlobalSet g -> Variable.Var (Var.Global (Int32.to_int_exn g)) |> set
       | Const c ->
         begin match c with

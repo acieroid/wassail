@@ -76,6 +76,7 @@ module Inter = Inter.MakeSummaryBased(TransferFunction)(Intra)
     Each analyzed function returns its summary and, when available, its annotated
     value-set CFG. *)
 let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t option) Int32Map.t =
+  Spec_inference.propagate_globals := false;
   Analysis_helpers.mk_intra
     (fun cfgs wasm_mod ->
       (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs wasm_mod `Bottom)))
@@ -98,6 +99,7 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
   Analysis_helpers.mk_inter
     (fun _cfgs _wasm_mod -> Int32Map.empty)
     (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
+      Spec_inference.propagate_globals := false;
       Log.info
         (Printf.sprintf "---------- Value-set analysis of SCC {%s} ----------"
           (String.concat ~sep:", " (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
@@ -116,6 +118,7 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
 (** [analyze_inter_classical module_ entry] runs the classical interprocedural
     value-set analysis from [entry]. *)
 let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Domain.t Icfg.t =
+  Spec_inference.propagate_globals := false;
   ClassicalInter.analyze module_ (Analysis_helpers.mk_inter_classical module_ entry)
 
 (** Result of [run_pointer_analysis]: the value-set CFG, the propagated spec
@@ -136,7 +139,7 @@ let run_pointer_analysis
   and original_prop_globals = !Spec_inference.propagate_globals
   and original_prop_locals = !Spec_inference.propagate_locals in
   Spec_inference.use_const := true;
-  Spec_inference.propagate_globals := true;
+  Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := true;
   let cfg_spec_with_propagation = Spec_inference.Intra.analyze module_ cfg () in
   let instructions_from_pointer_cfg = Cfg.all_instructions cfg_spec_with_propagation in
@@ -2732,6 +2735,7 @@ let%test_module "value-set tests" = (module struct
   let%test "param.wat" =
     let exit_state =
       "(module
+      (memory (export \"mem\") 1)
         (func $main (export \"main\") (param $x i32) (result i32) (local $y i32)
           local.get $x
           local.set $y
@@ -2742,6 +2746,10 @@ let%test_module "value-set tests" = (module struct
           local.get $y
           local.set $x
 
+          i32.const 14
+          local.get $y
+          i32.store
+
           local.get $x
         )
       )"
@@ -2750,6 +2758,9 @@ let%test_module "value-set tests" = (module struct
     test_label "[unknown param.wat]";
     check_value exit_state
       (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.(relative_ric "l0"))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 14l))
       (ValueSet RIC.(relative_ric "l0"))
 
   let%test "add_local_set.wat" =
@@ -3236,6 +3247,105 @@ let%test_module "value-set tests" = (module struct
     && check_value exit_state
       (i_var 2l 26)
       (ValueSet RIC.Top)
+
+
+  let%test "function changes global.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+        (global $g (mut i32) (i32.const 0))
+
+        ;; Function that increments g by 166, stores 14 at address g, and adds 42 to its argument
+        (func $f
+          i32.const 14
+          global.set $g
+        )
+
+        ;; Main function that increments global g and calls add42(10)
+        (func $main (result i32) (local $l0 i32)
+          i32.const 42
+          global.set $g
+
+          call $f
+
+          global.get $g
+          local.set $l0
+          i32.const 99
+          global.get $g
+          i32.store
+          i32.const 99
+          i32.load
+        )
+
+        ;; Export the main function
+        (export \"main\" (func $main))
+      )"
+      |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[function changes global.wat]";
+    check_value exit_state
+      (i_var 1l 9)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (Variable.Var (Var.Local 0))
+      (ValueSet RIC.(constant 14l))
+
+
+    let%test "param_with_fct.wat" =
+    let exit_state =
+      "(module
+      (memory (export \"mem\") 1)
+      (global $g (mut i32) (i32.const 0))
+
+        (func $f 
+          i32.const 56
+          global.set $g
+        )
+
+        (func $main (export \"main\") (result i32) (local $l0 i32) (local $l1 i32)
+          global.get $g
+          local.set $l0   ;; l0 = \"g0\"
+
+          i32.const 14
+          global.set $g   ;; g0 = 14;  l0 = \"g0\"
+
+          local.get $l0
+          local.set $l1   ;; g0 = 14;  l0 = \"g0\";   l1 = \"g0\"
+
+          call $f         ;; g0 = 56;  l0 = \"g0\";   l1 = \"g0\"
+
+          i32.const 99
+          local.get $l0
+          i32.store       ;; mem[99] = \"g0\";  g0 = 56;  l0 = \"g0\";   l1 = \"g0\"
+
+          i32.const 999
+          global.get $g
+          i32.store       ;; mem[999] = 56;   mem[99] = \"g0\";  g0 = 56;  l0 = \"g0\";   l1 = \"g0\"
+
+          local.get $l1
+        )
+      )"
+      |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[unknown param, function that modifies a global.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Local 1))
+      (ValueSet RIC.(relative_ric "g0"))
+    && check_value exit_state
+      (Variable.Var (Var.Local 0))
+      (ValueSet RIC.(relative_ric "g0"))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 999l))
+      (ValueSet RIC.(constant 56l))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 99l))
+      (ValueSet RIC.(relative_ric "g0"))
+    && check_value exit_state
+      (Variable.Var (Var.Return (1l, 0l)))
+      (ValueSet RIC.(relative_ric "g0"))
+    && check_value exit_state
+      (Variable.Var (Var.Global 0))
+      (ValueSet RIC.(constant 56l))
 
   
     

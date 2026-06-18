@@ -180,7 +180,7 @@ module Spec_inference
       let state = compute_stack_size_at_entry cfg i.label state in
       let ret = Var.Var i.label in
       (* globals may have been modified by the funciton being called: *)
-      let globals = List.init Int32.(to_int_exn _module.nglobals) ~f:(fun n -> Var.Global n) in
+      let globals = List.init Int32.(to_int_exn _module.nglobals) ~f:(fun _ -> Var.Other "unknown") in
       match i.instr with
       | CallDirect ((arity_in, arity_out), _, _) ->
         State.NotBottom { state with globals; vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) }
@@ -386,7 +386,7 @@ module Spec_inference
           { state with
             vstack = [Var.Return (desc.idx, 0l)]; (* it's assumed that imported functions will only have one return *)
             locals = [];
-            globals = List.mapi _module_.global_types ~f:(fun i _ -> Var.Global i)
+            globals = List.map _module_.global_types ~f:(fun _ -> Var.Other "unknown")
           }
       )
 end

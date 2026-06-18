@@ -45,7 +45,7 @@ let get (store : t) ~(var : Variable.t) : Value.t =
       | Accessed -> ValueSet RIC.Bottom
       | MemorySize -> ValueSet RIC.positive_integers
       | Var Const I32 n -> ValueSet (RIC.constant n)
-      | Var Const _ -> ValueSet RIC.Top
+      | Var Const _ | Var Other _ -> ValueSet RIC.Top
       | Var _ -> ValueSet RIC.Bottom
       | Mem _ ->
         let mems = extract_memory_variables store in
