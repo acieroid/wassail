@@ -85,12 +85,11 @@ module Make (*: Transfer.TRANSFER *) = struct
       (i : annot_expected Instr.labelled_data)
       (state : State.t)
     : State.t =
+    Print_trace.instruction i.line_number (Data i) state.unreachable;
     if state.unreachable then
-      (Print_trace.print "%d:\t%s (unreachable)\n" i.line_number (Instr.data_to_string i.instr);
-      state)
+      state
     else
-      (Print_trace.print "%d:\t%s\n" i.line_number (Instr.data_to_string i.instr);
-      (** [ret i] returns the SSA variable produced by data instruction [i]. *)
+      ((** [ret i] returns the SSA variable produced by data instruction [i]. *)
       let ret (i : annot_expected Instr.labelled_data) : Variable.t = 
         match (Spec_domain.get_or_fail i.annotation_after).vstack with
         | ret :: _ -> Variable.Var ret
@@ -99,7 +98,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       (** [invalid_pointer_value type_ variable] assigns top to [variable] when the
       value is a non-I32 value. *)
       let invalid_pointer_value (type_ : string) (variable : Variable.t) : State.t =
-        Print_trace.print "\tinvalid pointer type: %s\n" type_;
+        Print_trace.invalid_pointer_type type_;
         State.to_top_RIC state variable
       in
       (** [set variable] assigns the top stack value to [variable]. *)
@@ -107,22 +106,17 @@ module Make (*: Transfer.TRANSFER *) = struct
         let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
         begin match top_of_stack with
         | Var.Const (Prim_value.I32 n) ->
-          Print_trace.print "\tassigning constant value %ld to variable %s\n"
-            n (Variable.to_string variable);
+          Print_trace.assign_const n variable;
           State.assign_constant_value state ~const:n ~to_:variable
         | Var.Const (Prim_value.F32 _) -> invalid_pointer_value "Float32" variable
         | Var.Const (Prim_value.I64 _) -> invalid_pointer_value "Int64" variable
         | Var.Const (Prim_value.F64 _) -> invalid_pointer_value "Float64" variable
         | Var.Local _ | Var.Global _ ->
           let vs = Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
-          Print_trace.print "\tassigning value-set %s to variable %s\n"
-            (Value.to_string vs)
-            (Variable.to_string variable);
+          Print_trace.assign vs variable;
           State.set state ~var:variable ~vs
         | _ ->
-          Print_trace.print "\ttransferring value-set of %s to variable %s\n"
-            (Var.to_string top_of_stack)
-            (Variable.to_string variable);
+          Print_trace.copy_value top_of_stack variable;
           State.copy_value_set state ~from:(Variable.Var top_of_stack) ~to_:variable
         end
       in
@@ -141,7 +135,6 @@ module Make (*: Transfer.TRANSFER *) = struct
       | MemoryCopy -> 
         (* TODO: if needed, we could eventually increase precision. See 
            Abstract_store_domain.memory_copy for implementation stub *)
-        Print_trace.print "\t\tnot yet implemented: this operation is treated conservatively.\n";
         { (state |> State.set ~var:Variable.entire_memory ~vs:Value.top
                  |> State.set ~var:Variable.Accessed ~vs:Value.top)
             with store_operations = RICSet.singleton RIC.Top }
@@ -174,31 +167,21 @@ module Make (*: Transfer.TRANSFER *) = struct
               (* bottom condition is unreachable *)
               (Log.error "Select: condition can't be true nor false"; assert false )
         in
-        Print_trace.print "\t\tcondition: %s\n\t\tvalue if false: %s\n\t\tvalue if true: %s\n\t\tresult: %s\n"
-          (Value.to_string cond_vs)
-          (Value.to_string x_vs)
-          (Value.to_string y_vs)
-          (Value.to_string result);
+        Print_trace.select cond_vs x_vs y_vs result;
         State.set state ~var:(ret i) ~vs:result
       | LocalGet l -> 
-        let variable = Variable.Var (Var.Local (Int32.to_int_exn l)) in
-        Print_trace.print "\tretrieving variable %s: %s\n"
-          (variable |> Variable.to_string)
-          (state |> State.get ~var:variable |> Value.to_string);
+        Print_trace.get ~global:false l state ~get:(fun state var -> State.get state ~var);
         state
       | LocalSet l -> Variable.Var (Var.Local (Int32.to_int_exn l)) |> set
       | LocalTee l -> Variable.Var (Var.Local (Int32.to_int_exn l)) |> set
       | GlobalGet g -> 
-        let variable = Variable.Var (Var.Global (Int32.to_int_exn g)) in
-        Print_trace.print "\tretrieving variable %s: %s\n"
-          (variable |> Variable.to_string)
-          (state |> State.get ~var:variable |> Value.to_string);
+        Print_trace.get ~global:true g state ~get:(fun state var -> State.get state ~var);
         state
       | GlobalSet g -> Variable.Var (Var.Global (Int32.to_int_exn g)) |> set
       | Const c ->
         begin match c with
         | Prim_value.I32 _ -> state
-        | _ -> Print_trace.print "\tnon-i32 constant: it is assumed that this value won't be used as a pointer\n"; state
+        | _ -> Print_trace.non_i32 (); state
         end
       | Binary binop -> 
         let x, y = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
@@ -213,7 +196,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         | { op = Add; typ = I32 } -> State.i32_add state (Variable.Var x) (Variable.Var y) result
         | { op = Sub; typ = I32 } -> State.i32_sub state ~subtract_this:(Variable.Var x) ~from:(Variable.Var y) result
         | _ -> (* other operations result in a pointer that can point anywhere *)
-          Print_trace.print "\tthis type of binary operation results in a pointer that can point anywhere";
+          Print_trace.imprecise_operation ();
           State.to_top_RIC state result
         end
       | Load load ->
@@ -240,31 +223,29 @@ module Make (*: Transfer.TRANSFER *) = struct
         begin match comp with
         | {op = Ne; typ = I32} ->
           let result = Value.are_equal_or_not ~not_equal:true (var1, vs1) (var2, vs2) in
-          Print_trace.print "\t%s == %s -> %s\n" (RIC.to_string vs1) (RIC.to_string vs2) (Value.to_string result);
+          Print_trace.comp vs1 vs2 result "!=";
           state |> State.set ~var:(ret i) ~vs:result
         | {op = Eq; typ = I32} ->
           let result = Value.are_equal_or_not (var1, vs1) (var2, vs2) in
-          Print_trace.print "\t%s == %s -> %s\n" (RIC.to_string vs1) (RIC.to_string vs2) (Value.to_string result);
+          Print_trace.comp vs1 vs2 result "==";
           state |> State.set ~var:(ret i) ~vs:result
         | {op = LeS; typ = I32} -> 
           let result = Value.less_or_equal (var1, vs1) (var2, vs2) in
-          Print_trace.print "\t%s ≤ %s -> %s\n" (RIC.to_string vs1) (RIC.to_string vs2) (Value.to_string result);
+          Print_trace.comp vs1 vs2 result "≤";
           state |> State.set ~var:(ret i) ~vs:result
-          (* less_or_equal (var1, vs1) (var2, vs2) *)
         | {op = LtS; typ = I32} ->
           let result = Value.less_than (var1, vs1) (var2, vs2) in
-          Print_trace.print "\t%s < %s -> %s\n" (RIC.to_string vs1) (RIC.to_string vs2) (Value.to_string result);
+          Print_trace.comp vs1 vs2 result "<";
           state |> State.set ~var:(ret i) ~vs:result
         | {op = GeS; typ = I32} -> 
           let result = Value.less_or_equal (var2, vs2) (var1, vs1) in
-          Print_trace.print "\t%s ≥ %s -> %s\n" (RIC.to_string vs1) (RIC.to_string vs2) (Value.to_string result);
+          Print_trace.comp vs1 vs2 result "≥";
           state |> State.set ~var:(ret i) ~vs:result
         | {op = GtS; typ = I32} ->
           let result = Value.less_than (var2, vs2) (var1, vs1) in
-          Print_trace.print "\t%s > %s -> %s\n" (RIC.to_string vs1) (RIC.to_string vs2) (Value.to_string result);
+          Print_trace.comp vs1 vs2 result ">";
           state |> State.set ~var:(ret i) ~vs:result
         | {op = LeU; typ = I32} -> 
-          Print_trace.print "\t%s ≤ %s" (RIC.to_string vs1) (RIC.to_string vs2);
           let result : Value.t = 
             if not (RIC.comparable_offsets vs1 vs2) || (not (String.is_empty (RIC.extract_relative_offset vs1))) then
               ValueSet RIC.(join one zero)
@@ -279,7 +260,7 @@ module Make (*: Transfer.TRANSFER *) = struct
             else (* Mix of positives and negatives *)
               ValueSet RIC.(join one zero)
           in
-          Print_trace.print "\t%s ≤ %s -> %s\n" (RIC.to_string vs1) (RIC.to_string vs2) (Value.to_string result);
+          Print_trace.comp vs1 vs2 result "≤";
           state |> State.set ~var:(ret i) ~vs:result
         | {op = LtU; typ = I32} -> 
           let result : Value.t =
@@ -296,7 +277,7 @@ module Make (*: Transfer.TRANSFER *) = struct
             else (* Mix of positives and negatives *)
               ValueSet RIC.(join one zero)
           in
-          Print_trace.print "\t%s < %s -> %s\n" (RIC.to_string vs1) (RIC.to_string vs2) (Value.to_string result);
+          Print_trace.comp vs1 vs2 result "<";
           state |> State.set ~var:(ret i) ~vs:result
         | {op = GeU; typ = I32} -> 
           let result : Value.t = 
@@ -313,7 +294,7 @@ module Make (*: Transfer.TRANSFER *) = struct
             else (* Mix of positives and negatives *)
               ValueSet RIC.(join one zero)
           in
-          Print_trace.print "\t%s ≥ %s -> %s\n" (RIC.to_string vs1) (RIC.to_string vs2) (Value.to_string result);
+          Print_trace.comp vs1 vs2 result "≥";
           state |> State.set ~var:(ret i) ~vs:result
         | {op = GtU; typ = I32} -> 
           let result : Value.t =
@@ -330,7 +311,7 @@ module Make (*: Transfer.TRANSFER *) = struct
             else (* Mix of positives and negatives *)
               ValueSet RIC.(join one zero)
           in
-          Print_trace.print "\t%s > %s -> %s\n" (RIC.to_string vs1) (RIC.to_string vs2) (Value.to_string result);
+          Print_trace.comp vs1 vs2 result ">";
           state |> State.set ~var:(ret i) ~vs:result
         | _ -> State.set state ~var:(ret i) ~vs:(ValueSet RIC.(join one zero))
         end
@@ -427,7 +408,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : State.t) (* the pre-state *)
     : [`Simple of State.t | `Branch of State.t * State.t] =
-    Print_trace.print "%d:\t%s %s\n" i.line_number (Instr.control_to_short_string i.instr) (if state.unreachable then "(unreachable)" else "");
+    Print_trace.instruction i.line_number (Control i) state.unreachable;
     match i.instr with
     | Br _ -> `Simple state
     | BrIf _ | If _ -> 
@@ -471,7 +452,7 @@ module Make (*: Transfer.TRANSFER *) = struct
               Variable.Var (Var.Return (cfg.idx, Int32.of_int_exn i)), 
               state |> State.get ~var:(Variable.Var r))
         |> List.fold ~init:state ~f:(fun state (ret, value) -> 
-          Print_trace.print "\t\t%s: %s\n" (Variable.to_string ret) (Value.to_string value);
+          Print_trace.return ret value;
           state |> State.set ~var:ret ~vs:value))
     | Unreachable -> `Simple  { State.bottom with unreachable = true }
     | _ -> `Simple state
@@ -486,8 +467,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       (state : State.t)
       (summary : summary)
     : State.t =
-    Print_trace.print "\tstate before the call: %s\n\tsummary of function %ld:%s\n"
-      (State.to_string state) f (Summary.to_string summary) ;
+    Print_trace.apply_summary state State.to_string f summary Summary.to_string;
     let spec_before = Spec_domain.get_or_fail i.annotation_before in
     let args = List.take spec_before.vstack (fst arity) in
     let spec_after = Spec_domain.get_or_fail i.annotation_after in
@@ -537,34 +517,31 @@ module Make (*: Transfer.TRANSFER *) = struct
     : State.t =
     match predecessors with
     | [] -> 
-      Print_trace.print "================ START OF FUNCTION ==================== DATA BLOCK #%d" block.idx;
+      Print_trace.start_of_function block.idx;
       bottom
     | _ ->
       begin match block.content with
       | Control { instr = Merge; _ }
       | Entry | Return _ ->
-        Print_trace.print "======================================================= %s: Control block #%d\n"
-          (if IntSet.mem cfg.loop_heads block.idx then "LOOP HEAD" else "MERGE") block.idx;
+        Print_trace.control_block (Some cfg) block.idx;
         predecessors
         |> List.map ~f:snd
         |> List.reduce_exn ~f:join_state
         |> merge_variables module_ cfg block predecessors
       | Control _ ->
-        Print_trace.print "======================================================= CONTROL BLOCK #%d\n" block.idx;
+        Print_trace.control_block None block.idx;
         begin match predecessors with
         | [(_, s)] -> s
         | _ -> Log.error (Printf.sprintf "Invalid block with multiple input states: %d" block.idx); assert false
         end
       | _ -> 
-        Print_trace.print "======================================================= DATA BLOCK #%d\n" block.idx;
+        Print_trace.data_block block.idx;
         begin match predecessors with
         | [(_, s)] -> s
         | _ -> Log.error (Printf.sprintf "Invalid block with multiple input states: %d" block.idx); assert false
         end
       end
     
-
-
   (** [summary cfg out_state] builds the summary of [cfg] from its final state.
       If the exit annotation is bottom, the function summary is bottom. *)
   let summary (cfg : annot_expected Cfg.t) (out_state : State.t) : summary =
@@ -576,8 +553,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       | NotBottom _ ->
         Summary.make out_state
     in
-    Print_trace.print "======================================================= SUMMARY\nEND STATE:\t%s\nSUMMARY:%s\n"
-      (State.to_string out_state) (Summary.to_string function_summary);
+    Print_trace.summary out_state State.to_string function_summary Summary.to_string;
     function_summary
 
   (** [extract_summary module_ cfg analyzed_cfg] extracts the final abstract
@@ -599,9 +575,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       (instr : annot_expected Instr.labelled_call)
       (state : State.t)
     : State.t =
-    instr.instr
-    |> Instr.call_to_string
-    |> Print_trace.print "%d:\t%s" instr.line_number;
+    Print_trace.instruction instr.line_number (Call instr) state.unreachable;
     state
   
   (** [entry module_ cfg state] propagates the state at function entry. *)
