@@ -25,7 +25,7 @@
     i32.const 44
     global.set $g
 
-    local.get $l1
+    local.get $l0
   )
 )
 
