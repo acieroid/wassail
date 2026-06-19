@@ -179,14 +179,12 @@ module Spec_inference
     State.wrap ~default:bottom ~f:(function state ->
       let state = compute_stack_size_at_entry cfg i.label state in
       let ret = Var.Var i.label in
-      (* globals may have been modified by the funciton being called: *)
-      let globals = List.init Int32.(to_int_exn _module.nglobals) ~f:(fun _ -> Var.Other "unknown") in
       match i.instr with
       | CallDirect ((arity_in, arity_out), _, _) ->
-        State.NotBottom { state with globals; vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) }
+        State.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop arity_in state.vstack) }
       | CallIndirect (_, (arity_in, arity_out), _, _) ->
         (* Like call, but reads the function index from the vstack *)
-        State.NotBottom { state with globals; vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) })
+        State.NotBottom { state with vstack = (if arity_out = 1 then [ret] else []) @ (drop (arity_in+1) state.vstack) })
 
   let merge
       (module_ : Wasm_module.t)
@@ -372,22 +370,11 @@ module Spec_inference
     : State.t -> State.t =
     assert (List.length desc.returns <= 1); (* we could support more than one return, but I haven't seen it used in practice *)
     State.lift ~f:(fun state ->
-        match desc.name with
-        | "fd_write" | "fd_seek" | "fd_fdstat_get" | "fd_close" | "proc_exit" ->
-          (* These functions leave globals unchanged *)
-          (* XXX: unsound, we keep memory from before. We probably shouldn't *)
-          { state with
-            vstack = [Var.Return (desc.idx, 0l)]; (* it's assumed that imported functions will only have one return *)
-            locals = []
-          }
-        | _ ->
-          (* These functions may modify globals (we don't know) *)
-          (* XXX: unsound, we keep memory from before. We probably shouldn't *)
-          { state with
-            vstack = [Var.Return (desc.idx, 0l)]; (* it's assumed that imported functions will only have one return *)
-            locals = [];
-            globals = List.map _module_.global_types ~f:(fun _ -> Var.Other "unknown")
-          }
+        (* XXX: unsound, we keep globals / memory from before. We probably shouldn't *)
+        { state with
+          vstack = [Var.Return (desc.idx, 0l)]; (* it's assumed that imported functions will only have one return *)
+          locals = [];
+        }
       )
 end
 
