@@ -119,7 +119,16 @@ let value_set_cfg =
           (Value_set.Options.print_trace := true; 
           Value_set.Options.debug := true; 
           Value_set.Options.show_intermediates := true);
+        let original_use_const = !Spec_inference.use_const
+        and original_prop_globals = !Spec_inference.propagate_globals
+        and original_prop_locals = !Spec_inference.propagate_locals in
+        Spec_inference.use_const := true;
+        Spec_inference.propagate_globals := false;
+        Spec_inference.propagate_locals := true;
         let results = Value_set.analyze_intra (Wasm_module.of_file file_in) funs in
+        Spec_inference.use_const := original_use_const;
+        Spec_inference.propagate_globals := original_prop_globals;
+        Spec_inference.propagate_locals := original_prop_locals;
         (* We only output the latest analyzed CFG *)
         let annotated_cfg = Option.value_exn (snd (Int32Map.find_exn results (List.last_exn funs))) in
         output_to_file file_out (Cfg.to_dot annotated_cfg ~annot_str:Value_set.Domain.to_string))
@@ -141,7 +150,16 @@ let value_set_inter =
         if ignore_imports then Value_set.Options.ignore_imports := true;
         let module_ = filename |> Wasm_module.of_file in
         let sccs = sccs |> List.map ~f:(fun l -> l |> List.filter ~f:(fun i -> Int32.(i >= module_.nfuncimports))) in
+        let original_use_const = !Spec_inference.use_const
+        and original_prop_globals = !Spec_inference.propagate_globals
+        and original_prop_locals = !Spec_inference.propagate_locals in
+        Spec_inference.use_const := true;
+        Spec_inference.propagate_globals := false;
+        Spec_inference.propagate_locals := true;
         let results = Value_set.analyze_inter module_ sccs in
+        Spec_inference.use_const := original_use_const;
+        Spec_inference.propagate_globals := original_prop_globals;
+        Spec_inference.propagate_locals := original_prop_locals;
         let function_name (summary : Spec_domain.t Wassail.Cfg.t * Value_set.Domain.t Wassail.Cfg.t * Value_set.Domain.t) : string =
           let name =
             match summary with
@@ -175,9 +193,18 @@ let value_set_inter_classical =
           (Value_set.Options.print_trace := true; 
           Value_set.Options.debug := true; 
           Value_set.Options.show_intermediates := true);
+        let original_use_const = !Spec_inference.use_const
+        and original_prop_globals = !Spec_inference.propagate_globals
+        and original_prop_locals = !Spec_inference.propagate_locals in
+        Spec_inference.use_const := true;
+        Spec_inference.propagate_globals := false;
+        Spec_inference.propagate_locals := true;
         let results = 
           (fun module_ fidx -> Value_set.analyze_inter_classical module_ fidx)
           (Wasm_module.of_file filename) fidx in
+        Spec_inference.use_const := original_use_const;
+        Spec_inference.propagate_globals := original_prop_globals;
+        Spec_inference.propagate_locals := original_prop_locals;
         (fun file_out icfg ->
        Out_channel.with_file file_out
          ~f:(fun ch ->

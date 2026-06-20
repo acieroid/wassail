@@ -76,7 +76,6 @@ module Inter = Inter.MakeSummaryBased(TransferFunction)(Intra)
     Each analyzed function returns its summary and, when available, its annotated
     value-set CFG. *)
 let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t option) Int32Map.t =
-  Spec_inference.propagate_globals := false;
   Analysis_helpers.mk_intra
     (fun cfgs wasm_mod ->
       (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs wasm_mod `Bottom)))
@@ -99,7 +98,6 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
   Analysis_helpers.mk_inter
     (fun _cfgs _wasm_mod -> Int32Map.empty)
     (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
-      Spec_inference.propagate_globals := false;
       Log.info
         (Printf.sprintf "---------- Value-set analysis of SCC {%s} ----------"
           (String.concat ~sep:", " (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
@@ -118,7 +116,6 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
 (** [analyze_inter_classical module_ entry] runs the classical interprocedural
     value-set analysis from [entry]. *)
 let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Domain.t Icfg.t =
-  Spec_inference.propagate_globals := false;
   ClassicalInter.analyze module_ (Analysis_helpers.mk_inter_classical module_ entry)
 
 (** Result of [run_pointer_analysis]: the value-set CFG, the propagated spec
@@ -154,7 +151,7 @@ let run_pointer_analysis
   let summaries = Int32Map.map cfg_pointers_map ~f:(fun (summary, _) -> summary) in
   Spec_inference.use_const := original_use_const;
   Spec_inference.propagate_globals := original_prop_globals;
-  Spec_inference.propagate_locals := original_prop_locals;
+  Spec_inference.propagate_locals := original_prop_locals; 
   (cfg_pointers, instructions_from_pointer_cfg, summaries)
 
 
@@ -187,6 +184,8 @@ let%test_module "value-set tests" = (module struct
   let test_label name = Printf.printf "%s\n" name
 
   let analyze (schedule : int32 list) (fct : int32) (program : string) : Domain.t =
+    let original_prop_globals = !Spec_inference.propagate_globals in
+    Spec_inference.propagate_globals := false;
     let cfg =
       ((program
       |> Wasm_module.of_string
@@ -195,18 +194,23 @@ let%test_module "value-set tests" = (module struct
       |> snd
       |> Option.value_exn 
     in
+    Spec_inference.propagate_globals := original_prop_globals;
     match (Cfg.find_block_exn cfg cfg.exit_block).content with
     | Control i -> i.annotation_after
     | _ -> failwith "Cfg.exit_annotation_exn: exit block is not a control block"
 
   let analyze_inter' (program : string) ~(fct_idx : int32) : Summary.t =
+    let original_prop_globals = !Spec_inference.propagate_globals in
+    Spec_inference.propagate_globals := false;
     let module_ = program |> Wasm_module.of_string in
     let cg = module_ |> Call_graph.make in
     let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
     let final_annotation (cfg : 'a Cfg.t) : 'a =
       let exit_block = Cfg.find_block_exn cfg (Cfg.exit_block cfg) in
       exit_block.annotation_after in
-    analyze_inter module_ schedule 
+    let analysis = analyze_inter module_ schedule in
+    Spec_inference.propagate_globals := original_prop_globals;
+    analysis
     |> (fun a -> Int32Map.find_exn a fct_idx)
     |> (fun (_,cfg,_) -> cfg)
     |> final_annotation
@@ -3347,7 +3351,173 @@ let%test_module "value-set tests" = (module struct
       (Variable.Var (Var.Global 0))
       (ValueSet RIC.(constant 56l))
 
-  
+  let%test "i64.wat" =
+    let exit_state =
+      "(module
+      (global $g (mut i64) (i64.const 0))
+
+        (func $main (export \"main\") (param $x i64) (result i32) (local $l0 i64)
+          i64.const 14
+          global.set $g
+          global.get $g
+          local.get $l0
+          i64.gt_s
+          drop 
+          i64.const 78
+          i64.eqz
+        )
+      )"
+      |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[i64.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Local 1))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Var (Var.Global 0))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Var (Var.Local 0))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 0l 4)
+      (ValueSet RIC.(join zero one))
+    && check_value exit_state
+      (Variable.Var (Var.Return (0l,0l)))
+      (ValueSet RIC.(join zero one))
+
+  let%test "local.get local.set.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (param $x i32) (result i32) (local $l0 i32)
+          local.get $l0
+          local.set $x
+          local.get $x
+        )
+      )"
+      |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[local.get local.set.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Local 0))
+      (ValueSet RIC.zero)
+    && check_value exit_state
+      (Variable.Var (Var.Local 1))
+      (ValueSet RIC.zero)
+    && check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.zero)
+
+  let%test "lt_u.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (param $x i32) (param $y i32) (result i32) (local $l0 i32)
+          local.get $x
+          local.tee $l0
+          local.get $x
+          i32.lt_u
+          drop
+
+          i32.const 14
+          i32.const 2
+          i32.lt_u
+          drop
+
+          i32.const -14
+          i32.const -2
+          i32.lt_u
+          drop
+
+          local.get $x
+          local.get $y
+          i32.lt_u
+        )
+      )"
+      |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[lt_u.wat]";
+    check_value exit_state
+      (i_var 0l 3)
+      (ValueSet RIC.(join zero one))
+    && check_value exit_state
+      (i_var 0l 7)
+      (ValueSet RIC.zero)
+    && check_value exit_state
+      (i_var 0l 11)
+      (ValueSet RIC.one)
+    && check_value exit_state
+      (i_var 0l 15)
+      (ValueSet RIC.(join zero one))
+
+
+  let%test "gt_u.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (param $x i32) (param $y i32) (result i32) (local $l0 i32)
+          local.get $x
+          local.tee $l0
+          local.get $x
+          i32.gt_u
+          drop
+
+          i32.const 14
+          i32.const -2
+          i32.gt_u
+          drop
+
+          i32.const -14
+          i32.const -2
+          i32.gt_u
+          drop
+
+          local.get $x
+          local.get $y
+          i32.lt_u
+        )
+      )"
+      |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[gt_u.wat]";
+    check_value exit_state
+      (i_var 0l 3)
+      (ValueSet RIC.(join zero one))
+    && check_value exit_state
+      (i_var 0l 7)
+      (ValueSet RIC.zero)
+    && check_value exit_state
+      (i_var 0l 11)
+      (ValueSet RIC.zero)
+    && check_value exit_state
+      (i_var 0l 15)
+      (ValueSet RIC.(join zero one))
+
+  let%test "unreachable true branch.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (param $x i32) (result i32) (local $l1 i32)
+          local.get $x
+          if
+            i32.const 14
+            local.set $l1
+          else
+            i32.const 44
+            local.set $l1
+          end
+          local.get $l1
+          i32.eqz
+          if (result i32)
+            i32.const 99
+          else
+            i32.const 66
+          end
+        )
+      )"
+      |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[unreachable true branch.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.(constant 66l))
     
 
   (* Add next test here *)

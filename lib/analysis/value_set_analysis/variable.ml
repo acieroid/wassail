@@ -81,13 +81,6 @@ module T = struct
   (** [is_finite v] is [true] iff [v] is not infinite. *)
   let is_finite (var : t) : bool = not (is_infinite var)
 
-  (** [is_singleton v] is [false] only for memory regions with distinct bounds.
-    Non-memory variables are considered singleton variables. *)
-  let is_singleton (var : t) : bool =
-    match var with
-    | Mem addr -> RIC.is_singleton addr
-    | _ -> true
-
   (** [share_addresses v1 v2] is [true] iff [v1] and [v2] overlap as memory regions. *)
   let share_addresses (var1 : t) (var2 : t) : bool =
     match var1, var2 with
@@ -212,19 +205,19 @@ module Map = struct
               ~f:(fun new_store1 m2 ->
                 let mems1 = extract_memory_variables new_store1 in
                 match m2 with
-                | T.Mem addr_m2 -> 
+                | Mem addr_m2 -> 
                   mems1 |> List.fold
                             ~init:new_store1
                             ~f:(fun store m1 ->
                               match m1 with
-                              | T.Mem addr_m1 ->
+                              | Mem addr_m1 ->
                                 let met_addrs = RIC.meet addr_m2 addr_m1 in
                                 if RIC.(met_addrs = Bottom) then
                                   store
                                 else
                                   let new_mem_vars = 
                                     met_addrs :: (RIC.remove ~this:met_addrs ~from:addr_m1)
-                                    |> List.map ~f:(fun addr -> T.Mem addr) in
+                                    |> List.map ~f:(fun addr -> Mem addr) in
                                   let vs = get store ~var:m1 in
                                   let store = remove store m1 in
                                   update_all store (Set.of_list new_mem_vars) vs

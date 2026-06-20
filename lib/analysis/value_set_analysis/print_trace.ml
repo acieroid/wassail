@@ -302,7 +302,7 @@ let non_i32 () : unit =
     ()
 
 let print_imprecise : unit -> unit =
-  fun () -> Printf.printf "\tthis type of binary operation results in a pointer that can point anywhere"
+  fun () -> Printf.printf "\tthis type of binary operation results in a pointer that can point anywhere\n"
 let imprecise_operation () : unit =
   if !Value_set_options.print_trace then
     print_imprecise ()
@@ -352,7 +352,7 @@ let return
 
 let print_start_of_function (idx : int) : unit =
   Printf.printf
-    "================ START OF FUNCTION ==================== DATA BLOCK #%d" 
+    "================ START OF FUNCTION ==================== DATA BLOCK #%d\n" 
     idx
 let start_of_function (idx : int) : unit =
   if !Value_set_options.print_trace then

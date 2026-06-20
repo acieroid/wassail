@@ -41,14 +41,14 @@ module Make (*: Transfer.TRANSFER *) = struct
             let variable = Variable.Var (Var.Global i) in
             match type_ with
             | I32 -> init_variable variable
-            | _ -> (variable, Value.top))) @
+            | _ -> (variable, top))) @
           (* locals *)
           (List.mapi funcinst.code.locals ~f:(fun i type_ -> 
             let variable = Variable.Var (Var.Local (i + nb_of_arguments)) in
             match type_ with
             | I32 -> (variable, Value.ValueSet RIC.zero)
             | _ -> (variable, top))) @
-          [(Variable.entire_memory), Value.top]);
+          [(Variable.entire_memory), top]);
       store_operations = RICSet.empty;
       unreachable = false }
 
@@ -95,22 +95,20 @@ module Make (*: Transfer.TRANSFER *) = struct
         | ret :: _ -> Variable.Var ret
         | [] -> assert false
       in
-      (** [invalid_pointer_value type_ variable] assigns top to [variable] when the
-      value is a non-I32 value. *)
-      let invalid_pointer_value (type_ : string) (variable : Variable.t) : State.t =
-        Print_trace.invalid_pointer_type type_;
-        State.to_top_RIC state variable
-      in
       (** [set variable] assigns the top stack value to [variable]. *)
       let set (variable : Variable.t) : State.t =
+        let invalid_pointer_type (type_ : string) (variable : Variable.t) : State.t =
+          Print_trace.invalid_pointer_type type_;
+          State.to_top_RIC state variable
+        in
         let top_of_stack = pop (Spec_domain.get_or_fail i.annotation_before).vstack in
         begin match top_of_stack with
         | Var.Const (Prim_value.I32 n) ->
           Print_trace.assign_const n variable;
           State.assign_constant_value state ~const:n ~to_:variable
-        | Var.Const (Prim_value.F32 _) -> invalid_pointer_value "Float32" variable
-        | Var.Const (Prim_value.I64 _) -> invalid_pointer_value "Int64" variable
-        | Var.Const (Prim_value.F64 _) -> invalid_pointer_value "Float64" variable
+        | Var.Const (Prim_value.F32 _) -> invalid_pointer_type "Float32" variable
+        | Var.Const (Prim_value.I64 _) -> invalid_pointer_type "Int64" variable
+        | Var.Const (Prim_value.F64 _) -> invalid_pointer_type "Float64" variable
         | Var.Local _ | Var.Global _ ->
           let vs = Value.ValueSet (RIC.relative_ric (Var.to_string top_of_stack)) in
           Print_trace.assign vs variable;
@@ -135,12 +133,12 @@ module Make (*: Transfer.TRANSFER *) = struct
       | MemoryCopy -> 
         (* TODO: if needed, we could eventually increase precision. See 
            Abstract_store_domain.memory_copy for implementation stub *)
-        { (state |> State.set ~var:Variable.entire_memory ~vs:Value.top
-                 |> State.set ~var:Variable.Accessed ~vs:Value.top)
+        { (state |> State.set ~var:Variable.entire_memory ~vs:top
+                 |> State.set ~var:Variable.Accessed ~vs:top)
             with store_operations = RICSet.singleton RIC.Top }
       | MemoryInit _ | MemoryFill ->
         (* TODO: if needed, we could eventually increase precision. *)
-        { (state |> State.set ~var:Variable.entire_memory ~vs:Value.top)
+        { (state |> State.set ~var:Variable.entire_memory ~vs:top)
             with store_operations = RICSet.singleton RIC.Top }
       | RefIsNull | RefNull _ | RefFunc _ -> state
       | Select _ ->
