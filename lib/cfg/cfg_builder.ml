@@ -49,13 +49,74 @@ let compute_enclosing_block_id (basic_blocks : unit Basic_block.t list) : int In
           (label, bb.idx)))
   |> Instr.Label.Map.of_alist_exn
 
+(* When merging empty blocks, we need to propagate their edge data. It only works if there is at most one conditional in the edges to merge *)
+let merge_edge_data (left : bool option) (right : bool option) : bool option =
+    match left, right with
+    | Some b, None
+    | None, Some b -> Some b
+    | None, None -> None
+    | Some _, Some _ -> failwith "trying to merge two conditional edges, should not happen"
+
+let redirect_edges_around_empty_blocks (filtered_blocks : IntSet.t) (edges : (int * int * bool option) list) : (int * int * bool option) list =
+  (* For each removed empty block E, we collect the non-empty predecessors that point to it *)
+  let incoming = edges
+    |> List.filter_map ~f:(fun (src, dst, data) ->
+        if IntSet.mem filtered_blocks dst && not (IntSet.mem filtered_blocks src) then
+          Some (dst, (src, data))
+        else
+          None)
+    |> IntMap.of_alist_multi in
+  (* For each removed empty block E, we collect its outgoing edges. *)
+  let outgoing = edges
+    |> List.filter_map ~f:(fun (src, dst, data) ->
+        if IntSet.mem filtered_blocks src then
+          Some (src, (dst, data))
+        else
+          None)
+    |> IntMap.of_alist_multi in
+
+  (* Starting from a removed empty block, find all non-empty blocks reachable by following only outgoing edges through removed empty blocks. *)
+  let rec targets_from_filtered_block (visited : IntSet.t) (idx : int) (edge_data : bool option) : (int * bool option) list =
+    if IntSet.mem visited idx then
+      []
+    else
+      let visited = IntSet.add visited idx in
+      IntMap.find outgoing idx
+      |> Option.value ~default:[]
+      |> List.concat_map ~f:(fun (dst, data) ->
+          let data = merge_edge_data edge_data data in
+          if IntSet.mem filtered_blocks dst then
+            (* Still inside removed empty blocks: continue. *)
+            targets_from_filtered_block visited dst data
+          else
+            (* Found a real block. This is a target for the redirected edge. *)
+            [(dst, data)])
+  in
+
+  (* For every non-empty predecessor of an empty block, connect it directly to every non-empty target reachable through that empty block chain.
+     For example, A -> E1 -> E2 -> B comes A -> B *)
+  let redirected_edges = incoming
+    |> IntMap.to_alist
+    |> List.concat_map ~f:(fun (empty_idx, incoming_edges) ->
+        let outgoing_edges =
+          targets_from_filtered_block IntSet.empty empty_idx None
+        in
+        List.concat_map incoming_edges ~f:(fun (src, incoming_data) ->
+            List.map outgoing_edges ~f:(fun (dst, outgoing_data) ->
+                (src, dst, merge_edge_data incoming_data outgoing_data))))
+  in
+
+  (* These are edges that do not touch removed empty blocks. Edges into or out of removed blocks are replaced by redirected_edges *)
+  let regular_edges = List.filter edges ~f:(fun (src, dst, _) -> not (IntSet.mem filtered_blocks src || IntSet.mem filtered_blocks dst)) in
+  redirected_edges @ regular_edges
+
 (** Constructs a CFG for function `fid` in a module. *)
 let build (module_ : Wasm_module.t) (fidx : Int32.t) : unit Cfg.t =
   (* XXX: this implementation is really not ideal and should be cleaned *)
   let rec check_no_rest (rest : 'a Instr.t list) : unit = match rest with
     | [] -> ()
     | Control { instr = Unreachable; _ } :: rest -> check_no_rest rest
-    | _ -> Log.info (Printf.sprintf "Ignoring unreachable instructions after jump: %s" (Instr.list_to_string rest (fun _ -> "")))
+    | _ -> Log.info (fun () -> Printf.sprintf "Ignoring unreachable instructions after jump: %s" (Instr.list_to_string rest (fun _ -> "")))
   in
   let simplify = true in
   let funcinst = Wasm_module.get_funcinst module_ fidx in
@@ -255,7 +316,7 @@ let build (module_ : Wasm_module.t) (fidx : Int32.t) : unit Cfg.t =
            (* The exit block (it should not matter here) *)
            return_block.idx)
         | Unreachable ->
-          (* Simply construct a block containig the unreachable instruction *)
+          (* Simply construct a block containing the unreachable instruction *)
           let block = mk_data_block instrs in
           let unreachable_block = mk_control_block instr in
           let (blocks, edges, breaks, returns, _entry', exit') = helper [] rest in
@@ -273,7 +334,7 @@ let build (module_ : Wasm_module.t) (fidx : Int32.t) : unit Cfg.t =
   let breaks_to_exit, remaining_breaks = List.partition_tf breaks ~f:(fun (_, lvl, _) -> Int32.(lvl = 0l)) in
   begin if not (List.is_empty remaining_breaks) then
       (* there shouldn't be any breaks outside the function *)
-      Log.warn (Printf.sprintf "There are %d breaks outside of function %ld" (List.length breaks) fidx)
+      Log.warn (fun () -> Printf.sprintf "There are %d breaks outside of function %ld" (List.length breaks) fidx)
   end;
   (* Connect the return block and the remaining breaks to it, and remove all edges that start from a return block (as they are unreachable) *)
   let edges' = (exit_idx, return_block.idx, None) ::
@@ -288,21 +349,9 @@ let build (module_ : Wasm_module.t) (fidx : Int32.t) : unit Cfg.t =
         else
           true
       | _ -> true) in
-  let filtered_blocks_idx = List.map filtered_blocks ~f:(fun b -> b.idx) in
+  let filtered_blocks_idx = IntSet.of_list (List.map filtered_blocks ~f:(fun b -> b.idx)) in
   (* And we have to redirect the edges: if there is an edge to a removed block, we make it point to its successors *)
-  let actual_edges = List.fold_left filtered_blocks_idx ~init:edges' ~f:(fun edges idx ->
-      (* idx is removed, so we find all edges pointing to idx (and we keep track of the other ones, as only these should be kept) *)
-      let (pointing_to, edges') = List.partition_tf edges ~f:(fun (_, dst, _) -> dst = idx) in
-      (* and we find all edges pointing from idx (again, keeping track of the other ones) *)
-      let (pointing_from, edges'') = List.partition_tf edges' ~f:(fun (src, _, _) -> src = idx) in
-      (* now we connect everything from both sets *)
-      List.concat (List.map pointing_to ~f:(fun (src, _, data) -> List.map pointing_from ~f:(fun (_, dst, data') ->
-          match (data, data') with
-          | Some b, None -> (src, dst, Some b)
-          | None, Some b -> (src, dst, Some b)
-          | None, None -> (src, dst, None)
-          | Some _, Some _ -> failwith "trying to merge two conditional edges, should not happen"))) @ edges'') in
-
+  let actual_edges = redirect_edges_around_empty_blocks filtered_blocks_idx edges' in
   (* Create the entry block if needed *)
   let first_block = Option.value_exn (List.min_elt (List.map actual_blocks ~f:(fun b -> b.idx)) ~compare:Stdlib.compare) in
   (* In general, the first block is the entry block. But in some cases, it could be a block with back edges, and we want to avoid that. So we check if there's an edge to the entry block: if there is one, we need an extra entry block *)
@@ -443,4 +492,3 @@ module Test = struct
   let%test_unit "CFG for loop.wat can be built" = test_cfgs "../../../test/loop.wat"
   let%test_unit "CFG for loop-brif.wat can be built" = test_cfgs "../../../test/loop-brif.wat"
 end
-

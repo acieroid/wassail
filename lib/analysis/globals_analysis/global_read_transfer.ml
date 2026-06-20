@@ -64,7 +64,7 @@ module Make = struct
     match i.instr with
     | GlobalGet g ->
       (let global_var = Var.Global (Int32.to_int_exn g) in
-        Log.info (Printf.sprintf "global.get %ld --- function uses variable %s" g (Var.to_string global_var));
+        Log.info (fun () -> Printf.sprintf "global.get %ld --- function uses variable %s" g (Var.to_string global_var));
         match Global_defs.get ~defs:!global_defs ~global_var with
         | None -> state
         | Some defs -> Global_read_domain.join state (NotTop defs))
@@ -144,7 +144,7 @@ module Make = struct
       (state : State.t)
       (summary : summary)
     : State.t =
-    Log.info (Printf.sprintf "call %ld --- summary of function %ld:\t%s" f f (Global_read_summary.to_string summary));
+    Log.info (fun () -> Printf.sprintf "call %ld --- summary of function %ld:\t%s" f f (Global_read_summary.to_string summary));
     Summary.apply ~state ~summary
 
 
@@ -164,7 +164,7 @@ module Make = struct
       | NotBottom _ ->
         Summary.make out_state
     in
-    Log.info ("SUMMARY:\t" ^ Summary.to_string function_summary);
+    Log.info (fun () -> "SUMMARY:\t" ^ Summary.to_string function_summary);
     function_summary
 
 

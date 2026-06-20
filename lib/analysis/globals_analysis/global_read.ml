@@ -73,9 +73,9 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
     (fun wasm_mod ~cfgs:_ -> Global_defs.make wasm_mod)
     (fun _ _ -> Int32Map.empty)
     (fun global_defs wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
-      Log.info
+      Log.info (fun () -> 
         (Printf.sprintf "-------------------- Global-read analysis of SCC {%s} --------------------"
-          (String.concat ~sep:", " (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
+          (String.concat ~sep:", " (List.map (Int32Map.keys scc) ~f:Int32.to_string))));
       (* Run the global-read analysis. *)
       let annotated_scc = scc in
       let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_, _, summary) -> summary) in

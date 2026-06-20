@@ -194,7 +194,7 @@ let join (boolean1 : t) (boolean2 : t) : t =
 
     Both operands are first made compatible, then shared refinements and numeric
     values are intersected pointwise. *)
-let meet (boolean1 : t) (boolean2 : t) : t = Log.warn "I'm not sure about the meet of two boolean conditions"; 
+let meet (boolean1 : t) (boolean2 : t) : t = Log.warn (fun () -> "I'm not sure about the meet of two boolean conditions"); 
   let boolean1 = { boolean1 with 
                    true_or_false = Variable.Map.make_compatible ~this:boolean1.true_or_false ~relative_to:boolean2.true_or_false ~get:True_or_false.get;} in
   let boolean2 = { boolean2 with

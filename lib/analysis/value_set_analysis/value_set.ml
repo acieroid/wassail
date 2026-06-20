@@ -62,7 +62,7 @@ struct
                 |> Value_set_abstraction.equal Value_set_abstraction.bottom
                 |> not)
       in
-      if List.is_empty targets then (Log.error "indirect call index doesn't match any function"; failwith "invalid program: indirect call index doesn't match any function");
+      if List.is_empty targets then (Log.error (fun () -> "indirect call index doesn't match any function"); failwith "invalid program: indirect call index doesn't match any function");
       List.fold_left targets
         ~init:Transfer.bottom
         ~f:(fun acc idx -> Transfer.State.join (apply_summary idx arity state) acc)
@@ -81,7 +81,7 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
       (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs wasm_mod `Bottom)))
     (fun data wasm_mod cfg ->
       Log.info
-        (Printf.sprintf "-------------------- Value-set analysis of function %s --------------------" (Int32.to_string cfg.idx));
+        (fun () -> Printf.sprintf "-------------------- Value-set analysis of function %s --------------------" (Int32.to_string cfg.idx));
       (* Run the value-set analysis *)
       let annotated_cfg = (* Relational.Transfer.dummy_annotate  *) cfg in
       let summaries = Int32Map.map data ~f:fst in
@@ -99,7 +99,7 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
     (fun _cfgs _wasm_mod -> Int32Map.empty)
     (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
       Log.info
-        (Printf.sprintf "---------- Value-set analysis of SCC {%s} ----------"
+        (fun () -> Printf.sprintf "---------- Value-set analysis of SCC {%s} ----------"
           (String.concat ~sep:", " (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
       (* Run the value-set analysis *)
       let annotated_scc = scc in

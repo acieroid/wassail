@@ -141,7 +141,7 @@ let of_import (fct_idx : int32) (name : string) (nglobals : Int32.t) (_args : Ty
     |> Domain.set ~var:(Variable.Accessed) ~vs:(Value.top)
   | _ ->
     (* There is no way to know if global variables have been changed *)
-    Log.warn (Printf.sprintf "Imported function is not modelled: %s" name);
+    Log.warn (fun () -> Printf.sprintf "Imported function is not modelled: %s" name);
     let summary =
       (* Globals can point anywhere *)
       List.fold globals 

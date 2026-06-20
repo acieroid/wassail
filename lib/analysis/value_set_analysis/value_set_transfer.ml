@@ -163,7 +163,7 @@ module Make (*: Transfer.TRANSFER *) = struct
               y_vs
             else
               (* bottom condition is unreachable *)
-              (Log.error "Select: condition can't be true nor false"; assert false )
+              (Log.error (fun () -> "Select: condition can't be true nor false"); assert false )
         in
         Print_trace.select cond_vs x_vs y_vs result;
         State.set state ~var:(ret i) ~vs:result
@@ -530,13 +530,13 @@ module Make (*: Transfer.TRANSFER *) = struct
         Print_trace.control_block None block.idx;
         begin match predecessors with
         | [(_, s)] -> s
-        | _ -> Log.error (Printf.sprintf "Invalid block with multiple input states: %d" block.idx); assert false
+        | _ -> Log.error (fun () -> Printf.sprintf "Invalid block with multiple input states: %d" block.idx); assert false
         end
       | _ -> 
         Print_trace.data_block block.idx;
         begin match predecessors with
         | [(_, s)] -> s
-        | _ -> Log.error (Printf.sprintf "Invalid block with multiple input states: %d" block.idx); assert false
+        | _ -> Log.error (fun () -> Printf.sprintf "Invalid block with multiple input states: %d" block.idx); assert false
         end
       end
     

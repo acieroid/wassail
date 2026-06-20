@@ -205,7 +205,7 @@ module RIC = struct
     | Top -> Top
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
       ric (s, l, u, (relative_offset, o))
-    | _ -> Log.error ("set_relative_offset : " ^ to_string r ^ " ... " ^ relative_offset);
+    | _ -> Log.error (fun () -> "set_relative_offset : " ^ to_string r ^ " ... " ^ relative_offset);
       assert false
 
   (** [remove_relative_offset r]

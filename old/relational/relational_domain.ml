@@ -149,7 +149,7 @@ let add_constraints (s : t) (constraints : (Var.t * string) list) : t =
   rethrow_apron_error "Relational_domain.add_constraints" (fun () ->
       List.iter filtered_constraints ~f:(fun (x, y) ->
           (Log.info
-             (Printf.sprintf "add constraint: %s = %s" (Var.to_string x) y)));
+             (fun () -> Printf.sprintf "add constraint: %s = %s" (Var.to_string x) y)));
       let lhs = List.map filtered_constraints ~f:(fun (v, _) -> Apron.Var.of_string (Var.to_string v)) in
       let rhs = List.map filtered_constraints ~f:(fun (_, c) -> Apron.Parser.linexpr1_of_string s.constraints.env c) in
       { constraints = Apron.Abstract1.assign_linexpr_array manager s.constraints (Array.of_list lhs)  (Array.of_list rhs) None })
@@ -290,7 +290,7 @@ let join (s1 : t) (s2 : t) : t =
         constraints = Apron.Abstract1.join manager s1.constraints s2.constraints;
       } in
       Log.info
-        (Printf.sprintf "join %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
+        (fun () -> Printf.sprintf "join %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
       res)
 
 (** Like join, but the second argument is an option: if it is None, it is treated as bottom *)
@@ -306,7 +306,7 @@ let widen (s1 : t) (s2 : t) : t =
         constraints = Apron.Abstract1.widening manager s1.constraints s2.constraints;
       } in
       Log.info
-        (Printf.sprintf "widening %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
+        (fun () -> Printf.sprintf "widening %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
       res)
 
 (** Meet two states *)
@@ -316,7 +316,7 @@ let meet (s1 : t) (s2 : t) : t =
         constraints = Apron.Abstract1.meet manager s1.constraints s2.constraints;
       } in
       Log.info
-        (Printf.sprintf "meet %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
+        (fun () -> Printf.sprintf "meet %s\n and %s\ngives %s\n" (to_string s1) (to_string s2) (to_string res));
       res)
 
 

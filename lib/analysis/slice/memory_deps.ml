@@ -613,7 +613,7 @@ let make
                   | { instr = MemoryFill; label = store_label; _ } ->
                     let () =
                     (match pointer_analysis with
-                    | Some _ -> Log.warn "memory.fill instruction is not yet supported by pointer analysis";
+                    | Some _ -> Log.warn (fun () -> "memory.fill instruction is not yet supported by pointer analysis");
                     | None -> ())
                     in
                     Some store_label
@@ -621,7 +621,7 @@ let make
                   | { instr = MemoryInit _; label = store_label; _ } ->
                     let () =
                     (match pointer_analysis with
-                    | Some _ -> Log.warn "memory.init _ instruction is not yet supported by pointer analysis";
+                    | Some _ -> Log.warn (fun () -> "memory.init _ instruction is not yet supported by pointer analysis");
                     | None -> ())
                     in
                     Some store_label
@@ -629,7 +629,7 @@ let make
                   | { instr = MemoryCopy; label = store_label; _ } ->
                     let () =
                     (match pointer_analysis with
-                    | Some _ -> Log.warn "memory.copy instruction is not yet supported by pointer analysis";
+                    | Some _ -> Log.warn (fun () -> "memory.copy instruction is not yet supported by pointer analysis");
                     | None -> ())
                     in
                     Some store_label

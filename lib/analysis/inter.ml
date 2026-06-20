@@ -51,7 +51,7 @@ module MakeSummaryBased (Transfer : Transfer.SUMMARY_TRANSFER)(Intra : Intra.INT
         if Int32.(cfg_idx < module_.nfuncimports) then begin
           (* Should not happen *)
           Log.info
-            (Printf.sprintf "Not analyzing cfg %s (it is an imported function)" (Int32.to_string cfg_idx));
+            (fun () -> Printf.sprintf "Not analyzing cfg %s (it is an imported function)" (Int32.to_string cfg_idx));
           fixpoint (Int32Set.remove worklist cfg_idx) annotated_cfgs summaries
         end else begin
           let cfg = match Int32Map.find cfgs cfg_idx with
@@ -60,7 +60,7 @@ module MakeSummaryBased (Transfer : Transfer.SUMMARY_TRANSFER)(Intra : Intra.INT
           (* Log.info
             (Printf.sprintf "Analyzing cfg %s (name: %s)\n" (Int32.to_string cfg_idx) cfg.name); *)
           Log.info
-            (Printf.sprintf "Analyzing cfg %s (name: %s)\n" (Int32.to_string cfg_idx) (Cfg.name cfg));
+            (fun () -> Printf.sprintf "Analyzing cfg %s (name: %s)\n" (Int32.to_string cfg_idx) (Cfg.name cfg));
           (* Perform intra-procedural analysis *)
           let analyzed_cfg = Intra.analyze module_ cfg summaries in
           let summary = Transfer.extract_summary module_ cfg analyzed_cfg in

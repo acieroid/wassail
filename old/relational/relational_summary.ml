@@ -91,7 +91,7 @@ let of_import (name : string) (args : Type.t list) (ret : Type.t list) : t =
       topstate
     | _ ->
       (* We have not modelled this imported function, so we don't have any constraints *)
-      Log.warn (Printf.sprintf "Imported function is not modelled: %s" name);
+      Log.warn (fun () -> Printf.sprintf "Imported function is not modelled: %s" name);
       topstate
   in
   { params = params;
@@ -108,7 +108,7 @@ let of_import (name : string) (args : Type.t list) (ret : Type.t list) : t =
 let apply (summary : t) (state : Domain.t) (args: string list) (ret : string option) : Domain.t =
   try
     Log.info
-      (Printf.sprintf "Applying summary %s\n" (to_string summary));
+      (fun () -> Printf.sprintf "Applying summary %s\n" (to_string summary));
     (* A summary encodes the relation between the arguments and return value.
        To apply it, we do the following: *)
     let args_and_ret = args @ (Option.to_list ret) in
@@ -116,11 +116,11 @@ let apply (summary : t) (state : Domain.t) (args: string list) (ret : string opt
     let rename_from = List.map (summary.params @ (Option.to_list summary.return)) ~f:(fun v -> Apron.Var.of_string (Var.to_string v)) in
     let rename_to = List.map args_and_ret ~f:Apron.Var.of_string in
     Log.info
-      (Printf.sprintf "vars: %s\n" (String.concat ~sep:","
+      (fun () -> Printf.sprintf "vars: %s\n" (String.concat ~sep:","
                                     (List.map (Array.to_list (fst (Apron.Environment.vars summary.state.constraints.env)))
                                        ~f:Apron.Var.to_string)));
     Log.info
-      (Printf.sprintf "renaming in state %s\nFrom %s to %s\n" (Domain.to_string summary.state) (String.concat ~sep:"," (List.map rename_from ~f:Apron.Var.to_string )) (String.concat ~sep:"," (List.map rename_to ~f:Apron.Var.to_string)));
+      (fun () -> Printf.sprintf "renaming in state %s\nFrom %s to %s\n" (Domain.to_string summary.state) (String.concat ~sep:"," (List.map rename_from ~f:Apron.Var.to_string )) (String.concat ~sep:"," (List.map rename_to ~f:Apron.Var.to_string)));
     let renamed = Apron.Abstract1.rename_array Domain.manager summary.state.constraints
         (Array.of_list rename_from)
         (Array.of_list rename_to) in
@@ -145,4 +145,3 @@ let initial_summaries (cfgs : 'a Cfg.t Int32Map.t) (module_ : Wasm_module.t) (ty
          | `Top -> top) cfg Var.Set.empty (* TODO: vars *)))
     ~f:(fun summaries (idx, name, (args, ret)) ->
         Int32Map.set summaries ~key:idx ~data:(of_import name args ret))
-

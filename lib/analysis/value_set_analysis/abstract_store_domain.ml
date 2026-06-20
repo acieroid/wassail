@@ -241,7 +241,7 @@ let set (store : t) ~(var : Variable.t) ~(vs : Value.t) : t =
         Variable.(k <> var && share_addresses k var))
   in
   if is_invalid then
-    (Log.error "trying to update a memory variable that overlaps with other memory variables"; assert false)
+    (Log.error (fun () -> "trying to update a memory variable that overlaps with other memory variables"); assert false)
   else
     let store = 
       if Variable.is_linear_memory var then
@@ -472,7 +472,7 @@ let update_memory_size (store : t) ~(summary : t) : t =
   match (get store ~var:Variable.MemorySize), (get summary ~var:Variable.MemorySize) with
   | ValueSet (RIC r1), ValueSet (RIC r2) ->
     if Maths.ExtendedInt.(r1.upper_bound <> Infinity || r2.upper_bound <> Infinity) then 
-      (Log.error "Unexpected finite memory-size upper bound";
+      (Log.error (fun () -> "Unexpected finite memory-size upper bound");
       store |> set ~var:Variable.MemorySize ~vs:(ValueSet RIC.positive_integers))
     else
       store |> set ~var:Variable.MemorySize ~vs:(ValueSet RIC.(RIC r1 + RIC r2))

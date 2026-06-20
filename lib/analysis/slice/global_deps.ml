@@ -87,10 +87,10 @@ let globals_depend_on_calls
                               ~global_var
                               ~fct_index 
                           then
-                            (Log.info ("fct " ^ Int32.to_string fct_index ^ " may affect global variable " ^ Var.to_string global_var);
+                            (Log.info (fun () -> "fct " ^ Int32.to_string fct_index ^ " may affect global variable " ^ Var.to_string global_var);
                             Instr.Label.Set.add acc call_label)
                           else
-                            (Log.info ("fct " ^ Int32.to_string fct_index ^ " does not affect global variable " ^ Var.to_string global_var);
+                            (Log.info (fun () -> "fct " ^ Int32.to_string fct_index ^ " does not affect global variable " ^ Var.to_string global_var);
                             acc)
                         | Call { label = indirect_label; instr = CallIndirect (_, _, _, type_index); _ } ->
                           begin match pointer_analysis with
@@ -109,10 +109,10 @@ let globals_depend_on_calls
                                     ~global_var
                                     ~fct_index 
                                 then
-                                  (Log.info ("fct " ^ Int32.to_string fct_index ^ "(potentially called by call_indirect " ^ Instr.Label.to_string indirect_label ^ ")" ^ " may affect global variable " ^ Var.to_string global_var);
+                                  (Log.info (fun () -> "fct " ^ Int32.to_string fct_index ^ "(potentially called by call_indirect " ^ Instr.Label.to_string indirect_label ^ ")" ^ " may affect global variable " ^ Var.to_string global_var);
                                   Instr.Label.Set.add acc indirect_label)
                                 else
-                                  (Log.info ("fct " ^ Int32.to_string fct_index ^ " does not affect global variable " ^ Var.to_string global_var);
+                                  (Log.info (fun () -> "fct " ^ Int32.to_string fct_index ^ " does not affect global variable " ^ Var.to_string global_var);
                                   acc))
                                 end
                         | _ -> acc)
