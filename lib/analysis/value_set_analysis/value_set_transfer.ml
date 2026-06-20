@@ -185,9 +185,9 @@ module Make (*: Transfer.TRANSFER *) = struct
         let x, y = pop2 (Spec_domain.get_or_fail i.annotation_before).vstack in
         let result = ret i in
         begin match binop with
-        | { op = ShrU; typ = I32 } -> State.shr_u state (Variable.Var x) (Variable.Var y) result
-        | { op = ShrS; typ = I32 } -> State.shr_s state (Variable.Var x) (Variable.Var y) result
-        | { op = Shl; typ = I32 } -> State.shl state (Variable.Var x) (Variable.Var y) result
+        | { op = ShrU; typ = I32 } -> State.shr_u state ~shift_amount:(Variable.Var x) (Variable.Var y) result
+        | { op = ShrS; typ = I32 } -> State.shr_s state ~shift_amount:(Variable.Var x) (Variable.Var y) result
+        | { op = Shl; typ = I32 } -> State.shl state ~shift_amount:(Variable.Var x) (Variable.Var y) result
         | { op = And; typ = I32 } -> State.and_ state (Variable.Var x) (Variable.Var y) result
         | { op = Or; typ = I32 } -> State.or_ state (Variable.Var x) (Variable.Var y) result
         | { op = Xor; typ = I32 } -> State.xor_ state (Variable.Var x) (Variable.Var y) result

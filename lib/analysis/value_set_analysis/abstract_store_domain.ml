@@ -400,7 +400,7 @@ let copy_value_set (store : t) ~(from : Variable.t) ~(to_ : Variable.t) : t =
 
     [eval] receives the abstract values of [lhs] and [rhs] and computes the
     resulting abstract value. *)
-let i32_binary_op
+let binary_op
     (symbol : string)
     (eval : Value.t -> Value.t -> Value.t)
     (store : t)
@@ -415,96 +415,46 @@ let i32_binary_op
   set store ~var:result ~vs:result_value
 
 (** [i32_add store x y result] assigns [x + y] to [result]. *)
-let i32_add = i32_binary_op "+" Value.(+)
+let i32_add = binary_op "+" Value.(+)
 
 (** [i32_sub store ~subtract_this ~from result] assigns [from - subtract_this]
     to [result]. *)
 let i32_sub (store : t) ~(subtract_this : Variable.t) ~(from : Variable.t) (result : Variable.t) : t =
-  i32_binary_op "-" (fun from subtract_this -> Value.(from - subtract_this)) store from subtract_this result
+  binary_op "-" (fun from subtract_this -> Value.(from - subtract_this)) store from subtract_this result
 
 (** [shift op ric_shift bitfield_shift store x y result] applies the shift
     operation [op] to [y] using [x] as the shift amount, stores the result in
     [result], and emits a trace. *)
 let shift 
-    (op : string) 
-    (ric_shift : ric -> ric -> ric) 
-    (bitfield_shift : bitfield -> bitfield -> bitfield) 
+    (op_string : string)
+    (op : Value.t -> Value.t -> Value.t)
     (store : t)
     (x : Variable.t)
-    (y : Variable.t)
+    ~(shift_amount : Variable.t)
     (result : Variable.t)
   : t =
-  let x_value = get store ~var:x in
-  let y_value = get store ~var:y in
-  let result_value =
-    match x_value, y_value with
-    | ValueSet vs2, ValueSet vs1
-    | ValueSet vs2, Boolean {numeric_value = vs1; _} 
-    | Boolean {numeric_value = vs2; _}, ValueSet vs1 
-    | Boolean {numeric_value = vs2; _}, Boolean {numeric_value = vs1; _} -> 
-      Value.ValueSet (ric_shift vs1 vs2)
-    | Boolean {numeric_value = vs2; _}, Bitfield bf1
-    | ValueSet vs2, Bitfield bf1 -> 
-      ValueSet RIC.(vs2 |> to_bitfield |> bitfield_shift bf1 |> of_bitfield)
-    | Bitfield bf2, ValueSet vs1
-    | Bitfield bf2, Boolean {numeric_value = vs1; _} -> 
-      ValueSet RIC.(bitfield_shift (vs1 |> to_bitfield) bf2 |> of_bitfield)
-    | Bitfield bf2, Bitfield bf1 -> Bitfield (bitfield_shift bf1 bf2)
-  in
-  Print_trace.binop y y_value op x x_value result result_value;
-  set store ~var:result ~vs:result_value
+  binary_op op_string op store x shift_amount result
 
 (** [shr_u store x y result] assigns the logical right shift [y >>> x] to [result]. *)
-let shr_u = shift ">>u" RIC.(>>.) Bitfield.(>>.)
+let shr_u = shift ">>u" Value.(>>.)
 
 (** [shr_s store x y result] assigns the arithmetic right shift [y >> x] to [result]. *)
-let shr_s = shift ">>s" RIC.(>>-) Bitfield.(>>-)
+let shr_s = shift ">>s" Value.(>>-)
 
 (** [shl store x y result] assigns the left shift [y << x] to [result]. *)
-let shl = shift "<<" RIC.(<<) Bitfield.(<<)
-
-(** [logical_op op ric_op boolean_op bitfield_op store x y result]
-    applies a bitwise/logical operation between [x] and [y] and stores the
-    result in [result]. *)
-let logical_op 
-    (op : string)
-    (ric_op : ric -> ric -> ric) 
-    (boolean_op : boolean -> boolean -> boolean)
-    (bitfield_op : bitfield -> bitfield -> bitfield) 
-    (store : t)
-    (x : Variable.t)
-    (y : Variable.t)
-    (result : Variable.t)
-  : t =
-  let x_value = get store ~var:x in
-  let y_value = get store ~var:y in
-  let result_value =
-    match x_value, y_value with
-    | ValueSet vs1, ValueSet vs2
-    | ValueSet vs1, Boolean {numeric_value = vs2; _}
-    | Boolean {numeric_value = vs1; _}, ValueSet vs2 -> Value.ValueSet (ric_op vs1 vs2)
-    | Boolean v1, Boolean v2 -> Boolean (boolean_op v1 v2)
-    | Bitfield bf, ValueSet vs
-    | Bitfield bf, Boolean {numeric_value = vs; _}
-    | ValueSet vs, Bitfield bf
-    | Boolean {numeric_value = vs; _}, Bitfield bf -> 
-      ValueSet RIC.(bitfield_op (vs |> to_bitfield) bf |> of_bitfield)
-    | Bitfield bf1, Bitfield bf2 -> Bitfield (bitfield_op bf1 bf2)
-  in
-  Print_trace.binop y y_value op x x_value result result_value;
-  set store ~var:result ~vs:result_value
+let shl = shift "<<" Value.(<<)
 
 (** [and_ store x y result] assigns the bitwise/logical conjunction
     [x AND y] to [result]. *)
-let and_ = logical_op "and" RIC.(&.) Boolean.(&.) Bitfield.(&.)
+let and_ = binary_op "and" Value.(&.)
 
 (** [or_ store x y result] assigns the bitwise/logical disjunction
     [x OR y] to [result]. *)
-let or_ = logical_op "or" RIC.(|.) Boolean.(|.) Bitfield.(|.)
+let or_ = binary_op "or" Value.(|.)
 
 (** [xor_ store x y result] assigns the bitwise/logical exclusive OR
     [x XOR y] to [result]. *)
-let xor_ = logical_op "xor" RIC.(<+>) Boolean.(<+>) Bitfield.(<+>)
+let xor_ = binary_op "xor" Value.(<+>)
 
 (** [access_memory store ~addresses] adds [addresses] to the set of accessed
     addresses tracked by the store. *)

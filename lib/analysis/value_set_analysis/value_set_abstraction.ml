@@ -44,7 +44,7 @@ let is_singleton (x : t) : bool =
   | ValueSet x -> RIC.is_singleton x
   | Boolean x -> Boolean.is_singleton x
   | Bitfield x -> Bitfield.is_singleton x
-  
+
   
 (** [to_string x] returns a human‑readable representation of [x],
     delegating to the corresponding sub‑domain printer. *)

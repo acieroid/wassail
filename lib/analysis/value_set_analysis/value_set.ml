@@ -3574,6 +3574,38 @@ let%test_module "value-set tests" = (module struct
     check_value exit_state
       (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(ric (1l, Int 0l, Int 2l, ("", 0l))))
+
+  let%test "ric and ric.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (result i32)
+          i32.const 18
+          i32.const 10
+          i32.and
+        )
+      )"
+      |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[ric and ric.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.(constant 2l))
+
+  let%test "ric xor ric.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (result i32)
+          i32.const 18
+          i32.const 10
+          i32.xor
+        )
+      )"
+      |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[ric xor ric.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.(constant 24l))
     
 
   (* Add next test here *)
