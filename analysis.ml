@@ -141,13 +141,11 @@ let value_set_inter =
       and sccs = anon (sequence ("funs" %: int32_comma_separated_list))
       and show_intermediates = flag "--all" no_arg ~doc:"Show all intermediate variables" 
       and narrow = flag "--narrow" no_arg ~doc:"Allow narrowing to be performed to compensate for aggressive widening" 
-      and ignore_imports = flag "--ignore-imports" no_arg ~doc:"Ignore changes made by imported functions"
       and trace = flag "--trace" no_arg ~doc:"Print an execution trace (may slow down execution)" in
       fun () ->
         if show_intermediates then Value_set.Options.show_intermediates := true;
         if narrow then Intra.narrow_option := true;
         if trace then (Log.enable_info (); Value_set.Options.print_trace := true);
-        if ignore_imports then Value_set.Options.ignore_imports := true;
         let module_ = filename |> Wasm_module.of_file in
         let sccs = sccs |> List.map ~f:(fun l -> l |> List.filter ~f:(fun i -> Int32.(i >= module_.nfuncimports))) in
         let original_use_const = !Spec_inference.use_const
