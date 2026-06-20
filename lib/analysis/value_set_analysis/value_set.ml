@@ -3606,6 +3606,495 @@ let%test_module "value-set tests" = (module struct
     check_value exit_state
       (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(constant 24l))
+
+  let%test "store and load.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $initialize_memory
+          i32.const 36
+          i32.const 14
+          i32.store
+
+          i32.const 40
+          i32.const 14
+          i32.store
+
+          i32.const 44
+          i32.const 14
+          i32.store
+
+          i32.const 48
+          i32.const 14
+          i32.store
+
+          i32.const 52
+          i32.const 14
+          i32.store
+        )
+
+        (func $main (export \"main\")
+
+          call $initialize_memory     ;; [36:14;  40:14;  44:14;  48:14;  52:14]
+
+          i32.const 42
+          i64.const 66
+          i64.store                   ;; [36:14;  ------  ------  ------  52:14]
+
+          i32.const 42
+          i32.load      ;; i05 = Top
+          i32.const 36
+          i32.load      ;; i07 = 14
+          i32.const 40
+          i32.load      ;; i09 = Top
+          i32.const 44
+          i32.load      ;; i11 = Top
+          i32.const 48
+          i32.load      ;; i13 = Top
+          i32.const 52
+          i32.load      ;; i15 = 14
+          drop
+          drop
+          drop
+          drop
+          drop
+          drop
+
+          call $initialize_memory     ;; [36:14;  40:14;  44:14;  48:14;  52:14]
+
+          i32.const 43
+          i64.const 66
+          i64.store8                  ;; [36:14;  ------  44:14;  48:14;  52:14]
+
+          i32.const 43
+          i32.load      ;; i27 = Top
+          i32.const 36
+          i32.load      ;; i29 = 14
+          i32.const 40
+          i32.load      ;; i31 = Top
+          i32.const 44
+          i32.load      ;; i33 = 14
+          i32.const 48
+          i32.load      ;; i35 = 14
+          i32.const 52
+          i32.load      ;; i37 = 14
+          drop
+          drop
+          drop
+          drop
+          drop
+          drop
+
+          call $initialize_memory     ;; [36:14;  40:14;  44:14;  48:14;  52:14]
+
+          i32.const 43
+          i64.const 66
+          i64.store16                 ;; [36:14;  ------  ------  48:14;  52:14]
+
+          i32.const 43
+          i32.load      ;; i49 = Top
+          i32.const 36
+          i32.load      ;; i51 = 14
+          i32.const 40
+          i32.load      ;; i53 = Top
+          i32.const 44
+          i32.load      ;; i55 = Top
+          i32.const 48
+          i32.load      ;; i57 = 14
+          i32.const 52
+          i32.load      ;; i59 = 14
+          drop
+          drop
+          drop
+          drop
+          drop
+          drop
+
+          call $initialize_memory     ;; [36:14;  40:14;  44:14;  48:14;  52:14]
+
+          i32.const 44
+          i64.const 66
+          i64.store32                 ;; [36:14;  40:14;  ------  48:14;  52:14]
+
+          i32.const 36
+          i32.load      ;; i71 = 14
+          i32.const 40
+          i32.load      ;; i73 = 14
+          i32.const 44
+          i32.load      ;; i75 = Top
+          i32.const 48
+          i32.load      ;; i77 = 14
+          i32.const 52
+          i32.load      ;; i79 = 14
+          drop
+          drop
+          drop
+          drop
+          drop
+
+          call $initialize_memory     ;; [36:14;  40:14;  44:14;  48:14;  52:14]
+
+          i32.const 42
+          i32.const 36
+          i32.store16                 ;; [36:14;  ------  44:14;  48:14;  52:14]
+
+          i32.const 42
+          i32.load      ;; i90 = Top
+          i32.const 36
+          i32.load      ;; i92 = 14
+          i32.const 40
+          i32.load      ;; i94 = Top
+          i32.const 44
+          i32.load      ;; i96 = 14
+          i32.const 48
+          i32.load      ;; i98 = 14
+          i32.const 52
+          i32.load      ;; i100 = 14
+          drop
+          drop
+          drop
+          drop
+          drop
+          drop
+
+          call $initialize_memory     ;; [36:14;  40:14;  44:14;  48:14;  52:14]
+
+          i32.const 41
+          i32.const 36
+          i32.store8                  ;; [36:14;  ------  44:14;  48:14;  52:14]
+
+          i32.const 41
+          i32.load      ;; i112 = Top
+          i32.const 36
+          i32.load      ;; i114 = 14
+          i32.const 40
+          i32.load      ;; i116 = Top
+          i32.const 44
+          i32.load      ;; i118 = 14
+          i32.const 48
+          i32.load      ;; i120 = 14
+          i32.const 52
+          i32.load      ;; i122 = 14
+          drop
+          drop
+          drop
+          drop
+          drop
+          drop
+
+          call $initialize_memory     ;; [36:14;  40:14;  44:14;  48:14;  52:14]
+
+          i32.const 42
+          i32.const 36
+          i32.store                   ;; [36:14;  --- 42:36 ----  48:14;  52:14]
+
+          i32.const 42
+          i32.load      ;; i134 = 36
+          i32.const 36
+          i32.load      ;; i136 = 14
+          i32.const 40
+          i32.load      ;; i138 = Top
+          i32.const 44
+          i32.load      ;; i140 = Top
+          i32.const 48
+          i32.load      ;; i142 = 14
+          i32.const 52
+          i32.load      ;; i144 = 14
+          drop
+          drop
+          drop
+          drop
+          drop
+          drop
+        )
+      )"
+      |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[store and load.wat]";
+    check_value exit_state
+      (i_var 1l 5)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 7)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 9)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 11)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 13)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 15)
+      (ValueSet RIC.(constant 14l))
+
+    && check_value exit_state
+      (i_var 1l 27)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 29)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 31)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 33)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 35)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 37)
+      (ValueSet RIC.(constant 14l))
+
+    && check_value exit_state
+      (i_var 1l 49)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 51)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 53)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 55)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 57)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 59)
+      (ValueSet RIC.(constant 14l))
+
+    && check_value exit_state
+      (i_var 1l 71)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 73)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 75)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 77)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 79)
+      (ValueSet RIC.(constant 14l))
+
+    && check_value exit_state
+      (i_var 1l 90)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 92)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 94)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 96)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 98)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 100)
+      (ValueSet RIC.(constant 14l))
+
+    && check_value exit_state
+      (i_var 1l 112)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 114)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 116)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 118)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 120)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 122)
+      (ValueSet RIC.(constant 14l))
+
+    && check_value exit_state
+      (i_var 1l 134)
+      (ValueSet RIC.(constant 36l))
+    && check_value exit_state
+      (i_var 1l 136)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 138)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 140)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 1l 142)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 1l 144)
+      (ValueSet RIC.(constant 14l))
+
+  let%test "arguments.wat" =
+    let exit_state =
+      "(module
+        (func $add (param $a i32) (param $b i32) (result i32)
+          ;; double first argument and add to second
+          local.get 0
+          local.get 0
+          i32.add
+          
+          local.get 1
+          i32.add)
+        (func $main (result i32)
+          i32.const 5
+          i32.const 2
+          call $add
+        )
+        (export \"main\" (func $main))
+      )"
+      |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[arguments.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (1l, 0l)))
+      (ValueSet RIC.(constant 12l))
+
+  let%test "store interference.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $initialize_memory
+          i32.const 0
+          i32.const 14
+          i32.store 
+
+          i32.const 10
+          i32.const 140
+          i32.store 
+
+          i32.const 20
+          i32.const 1400
+          i32.store 
+
+          i32.const 30
+          i32.const 14000
+          i32.store 
+
+          i32.const 40
+          i32.const 140000
+          i32.store 
+
+          i32.const 50
+          i32.const 1400000
+          i32.store 
+
+          i32.const 60
+          i32.const 14000000
+          i32.store 
+
+          i32.const 70
+          i32.const 140000000
+          i32.store 
+        )
+
+        (func $write 
+
+          i32.const 0
+          i32.const 99
+          i32.store
+
+          i32.const 11
+          i32.const 99
+          i32.store
+
+          i32.const 22
+          i32.const 99
+          i32.store
+
+          i32.const 33
+          i32.const 99
+          i32.store
+
+          i32.const 44
+          i32.const 99
+          i32.store
+
+          i32.const 49
+          i32.const 99
+          i32.store
+
+          i32.const 58
+          i32.const 99
+          i32.store
+
+          i32.const 67
+          i32.const 99
+          i32.store
+
+        )
+        (func $main
+          call $initialize_memory    ;; [0:14;  10:140;  20:1400;  30:14000;  40:140000;          50:1400000;  60:14000000; 70:140000000]
+          call $write                ;; [0:99;   11:99;    22:99;     33:99;  40:140000; 44:99;  49:99;      58:99;      67:99]
+        )
+        (export \"main\" (func $main))
+      )"
+      |> analyze_inter' ~fct_idx:2l
+    in
+    test_label "[store interference.wat]";
+    check_value exit_state
+      (Variable.Mem RIC.(constant 0l))
+      (ValueSet RIC.(constant 99l))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 10l))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 11l))
+      (ValueSet RIC.(constant 99l))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 20l))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 22l))
+      (ValueSet RIC.(constant 99l))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 30l))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 33l))
+      (ValueSet RIC.(constant 99l))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 40l))
+      (ValueSet RIC.(constant 140000l))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 44l))
+      (ValueSet RIC.(constant 99l))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 50l))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 49l))
+      (ValueSet RIC.(constant 99l))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 60l))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 58l))
+      (ValueSet RIC.(constant 99l))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 70l))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 67l))
+      (ValueSet RIC.(constant 99l))
     
 
   (* Add next test here *)
