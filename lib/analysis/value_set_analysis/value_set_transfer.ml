@@ -126,9 +126,9 @@ module Make (*: Transfer.TRANSFER *) = struct
           |> State.set ~var:(ret i) ~vs:(State.get state ~var:Variable.MemorySize)
           |> State.set 
             ~var:Variable.MemorySize 
-            ~vs:(Value_set_abstraction.plus 
+            ~vs:(Value.(
               (State.get state ~var:Variable.MemorySize)
-              (State.get state ~var:(Variable.Var (pop (Spec_domain.get_or_fail i.annotation_before).vstack))))
+              + (State.get state ~var:(Variable.Var (pop (Spec_domain.get_or_fail i.annotation_before).vstack)))))
       | Nop | Drop -> state
       | MemoryCopy -> 
         (* TODO: if needed, we could eventually increase precision. See 

@@ -3518,6 +3518,62 @@ let%test_module "value-set tests" = (module struct
     check_value exit_state
       (Variable.Var (Var.Return (0l, 0l)))
       (ValueSet RIC.(constant 66l))
+
+  let%test "unreachable return.wat" =
+    let exit_state =
+      "(module
+        (func $dead_end (local $l i32)
+          i32.const 1
+          local.set $l
+
+          loop $loop
+            local.get $l
+            i32.eqz
+            br_if 1
+            br $loop
+          end
+        )
+        (func $main (export \"main\") (result i32) (local $l1 i32)
+          local.get $l1
+          call $dead_end
+          return
+        )
+      )"
+      |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[unreachable return.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.Bottom)
+    && check_value exit_state
+      (Variable.Var (Var.Local 0))
+      (ValueSet RIC.Bottom)
+
+  let%test "adding boolean values.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (param $x i32) (result i32) (local $l1 i32) (local $l2 i32)
+          local.get $x
+          if 
+            i32.const 14
+            local.set $l1
+          else     
+            i32.const 42
+            local.set $l2 
+          end
+          local.get $l1
+          i32.eqz
+          local.get $l2
+          i32.eqz
+          i32.add
+        )
+      )"
+      |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[adding boolean values.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.(ric (1l, Int 0l, Int 2l, ("", 0l))))
     
 
   (* Add next test here *)

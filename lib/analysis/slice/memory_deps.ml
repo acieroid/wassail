@@ -48,12 +48,12 @@ let load_depends_on_store
     let store_address, store_size = find_store_address_and_size cfg_spec store_label in
     let store_address_value_set = 
       Abstract_store_domain.find_value_set cfg_pointers ~label:store_label ~var:store_address 
-      |> (Value_set_abstraction.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn store_offset)))))
+      |> (Value_set_abstraction.(+) (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn store_offset)))))
     in
     let load_address, load_size = find_load_address_and_size cfg_spec load_label in
     let load_address_value_set = 
       Abstract_store_domain.find_value_set cfg_pointers ~label:load_label ~var:load_address 
-      |> (Value_set_abstraction.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn load_offset)))))
+      |> (Value_set_abstraction.(+) (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn load_offset)))))
     in
 
     let overlap = Value_set_abstraction.may_overlap ~store_size ~load_size ~store_vs:store_address_value_set ~load_vs:load_address_value_set in
@@ -132,15 +132,15 @@ let rec find_parameter_value_set
       in
       let var = Variable.Var (extract_nth_argument stack_before_call fct_arity (int_of_string idx)) in
       let vs = Abstract_store_domain.get store ~var in
-      Value_set_abstraction.plus (find_parameter_value_set pointer_analysis label rest) vs) 
+      Value_set_abstraction.(+) (find_parameter_value_set pointer_analysis label rest) vs) 
     | "g" :: idx :: "+" :: rest
     | "g" :: idx :: rest ->
       let vs = Abstract_store_domain.get store ~var:(Variable.Var (Var.Global (int_of_string idx))) in
-      Value_set_abstraction.plus (find_parameter_value_set pointer_analysis label rest) vs
+      Value_set_abstraction.(+) (find_parameter_value_set pointer_analysis label rest) vs
     | "n" :: "e" :: "g" :: lg :: idx :: rest ->
-      Value_set_abstraction.minus 
+      Value_set_abstraction.(
         (find_parameter_value_set pointer_analysis label rest)
-        (find_parameter_value_set pointer_analysis label [lg; idx])
+        - (find_parameter_value_set pointer_analysis label [lg; idx]))
     | lst ->
       (print_endline (String.concat ~sep:";" lst); failwith "not yet implemented")
     
@@ -164,7 +164,7 @@ let call_depends_on_store
         Value_set_abstraction.ValueSet (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))
       | ValueSet RIC {stride; lower_bound; upper_bound; offset=(relative_offset, o)} ->
         find_parameter_value_set ~is_call_indirect pointer_analysis call_label (tokenize relative_offset) 
-        |>  (Value_set_abstraction.i32_add
+        |>  (Value_set_abstraction.(+)
               (Value_set_abstraction.ValueSet 
                 (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))))
       | ValueSet Bottom -> ValueSet Bottom
@@ -174,7 +174,7 @@ let call_depends_on_store
     let store_address_value_set = 
       Abstract_store_domain.find_value_set 
         cfg_pointers ~label:store_label ~var:store_address 
-      |> (Value_set_abstraction.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn store_offset)))))
+      |> (Value_set_abstraction.(+) (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn store_offset)))))
     in
     let overlap = Value_set_abstraction.may_overlap ~store_size ~load_size:1l ~store_vs:store_address_value_set ~load_vs:accessed_memory in
     if overlap then Some store_label else None
@@ -195,7 +195,7 @@ let load_depends_on_call
     let load_address, load_size = find_load_address_and_size spec load_label in
     let load_address_value_set =
       Abstract_store_domain.find_value_set cfg_pointers ~label:load_label ~var:load_address 
-      |> (Value_set_abstraction.plus (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn load_offset)))))
+      |> (Value_set_abstraction.(+) (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, ("", Int32.of_int_exn load_offset)))))
     in
     let function_summary = Int32Map.find_exn summaries fct_index in
     let affected_memory_addresses = function_summary.store_operations in
@@ -210,7 +210,7 @@ let load_depends_on_call
             | RIC { offset = ("", _); _ } -> Value_set_abstraction.ValueSet address
             | RIC { stride; lower_bound; upper_bound; offset=(relative_offset, o)} ->
               find_parameter_value_set pointer_analysis call_label (tokenize relative_offset)
-              |> (Value_set_abstraction.i32_add
+              |> (Value_set_abstraction.(+)
                    (Value_set_abstraction.ValueSet 
                      (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))))
             | _ -> ValueSet address
@@ -301,7 +301,7 @@ let call_depends_on_call
       | Value_set_abstraction.ValueSet RIC { offset = ("", _); _ } -> tmp_address
       | ValueSet RIC {stride; lower_bound; upper_bound; offset=(relative_offset, o)} ->
         find_parameter_value_set pointer_analysis call_label (tokenize relative_offset)
-        |> (Value_set_abstraction.i32_add
+        |> (Value_set_abstraction.(+)
               (Value_set_abstraction.ValueSet 
                 (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))))
       | _ -> tmp_address
@@ -315,7 +315,7 @@ let call_depends_on_call
         | RIC {stride; lower_bound; upper_bound; offset=(relative_offset, o)} ->
           let tmp_vs =
             find_parameter_value_set pointer_analysis depends_on_this_call (tokenize relative_offset)
-            |> (Value_set_abstraction.i32_add
+            |> (Value_set_abstraction.(+)
                 (Value_set_abstraction.ValueSet
                   (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))))
           in

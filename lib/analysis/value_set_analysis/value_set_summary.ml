@@ -122,9 +122,9 @@ let of_import (fct_idx : int32) (name : string) (nglobals : Int32.t) (_args : Ty
       (* Return values are unknown *)
       ret |> List.foldi ~init:summary
               ~f:(fun idx state _ -> state |> Domain.set ~var:(Variable.Var (Var.Return (fct_idx, Int32.of_int_exn idx))) ~vs:Value.top)
-    (* Linear memory has been modified/accessed, but we don't know how: *)
-    |> Domain.set ~var:(Variable.Accessed) ~vs:(Value.top)
-    |> Domain.set ~var:(Variable.entire_memory) ~vs:(Value.top)
+      (* Linear memory has been modified/accessed, but we don't know how: *)
+      |> Domain.set ~var:(Variable.Accessed) ~vs:(Value.top)
+      |> Domain.set ~var:(Variable.entire_memory) ~vs:(Value.top)
     in
     { summary with store_operations = RICSet.singleton RIC.Top }
   | "fd_close" | "proc_exit" ->
@@ -154,7 +154,7 @@ let of_import (fct_idx : int32) (name : string) (nglobals : Int32.t) (_args : Ty
             ~f:(fun idx state _ -> state |> Domain.set ~var:(Variable.Var (Var.Return (fct_idx, Int32.of_int_exn idx))) ~vs:Value.top)
       (* Linear memory may have been modified, but we don't know how: *)
       |> Domain.set ~var:(Variable.Accessed) ~vs:(Value.top) in
-      { summary with store_operations = RICSet.singleton RIC.Top }
+    { summary with store_operations = RICSet.singleton RIC.Top }
 
 (** [initial_summaries cfgs module_ typ] builds the initial summary map.
 

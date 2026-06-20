@@ -415,12 +415,12 @@ let i32_binary_op
   set store ~var:result ~vs:result_value
 
 (** [i32_add store x y result] assigns [x + y] to [result]. *)
-let i32_add = i32_binary_op "+" Value.i32_add
+let i32_add = i32_binary_op "+" Value.(+)
 
 (** [i32_sub store ~subtract_this ~from result] assigns [from - subtract_this]
     to [result]. *)
 let i32_sub (store : t) ~(subtract_this : Variable.t) ~(from : Variable.t) (result : Variable.t) : t =
-  i32_binary_op "-" (fun from subtract_this -> Value.i32_sub ~subtract_this ~from) store from subtract_this result
+  i32_binary_op "-" (fun from subtract_this -> Value.(from - subtract_this)) store from subtract_this result
 
 (** [shift op ric_shift bitfield_shift store x y result] applies the shift
     operation [op] to [y] using [x] as the shift amount, stores the result in

@@ -33,7 +33,7 @@ let rec equal (x : t) (y : t) : bool =
   (* Mixed ValueSet/Bitfield equality holds only when both
    over-approximating conversions are lossless. *)
   | ValueSet x, Bitfield y 
-  | Bitfield y, ValueSet x -> RIC.(x = of_bitfield y) && Bitfield.(y = (RIC.to_bitfield x))
+  | Bitfield y, ValueSet x -> RIC.(x = of_bitfield y) && Bitfield.(y = RIC.to_bitfield x)
 let (=) = equal
 let (<>) (x : t) (y : t) : bool = not (x = y)
 
@@ -44,29 +44,7 @@ let is_singleton (x : t) : bool =
   | ValueSet x -> RIC.is_singleton x
   | Boolean x -> Boolean.is_singleton x
   | Bitfield x -> Bitfield.is_singleton x
-
-(** [plus x y] over-approximates integer addition. Non-RIC operands are
-    converted through their numeric abstraction when needed. *)
-let rec plus (x : t) (y : t) : t =
-  match x, y with
-  | ValueSet x, ValueSet y -> ValueSet RIC.(x + y)
-  | Boolean {numeric_value = x; _}, y 
-  | y, Boolean {numeric_value = x; _} -> plus (ValueSet x) y
-  | Bitfield x, y 
-  | y, Bitfield x -> plus (ValueSet (RIC.of_bitfield x)) y
-let (+) = plus
-
-
-(** [minus x y] over-approximates integer subtraction. Non-RIC operands are
-    converted through their numeric abstraction when needed. *)
-let rec minus (x : t) (y : t) : t =
-  match x, y with
-  | ValueSet x, ValueSet y -> ValueSet RIC.(x - y)
-  | Boolean {numeric_value = x; _}, y -> minus (ValueSet x) y
-  | x, Boolean {numeric_value = y; _} -> minus x (ValueSet y)
-  | Bitfield x, y -> minus (ValueSet (RIC.of_bitfield x)) y
-  | x, Bitfield y -> minus x (ValueSet (RIC.of_bitfield y))
-let (-) = minus
+  
   
 (** [to_string x] returns a human‑readable representation of [x],
     delegating to the corresponding sub‑domain printer. *)
@@ -259,8 +237,8 @@ let add_const (x : t) (y : int32) : t =
 let sub_const ~(subtract_this : int32) ~(from : t) : t =
   add_const from Int32.(-subtract_this)
 
-(** [i32_add x y] implements Wasm [i32.add] on abstract values. *)
-let i32_add (x : t) (y : t) : t =
+(** [plus x y] implements Wasm [i32.add] on abstract values. *)
+let plus (x : t) (y : t) : t =
   match x, y with
   | ValueSet x, ValueSet y
   | ValueSet x, Boolean {numeric_value = y; _}
@@ -271,12 +249,13 @@ let i32_add (x : t) (y : t) : t =
   | Bitfield x, Boolean {numeric_value = y; _}
   | Boolean {numeric_value = y; _}, Bitfield x -> ValueSet RIC.(of_bitfield x + y)
   | Bitfield x, Bitfield y -> ValueSet RIC.(of_bitfield x + of_bitfield y)
+let (+) = plus
 
-(** [i32_sub ~subtract_this ~from] implements Wasm [i32.sub], computing
+(** [minus ~subtract_this ~from] implements Wasm [i32.sub], computing
     [from - subtract_this]. *)
-let i32_sub ~(subtract_this : t) ~(from : t) : t =
-  i32_add (negative subtract_this) from
-
+let minus ~(subtract_this : t) ~(from : t) : t =
+  plus (negative subtract_this) from
+let (-) (lhs : t) (rhs : t) : t = minus ~subtract_this:rhs ~from:lhs
 
 (** [may_overlap ~store_size ~load_size ~store_vs ~load_vs] returns [true]
     when a store at [store_vs] may overlap a load at [load_vs]. *)
@@ -567,7 +546,7 @@ let%test_module "value-set abstraction tests" = (module struct
   let%test "i32_sub_mixed_value_set_bitfield" =
     let from = ValueSet (RIC.constant 10l) in
     let subtract_this = Bitfield (Bitfield.singleton 3l) in
-    let actual = i32_sub ~subtract_this ~from in
+    let actual = minus ~subtract_this ~from in
     let expected = ValueSet (RIC.constant 7l) in
     let passed = equal actual expected in
     print_endline (Printf.sprintf "%s %s - %s -> %s%s"
