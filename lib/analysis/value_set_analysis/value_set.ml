@@ -26,21 +26,25 @@ struct
       (module_ : Wasm_module.t)
       (_cfg : Transfer.annot_expected Cfg.t)
       (instr : Transfer.annot_expected Instr.labelled_call)
-      (state : Transfer.State.t)
+      (state : Domain.t)
       (summaries : extra)
-    : Transfer.State.t =
+    : Domain.t =
     Print_trace.instruction instr.line_number (Call instr) state.unreachable;
-    let apply_summary f arity state =
+    let apply_summary ?(indirect : bool = false) f arity state =
       match Map.find summaries f with
       | None ->
         if Int32.(f < module_.nfuncimports) then
           let desc = List32.nth_exn module_.imported_funcs f in
           Transfer.imported module_ desc instr.annotation_before instr.annotation_after state
         else
-          (* This function depends on another function that has not been analyzed yet, so it is part of some recursive loop. It will eventually stabilize. *)
+          (* This function depends on another function that has not been analyzed yet, so it is part 
+             of some recursive loop. It will eventually stabilize. *)
           state
       | Some summary ->
-        Transfer.apply_summary module_ f arity instr state summary
+        if indirect then
+          Transfer.apply_indirect module_ f arity instr state summary
+        else
+          Transfer.apply_summary module_ f arity instr state summary
     in
     match instr.instr with
     | CallDirect (arity, _, f) -> apply_summary f arity state
@@ -65,7 +69,7 @@ struct
       if List.is_empty targets then (Log.error (fun () -> "indirect call index doesn't match any function"); failwith "invalid program: indirect call index doesn't match any function");
       List.fold_left targets
         ~init:Transfer.bottom
-        ~f:(fun acc idx -> Transfer.State.join (apply_summary idx arity state) acc)
+        ~f:(fun acc idx -> Domain.join (apply_summary ~indirect:true idx arity state) acc)
 end
 module Intra = Intra.MakeSumm(TransferFunction)(ValueSetCallAdapter)
 module Inter = Inter.MakeSummaryBased(TransferFunction)(Intra)
@@ -4095,7 +4099,474 @@ let%test_module "value-set tests" = (module struct
     && check_value exit_state
       (Variable.Mem RIC.(constant 67l))
       (ValueSet RIC.(constant 99l))
-    
+
+
+  let%test "call_indirect.wat" =
+    let exit_state =
+      "(module
+          (memory (export \"mem\") 1)
+          (type $t (func (param i32) (result i32)))
+          (type $t2 (func (result i32)))
+          (global $g0 (mut i32) (i32.const 1024))
+          (global $g1 (mut i32) (i32.const 1024))
+          (global $g2 (mut i32) (i32.const 1024))
+
+
+          ;; Function $f0:
+          (func $f0 (type $t) (param i32) (result i32)
+            local.get 0
+            global.set $g0
+            i32.const 14)
+
+          ;; Function $f1:
+          (func $f1 (type $t) (param i32) (result i32)
+            local.get 0
+            global.set $g1
+            i32.const 66)
+
+          ;; Function $f2: 
+          (func $f2 (type $t2) (result i32)
+            i32.const 26
+            global.set $g2
+            i32.const 26)
+
+          ;; Table of functions for indirect call
+          (table 3 funcref)
+          (elem (i32.const 0) $f0 $f1 $f2)
+
+          ;; Main function: decides which function to call indirectly
+          (func (export \"main\") (result i32)
+            i32.const 99
+            i32.const 1
+            (call_indirect (type $t))
+          )
+        )"
+    |> analyze_inter' ~fct_idx:3l
+    in
+    test_label "[indirect_call.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (3l, 0l)))
+      (ValueSet RIC.(constant 66l))
+    && check_value exit_state
+      (Variable.Var (Var.Global 1))
+      (ValueSet RIC.(constant 99l))
+    && check_value exit_state
+      (Variable.Var (Var.Global 0))
+      (ValueSet RIC.(relative_ric "g0"))
+    && check_value exit_state
+      (Variable.Var (Var.Global 2))
+      (ValueSet RIC.(relative_ric "g2"))
+
+  let%test "call_indirect more than one option.wat" =
+    let exit_state =
+      "(module
+          (memory (export \"mem\") 1)
+          (type $t (func (param i32) (result i32)))
+          (type $t2 (func (result i32)))
+          (global $g0 (mut i32) (i32.const 1024))
+          (global $g1 (mut i32) (i32.const 1024))
+          (global $g2 (mut i32) (i32.const 1024))
+
+
+          ;; Function $f0:
+          (func $f0 (type $t) (param i32) (result i32)
+            local.get 0
+            global.set $g0
+            i32.const 14)
+
+          ;; Function $f1:
+          (func $f1 (type $t) (param i32) (result i32)
+            local.get 0
+            global.set $g1
+            i32.const 66)
+
+          ;; Function $f2: 
+          (func $f2 (type $t2) (result i32)
+            i32.const 26
+            global.set $g2
+            i32.const 26)
+
+          ;; Table of functions for indirect call
+          (table 3 funcref)
+          (elem (i32.const 0) $f0 $f1 $f2)
+
+          ;; Main function: decides which function to call indirectly
+          (func (export \"main\") (param $x i32) (result i32)
+            i32.const 99
+            local.get $x
+            if (result i32)
+              i32.const 1
+            else
+              i32.const 0
+            end
+            (call_indirect (type $t))
+          )
+        )"
+    |> analyze_inter' ~fct_idx:3l
+    in
+    test_label "[indirect_call more than one option.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (3l, 0l)))
+      (ValueSet RIC.(join (constant 66l) (constant 14l)))
+    && check_value exit_state
+      (Variable.Var (Var.Global 1))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Var (Var.Global 0))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Var (Var.Global 2))
+      (ValueSet RIC.(relative_ric "g2"))
+
+  let%test "call_indirect 2.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+        (type $t (func (param i32) (result i32)))
+        (type $t2 (func (result i32)))
+        (global $g0 (mut i32) (i32.const 1024))
+        (global $g1 (mut i32) (i32.const 1024))
+        (global $g2 (mut i32) (i32.const 1024))
+
+
+        ;; Function $f0 (reads at address 14):
+        (func $f0 (type $t) (param i32) (result i32)
+          local.get 0
+          global.set $g0
+          global.get $g0)
+
+        ;; Function $f1 (reads at address 99):
+        (func $f1 (type $t) (param i32) (result i32)
+          local.get 0
+          i32.const 85
+          i32.add
+          i32.load
+          drop
+          local.get 0
+          global.set $g1
+          i32.const 66)
+
+        ;; Function $f2: 
+        (func $f2 (type $t2) (result i32)
+          i32.const 99
+          i32.const 99
+          i32.store
+
+          i32.const 26
+          global.set $g2
+
+          global.get $g2)
+
+        ;; Table of functions for indirect call
+        (table 3 funcref)
+        (elem (i32.const 0) $f0 $f1 $f2)
+
+        ;; Main function: decides which function to call indirectly
+        (func (export \"main\") (result i32)
+          call $f2               ;; [99:99]     g2=26     i3_0=26                                                                                    ;; [26]
+          drop                                                                                                                                       ;; []
+          i32.const 14                                                                                                                               ;; [14]
+          i32.const 14                                                                                                                               ;; [14; 14]
+          i32.store              ;; [14:14;   99:99]     g2=26     i3_0=26                                                                           ;; []
+
+          i32.const 14                                                                                                                               ;; [14]
+          i32.const 0            ;; calling function $f0                                                                                             ;; [0; 14]
+          (call_indirect (type $t))    ;; [14:14;   99:99]     g0=14     i3_7=14     g2=26     i3_0=26                                               ;; [14]
+
+
+          global.get $g2               ;; [14:14;   99:99]     i3_8=26    g0=14     i3_7=14     g2=26     i3_0=26                                    ;; [26; 14]
+          drop                                                                                                                                       ;; [14]
+
+          global.get $g0               ;; [14:14;   99:99]     i3_10=14    i3_8=26    g0=14     i3_7=14     g2=26     i3_0=26                        ;; [14; 14]
+          drop                                                                                                                                       ;; [14]
+
+          i32.const 54                                                                                                                               ;; [54; 14]
+          global.set $g0               ;; [14:14;   99:99]     i3_10=14    i3_8=26    g0=54     i3_7=14     g2=26     i3_0=26                        ;; [14]
+          i32.const 94                                                                                                                               ;; [94; 14]
+          global.set $g1               ;; [14:14;   99:99]     i3_10=14    i3_8=26    g0=54     i3_7=14     g2=26     i3_0=26    g1=94               ;; [14]
+          i32.const 36                                                                                                                               ;; [36; 14]
+          global.set $g2               ;; [14:14;   99:99]     i3_10=14    i3_8=26    g0=54     i3_7=14     g2=36     i3_0=26    g1=94               ;; [14]
+          i32.const 2  ;; calling function $f2                                                                                                       ;; [2; 14]
+          (call_indirect (type $t2))   ;; [14:14;   99:99]     i3_10=14    i3_8=26    g0=54     i3_7=14     g2=26     i3_0=26    g1=94    i3_19=26   ;; [26; 14]
+          drop                                                                                                                                       ;; [14]
+        )
+      )"
+    |> analyze_inter' ~fct_idx:3l
+    in
+    test_label "[call_indirect 2.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (3l, 0l)))
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (Variable.Var (Var.Global 0))
+      (ValueSet RIC.(constant 54l))
+    && check_value exit_state
+      (Variable.Var (Var.Global 1))
+      (ValueSet RIC.(constant 94l))
+    && check_value exit_state
+      (Variable.Var (Var.Global 2))
+      (ValueSet RIC.(constant 26l))
+    && check_value exit_state
+      (i_var 3l 10)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 3l 8)
+      (ValueSet RIC.(constant 26l))
+    && check_value exit_state
+      (i_var 3l 7)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (i_var 3l 0)
+      (ValueSet RIC.(constant 26l))
+    && check_value exit_state
+      (i_var 3l 19)
+      (ValueSet RIC.(constant 26l))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 99l))
+      (ValueSet RIC.(constant 99l))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 14l))
+      (ValueSet RIC.(constant 14l))
+
+
+  let%test "call_indirect 3.wat" =
+    let exit_state =
+      "(module
+          (memory (export \"mem\") 1)
+          (type $t (func (param i32) (result i32)))
+          (type $t2 (func (result i32)))
+          (global $g0 (mut i32) (i32.const 1024))
+          (global $g1 (mut i32) (i32.const 1024))
+          (global $g2 (mut i32) (i32.const 1024))
+
+
+          ;; Function $f0 (reads at address 14):
+          (func $f0 (type $t) (param i32) (result i32)             ;; with arg=14 :
+            local.get 0                                            ;; [14]
+            i32.load                                               ;; [Top]
+            drop                                                   ;; []
+            local.get 0                                            ;; [14]
+            global.set $g0                                         ;; []              g0=14
+            i32.const 14)                                          ;; [14]
+
+          ;; Function $f1 (reads at address 99):
+          (func $f1 (type $t) (param i32) (result i32)             ;; with arg=14:
+            local.get 0                                            ;; [14]
+            i32.const 85                                           ;; [85; 14]
+            i32.add                                                ;; [99]
+            i32.load                                               ;; [Top]
+            drop                                                   ;; []
+            local.get 0                                            ;; [14]
+            global.set $g1                                         ;; []              g1=14
+            i32.const 66)                                          ;; [66]
+
+          ;; Function $f2: 
+          (func $f2 (type $t2) (result i32)
+            i32.const 99
+            i32.const 99
+            i32.store
+
+            global.get $g1
+            drop
+
+            i32.const 26
+            global.set $g2
+            i32.const 26)
+
+          ;; Table of functions for indirect call
+          (table 3 funcref)
+          (elem (i32.const 0) $f0 $f1 $f2)
+
+          ;; Main function: decides which function to call indirectly
+          (func (export \"main\") (result i32)
+            i32.const 14
+            global.get $g0                   ;; inknown function index: f0 or f1 may have been called (f2 is of wrong type)
+            (call_indirect (type $t))        ;; g0=Top, g1=top, g2=g2 i3_2=14join66 return=14join66
+          )
+        )"
+    |> analyze_inter' ~fct_idx:3l
+    in
+    test_label "[call_indirect 3.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (3l, 0l)))
+      (ValueSet RIC.(join (constant 14l) (constant 66l)))
+    && check_value exit_state
+      (i_var 3l 2)
+      (ValueSet RIC.(join (constant 14l) (constant 66l)))
+    && check_value exit_state
+      (Variable.Var (Var.Global 0))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Var (Var.Global 1))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Var (Var.Global 2))
+      (ValueSet RIC.(relative_ric "g2"))
+
+
+  let%test "function call 2.wat" =
+    let exit_state =
+      "(module
+          (memory (export \"memory\") 1)
+
+          ;; Function that stores 422 at address 42
+          (func $store42
+            i32.const 42
+            i32.const 422
+            i32.store)
+
+          ;; Main function that calls add42(10)
+          (func $main
+            i32.const 42
+            i32.const 14
+            i32.store          ;; storing 14 at address 42
+
+            i32.const 42
+            i32.load
+            drop
+
+            i32.const 10
+            i32.const 36
+            i32.store          ;; storing 36 at address 10
+
+            call $store42)     ;; function overrides what was written at address 42
+
+          ;; Export the main function
+          (export \"main\" (func $main))
+        )"
+    |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[function call 2.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (3l, 0l)))
+      (ValueSet RIC.Bottom)
+    && check_value exit_state
+      (i_var 1l 4)
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 10l))
+      (ValueSet RIC.(constant 36l))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 42l))
+      (ValueSet RIC.(constant 422l))
+
+  let%test "function call 3.wat" =
+    let exit_state =
+      "(module
+        ;; Define a mutable global variable initialized to 0
+        ;; (global $g (mut i32) (i32.const 0))
+        (memory (export \"memory\") 1)
+
+        ;; Function that adds 42 to its argument
+        (func $load42
+          i32.const 42
+          i32.load              ;; loads Top, because we don't know what's in the memory
+          i32.const 20
+          i32.store)
+
+        ;; Main function that and calls load42
+        (func $main
+          i32.const 42
+          i32.const 14
+          i32.store             ;; [42:14]
+
+          call $load42          ;; writes 20 at address Top :    [Top]
+          
+          i32.const 42
+          i32.const 26
+          i32.store)                                         ;; [42:26]
+
+        ;; Export the main function
+        (export \"main\" (func $main))
+      )"
+    |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[function call 3.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (3l, 0l)))
+      (ValueSet RIC.Bottom)
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 14l))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 42l))
+      (ValueSet RIC.(constant 26l))
+
+  let%test "function call 4.wat" =
+    let exit_state =
+      "(module
+          (memory (export \"mem\") 1)
+
+          (func $f1 (param $x i32) (result i32)
+            local.get $x                        ;; [ 13[0,1]+14 ]
+            i32.const 19                        ;; [ 19;  13[0,1]+14 ]
+            i32.lt_u                            ;; [ [0,1] ]
+            if (result i32)
+              i32.const 100                     ;; [100]
+            else
+              i32.const 50                      ;; [50]
+            end
+            return)                             ;; [50[0,1]+50]
+
+          (func $f2 (param $x i32) (result i32)
+            i32.const 34
+            return)
+
+          (func $main (param $x i32) (result i32) (local $l1 i32)
+            local.get $x                  ;; [x]
+            if (result i32)
+              i32.const 14                ;; [14]
+            else
+              i32.const 27                ;; [27]
+            end                           ;; [ 13[0,1]+14 ]
+            local.tee $l1
+            call $f1                      ;; [ 50[0,1]+50 ] 
+          )
+
+          ;; Export the main function
+          (export \"main\" (func $main))
+        )"
+    |> analyze_inter' ~fct_idx:2l
+    in
+    test_label "[function call 4.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (2l, 0l)))
+      (ValueSet RIC.(join (constant 50l) (constant 100l)))
+    && check_value exit_state
+      (Variable.Var (Var.Local 1))
+      (ValueSet RIC.(join (constant 14l) (constant 27l)))
+
+  let%test "function call 5.wat" =
+    let exit_state =
+      "(module
+          (memory (export \"mem\") 1)
+          ;; Define a mutable global variable initialized to 0
+          (global $g (mut i32) (i32.const 0))
+
+          (func $add42 (param $x i32) (param $y i32) (result i32)
+            local.get $x
+            local.get $y
+            i32.sub
+            i32.const 42
+            i32.add
+            return)
+
+          ;; Main function that increments global g and calls add42(10)
+          (func $main (param $x i32) (result i32)
+            i32.const 10
+            local.get $x
+            call $add42
+            return)
+
+          ;; Export the main function
+          (export \"main\" (func $main))
+        )"
+    |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[function call 5.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (1l, 0l)))
+      (ValueSet RIC.(ric (0l, Int 0l, Int 0l, ("negl0", 52l))))
 
   (* Add next test here *)
 

@@ -476,6 +476,27 @@ module Make (*: Transfer.TRANSFER *) = struct
       ~args
       ~return_variables
 
+  let apply_indirect
+      (_module_ : Wasm_module.t)
+      (f : Int32.t) 
+      (arity : int * int) 
+      (i : annot_expected Instr.labelled_call)
+      (state : State.t)
+      (summary : summary)
+    : State.t =
+    Print_trace.apply_summary state State.to_string f summary Summary.to_string;
+    let spec_before = Spec_domain.get_or_fail i.annotation_before in
+    (* the argument on top of the stack is irrelevant to function being called, and must be dropped *)
+    let stack_without_function_index = spec_before.vstack |> List.tl_exn in
+    let args = List.take stack_without_function_index (fst arity) in
+    let spec_after = Spec_domain.get_or_fail i.annotation_after in
+    let return_variables = List.take spec_after.vstack (snd arity) in
+    Value_set_summary.apply
+      ~summary
+      ~state
+      ~args
+      ~return_variables
+
   (** [merge_variables module_ cfg block predecessors state] assigns merged SSA
       variables at [block]. Values coming from unreachable predecessors are
       ignored. *)
