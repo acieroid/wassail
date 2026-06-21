@@ -203,7 +203,7 @@ let%test_module "value-set tests" = (module struct
     | Control i -> i.annotation_after
     | _ -> failwith "Cfg.exit_annotation_exn: exit block is not a control block"
 
-  let analyze_inter' (program : string) ~(fct_idx : int32) : Summary.t =
+  let analyze_inter' (program : string) ~(fct_idx : int32) : Domain.t =
     let original_prop_globals = !Spec_inference.propagate_globals in
     Spec_inference.propagate_globals := false;
     let module_ = program |> Wasm_module.of_string in
@@ -4157,6 +4157,62 @@ let%test_module "value-set tests" = (module struct
       (Variable.Var (Var.Global 2))
       (ValueSet RIC.(relative_ric "g2"))
 
+  let%test "call_indirect (intra).wat" =
+    let exit_state =
+      "(module
+          (memory (export \"mem\") 1)
+          (type $t (func (param i32) (result i32)))
+          (type $t2 (func (result i32)))
+          (global $g0 (mut i32) (i32.const 1024))
+          (global $g1 (mut i32) (i32.const 1024))
+          (global $g2 (mut i32) (i32.const 1024))
+
+
+          ;; Function $f0:
+          (func $f0 (type $t) (param i32) (result i32)
+            local.get 0
+            global.set $g0
+            i32.const 14)
+
+          ;; Function $f1:
+          (func $f1 (type $t) (param i32) (result i32)
+            local.get 0
+            global.set $g1
+            i32.const 66)
+
+          ;; Function $f2: 
+          (func $f2 (type $t2) (result i32)
+            i32.const 26
+            global.set $g2
+            i32.const 26)
+
+          ;; Table of functions for indirect call
+          (table 3 funcref)
+          (elem (i32.const 0) $f0 $f1 $f2)
+
+          ;; Main function: decides which function to call indirectly
+          (func (export \"main\") (result i32)
+            i32.const 99
+            i32.const 1
+            (call_indirect (type $t))
+          )
+        )"
+    |> analyze [0l; 1l; 2l; 3l] 3l
+    in
+    test_label "[indirect_call (intra).wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (3l, 0l)))
+      (ValueSet RIC.(constant 66l))
+    && check_value exit_state
+      (Variable.Var (Var.Global 1))
+      (ValueSet RIC.(constant 99l))
+    && check_value exit_state
+      (Variable.Var (Var.Global 0))
+      (ValueSet RIC.(relative_ric "g0"))
+    && check_value exit_state
+      (Variable.Var (Var.Global 2))
+      (ValueSet RIC.(relative_ric "g2"))
+
   let%test "call_indirect more than one option.wat" =
     let exit_state =
       "(module
@@ -4567,6 +4623,132 @@ let%test_module "value-set tests" = (module struct
     check_value exit_state
       (Variable.Var (Var.Return (1l, 0l)))
       (ValueSet RIC.(ric (0l, Int 0l, Int 0l, ("negl0", 52l))))
+
+  let%test "if2.wat" =
+    let exit_state =
+      "(module
+          (memory (export \"mem\") 1)
+
+          (func $main (export \"main\") (result i32) (local $l0 i32) (local $l1 i32) (local $l2 i32)
+            i32.const 0
+            if (result i32)
+              i32.const 99     ;; unreachable
+              local.set $l0    ;; unreachable
+              i32.const 1      ;; unreachable
+            else
+              i32.const 2
+            end
+                                                ;; [2]
+            local.get $l0                       ;; [0; 2]
+            local.set $l2                       ;; [2]
+
+            local.tee $l0      ;; l0 = 2           [2]
+            i32.const 2                         ;; [2, 2]
+            i32.lt_u                            ;; [0]
+            i32.const 5                         ;; [5; 0]
+            local.tee $l1      ;; l1 = 5           [5; 0]
+            i32.const 3                         ;; [3; 5; 0]
+            i32.gt_u                            ;; [1; 0]
+            i32.and                             ;; [0]
+            if (result i32)
+              i32.const 6   ;; unreqchable
+            else
+              i32.const 7                       ;; [7]   
+            end
+            return          ;; ret0_0 = 7
+          )
+        )
+"
+    |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[if2.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.(constant 7l))
+    && check_value exit_state
+      (Variable.Var (Var.Local 1))
+      (ValueSet RIC.(constant 5l))
+    && check_value exit_state
+      (Variable.Var (Var.Local 0))
+      (ValueSet RIC.(constant 2l))
+    && check_value exit_state
+      (Variable.Var (Var.Local 2))
+      (ValueSet RIC.zero)
+
+  let%test "stores....wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+          (func $main (param $i i32) (result i32)
+            
+            local.get $i       ;; memory:[top] stack:[i]
+            i32.const 43       ;; memory:[top] stack:[43; i]
+            i32.lt_u           ;; memory:[top] stack:[[0,1]]
+            if                 ;; memory:[top] stack:[]
+              i32.const 10     ;; memory:[top] stack:[10]
+              i32.const 0      ;; memory:[top] stack:[0; 10]
+              i32.store        ;; memory:[10:0] stack:[1]
+            else
+              local.get $i     ;; memory:[top] stack:[i]
+              i32.const 43     ;; memory:[top] stack:[43; i]
+              i32.lt_u         ;; memory:[top] stack:[[0,1]]
+              if               ;; memory:[top] stack:[]
+                i32.const 10   ;; memory:[top] stack:[10]
+                i32.const 15   ;; memory:[top] stack:[15; 10]
+                i32.store      ;; memory:[10:15] stack:[]
+              else
+                local.get $i   ;; memory:[top] stack:[i]
+                i32.const 43   ;; memory:[top] stack:[43; i]
+                i32.lt_u       ;; memory:[top] stack:[[0,1]]
+                if
+                  i32.const 10 ;; memory:[top] stack:[10]
+                  i32.const 30 ;; memory:[top] stack:[30; 10]
+                  i32.store    ;; memory:[10:30] stack:[]
+                else
+                  i32.const 10 ;; memory:[top] stack:[10]
+                  i32.const 40 ;; memory:[top] stack:[30; 10]
+                  i32.store    ;; memory:[10:40] stack:[]
+                end
+              end
+            end                ;; memory:[10:5[0,8]] stack:[]
+            i32.const 10       ;; memory:[10:5[0,8]] stack:[10]
+            i32.load           ;; memory:[10:5[0,8]] stack:[5[0,8]]                             i0_25=5[0,8]
+            local.tee $i       ;; memory:[10:5[0,8]] stack:[5[0,8]]                i=5[0,8]
+            i32.const 100      ;; memory:[10:5[0,8]] stack:[100; 5[0,8]]           i=5[0,8]
+            i32.store          ;; memory:[10:5[0,20]] stack:[]                     i=5[0,8]
+            i32.const 10       ;; memory:[10:5[0,20]] stack:[10]                   i=5[0,8]
+            i32.load           ;; memory:[10:5[0,20]] stack:[5[0,20]]              i=5[0,8]     i0_30=5[0,20]
+            i32.const 1001     ;; memory:[10:5[0,20]] stack:[1001; 5[0,20]]        i=5[0,8]     i0_30=5[0,20]
+            i32.store          ;; memory:[10:[0,1001]] stack:[]                    i=5[0,8]     i0_30=5[0,20]
+            i32.const 10       ;; memory:[10:[0,1001]] stack:[10]                  i=5[0,8]     i0_30=5[0,20]
+            i32.load           ;; memory:[10:[0,1001]] stack:[[0,1001]]            i=5[0,8]     i0_30=5[0,20]    i0_34=[0,1001]
+            i32.const 13       ;; memory:[10:[0,1001]] stack:[13; [0,1001]]        i=5[0,8]     i0_30=5[0,20]    i0_34=[0,1001]
+            i32.store          ;; memory:[10:Top] stack:[]                         i=5[0,8]     i0_30=5[0,20]    i0_34=[0,1001]
+            i32.const 10       ;; memory:[10:Top] stack:[10]                       i=5[0,8]     i0_30=5[0,20]    i0_34=[0,1001]
+            i32.load           ;; memory:[10:Top] stack:[Top]                      i=5[0,8]     i0_30=5[0,20]    i0_34=[0,1001]
+          )
+          (export \"main\" (func $main))
+        )
+"
+    |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[stores....wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Var (Var.Local 0))
+      (ValueSet RIC.(ric (5l, Int 0l, Int 8l, ("", 0l))))
+    && check_value exit_state
+      (i_var 0l 34)
+      (ValueSet RIC.(ric (1l, Int 0l, Int 1001l, ("", 0l))))
+    && check_value exit_state
+      (i_var 0l 30)
+      (ValueSet RIC.(ric (5l, Int 0l, Int 20l, ("", 0l))))
+    && check_value exit_state
+      (i_var 0l 25)
+      (ValueSet RIC.(ric (5l, Int 0l, Int 8l, ("", 0l))))
+    
 
   (* Add next test here *)
 
