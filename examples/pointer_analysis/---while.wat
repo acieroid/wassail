@@ -25,6 +25,5 @@
       end
     end
   )
-
   (export "main" (func $main))
 )

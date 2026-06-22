@@ -6,7 +6,7 @@
     local.get $l0
     local.get $l1
     i32.lt_u
-    if
+    if (result i32)
       local.get $l0
     else
       local.get $l1

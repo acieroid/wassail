@@ -1,9 +1,9 @@
 (module
 (memory (export "mem") 1)
-  (func $main (local $i i32)
+  (func $main (param $x i32) (local $i i32)
     ;; initialize i = 0
     
-    i32.const 22
+    local.get $x
     i32.const 34
     i32.lt_u
     if
@@ -26,10 +26,6 @@
         i32.lt_s
         i32.eqz          ;; if !(i < 10) => break
         br_if $exit
-
-        ;;f32.const 20
-        ;;i32.const 42
-        ;;f32.store
 
         ;; repeat loop
         br $loop

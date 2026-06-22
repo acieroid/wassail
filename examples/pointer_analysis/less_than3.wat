@@ -4,17 +4,19 @@
 
   (func $main (export "main") (param $l0 i32) (param $l1 i32) (result i32)
     i32.const 14
+    return
     local.get $l0
     i32.add
     i32.const 36
     local.get $l1
     i32.add
     i32.lt_u
-    if
+    if (result i32)
       local.get $l0
     else
       local.get $l1
     end
+    return
     i32.const 32 ;; this should not be permitted 
     return
   )

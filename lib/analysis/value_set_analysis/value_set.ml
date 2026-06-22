@@ -13,15 +13,24 @@ module RIC = Reduced_interval_congruence.RIC
 module TransferFunction = Value_set_transfer.Make
 module Summary = Value_set_summary
 module ClassicalInter = Intra.MakeClassicalInter(TransferFunction)
+
+(** Adapter used by the generic summary-based intraprocedural engine to
+    resolve direct and indirect calls through value-set summaries. *)
 module ValueSetCallAdapter: Intra.CALL_ADAPTER
   with module Transfer = TransferFunction
   and type extra = TransferFunction.summary Int32Map.t =
 struct
   module Transfer = TransferFunction
+  (** Mapping from function indices to the summaries currently available
+    during interprocedural analysis. *)
   type extra = TransferFunction.summary Int32Map.t
 
-  (** [analyze_call module_ cfg instr state summaries] applies the effect of
-    [instr] to [state] using the available function summaries. *)
+  (** [analyze_call module_ cfg instr state summaries] evaluates a direct or
+    indirect call instruction using the summaries currently available.
+
+    Imported functions are handled through [Transfer.imported]. Calls to
+    functions whose summaries are not yet available are left unchanged until
+    the surrounding SCC stabilizes. *)
   let analyze_call
       (module_ : Wasm_module.t)
       (_cfg : Transfer.annot_expected Cfg.t)
@@ -50,8 +59,7 @@ struct
     | CallDirect (arity, _, f) -> apply_summary f arity state
     | CallIndirect (_, arity, _, typ) ->
       let call_index =
-        state |> Domain.get
-          ~var:(Variable.Var (pop (Spec_domain.get_or_fail instr.annotation_before).vstack))
+        state |> Domain.get ~var:(Variable.Var (pop (Spec_domain.get_or_fail instr.annotation_before).vstack))
       in
       let targets = Call_graph.indirect_call_targets module_ typ
         |> List.filter ~f:(fun idx ->
@@ -62,11 +70,12 @@ struct
             | ValueSet _ ->
                 Value_set_abstraction.meet
                   call_index
-                  (ValueSet (Reduced_interval_congruence.RIC.of_int32 idx))
-                |> Value_set_abstraction.equal Value_set_abstraction.bottom
-                |> not)
+                  (ValueSet (RIC.constant idx))
+                |> Value_set_abstraction.(<>) Value_set_abstraction.bottom)
       in
-      if List.is_empty targets then (Log.error (fun () -> "indirect call index doesn't match any function"); failwith "invalid program: indirect call index doesn't match any function");
+      if List.is_empty targets then 
+        (Log.error (fun () -> "indirect call index doesn't match any function"); 
+        failwith "invalid program: indirect call index doesn't match any function");
       List.fold_left targets
         ~init:Transfer.bottom
         ~f:(fun acc idx -> Domain.join (apply_summary ~indirect:true idx arity state) acc)
@@ -74,20 +83,21 @@ end
 module Intra = Intra.MakeSumm(TransferFunction)(ValueSetCallAdapter)
 module Inter = Inter.MakeSummaryBased(TransferFunction)(Intra)
 
-(** [analyze_intra module_ schedule] runs the summary-based intraprocedural
-    value-set analysis following [schedule].
+(** [analyze_intra module_ schedule] analyzes the functions of [module_]
+    according to [schedule], using summaries computed for previously analyzed
+    functions.
 
-    Each analyzed function returns its summary and, when available, its annotated
-    value-set CFG. *)
+    For each function, the result contains its summary and, when requested,
+    the annotated value-set CFG. *)
 let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t option) Int32Map.t =
   Analysis_helpers.mk_intra
     (fun cfgs wasm_mod ->
       (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs wasm_mod `Bottom)))
     (fun data wasm_mod cfg ->
       Log.info
-        (fun () -> Printf.sprintf "-------------------- Value-set analysis of function %s --------------------" (Int32.to_string cfg.idx));
+        (fun () -> Printf.sprintf "-------------------- Value-set analysis of function %ld --------------------" cfg.idx);
       (* Run the value-set analysis *)
-      let annotated_cfg = (* Relational.Transfer.dummy_annotate  *) cfg in
+      let annotated_cfg = cfg in
       let summaries = Int32Map.map data ~f:fst in
       let result_cfg = Intra.analyze wasm_mod annotated_cfg summaries in
       let value_set_summary = TransferFunction.extract_summary wasm_mod annotated_cfg result_cfg in
@@ -96,7 +106,7 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
 (** [analyze_inter module_ schedule] runs the summary-based interprocedural
     value-set analysis over the SCCs in [schedule].
 
-    Each result contains the original spec CFG, the value-set CFG, and the final
+    Each result contains the specification CFG, the value-set CFG, and the final
     summary. *)
 let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t * Domain.t Cfg.t * Summary.t) Int32Map.t =
   Analysis_helpers.mk_inter
@@ -122,15 +132,22 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
 let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Domain.t Icfg.t =
   ClassicalInter.analyze module_ (Analysis_helpers.mk_inter_classical module_ entry)
 
-(** Result of [run_pointer_analysis]: the value-set CFG, the propagated spec
-    instructions, and the computed summaries. 
-    
-    This type is used by the slicer. *)
+(** Result of [run_pointer_analysis]:
+    - the annotated value-set CFG,
+    - the propagated specification instructions,
+    - the computed summaries.
+
+    This type is currently used by the slicer. *)
 type pointer_analysis = 
   Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Domain.t Int32Map.t
 
-(** [run_pointer_analysis module_ cfg funidx] runs the analysis on function [funidx], 
-    needed by other WASSAIL tools, namely the slicer. *)
+(** [run_pointer_analysis module_ cfg funidx] runs the value-set analysis
+    infrastructure required by downstream tools.
+
+    It first performs specification propagation, then computes value-set
+    summaries and the annotated CFG for [funidx]. The resulting CFG,
+    propagated instructions, and summaries are returned for reuse by
+    analyses such as the slicer. *)
 let run_pointer_analysis 
     (module_ : Wasm_module.t) 
     (cfg : unit Cfg.t) 
@@ -149,8 +166,12 @@ let run_pointer_analysis
   let cfg_pointers_map = analyze_intra module_ schedule in
   let cfg_pointers =
     match Int32Map.find cfg_pointers_map funidx with
-    | None -> failwith ("No entry for function " ^ Int32.to_string funidx)
-    | Some (_summary, None) -> failwith ("Function" ^ Int32.to_string funidx ^ "has no CFG")
+    | None -> 
+      Log.error (fun () -> Printf.sprintf "No entry for function %ld" funidx); 
+      failwith (Printf.sprintf "No entry for function %ld" funidx)
+    | Some (_summary, None) -> 
+      Log.error (fun () -> Printf.sprintf "Function %ld has no CFG" funidx);
+      failwith (Printf.sprintf "Function %ld has no CFG" funidx)
     | Some (_summary, Some cfg) -> cfg in
   let summaries = Int32Map.map cfg_pointers_map ~f:(fun (summary, _) -> summary) in
   Spec_inference.use_const := original_use_const;
@@ -4748,6 +4769,633 @@ let%test_module "value-set tests" = (module struct
     && check_value exit_state
       (i_var 0l 25)
       (ValueSet RIC.(ric (5l, Int 0l, Int 8l, ("", 0l))))
+
+  let%test "load with offset....wat" =
+    let exit_state =
+      "(module
+          (memory (export \"mem\") 1)
+          (global $g0 (mut i32) (i32.const 1024))
+
+          (func $main (export \"main\") (param $l0 i32) (result i32) (local $l1 i32)
+            i32.const 36
+            global.get $g0
+            i32.store offset=8
+            i32.const 44
+            i32.load
+          )
+        )
+        " 
+    |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[load with offset....wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.(relative_ric "g0"))
+
+  let%test "weak update.wat" =
+    let exit_state =
+      "(module
+          (memory (export \"mem\") 1)
+          ;; (global $g0 (mut i32) (i32.const 1024))
+
+          (func $main (export \"main\") (param $x i32) (local $l1 i32) (local $l2 i32)
+            local.get $x
+            if (result i32 i32)
+              i32.const 1
+              i32.const 3
+            else
+              i32.const 9
+              i32.const 11
+            end
+            local.set $l1   ;; 8[0,1]+3
+            local.set $l2   ;; 8[0,1]+1
+
+
+
+            local.get $l1   ;; 8[0,1]+3
+            local.get $l2
+            i32.store       ;; weak update
+            
+          )
+        )
+        " 
+    |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[weak update.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Local 2))
+      (ValueSet RIC.(join (constant 9l) one))
+    && check_value exit_state
+      (Variable.Var (Var.Local 1))
+      (ValueSet RIC.(join (constant 3l) (constant 11l)))
+    && check_value exit_state
+      (Variable.Mem RIC.(ric (1l, Int 0l, Int 1l, ("", 3l))))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 9l))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Mem RIC.one)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 11l))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 3l))
+      (ValueSet RIC.Top)
+
+  let%test "memory overlap.wat" =
+    let exit_state =
+      "(module
+          (memory (export \"mem\") 1)
+
+          (func $main (export \"main\") (param $x i32) (result i32)
+            local.get $x
+            if (result i32)
+              i32.const 14
+              i32.const 66
+              i32.store
+              i32.const 14
+              i32.load
+            else
+              i32.const 15
+              i32.const 99
+              i32.store
+              i32.const 15
+              i32.load
+            end
+            i32.const 14
+            i32.load
+            drop
+            i32.const 15
+            i32.load
+            drop
+          )
+        )"
+    |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[memory overlap.wat]";
+    check_value exit_state
+      (i_var 0l 6)
+      (ValueSet RIC.(constant 66l))
+    && check_value exit_state
+      (i_var 0l 11)
+      (ValueSet RIC.(constant 99l))
+    && check_value exit_state
+      (i_var 0l 13)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (i_var 0l 16)
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet RIC.(join (constant 66l) (constant 99l)))
+
+  let%test "shl (times 4).wat" =
+    let exit_state =
+      "(module
+        (func $add (param $a i32) (param $b i32) (result i32)
+          local.get 0
+          i32.const 2
+          i32.shl
+          
+          local.get 1
+          i32.add)
+        (func $main (result i32)
+          i32.const 5
+          i32.const 3
+          call $add
+        )
+        (export \"main\" (func $main))
+      )"
+    |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[shl (times 4).wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (1l,0l)))
+      (ValueSet RIC.(ric (4l, NegInfinity, Infinity, ("", 3l))))
+
+  let%test "spec.wat" =
+    let exit_state =
+      "(module
+          (global $g (mut i32) (i32.const 0))
+
+          (func $f 
+            i32.const 42
+            global.set $g
+          )
+
+          (func $main (export \"main\") (param $l0 i32) (result i32) (local $l1 i32) (local $l2 i32)
+            global.get $g         ;; g=g0;  l0=l0;  l1=0;  l2=0
+            local.set $l0         ;; g=g0;  l0=g0;  l1=0;  l2=0
+
+            i32.const 14        
+            global.set $g         ;; g=14;  l0=g0;  l1=0;  l2=0
+
+            global.get $g
+            local.set $l1         ;; g=14;  l0=g0;  l1=14;  l2=0
+
+            call $f               ;; g=42;  l0=g0;  l1=14;  l2=0
+
+            global.get $g
+            local.set $l2         ;; g=42;  l0=g0;  l1=14;  l2=42
+
+            i32.const 99
+            global.set $g         ;; g=99;  l0=g0;  l1=14;  l2=42
+
+            local.get $l0         ;; g=99;  l0=g0;  l1=14;  l2=42;  ret=g0
+          )
+        )
+
+"
+    |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[spec.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (1l,0l)))
+      (ValueSet RIC.(relative_ric "g0"))
+    && check_value exit_state
+      (Variable.Var (Var.Global 0))
+      (ValueSet RIC.(constant 99l))
+    && check_value exit_state
+      (Variable.Var (Var.Local 0))
+      (ValueSet RIC.(relative_ric "g0"))
+    && check_value exit_state
+      (Variable.Var (Var.Local 1))
+      (ValueSet RIC.(constant 14l))
+    && check_value exit_state
+      (Variable.Var (Var.Local 2))
+      (ValueSet RIC.(constant 42l))
+
+
+  let%test "yet another store test.wat" =
+    let exit_state =
+      "(module
+          (memory (export \"mem\") 1)
+          (global $g0 (mut i32) (i32.const 1024))
+
+          (func $main (export \"main\") (param $l0 i32) (local $l1 i32)
+            i32.const 36                                         ;; [36]
+            global.get $g0                                       ;; [g0; 36]
+            i32.store offset=8     ;; [44:g0]                    ;; []
+            i32.const 36                                         ;; [36]
+            i32.load offset=8      ;; i0_4=g0                    ;; [g0]
+            i32.const 4                                          ;; [4; g0]
+            i32.add                ;; i0_6=(g0+4)                ;; [g0+4]
+            global.get $g0         ;; i0_7=g0                    ;; [g0; g0+4]
+            i32.store offset=112   ;; [44:Top;   (g0+116):g0]    ;; []
+          )
+        )"
+    |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[yet another store test.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (1l,0l)))
+      (ValueSet RIC.Bottom)
+    && check_value exit_state
+      (i_var 0l 4)
+      (ValueSet RIC.(relative_ric "g0"))
+    && check_value exit_state
+      (i_var 0l 6)
+      (ValueSet RIC.(relative_ric "g0" + constant 4l))
+    && check_value exit_state
+      (i_var 0l 7)
+      (ValueSet RIC.(relative_ric "g0"))
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 44l))
+      (ValueSet RIC.Top)
+    && check_value exit_state
+      (Variable.Mem RIC.(constant 116l + relative_ric "g0"))
+      (ValueSet RIC.(relative_ric "g0"))
+
+
+  let%test "tee.wat" =
+    let exit_state =
+      "(module
+          (memory (export \"mem\") 1)
+          (global $g0 (mut i32) (i32.const 1024))
+
+          (func $main (export \"main\") (param $l0 i32) (result i32) (local $l1 i32)
+            i32.const 42            ;; [42]
+            local.tee $l0           ;; [42]        l0=42
+            global.get $g0          ;; [g0; 42]
+            i32.add                 ;; [g0+42]
+            return
+          )
+        )"
+    |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[tee.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l,0l)))
+      (ValueSet RIC.(relative_ric "g0" + constant 42l))
+    && check_value exit_state
+      (Variable.Var (Var.Local 0))
+      (ValueSet RIC.(constant 42l))
+
+  let%test "while.wat" =
+    let exit_state =
+      "(module
+          (func $main (local $i i32)
+            ;; initialize i = 3
+            i32.const 3
+            local.set $i
+
+            ;; while loop
+            block $exit          ;; outer block (break target)
+              loop $loop         ;; loop label
+                ;; condition: if (i <= 10)
+                local.get $i
+                i32.const 10
+                i32.gt_u
+                ;; i32.eqz       
+                br_if $exit      ;; if i > 10 => break
+
+                ;; body: i = i + 1
+                local.get $i
+                i32.const 1
+                i32.add
+                local.set $i
+
+                ;; repeat loop
+                br $loop
+              end
+            end
+          )
+          (export \"main\" (func $main))
+        )"
+    |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[while.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Local 0))
+      (ValueSet RIC.(constant 11l + positive_integers))
+    && check_value exit_state
+      (i_var 0l 10)
+      (ValueSet RIC.(ric (1l, Int 3l, Infinity, ("", 1l))))
+
+  let%test "while2.wat" =
+    let exit_state =
+      "(module
+          (func $main (local $i i32)
+            ;; initialize i = 3
+            i32.const 3
+            local.set $i
+
+            ;; while loop
+            block $exit          ;; outer block (break target)
+              loop $loop         ;; loop label
+                ;; condition: if (i <= 10)
+                local.get $i
+                i32.const 10
+                i32.gt_u
+                ;; i32.eqz       
+                br_if $exit      ;; if i > 10 => break
+
+                ;; body: i = i + 1
+                local.get $i
+                i32.const 1
+                i32.add
+                local.set $i
+
+                ;; repeat loop
+                br $loop
+              end
+            end
+          )
+          (export \"main\" (func $main))
+        )"
+    |> analyze_inter' ~fct_idx:0l
+    in
+    test_label "[while2.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Local 0))
+      (ValueSet RIC.(constant 11l + positive_integers))
+    && check_value exit_state
+      (i_var 0l 10)
+      (ValueSet RIC.(ric (1l, Int 3l, Infinity, ("", 1l))))
+
+
+  (* The following tests have been generated to test a few edge cases: *)
+  let%test "memory.copy.overlapping-forward-is-conservative.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 0
+          i32.const 10
+          i32.store
+
+          i32.const 4
+          i32.const 20
+          i32.store
+
+          ;; Overlapping copy: dest is inside the copied source range.
+          ;; The concrete Wasm semantics are memmove-like, but the analysis
+          ;; should at least be conservative.
+          i32.const 4
+          i32.const 0
+          i32.const 8
+          memory.copy
+
+          i32.const 4
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.copy.overlapping-forward-is-conservative.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet Top)
+
+  let%test "memory.grow.by-unknown-amount.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $pages i32) (result i32)
+          local.get $pages
+          memory.grow
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.grow.by-unknown-amount.wat]";
+       check_value exit_state
+        Variable.MemorySize
+        (ValueSet RIC.(positive_integers + relative_ric "l0"))
+    && check_value exit_state
+        (Variable.Var (Var.Return (0l, 0l)))
+        (ValueSet RIC.positive_integers)
+
+  let%test "call.direct.imported-function-is-conservative.wat" =
+    let exit_state =
+      "(module
+        (import \"env\" \"unknown_i32\" (func $unknown_i32 (param i32) (result i32)))
+
+        (func $main (export \"main\") (result i32)
+          i32.const 42
+          call $unknown_i32
+        )
+      )"
+      |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[call.direct.imported-function-is-conservative.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (1l, 0l)))
+      (ValueSet Top)
+
+  let%test "call.direct.user-function-propagates-summary.wat" =
+    let exit_state =
+      "(module
+        (func $callee (param $x i32) (result i32)
+          local.get $x
+          i32.const 1
+          i32.add)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 41
+          call $callee)
+      )"
+      |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[call.direct.user-function-propagates-summary.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (1l, 0l)))
+      (ValueSet (RIC.constant 42l))
+
+  let%test "division.by-zero-is-conservative.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (result i32)
+          i32.const 42
+          i32.const 0
+          i32.div_s)
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[division.by-zero-is-conservative.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet Top)
+
+  let%test "remainder.by-zero-is-conservative.wat" =
+    let exit_state =
+      "(module
+        (func $main (export \"main\") (result i32)
+          i32.const 42
+          i32.const 0
+          i32.rem_s)
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[remainder.by-zero-is-conservative.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet Top)
+
+  let%test "memory.store-load.same-relative-address.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $p i32) (result i32)
+          local.get $p
+          i32.const 42
+          i32.store
+
+          local.get $p
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store-load.same-relative-address.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet (RIC.constant 42l))
+
+  let%test "memory.store-load.different-relative-addresses.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $p i32) (param $q i32) (result i32)
+          local.get $p
+          i32.const 42
+          i32.store
+
+          local.get $q
+          i32.load
+        )
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store-load.different-relative-addresses.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet Top)
+
+  let%test "call.direct.store-through-pointer.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $store42 (param $p i32)
+          local.get $p
+          i32.const 42
+          i32.store)
+
+        (func $main (export \"main\") (result i32)
+          i32.const 4
+          call $store42
+
+          i32.const 4
+          i32.load)
+      )"
+      |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[call.direct.store-through-pointer.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (1l, 0l)))
+      (ValueSet (RIC.constant 42l))
+
+  let%test "call.direct.store-through-relative-pointer.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $store42 (param $p i32)
+          local.get $p
+          i32.const 42
+          i32.store)
+
+        (func $main (export \"main\") (param $q i32) (result i32)
+          local.get $q
+          call $store42
+
+          local.get $q
+          i32.load)
+      )"
+      |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[call.direct.store-through-relative-pointer.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (1l, 0l)))
+      (ValueSet (RIC.constant 42l))
+
+  let%test "memory.store-relative-then-store-other-relative-invalidates-first.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $main (export \"main\") (param $p i32) (param $q i32) (result i32)
+          ;; mem[p] = 42
+          local.get $p
+          i32.const 42
+          i32.store
+
+          ;; mem[q] = 14
+          ;; Since p and q may overlap, the previous value stored through p
+          ;; can no longer be trusted.
+          local.get $q
+          i32.const 14
+          i32.store
+
+          local.get $p
+          i32.load)
+      )"
+      |> analyze [0l] 0l
+    in
+    test_label "[memory.store-relative-then-store-other-relative-invalidates-first.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (0l, 0l)))
+      (ValueSet Top)
+    && check_value exit_state
+      (Variable.Mem RIC.(relative_ric "l1"))
+      (ValueSet RIC.(constant 14l))
+
+
+  let%test "call.direct.store-other-relative-invalidates-first-relative.wat" =
+    let exit_state =
+      "(module
+        (memory (export \"mem\") 1)
+
+        (func $store14 (param $q i32)
+          local.get $q
+          i32.const 14
+          i32.store)
+
+        (func $main (export \"main\") (param $p i32) (param $q i32) (result i32)
+          ;; mem[p] = 42
+          local.get $p
+          i32.const 42
+          i32.store
+
+          ;; mem[q] = 14, but through a callee.
+          ;; Since p and q may overlap, the value previously stored through p
+          ;; can no longer be trusted after applying the callee summary.
+          local.get $q
+          call $store14
+
+          local.get $p
+          i32.load)
+      )"
+      |> analyze_inter' ~fct_idx:1l
+    in
+    test_label "[call.direct.store-other-relative-invalidates-first-relative.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (1l, 0l)))
+      (ValueSet Top)
+    && check_value exit_state
+      (Variable.Mem RIC.(relative_ric "l1"))
+      (ValueSet RIC.(constant 14l))
+
+
+
+
     
 
   (* Add next test here *)
