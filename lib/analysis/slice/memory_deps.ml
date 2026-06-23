@@ -11,10 +11,18 @@ let find_store_address_and_size
   let instruction = label |> Instr.Label.Map.find_exn cfg in
   let store_size =
     match instruction with
-    | Data { instr = Store {typ = I32; _}; _ }
-    | Data { instr = Store {typ = F32; _}; _ } -> 4l
-    | Data { instr = Store {typ = I64; _}; _ }
-    | Data { instr = Store {typ = F64; _}; _ } -> 8l
+    | Data { instr = Store {typ = I32; pack; _}; _ }
+    | Data { instr = Store {typ = F32; pack; _}; _ } -> 
+      begin match pack with
+      | None -> 4l
+      | Some (size, _) -> Int32.((size |> Memoryop.pack_size_to_int |> Int32.of_int_exn) / 8l)
+      end
+    | Data { instr = Store {typ = I64; pack; _}; _ }
+    | Data { instr = Store {typ = F64; pack; _}; _ } -> 
+      begin match pack with
+      | None -> 8l
+      | Some (size, _) -> Int32.((size |> Memoryop.pack_size_to_int |> Int32.of_int_exn) / 8l)
+      end
     | _ -> assert false in
   let annotation_before = instruction |> Instr.annotation_before in
   let (_, address) = pop2 (Spec_domain.get_or_fail annotation_before).vstack in
@@ -27,10 +35,18 @@ let find_load_address_and_size
   let instruction = label |> Instr.Label.Map.find_exn cfg in
   let load_size =
     match instruction with
-    | Data { instr = Load {typ = I32; _}; _ }
-    | Data { instr = Load {typ = F32; _}; _ } -> 4l
-    | Data { instr = Load {typ = I64; _}; _ }
-    | Data { instr = Load {typ = F64; _}; _ } -> 8l
+    | Data { instr = Load {typ = I32; pack; _}; _ }
+    | Data { instr = Load {typ = F32; pack; _}; _ } ->
+      begin match pack with
+      | None -> 4l
+      | Some (size, _) -> Int32.((size |> Memoryop.pack_size_to_int |> Int32.of_int_exn) / 8l)
+      end
+    | Data { instr = Load {typ = I64; pack; _}; _ }
+    | Data { instr = Load {typ = F64; pack; _}; _ } ->
+      begin match pack with
+      | None -> 8l
+      | Some (size, _) -> Int32.((size |> Memoryop.pack_size_to_int |> Int32.of_int_exn) / 8l)
+      end
     | _ -> assert false in
   let annotation_before = instruction |> Instr.annotation_before in
   pop (Spec_domain.get_or_fail annotation_before).vstack, load_size
@@ -233,13 +249,23 @@ let functions_potentially_called
             |> Spec_domain.get_or_fail).vstack in
     let call_indirect_index_value =
       Abstract_store_domain.find_value_set cfg_pointers ~label:indirect_label ~var:call_indirect_index in
-    Call_graph.indirect_call_targets module_ type_index
-      |> List.filter ~f:(fun idx ->
-        Value_set_abstraction.meet
-          call_indirect_index_value
-          (ValueSet (Reduced_interval_congruence.RIC.of_int32 idx))
-        |> Value_set_abstraction.equal Value_set_abstraction.bottom
-        |> not)
+    let indirect_call_targets = Call_graph.indirect_call_targets module_ type_index in
+    if call_indirect_index_value |> Value_set_abstraction.extract_relative_offset |> String.is_empty then
+      match call_indirect_index_value with
+      | Bitfield _ -> indirect_call_targets
+      | Boolean {numeric_value = r; _}
+      | ValueSet r when not (String.is_empty (Reduced_interval_congruence.RIC.extract_relative_offset r)) -> indirect_call_targets
+      | Boolean {numeric_value = r; _}
+      | ValueSet r -> 
+        let table = module_.table_insts |> List.hd_exn in
+        table
+        |> Table_inst.indices
+        |> List.filter ~f:(fun idx -> Reduced_interval_congruence.RIC.(meet (constant idx) r <> Bottom))
+        |> List.filter_map ~f:(fun idx -> Table_inst.get table idx)
+        |> List.filter ~f:(fun idx -> List.mem indirect_call_targets idx ~equal:Int32.(=))
+    else
+      indirect_call_targets
+
 
 let load_depends_on_call_indirect
     ~(module_ : Wasm_module.t)
