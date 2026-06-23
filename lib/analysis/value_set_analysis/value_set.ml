@@ -61,17 +61,23 @@ struct
       let call_index =
         state |> Domain.get ~var:(Variable.Var (pop (Spec_domain.get_or_fail instr.annotation_before).vstack))
       in
-      let targets = Call_graph.indirect_call_targets module_ typ
-        |> List.filter ~f:(fun idx ->
-            match call_index with
-            | Bitfield _
-            | Boolean _ -> true
-            | ValueSet RIC { offset = (o,_); _ } when not (String.is_empty o) -> true
-            | ValueSet _ ->
-                Value_set_abstraction.meet
-                  call_index
-                  (ValueSet (RIC.constant idx))
-                |> Value_set_abstraction.(<>) Value_set_abstraction.bottom)
+      let indirect_call_targets = Call_graph.indirect_call_targets module_ typ in
+      let targets =
+        if module_.tables |> List.length |> (=) 1 then
+          match call_index with
+          | Bitfield _ -> indirect_call_targets
+          | Boolean {numeric_value = r; _}
+          | ValueSet r when not (String.is_empty (RIC.extract_relative_offset r)) -> indirect_call_targets
+          | Boolean {numeric_value = r; _}
+          | ValueSet r -> 
+            let table = module_.table_insts |> List.hd_exn in
+            table
+            |> Table_inst.indices
+            |> List.filter ~f:(fun idx -> RIC.(meet (constant idx) r <> Bottom))
+            |> List.filter_map ~f:(fun idx -> Table_inst.get table idx)
+            |> List.filter ~f:(fun idx -> List.mem indirect_call_targets idx ~equal:Int32.(=))
+        else
+          indirect_call_targets
       in
       if List.is_empty targets then 
         (Log.error (fun () -> "indirect call index doesn't match any function"); 
@@ -5393,13 +5399,41 @@ let%test_module "value-set tests" = (module struct
       (Variable.Mem RIC.(relative_ric "l1"))
       (ValueSet RIC.(constant 14l))
 
+  let%test "indirect call odd table.wat" =
+    let exit_state =
+      "(module
+        (type (;0;) (func (result i32)))
+        (type (;1;) (func))
 
+        (func $f0 (type 1)
+          i32.const 11
+          global.set 0)
 
+        (func $f1 (type 1)
+          i32.const 42
+          global.set 0)
 
-    
+        (func $f2 (type 1)
+          i32.const 22
+          global.set 0)
 
-  (* Add next test here *)
+        (func $test (export \"main\") (type 0) (result i32)
+          i32.const 1
+          call_indirect (type 1)
+          global.get 0
+        )
 
-  (* let%test "keep false when working" = false *)
+        (table 2 funcref)
+        (elem (i32.const 0) $f0 $f2)
+
+        (global (mut i32) (i32.const 0))
+        (global (mut i32) (i32.const 0)))"
+      |> analyze_inter' ~fct_idx:3l
+    in
+    test_label "[indirect call odd table.wat]";
+    check_value exit_state
+      (Variable.Var (Var.Return (3l, 0l)))
+      (ValueSet RIC.(constant 22l))
+
 
 end)
