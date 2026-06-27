@@ -3541,4 +3541,3298 @@ let%test "global.get depends on indirect call to table target that modifies same
       ~test_name:"global.get depends on unknown indirect call with relevant table target"
       ~with_pointer_analysis:true
       original slice 3l 2
+
+
+  let%test "global.get ignores call that restores modified global before returning" =
+    let original = "(module
+                      (type (;0;) (func))
+                      (type (;1;) (func (result i32)))
+
+                      (func (;0;) (type 0)
+                        global.get 0
+                        i32.const 1
+                        i32.add
+                        global.set 0
+
+                        global.get 0
+                        i32.const 1
+                        i32.sub
+                        global.set 0)
+
+                      (func (;1;) (type 1) (result i32)
+                        call 0       ;; Instr 0: temporarily modifies global 0, then restores it
+                        global.get 0 ;; Instr 1: slicing criterion
+                      )
+
+                      (global (;0;) (mut i32) (i32.const 42)))"
+    in
+    let slice = "(module
+                  (type (;0;) (func))
+                  (type (;1;) (func (result i32)))
+
+                  (func (;0;) (type 0)
+                    global.get 0
+                    i32.const 1
+                    i32.add
+                    global.set 0
+
+                    global.get 0
+                    i32.const 1
+                    i32.sub
+                    global.set 0)
+
+                  (func (;1;) (type 1) (result i32)
+                    global.get 0
+                  )
+
+                  (global (;0;) (mut i32) (i32.const 42)))"
+    in
+    check_slice 
+      ~test_name:"global.get ignores call that restores modified global before returning"
+      ~with_pointer_analysis:true
+      original slice 1l 1
+
+  let%test "global.get ignores call that saves and restores global through local" =
+    let original = "(module
+                      (type (;0;) (func))
+                      (type (;1;) (func (result i32)))
+
+                      (func (;0;) (type 0) (local i32)
+                        global.get 0
+                        local.set 0
+                        i32.const 123
+                        global.set 0
+                        local.get 0
+                        global.set 0)
+
+                      (func (;1;) (type 1) (result i32)
+                        call 0
+                        global.get 0)
+
+                      (global (;0;) (mut i32) (i32.const 42)))"
+    in
+    let slice = "(module
+                      (type (;0;) (func))
+                      (type (;1;) (func (result i32)))
+
+                      (func (;0;) (type 0) (local i32)
+                        global.get 0
+                        local.set 0
+                        i32.const 123
+                        global.set 0
+                        local.get 0
+                        global.set 0)
+
+                      (func (;1;) (type 1) (result i32)
+                        global.get 0)
+
+                      (global (;0;) (mut i32) (i32.const 42)))"
+    in
+    check_slice
+      ~test_name:"global.get ignores call that saves and restores global through local"
+      ~with_pointer_analysis:true
+      original slice 1l 1
+
+  let%test "global.get keeps call that may leave global modified on one branch" =
+    let original = "(module
+                      (type (;0;) (func))
+                      (type (;1;) (func (result i32)))
+
+                      (func (;0;) (type 0)
+                        global.get 1
+                        if
+                          i32.const 123
+                          global.set 0
+                        else
+                          global.get 0
+                          global.set 0
+                        end)
+
+                      (func (;1;) (type 1) (result i32)
+                        call 0
+                        global.get 0)
+
+                      (global (;0;) (mut i32) (i32.const 42))
+                      (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"global.get keeps call that may leave global modified on one branch"
+      ~with_pointer_analysis:true
+      original slice 1l 1
+
+  let%test "global.get keeps only call that actually changes same global" =
+    let original = "(module
+                      (type (;0;) (func))
+                      (type (;1;) (func (result i32)))
+
+                      (func (;0;) (type 0)
+                        (local i32)
+                        global.get 0
+                        local.set 0
+                        i32.const 123
+                        global.set 0
+                        local.get 0
+                        global.set 0)
+
+                      (func (;1;) (type 0)
+                        i32.const 999
+                        global.set 0)
+
+                      (func (;2;) (type 1) (result i32)
+                        call 0
+                        call 1
+                        global.get 0)
+
+                      (global (;0;) (mut i32) (i32.const 42)))"
+    in
+    let slice = "(module
+                    (type (;0;) (func))
+                    (type (;1;) (func (result i32)))
+
+                    (func (;0;) (type 0)
+                      (local i32)
+                      global.get 0
+                      local.set 0
+                      i32.const 123
+                      global.set 0
+                      local.get 0
+                      global.set 0)
+
+                    (func (;1;) (type 0)
+                      i32.const 999
+                      global.set 0)
+
+                    (func (;2;) (type 1) (result i32)
+                      call 1
+                      global.get 0)
+
+                    (global (;0;) (mut i32) (i32.const 42)))"
+    in
+    check_slice
+      ~test_name:"global.get keeps only call that actually changes same global"
+      ~with_pointer_analysis:true
+      original slice 2l 2
+
+
+  let%test "global.get ignores call that changes different global" =
+    let original = "(module
+                      (type (;0;) (func))
+                      (type (;1;) (func (result i32)))
+
+                      (func (;0;) (type 0)
+                        i32.const 999
+                        global.set 1)
+
+                      (func (;1;) (type 1) (result i32)
+                        call 0
+                        global.get 0)
+
+                      (global (;0;) (mut i32) (i32.const 42))
+                      (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    let slice = "(module
+                    (type (;0;) (func))
+                    (type (;1;) (func (result i32)))
+
+                    (func (;0;) (type 0)
+                      i32.const 999
+                      global.set 1)
+
+                    (func (;1;) (type 1) (result i32)
+                      global.get 0)
+
+                    (global (;0;) (mut i32) (i32.const 42))
+                    (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    check_slice
+      ~test_name:"global.get ignores call that changes different global"
+      ~with_pointer_analysis:true
+      original slice 1l 1
+
+  let%test "global.get ignores restored call and call changing different global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 0)
+          (local i32)
+          global.get 0
+          local.set 0
+          i32.const 123
+          global.set 0
+          local.get 0
+          global.set 0)
+
+        (func (;1;) (type 0)
+          i32.const 999
+          global.set 1)
+
+        (func (;2;) (type 1) (result i32)
+          call 0
+          call 1
+          global.get 0)
+
+        (global (;0;) (mut i32) (i32.const 42))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 0)
+          (local i32)
+          global.get 0
+          local.set 0
+          i32.const 123
+          global.set 0
+          local.get 0
+          global.set 0)
+
+        (func (;1;) (type 0)
+          i32.const 999
+          global.set 1)
+
+        (func (;2;) (type 1) (result i32)
+          global.get 0)
+
+        (global (;0;) (mut i32) (i32.const 42))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    check_slice
+      ~test_name:"global.get ignores restored call and call changing different global"
+      ~with_pointer_analysis:true
+      original slice 2l 2
+
+
+  let%test "global.get keeps call_indirect that changes same global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 0)
+          i32.const 999
+          global.set 0)
+
+        (func (;1;) (type 1) (result i32)
+          i32.const 0
+          call_indirect (type 0)
+          global.get 0)
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 0)
+        (global (;0;) (mut i32) (i32.const 42)))"
+    in
+    check_slice
+      ~test_name:"global.get keeps call_indirect that changes same global"
+      ~with_pointer_analysis:true
+      original original 1l 2
+
+
+  let%test "global.get ignores call_indirect that restores same global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 0)
+          (local i32)
+          global.get 0
+          local.set 0
+          i32.const 999
+          global.set 0
+          local.get 0
+          global.set 0)
+
+        (func (;1;) (type 1) (result i32)
+          i32.const 0
+          call_indirect (type 0)
+          global.get 0)
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 0)
+        (global (;0;) (mut i32) (i32.const 42)))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 0)
+          (local i32)
+          global.get 0
+          local.set 0
+          i32.const 999
+          global.set 0
+          local.get 0
+          global.set 0)
+
+        (func (;1;) (type 1) (result i32)
+          global.get 0)
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 0)
+        (global (;0;) (mut i32) (i32.const 42)))"
+    in
+    check_slice
+      ~test_name:"global.get ignores call_indirect that restores same global"
+      ~with_pointer_analysis:true
+      original slice 1l 2
+
+  let%test "global.get keeps call_indirect to selected target that changes same global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 0)
+          i32.const 999
+          global.set 0)
+
+        (func (;1;) (type 0)
+          i32.const 123
+          global.set 1)
+
+        (func (;2;) (type 1) (result i32)
+          i32.const 0
+          call_indirect (type 0)
+          global.get 0)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+
+        (global (;0;) (mut i32) (i32.const 42))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    check_slice
+      ~test_name:"global.get keeps call_indirect to selected target that changes same global"
+      ~with_pointer_analysis:true
+      original original 2l 2
+
+
+  let%test "global.get ignores call_indirect to selected target that changes different global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 0)
+          i32.const 123
+          global.set 1)
+
+        (func (;1;) (type 0)
+          i32.const 999
+          global.set 0)
+
+        (func (;2;) (type 1) (result i32)
+          i32.const 0
+          call_indirect (type 0)
+          global.get 0)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+
+        (global (;0;) (mut i32) (i32.const 42))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 0)
+          i32.const 123
+          global.set 1)
+
+        (func (;1;) (type 0)
+          i32.const 999
+          global.set 0)
+
+        (func (;2;) (type 1) (result i32)
+          global.get 0)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+
+        (global (;0;) (mut i32) (i32.const 42))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    check_slice
+      ~test_name:"global.get ignores call_indirect to selected target that changes different global"
+      ~with_pointer_analysis:true
+      original slice 2l 2
+
+  let%test "global.get keeps call_indirect with unknown target that may change same global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (param i32) (result i32)))
+
+        (func (;0;) (type 0)
+          i32.const 123
+          global.set 1)
+
+        (func (;1;) (type 0)
+          i32.const 999
+          global.set 0)
+
+        (func (;2;) (type 1) (param i32) (result i32)
+          local.get 0
+          call_indirect (type 0)
+          global.get 0)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+
+        (global (;0;) (mut i32) (i32.const 42))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    check_slice
+      ~test_name:"global.get keeps call_indirect with unknown target that may change same global"
+      ~with_pointer_analysis:true
+      original original 2l 2
+
+
+  let%test "load keeps preceding call that may write overlapping memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          i32.const 100
+          i32.const 888
+          i32.store)
+
+        (func (;2;) (type 0)
+          call 0
+          call 1
+
+          i32.const 4
+          i32.load
+
+          call 0
+          call 1
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          i32.const 100
+          i32.const 888
+          i32.store)
+
+        (func (;2;) (type 0)
+          call 0
+
+          i32.const 4
+          i32.load
+
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps preceding call that may write overlapping memory"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+  let%test "load ignores preceding call that writes disjoint memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          ;; Writes bytes [100,103]
+          i32.const 100
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1)
+          call 0
+
+          i32.const 4
+          i32.load
+
+          call 0
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          ;; Writes bytes [100,103]
+          i32.const 100
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1)
+          i32.const 4
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load ignores preceding call that writes disjoint memory"
+      ~with_pointer_analysis:true
+      original slice 1l 2
+
+
+  let%test "load keeps only preceding call that writes overlapping memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 100
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          i32.const 4
+          i32.const 888
+          i32.store)
+
+        (func (;2;) (type 0)
+          call 0
+          call 1
+
+          i32.const 4
+          i32.load
+
+          call 0
+          call 1
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 100
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          i32.const 4
+          i32.const 888
+          i32.store)
+
+        (func (;2;) (type 0)
+          call 1
+
+          i32.const 4
+          i32.load
+
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps only preceding call that writes overlapping memory"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+  let%test "load keeps preceding call that writes overlapping boundary memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          ;; Writes bytes [3, 6], overlapping the load range [4, 7]
+          i32.const 3
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          ;; Writes bytes [100, 103], irrelevant
+          i32.const 0
+          i32.const 888
+          i32.store)
+
+        (func (;2;) (type 0)
+          call 0
+          call 1
+
+          i32.const 4
+          i32.load
+
+          call 0
+          call 1
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          ;; Writes bytes [3, 6], overlapping the load range [4, 7]
+          i32.const 3
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          ;; Writes bytes [100, 103], irrelevant
+          i32.const 100
+          i32.const 888
+          i32.store)
+
+        (func (;2;) (type 0)
+          call 0
+
+          i32.const 4
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps preceding call that writes overlapping boundary memory"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+  let%test "load keeps preceding call that may write one of several possible addresses" =
+    let original =
+      "(module
+        (type (;0;) (func (param i32)))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0) (param $c i32)
+          local.get $c
+          if (result i32)
+            i32.const 4
+          else
+            i32.const 100
+          end
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $c i32)
+          local.get $c
+          call 0
+
+          i32.const 4
+          i32.load
+
+          local.get $c
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (param i32)))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0) (param $c i32)
+          local.get $c
+          if (result i32)
+            i32.const 4
+          else
+            i32.const 100
+          end
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $c i32)
+          local.get $c
+          call 0
+
+          i32.const 4
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps preceding call that may write one of several possible addresses"
+      ~with_pointer_analysis:true
+      original slice 1l 3
+
+
+  let%test "load keeps preceding call that writes at parameter address" =
+    let original =
+      "(module
+        (type (;0;) (func (param i32)))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $p i32)
+          local.get $p
+          call 0
+
+          i32.const 4
+          i32.load
+
+          local.get $p
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (param i32)))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $p i32)
+          local.get $p
+          call 0
+
+          i32.const 4
+          i32.load
+
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps preceding call that writes at parameter address"
+      ~with_pointer_analysis:true
+      original slice 1l 3
+
+
+  let%test "load keeps preceding call when load may read one of several possible addresses" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $c i32)
+          call 0
+
+          local.get $c
+          if (result i32)
+            i32.const 4
+          else
+            i32.const 100
+          end
+          i32.load
+
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $c i32)
+          call 0
+
+          local.get $c
+          if (result i32)
+            i32.const 4
+          else
+            i32.const 100
+          end
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps preceding call when load may read one of several possible addresses"
+      ~with_pointer_analysis:true
+      original slice 1l 5
+
+
+
+  let%test "load keeps preceding call when load reads at parameter address" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $p i32)
+          call 0
+
+          local.get $p
+          i32.load
+
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $p i32)
+          call 0
+
+          local.get $p
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps preceding call when load reads at parameter address"
+      ~with_pointer_analysis:true
+      original slice 1l 2
+
+
+
+  let%test "load keeps preceding call that writes at difference of parameter addresses" =
+    let original =
+      "(module
+        (type (;0;) (func (param i32) (param i32)))
+        (type (;1;) (func (param i32) (param i32)))
+
+        (func (;0;) (type 0) (param $p i32) (param $q i32)
+          local.get $p
+          local.get $q
+          i32.sub
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $p i32) (param $q i32)
+          local.get $p
+          local.get $q
+          call 0
+
+          i32.const 4
+          i32.load
+
+          local.get $p
+          local.get $q
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (param i32) (param i32)))
+        (type (;1;) (func (param i32) (param i32)))
+
+        (func (;0;) (type 0) (param $p i32) (param $q i32)
+          local.get $p
+          local.get $q
+          i32.sub
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $p i32) (param $q i32)
+          local.get $p
+          local.get $q
+          call 0
+
+          i32.const 4
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps preceding call that writes at difference of parameter addresses"
+      ~with_pointer_analysis:true
+      original slice 1l 4
+
+
+  let%test "load keeps preceding call whose known arguments write at loaded address" =
+    let original =
+      "(module
+        (type (;0;) (func (param i32) (param i32)))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0) (param $p i32) (param $q i32)
+          local.get $p
+          local.get $q
+          i32.sub
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1)
+          i32.const 10
+          i32.const 6
+          call 0
+
+          i32.const 4
+          i32.load
+
+          i32.const 20
+          i32.const 16
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (param i32) (param i32)))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0) (param $p i32) (param $q i32)
+          local.get $p
+          local.get $q
+          i32.sub
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1)
+          i32.const 10
+          i32.const 6
+          call 0
+
+          i32.const 4
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps preceding call whose known arguments write at loaded address"
+      ~with_pointer_analysis:true
+      original slice 1l 4
+
+
+  let%test "load keeps preceding call whose known arguments may write near loaded address" =
+    let original =
+      "(module
+        (type (;0;) (func (param i32) (param i32)))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0) (param $p i32) (param $q i32)
+          local.get $p
+          local.get $q
+          i32.sub
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1)
+          i32.const 13
+          i32.const 3
+          call 0
+
+          i32.const 4
+          i32.load
+
+          i32.const 20
+          i32.const 16
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (param i32) (param i32)))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0) (param $p i32) (param $q i32)
+          local.get $p
+          local.get $q
+          i32.sub
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1)
+          i32.const 13
+          i32.const 3
+          call 0
+
+          i32.const 4
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps preceding call whose known arguments may write near loaded address"
+      ~with_pointer_analysis:true
+      original slice 1l 4
+
+
+  let%test "load ignores preceding call whose known arguments write far from loaded address" =
+    let original =
+      "(module
+        (type (;0;) (func (param i32) (param i32)))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0) (param $p i32) (param $q i32)
+          local.get $p
+          local.get $q
+          i32.sub
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1)
+          i32.const 13
+          i32.const 2
+          call 0
+
+          i32.const 4
+          i32.load
+
+          i32.const 20
+          i32.const 16
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (param i32) (param i32)))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0) (param $p i32) (param $q i32)
+          local.get $p
+          local.get $q
+          i32.sub
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1)
+          i32.const 4
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load ignores preceding call whose known arguments write far from loaded address"
+      ~with_pointer_analysis:true
+      original slice 1l 4
+
+
+
+  let%test "load keeps preceding call that writes overlapping relative memory" =
+    let original =
+      "(module
+        (type (;0;) (func (param i32)))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 3
+          i32.add
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $p i32)
+          local.get $p
+          call 0
+
+          local.get $p
+          i32.const 4
+          i32.add
+          i32.load
+
+          local.get $p
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (param i32)))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 3
+          i32.add
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $p i32)
+          local.get $p
+          call 0
+
+          local.get $p
+          i32.const 4
+          i32.add
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps preceding call that writes overlapping relative memory"
+      ~with_pointer_analysis:true
+      original slice 1l 5
+
+
+  let%test "load ignores preceding call that writes disjoint relative memory" =
+    let original =
+      "(module
+        (type (;0;) (func (param i32)))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 20
+          i32.add
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $p i32)
+          local.get $p
+          call 0
+
+          local.get $p
+          i32.const 4
+          i32.add
+          i32.load
+
+          local.get $p
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (param i32)))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 20
+          i32.add
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1) (param $p i32)
+          local.get $p
+          i32.const 4
+          i32.add
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load ignores preceding call that writes disjoint relative memory"
+      ~with_pointer_analysis:true
+      original slice 1l 5
+
+
+  let%test "load keeps only preceding call that writes overlapping relative memory" =
+    let original =
+      "(module
+        (type (;0;) (func (param i32)))
+
+        (func (;0;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 20
+          i32.add
+          i32.const 111
+          i32.store)
+
+        (func (;1;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 3
+          i32.add
+          i32.const 222
+          i32.store)
+
+        (func (;2;) (type 0) (param $p i32)
+          local.get $p
+          call 0
+
+          local.get $p
+          call 1
+
+          local.get $p
+          i32.const 4
+          i32.add
+          i32.load
+
+          local.get $p
+          call 0
+
+          local.get $p
+          call 1
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (param i32)))
+
+        (func (;0;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 20
+          i32.add
+          i32.const 111
+          i32.store)
+
+        (func (;1;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 3
+          i32.add
+          i32.const 222
+          i32.store)
+
+        (func (;2;) (type 0) (param $p i32)
+          local.get $p
+          call 1
+
+          local.get $p
+          i32.const 4
+          i32.add
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps only preceding call that writes overlapping relative memory"
+      ~with_pointer_analysis:true
+      original slice 2l 7
+
+
+  let%test "load keeps only preceding call that writes overlapping relative memory" =
+    let original =
+      "(module
+        (type (;0;) (func (param i32)))
+
+        (func (;0;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 20
+          i32.add
+          i32.const 111
+          i32.store)
+
+        (func (;1;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 3
+          i32.add
+          i32.const 222
+          i32.store)
+
+        (func (;2;) (type 0) (param $p i32)
+          local.get $p
+          call 0
+
+          local.get $p
+          call 1
+
+          local.get $p
+          i32.const 4
+          i32.add
+          i32.load
+
+          local.get $p
+          call 0
+
+          local.get $p
+          call 1
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (param i32)))
+
+        (func (;0;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 20
+          i32.add
+          i32.const 111
+          i32.store)
+
+        (func (;1;) (type 0) (param $p i32)
+          local.get $p
+          i32.const 3
+          i32.add
+          i32.const 222
+          i32.store)
+
+        (func (;2;) (type 0) (param $p i32)
+          local.get $p
+          call 1
+
+          local.get $p
+          i32.const 4
+          i32.add
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps only preceding call that writes overlapping relative memory"
+      ~with_pointer_analysis:true
+      original slice 2l 7
+
+
+  let%test "load keeps preceding call that transitively writes overlapping memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          call 0)
+
+        (func (;2;) (type 0)
+          call 1
+
+          i32.const 4
+          i32.load
+
+          call 1
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          call 0)
+
+        (func (;2;) (type 0)
+          call 1
+
+          i32.const 4
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps preceding call that transitively writes overlapping memory"
+      ~with_pointer_analysis:true
+      original slice 2l 2
+
+
+  let%test "load ignores preceding call that transitively writes disjoint memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 100
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          call 0)
+
+        (func (;2;) (type 0)
+          call 1
+
+          i32.const 4
+          i32.load
+
+          call 1
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 100
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0))
+
+        (func (;2;) (type 0)
+          i32.const 4
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load ignores preceding call that transitively writes disjoint memory"
+      ~with_pointer_analysis:true
+      original slice 2l 2
+
+
+  let%test "load ignores preceding call that transitively writes disjoint memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 100
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          call 0)
+
+        (func (;2;) (type 0)
+          call 1
+
+          i32.const 4
+          i32.load
+
+          call 1
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 100
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0))
+
+        (func (;2;) (type 0)
+          i32.const 4
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load ignores preceding call that transitively writes disjoint memory"
+      ~with_pointer_analysis:true
+      original slice 2l 2
+
+
+  let%test "load ignores preceding call that only reads overlapping memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.load
+          drop)
+
+        (func (;1;) (type 0)
+          call 0
+
+          i32.const 4
+          i32.load
+
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.load
+          drop)
+
+        (func (;1;) (type 0)
+          i32.const 4
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load ignores preceding call that only reads overlapping memory"
+      ~with_pointer_analysis:true
+      original slice 1l 2
+
+
+  let%test "load keeps preceding call that fills overlapping memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 0
+          i32.const 4
+          memory.fill)
+
+        (func (;1;) (type 0)
+          call 0
+
+          i32.const 4
+          i32.load
+
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 0
+          i32.const 4
+          memory.fill)
+
+        (func (;1;) (type 0)
+          call 0
+
+          i32.const 4
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps preceding call that fills overlapping memory"
+      ~with_pointer_analysis:true
+      original slice 1l 2
+
+
+  let%test "i32.load keeps only call whose i64.store overlaps loaded bytes" =
+    let original =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 0
+          i64.const 111
+          i64.store)
+
+        (func (;1;) (type 0)
+          i32.const 1
+          i64.const 222
+          i64.store)
+
+        (func (;2;) (type 0)
+          call 0
+          call 1
+
+          i32.const 8
+          i32.load
+
+          call 0
+          call 1
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 0
+          i64.const 111
+          i64.store)
+
+        (func (;1;) (type 0)
+          i32.const 1
+          i64.const 222
+          i64.store)
+
+        (func (;2;) (type 0)
+          call 1
+
+          i32.const 8
+          i32.load
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"i32.load keeps only call whose i64.store overlaps loaded bytes"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+  let%test "load keeps call_indirect to selected target that writes overlapping memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          i32.const 100
+          i32.const 888
+          i32.store)
+
+        (func (;2;) (type 1)
+          i32.const 0
+          call_indirect (type 0)
+
+          i32.const 4
+          i32.load
+
+          i32.const 0
+          call_indirect (type 0)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          i32.const 100
+          i32.const 888
+          i32.store)
+
+        (func (;2;) (type 1)
+          i32.const 0
+          call_indirect (type 0)
+
+          i32.const 4
+          i32.load
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps call_indirect to selected target that writes overlapping memory"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+  let%test "load drops call_indirect to selected target that writes disjoint memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 100
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          i32.const 4
+          i32.const 888
+          i32.store)
+
+        (func (;2;) (type 1)
+          i32.const 0
+          call_indirect (type 0)
+
+          i32.const 4
+          i32.load
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 100
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          i32.const 4
+          i32.const 888
+          i32.store)
+
+        (func (;2;) (type 1)
+          i32.const 4
+          i32.load
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load drops call_indirect to selected target that writes disjoint memory"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+  let%test "load keeps call_indirect with unknown target when one possible target writes overlapping memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0)
+          i32.const 100
+          i32.const 111
+          i32.store)
+
+        (func (;1;) (type 0)
+          i32.const 4
+          i32.const 222
+          i32.store)
+
+        (func (;2;) (type 1) (param $target i32)
+          local.get $target
+          call_indirect (type 0)
+
+          i32.const 4
+          i32.load
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice =
+      original
+    in
+    check_slice
+      ~test_name:"load keeps call_indirect with unknown target when one possible target writes overlapping memory"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+
+
+  let%test "load drops call_indirect with unknown target when no possible target writes overlapping memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0)
+          i32.const 100
+          i32.const 111
+          i32.store)
+
+        (func (;1;) (type 0)
+          i32.const 200
+          i32.const 222
+          i32.store)
+
+        (func (;2;) (type 1) (param $target i32)
+          local.get $target
+          call_indirect (type 0)
+
+          i32.const 4
+          i32.load
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0)
+          i32.const 100
+          i32.const 111
+          i32.store)
+
+        (func (;1;) (type 0)
+          i32.const 200
+          i32.const 222
+          i32.store)
+
+        (func (;2;) (type 1) (param $target i32)
+          i32.const 4
+          i32.load
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load drops call_indirect with unknown target when no possible target writes overlapping memory"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+  let%test "load keeps call_indirect to selected target that transitively writes overlapping memory" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          call 0)
+
+        (func (;2;) (type 1)
+          i32.const 0
+          call_indirect (type 0)
+
+          i32.const 4
+          i32.load
+
+          i32.const 0
+          call_indirect (type 0)
+          drop)
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 1)
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 0)
+          call 0)
+
+        (func (;2;) (type 1)
+          i32.const 0
+          call_indirect (type 0)
+
+          i32.const 4
+          i32.load
+          drop)
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 1)
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load keeps call_indirect to selected target that transitively writes overlapping memory"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+  let%test "load ignores later call_indirect in non-loop block" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.const 999
+          i32.store)
+
+        (func (;1;) (type 1)
+          i32.const 4
+          i32.load
+
+          i32.const 0
+          call_indirect (type 0)
+          drop)
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 0)
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0))
+
+        (func (;1;) (type 0)
+          i32.const 4
+          i32.load
+          drop)
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 0)
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"load ignores later call_indirect in non-loop block"
+      ~with_pointer_analysis:true
+      original slice 1l 1
+
+
+  let%test "call depends on previous global.set when callee reads same global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 0)
+          i32.const 42
+          global.set 0
+
+          call 0
+          drop)
+
+        (global (;0;) (mut i32) (i32.const 0)))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call depends on previous global.set when callee reads same global"
+      ~with_pointer_analysis:true
+      original slice 1l 2
+
+
+  let%test "call does not depend on previous global.set when callee reads no global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0))
+
+        (func (;1;) (type 0)
+          i32.const 42
+          global.set 0
+
+          call 0)
+
+        (global (;0;) (mut i32) (i32.const 0)))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0))
+
+        (func (;1;) (type 0)
+          call 0)
+
+        (global (;0;) (mut i32) (i32.const 0)))"
+    in
+    check_slice
+      ~test_name:"call does not depend on previous global.set when callee reads no global"
+      ~with_pointer_analysis:true
+      original slice 1l 2
+
+
+  let%test "call does not depend on previous global.set when callee reads different global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 1)
+
+        (func (;1;) (type 0)
+          i32.const 42
+          global.set 0
+
+          call 0
+          drop)
+
+        (global (;0;) (mut i32) (i32.const 0))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 1)
+
+        (func (;1;) (type 0)
+          call 0
+          drop)
+
+        (global (;0;) (mut i32) (i32.const 0))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    check_slice
+      ~test_name:"call does not depend on previous global.set when callee reads different global"
+      ~with_pointer_analysis:true
+      original slice 1l 2
+
+
+  let%test "call does not depend on previous global.set of unused global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 0)
+          i32.const 42
+          global.set 1
+
+          call 0
+          drop)
+
+        (global (;0;) (mut i32) (i32.const 0))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 0)
+          call 0
+          drop)
+
+        (global (;0;) (mut i32) (i32.const 0))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    check_slice
+      ~test_name:"call does not depend on previous global.set of unused global"
+      ~with_pointer_analysis:true
+      original slice 1l 2
+
+
+  let%test "call depends on previous global.set when callee transitively reads same global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 1)
+          call 0)
+
+        (func (;2;) (type 0)
+          i32.const 42
+          global.set 0
+
+          call 1
+          drop)
+
+        (global (;0;) (mut i32) (i32.const 0)))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call depends on previous global.set when callee transitively reads same global"
+      ~with_pointer_analysis:true
+      original slice 2l 2
+  
+
+  let%test "call does not depend on later global.set even when callee reads same global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 0)
+          call 0
+          drop
+
+          i32.const 42
+          global.set 0
+
+          i32.const 13
+          global.set 1)
+
+        (global (;0;) (mut i32) (i32.const 0))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 0)
+          call 0
+          drop)
+
+        (global (;0;) (mut i32) (i32.const 0))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    check_slice
+      ~test_name:"call does not depend on later global.set even when callee reads same global"
+      ~with_pointer_analysis:true
+      original slice 1l 0
+
+
+  let%test "call_indirect depends on previous global.set when selected target reads same global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 0)
+          i32.const 42
+          global.set 0
+
+          i32.const 0
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 0)
+
+        (global (;0;) (mut i32) (i32.const 0)))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call_indirect depends on previous global.set when selected target reads same global"
+      ~with_pointer_analysis:true
+      original slice 1l 3
+
+
+  let%test "call_indirect does not depend on previous global.set when selected target reads no global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0))
+
+        (func (;1;) (type 0)
+          i32.const 42
+          global.set 0
+
+          i32.const 0
+          call_indirect (type 0))
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 0)
+
+        (global (;0;) (mut i32) (i32.const 0)))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+
+        (func (;0;) (type 0))
+
+        (func (;1;) (type 0)
+          i32.const 0
+          call_indirect (type 0))
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 0)
+
+        (global (;0;) (mut i32) (i32.const 0)))"
+    in
+    check_slice
+      ~test_name:"call_indirect does not depend on previous global.set when selected target reads no global"
+      ~with_pointer_analysis:true
+      original slice 1l 3
+
+
+
+  let%test "call_indirect does not depend on previous global.set when selected target reads different global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 1)
+
+        (func (;1;) (type 0)
+          i32.const 42
+          global.set 0
+
+          i32.const 0
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 0)
+
+        (global (;0;) (mut i32) (i32.const 0))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 1)
+
+        (func (;1;) (type 0)
+          i32.const 0
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 0)
+
+        (global (;0;) (mut i32) (i32.const 0))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    check_slice
+      ~test_name:"call_indirect does not depend on previous global.set when selected target reads different global"
+      ~with_pointer_analysis:true
+      original slice 1l 3
+
+
+
+  let%test "call_indirect does not depend on previous global.set of unused global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 0)
+          i32.const 42
+          global.set 1
+
+          i32.const 0
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 0)
+
+        (global (;0;) (mut i32) (i32.const 0))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 0)
+          i32.const 0
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 0)
+
+        (global (;0;) (mut i32) (i32.const 0))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    check_slice
+      ~test_name:"call_indirect does not depend on previous global.set of unused global"
+      ~with_pointer_analysis:true
+      original slice 1l 3
+
+
+  let%test "call_indirect depends on previous global.set when selected target transitively reads same global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 1)
+          call 0)
+
+        (func (;2;) (type 0)
+          i32.const 42
+          global.set 0
+
+          i32.const 0
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 1 funcref)
+        (elem (;0;) (i32.const 0) func 1)
+
+        (global (;0;) (mut i32) (i32.const 0)))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call_indirect depends on previous global.set when selected target transitively reads same global"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+  let%test "call_indirect depends on previous global.set when parameter target may read same global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+        (type (;2;) (func (param i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 1)
+          i32.const 0)
+
+        (func (;2;) (type 2) (param $target i32)
+          i32.const 42
+          global.set 0
+
+          local.get $target
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+
+        (global (;0;) (mut i32) (i32.const 0)))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call_indirect depends on previous global.set when parameter target may read same global"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+
+  let%test "call_indirect depends on previous global.set when value-set target may read same global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+        (type (;2;) (func (param i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 1)
+          i32.const 0)
+
+        (func (;2;) (type 2) (param $c i32)
+          i32.const 42
+          global.set 0
+
+          local.get $c
+          if (result i32)
+            i32.const 0
+          else
+            i32.const 1
+          end
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+
+        (global (;0;) (mut i32) (i32.const 0)))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call_indirect depends on previous global.set when value-set target may read same global"
+      ~with_pointer_analysis:true
+      original slice 2l 6
+
+
+  let%test "call_indirect depends on previous global.set when selected table target reads same global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 1)
+          global.get 1)
+
+        (func (;2;) (type 0)
+          i32.const 42
+          global.set 0
+
+          i32.const 0
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+
+        (global (;0;) (mut i32) (i32.const 0))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call_indirect depends on previous global.set when selected table target reads same global"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+  let%test "call_indirect does not depend on previous global.set when selected table target reads different global" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 1)
+          global.get 1)
+
+        (func (;2;) (type 0)
+          i32.const 42
+          global.set 0
+
+          i32.const 1
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+
+        (global (;0;) (mut i32) (i32.const 0))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          global.get 0)
+
+        (func (;1;) (type 1)
+          global.get 1)
+
+        (func (;2;) (type 0)
+          i32.const 1
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+
+        (global (;0;) (mut i32) (i32.const 0))
+        (global (;1;) (mut i32) (i32.const 0)))"
+    in
+    check_slice
+      ~test_name:"call_indirect does not depend on previous global.set when selected table target reads different global"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+  let%test "call depends on previous store when callee loads same address" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 0)
+          i32.const 4
+          i32.const 42
+          i32.store
+
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call depends on previous store when callee loads same address"
+      ~with_pointer_analysis:true
+      original slice 1l 3
+
+
+  let%test "call depends on previous store when callee load overlaps one byte" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          i32.const 3
+          i32.load)
+
+        (func (;1;) (type 0)
+          i32.const 0
+          i32.const 42
+          i32.store
+
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call depends on previous store when callee load overlaps one byte"
+      ~with_pointer_analysis:true
+      original slice 1l 3
+
+
+  let%test "call does not depend on previous store when callee load is disjoint" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 0)
+          i32.const 0
+          i32.const 42
+          i32.store
+
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          i32.const 8
+          i32.load)
+
+        (func (;1;) (type 0)
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"call does not depend on previous store when callee load is disjoint"
+      ~with_pointer_analysis:true
+      original slice 1l 3
+
+
+  let%test "call depends on previous store when callee transitively loads affected address" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 1)
+          call 0)
+
+        (func (;2;) (type 0)
+          i32.const 4
+          i32.const 42
+          i32.store
+
+          call 1
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call depends on previous store when callee transitively loads affected address"
+      ~with_pointer_analysis:true
+      original slice 2l 3
+
+
+  let%test "call keeps previous store with incompatible relative offset" =
+    let original =
+      "(module
+        (type (;0;) (func (result i32)))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 1) (param $p i32)
+          local.get $p
+          i32.const 42
+          i32.store
+
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call keeps previous store with incompatible relative offset"
+      ~with_pointer_analysis:true
+      original slice 1l 3
+
+
+  let%test "call drops previous store with compatible disjoint relative offset" =
+    let original =
+      "(module
+        (func (;0;) (param $p i32) (result i32)
+          local.get $p
+          i32.const 8
+          i32.add
+          i32.load)
+
+        (func (;1;) (param $p i32)
+          local.get $p
+          i32.const 42
+          i32.store
+
+          local.get $p
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (func (;0;) (param $p i32) (result i32)
+          local.get $p
+          i32.const 8
+          i32.add
+          i32.load)
+
+        (func (;1;) (param $p i32)
+          local.get $p
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"call drops previous store with compatible disjoint relative offset"
+      ~with_pointer_analysis:true
+      original slice 1l 4
+
+
+
+  let%test "call does not depend on later store even when callee load overlaps" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 0)
+          call 0
+          drop
+
+          i32.const 4
+          i32.const 42
+          i32.store)
+
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 0)
+          call 0
+          drop)
+
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"call does not depend on later store even when callee load overlaps"
+      ~with_pointer_analysis:true
+      original slice 1l 0
+
+
+  let%test "call_indirect depends on previous store when selected target loads same address" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 1)
+          i32.const 0)
+
+        (func (;2;) (type 0)
+          i32.const 4
+          i32.const 42
+          i32.store
+
+          i32.const 0
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call_indirect depends on previous store when selected target loads same address"
+      ~with_pointer_analysis:true
+      original slice 2l 4
+
+
+
+  let%test "call_indirect depends on previous store when selected target load overlaps one byte" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          i32.const 3
+          i32.load)
+
+        (func (;1;) (type 1)
+          i32.const 0)
+
+        (func (;2;) (type 0)
+          i32.const 0
+          i32.const 42
+          i32.store
+
+          i32.const 0
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call_indirect depends on previous store when selected target load overlaps one byte"
+      ~with_pointer_analysis:true
+      original slice 2l 4
+
+
+  let%test "call_indirect does not depend on previous store when selected target load is disjoint" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          i32.const 8
+          i32.load)
+
+        (func (;1;) (type 1)
+          i32.const 0)
+
+        (func (;2;) (type 0)
+          i32.const 0
+          i32.const 42
+          i32.store
+
+          i32.const 0
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          i32.const 8
+          i32.load)
+
+        (func (;1;) (type 1)
+          i32.const 0)
+
+        (func (;2;) (type 0)
+          i32.const 0
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"call_indirect does not depend on previous store when selected target load is disjoint"
+      ~with_pointer_analysis:true
+      original slice 2l 4
+
+
+  let%test "call_indirect depends on previous store when selected target transitively loads affected address" =
+    let original =
+      "(module
+        (type (;0;) (func))
+        (type (;1;) (func (result i32)))
+
+        (func (;0;) (type 1)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 1)
+          call 0)
+
+        (func (;2;) (type 1)
+          i32.const 0)
+
+        (func (;3;) (type 0)
+          i32.const 4
+          i32.const 42
+          i32.store
+
+          i32.const 0
+          call_indirect (type 1)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 1 2)
+        (memory (;0;) 1))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call_indirect depends on previous store when selected target transitively loads affected address"
+      ~with_pointer_analysis:true
+      original slice 3l 4
+
+
+  let%test "call_indirect keeps previous store with incompatible relative offset" =
+    let original =
+      "(module
+        (type (;0;) (func (result i32)))
+        (type (;1;) (func (param i32)))
+        (type (;2;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 0)
+          i32.const 0)
+
+        (func (;2;) (type 1) (param $p i32)
+          local.get $p
+          i32.const 42
+          i32.store
+
+          i32.const 0
+          call_indirect (type 0)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call_indirect keeps previous store with incompatible relative offset"
+      ~with_pointer_analysis:true
+      original slice 2l 4
+
+
+  let%test "call_indirect depends on previous store when selected same-typed target loads same address" =
+    let original =
+      "(module
+        (type (;0;) (func (result i32)))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 0)
+          i32.const 0)
+
+        (func (;2;) (type 1)
+          i32.const 4
+          i32.const 42
+          i32.store
+
+          i32.const 0
+          call_indirect (type 0)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call_indirect depends on previous store when selected same-typed target loads same address"
+      ~with_pointer_analysis:true
+      original slice 2l 4
+
+
+  let%test "call_indirect depends on previous store when selected same-typed target load overlaps one byte" =
+    let original =
+      "(module
+        (type (;0;) (func (result i32)))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 3
+          i32.load)
+
+        (func (;1;) (type 0)
+          i32.const 0)
+
+        (func (;2;) (type 1)
+          i32.const 0
+          i32.const 42
+          i32.store
+
+          i32.const 0
+          call_indirect (type 0)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call_indirect depends on previous store when selected same-typed target load overlaps one byte"
+      ~with_pointer_analysis:true
+      original slice 2l 4
+
+
+  let%test "call_indirect does not depend on previous store when selected same-typed target load is disjoint" =
+    let original =
+      "(module
+        (type (;0;) (func (result i32)))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 8
+          i32.load)
+
+        (func (;1;) (type 0)
+          i32.const 0)
+
+        (func (;2;) (type 1)
+          i32.const 0
+          i32.const 42
+          i32.store
+
+          i32.const 0
+          call_indirect (type 0)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (result i32)))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 8
+          i32.load)
+
+        (func (;1;) (type 0)
+          i32.const 0)
+
+        (func (;2;) (type 1)
+          i32.const 0
+          call_indirect (type 0)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"call_indirect does not depend on previous store when selected same-typed target load is disjoint"
+      ~with_pointer_analysis:true
+      original slice 2l 4
+
+
+  let%test "call_indirect depends on previous store when selected same-typed target transitively loads affected address" =
+    let original =
+      "(module
+        (type (;0;) (func (result i32)))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 0)
+          call 0)
+
+        (func (;2;) (type 0)
+          i32.const 0)
+
+        (func (;3;) (type 1)
+          i32.const 4
+          i32.const 42
+          i32.store
+
+          i32.const 0
+          call_indirect (type 0)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 1 2)
+        (memory (;0;) 1))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call_indirect depends on previous store when selected same-typed target transitively loads affected address"
+      ~with_pointer_analysis:true
+      original slice 3l 4
+
+
+  let%test "call_indirect keeps previous store with incompatible relative offset and same-typed targets" =
+    let original =
+      "(module
+        (type (;0;) (func (result i32)))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 0)
+          i32.const 0)
+
+        (func (;2;) (type 1) (param $p i32)
+          local.get $p
+          i32.const 42
+          i32.store
+
+          i32.const 0
+          call_indirect (type 0)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice = original in
+    check_slice
+      ~test_name:"call_indirect keeps previous store with incompatible relative offset and same-typed targets"
+      ~with_pointer_analysis:true
+      original slice 2l 4
+
+
+  let%test "call_indirect drops previous store with compatible disjoint relative offset and same-typed targets" =
+    let original =
+      "(module
+        (type (;0;) (func (param i32) (result i32)))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (param $p i32) (result i32)
+          local.get $p
+          i32.const 8
+          i32.add
+          i32.load)
+
+        (func (;1;) (param $p i32) (result i32)
+          i32.const 0)
+
+        (func (;2;) (param $p i32)
+          local.get $p
+          i32.const 42
+          i32.store
+
+          local.get $p
+          i32.const 0
+          call_indirect (type 0)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (param i32) (result i32)))
+        (type (;1;) (func (param i32)))
+
+        (func (;0;) (param $p i32) (result i32)
+          local.get $p
+          i32.const 8
+          i32.add
+          i32.load)
+
+        (func (;1;) (param $p i32) (result i32)
+          i32.const 0)
+
+        (func (;2;) (param $p i32)
+          local.get $p
+          i32.const 0
+          call_indirect (type 0)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"call_indirect drops previous store with compatible disjoint relative offset and same-typed targets"
+      ~with_pointer_analysis:true
+      original slice 2l 5
+
+
+  let%test "call_indirect does not depend on later store even when selected same-typed target load overlaps" =
+    let original =
+      "(module
+        (type (;0;) (func (result i32)))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 0)
+          i32.const 0)
+
+        (func (;2;) (type 1)
+          i32.const 0
+          call_indirect (type 0)
+          drop
+
+          i32.const 4
+          i32.const 42
+          i32.store)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (result i32)))
+        (type (;1;) (func))
+
+        (func (;0;) (type 0)
+          i32.const 4
+          i32.load)
+
+        (func (;1;) (type 0)
+          i32.const 0)
+
+        (func (;2;) (type 1)
+          i32.const 0
+          call_indirect (type 0)
+          drop)
+
+        (table (;0;) 2 funcref)
+        (elem (;0;) (i32.const 0) func 0 1)
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"call_indirect does not depend on later store even when selected same-typed target load overlaps"
+      ~with_pointer_analysis:true
+      original slice 2l 1
 end

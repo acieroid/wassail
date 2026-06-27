@@ -132,7 +132,7 @@ let rec find_parameter_value_set
     in
     let store = call_instr.annotation_before in
     match vars with
-    | [] -> Value_set_abstraction.ValueSet Reduced_interval_congruence.RIC.Bottom
+    | [] -> Value_set_abstraction.ValueSet Reduced_interval_congruence.RIC.zero
     | "l" :: idx :: "+" :: rest
     | "l" :: idx :: rest ->
       (let fct_arity =
