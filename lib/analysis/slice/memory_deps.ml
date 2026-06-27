@@ -148,15 +148,15 @@ let rec find_parameter_value_set
       in
       let var = Variable.Var (extract_nth_argument stack_before_call fct_arity (int_of_string idx)) in
       let vs = Abstract_store_domain.get store ~var in
-      Value_set_abstraction.(+) (find_parameter_value_set pointer_analysis label rest) vs) 
+      Value_set_abstraction.(+) (find_parameter_value_set ~is_call_indirect pointer_analysis label rest) vs) 
     | "g" :: idx :: "+" :: rest
     | "g" :: idx :: rest ->
       let vs = Abstract_store_domain.get store ~var:(Variable.Var (Var.Global (int_of_string idx))) in
-      Value_set_abstraction.(+) (find_parameter_value_set pointer_analysis label rest) vs
+      Value_set_abstraction.(+) (find_parameter_value_set ~is_call_indirect pointer_analysis label rest) vs
     | "n" :: "e" :: "g" :: lg :: idx :: rest ->
       Value_set_abstraction.(
-        (find_parameter_value_set pointer_analysis label rest)
-        - (find_parameter_value_set pointer_analysis label [lg; idx]))
+        (find_parameter_value_set ~is_call_indirect pointer_analysis label rest)
+        - (find_parameter_value_set ~is_call_indirect pointer_analysis label [lg; idx]))
     | lst ->
       (print_endline (String.concat ~sep:";" lst); failwith "not yet implemented")
     
@@ -203,7 +203,9 @@ let load_depends_on_call
     ~(load_label : Instr.Label.t)
     ~(load_offset : int)
     ~(call_label : Instr.Label.t)
+    ?(is_call_indirect : bool = false)
     ~(fct_index : int32)
+    (() : unit)
   : Instr.Label.Set.t =
   match pointer_analysis with
   | None -> Instr.Label.Set.singleton call_label
@@ -225,7 +227,7 @@ let load_depends_on_call
             match address with
             | RIC { offset = ("", _); _ } -> Value_set_abstraction.ValueSet address
             | RIC { stride; lower_bound; upper_bound; offset=(relative_offset, o)} ->
-              find_parameter_value_set pointer_analysis call_label (tokenize relative_offset)
+              find_parameter_value_set ~is_call_indirect pointer_analysis call_label (tokenize relative_offset)
               |> (Value_set_abstraction.(+)
                    (Value_set_abstraction.ValueSet 
                      (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))))
@@ -292,7 +294,9 @@ let load_depends_on_call_indirect
           ~load_label
           ~load_offset
           ~call_label:call_indirect_label
-          ~fct_index))
+          ~is_call_indirect:true
+          ~fct_index
+          ()))
 
 
 
@@ -312,9 +316,12 @@ let call_depends_on_call
     ~(global_deps : Global_read_domain.t Int32Map.t)
     ~(pointer_analysis : Value_set.pointer_analysis option)
     ~(call_label : Instr.Label.t)
+    ?(dependant_is_indirect : bool = false)
     ~(depends_on_this_call : Instr.Label.t)
+    ?(dependency_is_indirect : bool = false)
     ~(fct_1_index : int32)
     ~(fct_2_index : int32)
+    (() : unit)
   : Instr.Label.Set.t =
   match pointer_analysis with
   | None -> Instr.Label.Set.singleton depends_on_this_call
@@ -326,7 +333,7 @@ let call_depends_on_call
       match tmp_address with
       | Value_set_abstraction.ValueSet RIC { offset = ("", _); _ } -> tmp_address
       | ValueSet RIC {stride; lower_bound; upper_bound; offset=(relative_offset, o)} ->
-        find_parameter_value_set pointer_analysis call_label (tokenize relative_offset)
+        find_parameter_value_set ~is_call_indirect:dependant_is_indirect pointer_analysis call_label (tokenize relative_offset)
         |> (Value_set_abstraction.(+)
               (Value_set_abstraction.ValueSet 
                 (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))))
@@ -340,7 +347,7 @@ let call_depends_on_call
         | RIC {offset = ("", _); _} -> address
         | RIC {stride; lower_bound; upper_bound; offset=(relative_offset, o)} ->
           let tmp_vs =
-            find_parameter_value_set pointer_analysis depends_on_this_call (tokenize relative_offset)
+            find_parameter_value_set ~is_call_indirect:dependency_is_indirect pointer_analysis depends_on_this_call (tokenize relative_offset)
             |> (Value_set_abstraction.(+)
                 (Value_set_abstraction.ValueSet
                   (Reduced_interval_congruence.RIC.ric (stride, lower_bound, upper_bound, ("", o)))))
@@ -401,14 +408,17 @@ let call_indirect_depends_on_call
     (* if List.is_empty targets then (Log.error "indirect call index doesn't match any function"; failwith "invalid program: indirect call index doesn't match any function"); *)
     List.fold_left targets
       ~init:Instr.Label.Set.empty
-      ~f:(fun acc idx -> Instr.Label.Set.union acc 
+      ~f:(fun acc idx -> 
+        Instr.Label.Set.union acc 
         (call_depends_on_call
           ~global_deps
           ~pointer_analysis
           ~call_label:indirect_label
+          ~dependant_is_indirect:true
           ~depends_on_this_call
           ~fct_1_index:idx
           ~fct_2_index:call_idx_number
+          ()
         )
       )
                 
@@ -442,8 +452,10 @@ let call_depends_on_call_indirect
           ~pointer_analysis
           ~call_label
           ~depends_on_this_call:indirect_label
+          ~dependency_is_indirect:true
           ~fct_1_index:call_index
           ~fct_2_index:fct_index
+          ()
         )
       )
 
@@ -484,9 +496,13 @@ let call_indirect_depends_on_call_indirect
                 ~global_deps
                 ~pointer_analysis
                 ~call_label:dependent_label
+                ~dependant_is_indirect:true
                 ~depends_on_this_call:dependency_label
+                ~dependency_is_indirect:true
                 ~fct_1_index:dependent_index
-                ~fct_2_index:dependency_index)
+                ~fct_2_index:dependency_index
+                ()
+              )
           )
       )
 
@@ -535,7 +551,6 @@ let make
            | Data { instr = Load _ ; _ } -> true
            | Data { instr = MemoryCopy; _ } -> true
            | _ -> false)) in
-(* <<<<<<< HEAD *)
   Instr.Label.Map.of_alist_exn (List.map loads_and_calls ~f:(fun label ->
     let enclosing_block = Cfg.find_enclosing_block_exn cfg label in
     let predecessors = Cfg.all_predecessors cfg enclosing_block in
@@ -552,7 +567,7 @@ let make
             | Call { instr = CallDirect (_, _, i); label = call_label; _ } -> 
               begin match Instr.Label.Map.find_exn instrs label with
               | Data { instr = Load {offset=load_offset; _}; _ } ->
-                load_depends_on_call ~pointer_analysis ~load_label:label ~load_offset ~call_label ~fct_index:i
+                load_depends_on_call ~pointer_analysis ~load_label:label ~load_offset ~call_label ~fct_index:i ()
               | Call { instr = CallDirect (_, _, fct_1_index); label = dependent_label; _ } ->
                 call_depends_on_call
                   ~global_deps
@@ -561,7 +576,7 @@ let make
                   ~depends_on_this_call:call_label
                   ~fct_1_index
                   ~fct_2_index:i
-              (* TODO: | Call { instr = CallIndirect (table_idx, _, _, _); _ } -> *)
+                  ()
               | Call { instr = CallIndirect (_, _, _, type_index); label = indirect_label; _ } ->
                 call_indirect_depends_on_call
                   ~module_
