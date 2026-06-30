@@ -127,9 +127,10 @@ let slice_line_number =
         Log.info (fun () -> "Loading module");
         let module_ = Wasm_module.of_file filename in
         Log.info (fun () -> "Constructing CFG");
-        let cfg_raw = Cfg_builder.build module_ funidx in
-        let cfg = Cfg.without_empty_nodes_with_no_predecessors (*Spec_analysis.analyze_intra1 module_ funidx*)
-        (Spec_inference.Intra.analyze module_ cfg_raw ()) in
+        let cfg_raw = 
+          Cfg_builder.build module_ funidx 
+          |> Cfg.without_empty_nodes_with_no_predecessors in
+        let cfg = Spec_inference.Intra.analyze module_ cfg_raw () in
         let pointer_analysis =
           if not no_pointer_analysis then
             (if trace then Wassail.Log.enable_info ();

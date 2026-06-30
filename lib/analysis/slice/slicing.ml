@@ -248,7 +248,6 @@ let type_of_call
       | NotBottom s -> Some s.vstack in
   match i.instr, vstack_before with
   | (_, None) ->
-    Log.warn (fun () -> Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
     (* instruction is unreachable, treating it as having no effect *)
     ([], [])
   | (CallDirect (_, (in_type, out_type), _), _) -> (List.map in_type ~f:(fun t -> T t), List.map out_type ~f:(fun t -> T t))
@@ -273,7 +272,6 @@ let type_of_control
     (List.map ~f:(fun t -> T t) (fst bt),
      List.map ~f:(fun t -> T t) (snd bt))
   | (_, None) ->
-    Log.warn (fun () -> Printf.sprintf "instruction is unreachable: %s" (Instr.Label.to_string i.label));
     (* instruction is unreachable, treating it as having no effect *)
     ([], [])
   | (_, Some vstack_before) ->
@@ -441,7 +439,7 @@ module Test = struct
   open Instr.Label.Test
   let build_cfg ?fidx:(fidx : int32 = 0l) (program : string) 
     : Wasm_module.t * unit Cfg.t * Spec_domain.t Cfg.t =
-    let module_ = Wasm_module.of_string program in
+    let module_ = Wasm_module.of_string program in 
     let cfg_raw = 
       Cfg_builder.build module_ fidx
       |> Cfg.without_empty_nodes_with_no_predecessors in

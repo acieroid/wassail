@@ -10,7 +10,7 @@ let print_widening
   let print_all = !Value_set_options.show_intermediates in
   (Value_set_options.show_intermediates := true;
   Printf.printf
-     "\twidening:\n\t\tstate1: %s\n\t\tstate2: %s\n\t\twidened state: %s\n"
+     "\twidening:\n\t\tstate1: %s\n\t\tstate2: %s\n\t\twidened state: %s%!\n"
         (to_string store1)
         (to_string store2)
         (to_string widened_state);
@@ -36,7 +36,7 @@ let print_binop
     (result_value : Value_set_abstraction.t)
   : unit =
   Printf.printf 
-    "\t%s(%s) %s %s(%s) -> %s(%s)\n"
+    "\t%s(%s) %s %s(%s) -> %s(%s)%!\n"
     (Variable.to_string lhs)
     (Value_set_abstraction.to_string lhs_value)
     symbol
@@ -64,7 +64,7 @@ let print_unary_op
     (y : Value_set_abstraction.t)
   : unit =
   Printf.printf 
-    "\t%s (%s) -> %s\n" 
+    "\t%s (%s) -> %s%!\n" 
     op
     (Value_set_abstraction.to_string x)
     (Value_set_abstraction.to_string y)
@@ -87,7 +87,7 @@ let print_load
     (loaded_value : Value_set_abstraction.t)
   : unit =
   Printf.printf 
-    "\taddress: %s(%s)\n\toffset: %d\n\tloading content of %s into variable %s\n\tloaded value: %s\n"
+    "\taddress: %s(%s)\n\toffset: %d\n\tloading content of %s into variable %s\n\tloaded value: %s%!\n"
     (Var.to_string address)
     (Value_set_abstraction.to_string address_value)
     offset
@@ -108,7 +108,7 @@ let load
     ()
 
 let print_not_i32 () : unit = 
-  Printf.printf "\tNot an i32 integer: shouldn't be used as a pointer\n"
+  Printf.printf "\tNot an i32 integer: shouldn't be used as a pointer%!\n"
 let not_i32 () : unit =
   if !Value_set_options.print_trace then
     print_not_i32 ()
@@ -119,7 +119,7 @@ let print_accessed_memory
     (accessed : Reduced_interval_congruence.RIC.accessed_memory)
   : unit =
   Printf.printf
-    "\tfully accessed memory: %s\n\tpartially accessed memory: %s\n"
+    "\tfully accessed memory: %s\n\tpartially accessed memory: %s%!\n"
     (Reduced_interval_congruence.RIC.to_string accessed.fully)
     (accessed.partially |> List.map ~f:Reduced_interval_congruence.RIC.to_string |> String.concat ~sep:", ")
 let print_store 
@@ -132,7 +132,7 @@ let print_store
   : unit =
   let memory_var = (Variable.Mem (Reduced_interval_congruence.RIC.add_offset vs_address offset)) in
   Printf.printf
-    "\tvalue to be stored: %s(%s)\n\taddress: %s(%s)\n\tStoring value-set %s into variable %s\n"
+    "\tvalue to be stored: %s(%s)\n\taddress: %s(%s)\n\tStoring value-set %s into variable %s%!\n"
     (Var.to_string value)
     (Value_set_abstraction.to_string vs_value)
     (Var.to_string address)
@@ -141,11 +141,11 @@ let print_store
     (Variable.to_string memory_var);
   print_accessed_memory accessed;
   if Reduced_interval_congruence.RIC.((=) Bottom) accessed.fully then
-    Printf.printf "\tNo update necessary.\n"
+    Printf.printf "\tNo update necessary.%!\n"
   else if Reduced_interval_congruence.RIC.is_singleton accessed.fully then
-    Printf.printf "\tperforming STRONG update\n"
+    Printf.printf "\tperforming STRONG update%!\n"
   else
-    Printf.printf "\tperforming WEAK update\n"
+    Printf.printf "\tperforming WEAK update%!\n"
   
 let store 
     (address : Var.t)
@@ -166,7 +166,7 @@ let print_instruction
     (unreachable : bool)
   : unit =
   Printf.printf 
-    "%d:\t%s %s\n"
+    "%d:\t%s %s%!\n"
     line_number
     (match instr with
     | Data data -> Instr.data_to_string data.instr
@@ -184,7 +184,7 @@ let instruction
     ()
 
 let print_invalid_pointer_type (t : string) : unit =
-  Printf.printf "\tinvalid pointer type: %s\n" t
+  Printf.printf "\tinvalid pointer type: %s%!\n" t
 let invalid_pointer_type (t : string) : unit =
   if !Value_set_options.print_trace then
     print_invalid_pointer_type t
@@ -196,7 +196,7 @@ let print_const
     (var : Variable.t)
   : unit =
   Printf.printf
-    "\tassigning constant value %ld to variable %s\n"
+    "\tassigning constant value %ld to variable %s%!\n"
     cst
     (Variable.to_string var)
 let assign_const
@@ -213,7 +213,7 @@ let print_assign
     (var : Variable.t)
   : unit =
   Printf.printf
-    "\tassigning value-set %s to variable %s\n"
+    "\tassigning value-set %s to variable %s%!\n"
     (Value_set_abstraction.to_string value)
     (Variable.to_string var)
 let assign
@@ -230,7 +230,7 @@ let print_copy_value
     (var : Variable.t)
   : unit =
   Printf.printf
-    "\ttransferring value-set of %s to variable %s\n"
+    "\ttransferring value-set of %s to variable %s%!\n"
     (Var.to_string value)
     (Variable.to_string var)
 let copy_value
@@ -249,7 +249,7 @@ let print_select
     (result : Value_set_abstraction.t)
   : unit =
   Printf.printf
-    "\t\tcondition: %s\n\t\tvalue if false: %s\n\t\tvalue if true: %s\n\t\tresult: %s\n"
+    "\t\tcondition: %s\n\t\tvalue if false: %s\n\t\tvalue if true: %s\n\t\tresult: %s%!\n"
     (Value_set_abstraction.to_string cond)
     (Value_set_abstraction.to_string x)
     (Value_set_abstraction.to_string y)
@@ -279,7 +279,7 @@ let print_get
       Variable.Var (Var.Local (Int32.to_int_exn variable)) in 
   let result = get state variable in
   Printf.printf 
-    "\tretrieving variable %s: %s\n"
+    "\tretrieving variable %s: %s%!\n"
     (Variable.to_string variable)
     (Value_set_abstraction.to_string result)
 let get
@@ -294,7 +294,7 @@ let get
     ()
 
 let print_non_i32 : unit -> unit =
-  fun () -> Printf.printf "\tnon-i32 constant: it is assumed that this value won't be used as a pointer\n"
+  fun () -> Printf.printf "\tnon-i32 constant: it is assumed that this value won't be used as a pointer%!\n"
 let non_i32 () : unit =
   if !Value_set_options.print_trace then
     print_non_i32 ()
@@ -302,7 +302,7 @@ let non_i32 () : unit =
     ()
 
 let print_imprecise : unit -> unit =
-  fun () -> Printf.printf "\tthis type of binary operation results in a pointer that can point anywhere\n"
+  fun () -> Printf.printf "\tthis type of binary operation results in a pointer that can point anywhere%!\n"
 let imprecise_operation () : unit =
   if !Value_set_options.print_trace then
     print_imprecise ()
@@ -316,7 +316,7 @@ let print_comp
     (operator : string)
   : unit =
   Printf.printf
-    "\t%s %s %s -> %s\n"
+    "\t%s %s %s -> %s%!\n"
     (val1 |> Reduced_interval_congruence.RIC.to_string)
     operator
     (val2 |> Reduced_interval_congruence.RIC.to_string)
@@ -337,7 +337,7 @@ let print_return
     (ret_value : Value_set_abstraction.t)
   : unit =
   Printf.printf
-    "\t\t%s: %s\n" 
+    "\t\t%s: %s%!\n" 
     (Variable.to_string ret) 
     (Value_set_abstraction.to_string ret_value)
 let return
@@ -352,7 +352,7 @@ let return
 
 let print_start_of_function (idx : int) : unit =
   Printf.printf
-    "================ START OF FUNCTION ==================== DATA BLOCK #%d\n" 
+    "================ START OF FUNCTION ==================== DATA BLOCK #%d%!\n" 
     idx
 let start_of_function (idx : int) : unit =
   if !Value_set_options.print_trace then
@@ -362,7 +362,7 @@ let start_of_function (idx : int) : unit =
 
 let print_control_block (cfg : 'a Cfg.t option) (idx : int) : unit =
   Printf.printf
-    "======================================================= %sCONTROL BLOCK #%d\n"
+    "======================================================= %sCONTROL BLOCK #%d%!\n"
     (match cfg with
     | Some cfg -> 
       (if IntSet.mem cfg.loop_heads idx then "LOOP HEAD: " else "MERGE: ")
@@ -377,7 +377,7 @@ let control_block (cfg : 'a Cfg.t option) (idx : int) : unit =
 
 let print_data_block (idx : int) : unit =
   Printf.printf
-    "======================================================= DATA BLOCK #%d\n"
+    "======================================================= DATA BLOCK #%d%!\n"
     idx
 let data_block (idx : int) : unit =
   if !Value_set_options.print_trace then
@@ -394,7 +394,7 @@ let print_apply_summary
     (print_summary : 'summary -> string)
   : unit =
   Printf.printf
-    "\tstate before the call: %s\n\tsummary of function %ld:%s\n"
+    "\tstate before the call: %s\n\tsummary of function %ld:%s%!\n"
     (print_state state)
     f_idx
     (print_summary summary)
@@ -417,7 +417,7 @@ let print_summary
     (print_summary_ : 'summary -> string)
   : unit =
   Printf.printf
-    "======================================================= SUMMARY\nEND STATE:\t%s\nSUMMARY:%s\n"
+    "======================================================= SUMMARY\nEND STATE:\t%s\nSUMMARY:%s%!\n"
     (print_state state)
     (print_summary_ summary)
 let summary

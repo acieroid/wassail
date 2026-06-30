@@ -158,12 +158,11 @@ module Make (*: Transfer.TRANSFER *) = struct
                   y_vs
                 else
                   Value.bottom)
+          else if Value.may_be_true cond_vs then
+            y_vs
           else
-            if Value.may_be_true cond_vs then
-              y_vs
-            else
-              (* bottom condition is unreachable *)
-              (Log.error (fun () -> "Select: condition can't be true nor false"); assert false )
+            (Log.warn (fun () -> "Select: condition can't be true nor false -- result is Bottom"); 
+            Value.bottom)
         in
         Print_trace.select cond_vs x_vs y_vs result;
         State.set state ~var:(ret i) ~vs:result
@@ -220,6 +219,7 @@ module Make (*: Transfer.TRANSFER *) = struct
         in
         begin match comp with
         | {op = Ne; typ = I32} ->
+          Print_trace.comp vs1 vs2 Value.bottom "!=";
           let result = Value.are_equal_or_not ~not_equal:true (var1, vs1) (var2, vs2) in
           Print_trace.comp vs1 vs2 result "!=";
           state |> State.set ~var:(ret i) ~vs:result

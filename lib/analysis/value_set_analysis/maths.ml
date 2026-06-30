@@ -180,9 +180,9 @@ end
     when negative inputs are provided, the sign follows OCaml's remainder
     behaviour.  In the intended use cases, moduli are expected to be positive. *)
 let rec gcd (a : int32) (b : int32) : int32 =
-  if Int32.equal b 0l then 
+  if Int32.(b = 0l || b = a) then 
     a
-  else 
+  else
     gcd b Int32.(a % b)
 
 (** [lcm a b] is the least common multiple of [a] and [b].  If either input
@@ -190,8 +190,10 @@ let rec gcd (a : int32) (b : int32) : int32 =
     arithmetic, so intermediate products may overflow.  In the intended use
     cases, moduli are expected to be positive. *)
 let lcm (a : int32) (b : int32) : int32 =
-  if Int32.(a = 0l) || Int32.(b = 0l) then 
+  if Int32.(a = 0l || b = 0l) then 
     0l
+  else if Int32.(a = b) then
+    a 
   else 
     Int32.(abs ((a * b) / (gcd a b)))
 
@@ -227,7 +229,7 @@ let chinese_remainder (a : int32) (b : int32) (a' : int32) (b' : int32) : int32 
     let a1' = Int32.(a' / d) in
     let (_, u, _) = extended_gcd a1 a1' in
     let m = lcm a a' in
-    let diff = Int32.(-) b' b in
+    let diff = Int32.(b' - b) in
     let k = Int32.(((diff / d) * u) % a1') in
     let n = Int32.(((a * k) + b) % m) in
     (Int32.((n + m) % m), m) (* Ensure positive result *)

@@ -143,7 +143,7 @@ let to_string_without_bottoms (vs : t) : string =
         | Boolean _ -> true
         | ValueSet d -> RIC.(d <> Bottom)
         | Bitfield bf -> Bitfield.(bf <> Bottom)) in
-    to_string { abstract_store = restricted; store_operations = vs.store_operations; unreachable = vs.unreachable }
+    to_string { vs with abstract_store = restricted }
 
 let store_operations_to_string (s : t) : string =
   s.store_operations
@@ -157,16 +157,12 @@ let to_dot_string (s : t) : string =
 
 (** [update_all store vars value] sets each variable in [vars] to [value]. *)
 let update_all (store : t) (vars : Variable.Set.t) (new_value : Value.t) : t =
-  { abstract_store = (Variable.Map.update_all store.abstract_store vars new_value);
-    store_operations = store.store_operations;
-    unreachable = store.unreachable }
+  { store with abstract_store = (Variable.Map.update_all store.abstract_store vars new_value) }
 
 (** [make_compatible ~this_store ~relative_to] splits memory variables in
     [this_store] so they align with the memory partition of [relative_to]. *)
 let make_compatible ~(this_store : t) ~(relative_to : t) : t = 
-  { abstract_store = (Variable.Map.make_compatible ~this:this_store.abstract_store ~relative_to:relative_to.abstract_store ~get:(fun s -> get {abstract_store = s; store_operations = RICSet.empty; unreachable = true}));
-    store_operations = this_store.store_operations;
-    unreachable = this_store.unreachable }
+  { this_store with abstract_store = (Variable.Map.make_compatible ~this:this_store.abstract_store ~relative_to:relative_to.abstract_store ~get:(fun s -> get {abstract_store = s; store_operations = RICSet.empty; unreachable = true})) }
 
 (** [filter_relative_offsets store rel_offset] keeps only memory variables whose
     symbolic relative offset is [rel_offset]. Non-memory variables are kept. *)
@@ -178,7 +174,7 @@ let filter_relative_offsets (store : t) (rel_offset : string) : t =
         | Mem RIC {offset = (v, _); _} -> String.(v = rel_offset)
         | _ -> true)
   in
-  { abstract_store = abstract_store; store_operations = store.store_operations; unreachable = store.unreachable }
+  { store with abstract_store = abstract_store }
 
 (** [truncate_memory_var store ~var ~accessed_addresses] removes the accessed
     addresses from memory variable [var] and keeps the untouched regions with
@@ -202,7 +198,7 @@ let truncate_memory_var (store : t) ~(var : Variable.t) ~(accessed_addresses : R
     else
       assert false) in
   update_all 
-    { abstract_store = abstract_store; store_operations = store.store_operations; unreachable = store.unreachable } 
+    { store with abstract_store = abstract_store } 
     untouched_variables 
     vs
 
@@ -223,12 +219,10 @@ let set (store : t) ~(var : Variable.t) ~(vs : Value.t) : t =
               store_operations = RICSet.empty;
               unreachable = true }
       in
-        { abstract_store = 
+        { store with abstract_store = 
             Variable.Map.filter_keys 
               ~f:(fun v -> not (Variable.share_addresses v var)) 
-              store.abstract_store;
-          store_operations = store.store_operations;
-          unreachable = store.unreachable }
+              store.abstract_store}
     else 
       store
   in
@@ -249,20 +243,16 @@ let set (store : t) ~(var : Variable.t) ~(vs : Value.t) : t =
       else
         store
     in
-    { abstract_store = Variable.Map.set store.abstract_store ~key:var ~data:vs; 
-      store_operations = store.store_operations;
-      unreachable = store.unreachable }
+    { store with abstract_store = Variable.Map.set store.abstract_store ~key:var ~data:vs}
 
 (** [remove_pointers_to_top store] removes memory bindings mapped to [Top].
 
     If no memory binding remains, the whole memory is mapped to [Top]. *)
 let remove_pointers_to_top (store : t) : t =
   let store =
-    { abstract_store = 
+    { store with abstract_store = 
         Variable.Map.filteri store.abstract_store ~f:(fun ~key ~data -> 
-          (not (Variable.is_linear_memory key)) || (not (Value.equal (ValueSet RIC.Top) data)));
-      store_operations = store.store_operations;
-      unreachable = store.unreachable } in
+          (not (Variable.is_linear_memory key)) || (not (Value.equal (ValueSet RIC.Top) data))) } in
   if List.is_empty (extract_memory_variables store) then
     set store ~var:Variable.entire_memory ~vs:(ValueSet RIC.Top)
   else
@@ -306,9 +296,7 @@ let bottom : t =
 (** [to_top_RIC store var] sets [var] to [RIC.Top] and normalizes top memory bindings. *)
 let to_top_RIC (store : t) (var : Variable.t) : t =
   remove_pointers_to_top 
-    { abstract_store = (Variable.Map.set store.abstract_store ~key:var ~data:(Value.ValueSet RIC.Top));
-      store_operations = store.store_operations;
-      unreachable = store.unreachable }
+    { store with abstract_store = (Variable.Map.set store.abstract_store ~key:var ~data:(Value.ValueSet RIC.Top)) }
 
 (** [join store1 store2] computes the least upper bound of two stores.
 
@@ -324,13 +312,22 @@ let join (store1 : t) (store2 : t) : t =
   else
     let store1 = make_compatible ~this_store:store1 ~relative_to:store2 in
     let store2 = make_compatible ~this_store:store2 ~relative_to:store1 in
-    { abstract_store =
+    (if RICSet.mem store1.store_operations RIC.Top || RICSet.mem store2.store_operations RIC.Top then
+      { abstract_store =
       Variable.Map.merge store1.abstract_store store2.abstract_store ~f:(fun ~key:var value -> 
           match value with
           | `Both (x, y) -> Some (Value.join x y)
           | _ -> Some (Value.join (get store1 ~var) (get store2 ~var)));
-      store_operations = RICSet.union store1.store_operations store2.store_operations;
+      store_operations = RICSet.singleton RIC.Top;
       unreachable = false }
+    else
+      { abstract_store =
+        Variable.Map.merge store1.abstract_store store2.abstract_store ~f:(fun ~key:var value -> 
+            match value with
+            | `Both (x, y) -> Some (Value.join x y)
+            | _ -> Some (Value.join (get store1 ~var) (get store2 ~var)));
+        store_operations = RICSet.union store1.store_operations store2.store_operations;
+        unreachable = false })
     |> remove_pointers_to_top
 
 (** [truncate_accessed_memory store accessed_addresses] removes accessed regions from
@@ -493,7 +490,7 @@ let update_memory_size (store : t) ~(summary : t) : t =
     conservatively write [Top]. Singleton target addresses are updated strongly,
     while non-singleton addresses are updated weakly. Affected memory regions are
     recorded in [store_operations]. *)
-let store
+let store (* store function *)
     ~(instruction : Memoryop.t) 
     ?(annotation_before : Spec_domain.t option) 
     ?(value : Var.t option)
@@ -529,8 +526,11 @@ let store
         |> RICSet.filter ~f:(fun addr -> RIC.(addr <> Bottom)) 
       in
       let new_state = state |> truncate_accessed_memory accessed in
-      let new_state = { new_state with 
-                        store_operations = RICSet.union added_store_operations new_state.store_operations } in
+      let new_state = 
+        if RICSet.mem added_store_operations RIC.Top || RICSet.mem new_state.store_operations RIC.Top then
+          { new_state with store_operations = RICSet.singleton RIC.Top }
+        else
+          { new_state with store_operations = RICSet.union added_store_operations new_state.store_operations } in
       let variable_to_update = Variable.Mem accessed.fully in
       if RIC.((=) Bottom) accessed.fully then
         (* Nothing to update *)
@@ -550,7 +550,10 @@ let store
         |> RICSet.of_list
         |> RICSet.filter ~f:(fun addr -> RIC.(addr <> Bottom)) 
       in
-      { state with store_operations = RICSet.union added_store_operations state.store_operations }
+      (if RICSet.mem added_store_operations RIC.Top || RICSet.mem state.store_operations RIC.Top then
+        { state with store_operations = RICSet.singleton RIC.Top }
+      else
+        { state with store_operations = RICSet.union added_store_operations state.store_operations })
       |> truncate_accessed_memory accessed
     | { typ = I64; offset = offset; _ }
     | { typ = F64; offset = offset; _ } ->
@@ -562,7 +565,10 @@ let store
         |> RICSet.of_list
         |> RICSet.filter ~f:(fun addr -> RIC.(addr <> Bottom))
       in
-      { state with store_operations = RICSet.union added_store_operations state.store_operations }
+      (if RICSet.mem added_store_operations RIC.Top || RICSet.mem state.store_operations RIC.Top then
+        { state with store_operations = RICSet.singleton RIC.Top }
+      else
+        { state with store_operations = RICSet.union added_store_operations state.store_operations })
       |> truncate_accessed_memory accessed
     end
     |> remove_pointers_to_top

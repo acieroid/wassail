@@ -11,6 +11,7 @@ type slicing_result = {
   reduction_factor : float;
   cfg_time : Time_float.Span.t;
   spec_time : Time_float.Span.t;
+  vsa_time : Time_float.Span.t;
   control_time_without_pointers : Time_float.Span.t;
   control_time : Time_float.Span.t;
   data_time_without_pointers : Time_float.Span.t;
@@ -74,19 +75,20 @@ let output_slicing_result filename = function
                        string_of_float r.reduction_factor; (* 7 *)
                        string_of_float (Time_float.Span.to_ms r.cfg_time); (* 8 *)
                        string_of_float (Time_float.Span.to_ms r.spec_time); (* 9 *)
-                       string_of_float (Time_float.Span.to_ms r.control_time_without_pointers); (* 10 *)
-                       string_of_float (Time_float.Span.to_ms r.control_time); (* 11 *)
-                       string_of_float (Time_float.Span.to_ms r.data_time_without_pointers); (* 12 *)
-                       string_of_float (Time_float.Span.to_ms r.data_time); (* 13 *)
-                       string_of_float (Time_float.Span.to_ms r.mem_time_without_pointers); (* 14 *)
-                       string_of_float (Time_float.Span.to_ms r.mem_time); (* 15 *)
-                       string_of_float (Time_float.Span.to_ms r.global_time_without_pointers); (* 16 *)
-                       string_of_float (Time_float.Span.to_ms r.global_time); (* 17 *)
-                       string_of_float (Time_float.Span.to_ms r.instr_to_keep_time_without_pointers); (* 18 *)
-                       string_of_float (Time_float.Span.to_ms r.instr_to_keep_time); (* 19 *)
-                       string_of_float (Time_float.Span.to_ms r.slicing_time_without_pointers); (* 20 *)
-                       string_of_float (Time_float.Span.to_ms r.slicing_time);
-                       string_of_float (Time_float.Span.to_ms r.total_time_difference)] (* 21 *)
+                       string_of_float (Time_float.Span.to_ms r.vsa_time); (* 10 *)
+                       string_of_float (Time_float.Span.to_ms r.control_time_without_pointers); (* 11 *)
+                       string_of_float (Time_float.Span.to_ms r.control_time); (* 12 *)
+                       string_of_float (Time_float.Span.to_ms r.data_time_without_pointers); (* 13 *)
+                       string_of_float (Time_float.Span.to_ms r.data_time); (* 14 *)
+                       string_of_float (Time_float.Span.to_ms r.mem_time_without_pointers); (* 15 *)
+                       string_of_float (Time_float.Span.to_ms r.mem_time); (* 16 *)
+                       string_of_float (Time_float.Span.to_ms r.global_time_without_pointers); (* 17 *)
+                       string_of_float (Time_float.Span.to_ms r.global_time); (* 18 *)
+                       string_of_float (Time_float.Span.to_ms r.instr_to_keep_time_without_pointers); (* 19 *)
+                       string_of_float (Time_float.Span.to_ms r.instr_to_keep_time); (* 20 *)
+                       string_of_float (Time_float.Span.to_ms r.slicing_time_without_pointers); (* 21 *)
+                       string_of_float (Time_float.Span.to_ms r.slicing_time); (* 22 *)
+                       string_of_float (Time_float.Span.to_ms r.total_time_difference)] (* 23 *)
   | Ignored NoFunction ->
     output "nofunction.txt" [filename]
   | Ignored (NoInstruction f) ->
@@ -130,7 +132,6 @@ let slices (filename : string) (criterion_selection : [`Random of int | `All | `
         let labels = func.code.body 
           |> all_labels_no_blocks
           |> Instr.Label.Set.to_array
-          (* Instr.Label.Set.to_array (all_labels func.code.body) *)
         in
         if Array.length labels = 0 then
           output_slicing_result filename (Ignored (NoInstruction func.idx))
@@ -143,7 +144,9 @@ let slices (filename : string) (criterion_selection : [`Random of int | `All | `
             let cfg = Spec_inference.Intra.analyze module_ cfg_raw () in
             let spec_time = Time_float.diff (Time_float.now ()) t0 in
             let cfg_instructions = Cfg.all_instructions cfg in
+            let t0 = Time_float.now () in
             let pointer_analysis = Some (Value_set.run_pointer_analysis module_ cfg_raw func.idx) in
+            let vsa_time = Time_float.diff (Time_float.now ()) t0 in
             let preanalysis_without_pointers = Slicing.preanalysis module_ cfg cfg_instructions None in
             let preanalysis = Slicing.preanalysis module_ cfg cfg_instructions pointer_analysis in
             List.iter 
@@ -215,6 +218,7 @@ let slices (filename : string) (criterion_selection : [`Random of int | `All | `
                             reduction_factor;
                             cfg_time; 
                             spec_time;
+                            vsa_time;
                             control_time_without_pointers;
                             control_time;
                             data_time_without_pointers;
@@ -295,19 +299,20 @@ let evaluate =
                        "reduction factor"; (* 7 *)
                        "cfg_time (ms)"; (* 8 *)
                        "spec_time (ms)"; (* 9 *)
-                       "control_time_without_pointers (ms)"; (* 10 *)
-                       "control_time (ms)"; (* 11 *)
-                       "data_time_without_pointers (ms)"; (* 12 *)
-                       "data_time (ms)"; (* 13 *)
-                       "mem_time_without_pointers (ms)"; (* 14 *)
-                       "mem_time (ms)"; (* 15 *)
-                       "global_time_without_pointers (ms)"; (* 16 *)
-                       "global_time (ms)"; (* 17 *)
-                       "instr_to_keep_time_without_pointers (ms)"; (* 18 *)
-                       "instr_to_keep_time (ms)"; (* 19 *)
-                       "slicing_time_without_pointers (ms)"; (* 20 *)
-                       "slicing_time (ms)";
-                       "total_time_difference (ms)"] (* 21 *);
+                       "vsa_time (ms)"; (* 10 *)
+                       "control_time_without_pointers (ms)"; (* 11 *)
+                       "control_time (ms)"; (* 12 *)
+                       "data_time_without_pointers (ms)"; (* 13 *)
+                       "data_time (ms)"; (* 14 *)
+                       "mem_time_without_pointers (ms)"; (* 15 *)
+                       "mem_time (ms)"; (* 16 *)
+                       "global_time_without_pointers (ms)"; (* 17 *)
+                       "global_time (ms)"; (* 18 *)
+                       "instr_to_keep_time_without_pointers (ms)"; (* 19 *)
+                       "instr_to_keep_time (ms)"; (* 20 *)
+                       "slicing_time_without_pointers (ms)"; (* 21 *)
+                       "slicing_time (ms)" (* 22 *);
+                       "total_time_difference (ms)"] (* 23 *);
         let criterion_selection = 
           match random with
             | Some n -> `Random n
@@ -316,5 +321,12 @@ let evaluate =
           evaluate_file filename criterion_selection
         else
           wat_files_in_directory filename
-          |> List.iter ~f:(fun file -> evaluate_file file criterion_selection)
+          |> List.iter ~f:(fun file ->
+              Printf.printf "Processing %s\n%!" file;
+              evaluate_file file criterion_selection)
+        (* if String.is_suffix filename ~suffix:".wat" || String.is_suffix filename ~suffix:".wasm" then
+          evaluate_file filename criterion_selection
+        else
+          wat_files_in_directory filename
+          |> List.iter ~f:(fun file -> evaluate_file file criterion_selection) *)
     )

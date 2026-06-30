@@ -100,8 +100,7 @@ let analyze_intra : Wasm_module.t -> Int32.t list -> (Summary.t * Domain.t Cfg.t
     (fun cfgs wasm_mod ->
       (Int32Map.map ~f:(fun x -> (x, None)) (Summary.initial_summaries cfgs wasm_mod `Bottom)))
     (fun data wasm_mod cfg ->
-      Log.info
-        (fun () -> Printf.sprintf "-------------------- Value-set analysis of function %ld --------------------" cfg.idx);
+      Log.info (fun () -> Printf.sprintf "-------------------- Value-set analysis of function %ld --------------------" cfg.idx);
       (* Run the value-set analysis *)
       let annotated_cfg = cfg in
       let summaries = Int32Map.map data ~f:fst in
@@ -182,7 +181,7 @@ let run_pointer_analysis
   let summaries = Int32Map.map cfg_pointers_map ~f:(fun (summary, _) -> summary) in
   Spec_inference.use_const := original_use_const;
   Spec_inference.propagate_globals := original_prop_globals;
-  Spec_inference.propagate_locals := original_prop_locals; 
+  Spec_inference.propagate_locals := original_prop_locals;
   (cfg_pointers, instructions_from_pointer_cfg, summaries)
 
 

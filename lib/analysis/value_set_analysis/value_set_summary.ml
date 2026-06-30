@@ -287,9 +287,15 @@ let apply
           else
             acc)
   in
-  let state = { Domain.abstract_store = store; 
-                store_operations = RICSet.union summary.store_operations state.store_operations;
-                unreachable = state.unreachable || summary.unreachable } in
+  let state = 
+    if RICSet.mem summary.store_operations RIC.Top || RICSet.mem state.store_operations RIC.Top then
+      { Domain.abstract_store = store; 
+        store_operations = RICSet.singleton RIC.Top;
+        unreachable = state.unreachable || summary.unreachable }
+    else
+      { Domain.abstract_store = store; 
+        store_operations = RICSet.union summary.store_operations state.store_operations;
+        unreachable = state.unreachable || summary.unreachable } in
   (* Affected memory areas have been erased, and affected/accessed addresses have been updated. *)
   (* Update globals: *)
   let state = 
