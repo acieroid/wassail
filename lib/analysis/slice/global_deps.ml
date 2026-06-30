@@ -1,6 +1,16 @@
 open Core 
 open Helpers
 
+module RIC = Reduced_interval_congruence.RIC
+module RICSet = Reduced_interval_congruence.RICSet
+module ValueSet = Value_set_abstraction
+module AbstractStore = Abstract_store_domain
+
+type pointer_analysis = Value_set.pointer_analysis
+
+let is_unreachable = Memory_deps.is_unreachable
+let functions_potentially_called = Memory_deps.functions_potentially_called
+
 
 (** Dependencies involving global variables and function calls.
 
@@ -10,14 +20,7 @@ open Helpers
     - a [global.get] may depend on an earlier [call] if the called function may
       modify the global variable being read;
     - a [call] may depend on earlier [global.set] instructions whose definitions
-      may be read by the called function.
-
-    Dependencies are computed locally for a single function CFG. The analysis
-    searches through predecessor blocks in that CFG and currently handles direct
-    calls only.
-
-    The resulting map associates each instruction label with the labels of the
-    instructions it additionally depends on. *)
+      may be read by the called function. *)
 
 (** Map from an instruction label to the set of instruction labels it depends on.
 
@@ -38,18 +41,17 @@ type t = Instr.Label.Set.t Instr.Label.Map.t
     This predicate is used when deciding whether a [global.get] should depend on
     a preceding call. *)
 let function_may_affect_global_variable
-    (pointer_analysis : Value_set.pointer_analysis option)
+    (pointer_analysis : pointer_analysis option)
     ~(global_var : Var.t)
     ~(fct_index : int32)
   : bool =
-  match pointer_analysis with
-  | None -> true
-  | Some (_, _, summaries) ->
-    let fct_summary = 
-      Int32Map.find_exn summaries fct_index in
-    let global_value_after_call = 
-      Abstract_store_domain.get fct_summary ~var:(Variable.Var global_var) in
-    not (Value_set_abstraction.equal global_value_after_call (ValueSet (Reduced_interval_congruence.RIC.ric (0l, Int 0l, Int 0l, (Var.to_string global_var,0l)))))
+  pointer_analysis
+  |>Option.value_map
+    ~default:true
+    ~f:(fun (_, _, summaries) ->
+      let fct_summary = Int32Map.find_exn summaries fct_index in
+      let global_value_after_call = AbstractStore.get fct_summary ~var:(Variable.Var global_var) in
+      ValueSet.(global_value_after_call <> ValueSet (RIC.relative_ric (Var.to_string global_var))))
 
 (** Computes dependencies from [global.get] instructions to preceding calls.
 
@@ -69,7 +71,7 @@ let globals_depend_on_calls
     (module_ : Wasm_module.t)
     (global_gets : (Instr.Label.t * int32) list)
     (cfg : Spec_domain.t Cfg.t)
-    (pointer_analysis : Value_set.pointer_analysis option)
+    (pointer_analysis : pointer_analysis option)
   : t =
   List.fold global_gets 
         ~init:Instr.Label.Map.empty
@@ -82,39 +84,46 @@ let globals_depend_on_calls
                 ~f:(fun acc block ->
                         match block.content with
                         | Call { label = call_label; instr = CallDirect (_, _, fct_index); _ } ->
-                          if function_may_affect_global_variable
-                              pointer_analysis
-                              ~global_var
-                              ~fct_index 
-                          then
-                            (Log.info (fun () -> "fct " ^ Int32.to_string fct_index ^ " may affect global variable " ^ Var.to_string global_var);
-                            Instr.Label.Set.add acc call_label)
-                          else
-                            (Log.info (fun () -> "fct " ^ Int32.to_string fct_index ^ " does not affect global variable " ^ Var.to_string global_var);
-                            acc)
+                          begin match pointer_analysis with
+                          | None -> Instr.Label.Set.add acc call_label
+                          | Some (cfg, _, _) ->
+                            if is_unreachable cfg call_label then
+                              (Log.info (fun () -> Printf.sprintf "unreachable call %s does not affect global variable %s"
+                                                    (Instr.Label.to_string call_label) (Var.to_string global_var));
+                              acc)
+                            else if function_may_affect_global_variable pointer_analysis ~global_var ~fct_index then
+                              (Log.info (fun () -> Printf.sprintf "fct call %s may affect global variable %s" 
+                                                    (Instr.Label.to_string call_label) (Var.to_string global_var));
+                              Instr.Label.Set.add acc call_label)
+                            else
+                              (Log.info (fun () -> Printf.sprintf "fct call %s does not affect global variable %s" 
+                                                    (Instr.Label.to_string call_label) (Var.to_string global_var));
+                              acc)
+                          end
                         | Call { label = indirect_label; instr = CallIndirect (_, _, _, type_index); _ } ->
                           begin match pointer_analysis with
                           | None -> Instr.Label.Set.add acc indirect_label
                           | Some (cfg_pointers, cfg_spec, _) ->
-                            Memory_deps.functions_potentially_called
-                              ~module_
-                              ~indirect_label
-                              ~type_index
-                              ~cfg_pointers
-                              ~cfg_spec
-                            |> List.fold ~init:acc
-                              ~f:(fun acc fct_index ->
-                                if function_may_affect_global_variable
-                                    pointer_analysis
-                                    ~global_var
-                                    ~fct_index 
-                                then
-                                  (Log.info (fun () -> "fct " ^ Int32.to_string fct_index ^ "(potentially called by call_indirect " ^ Instr.Label.to_string indirect_label ^ ")" ^ " may affect global variable " ^ Var.to_string global_var);
-                                  Instr.Label.Set.add acc indirect_label)
-                                else
-                                  (Log.info (fun () -> "fct " ^ Int32.to_string fct_index ^ " does not affect global variable " ^ Var.to_string global_var);
-                                  acc))
-                                end
+                            if is_unreachable cfg_pointers indirect_label then
+                              (Log.info (fun () -> Printf.sprintf "unreachable call_indirect %s does not affect global variable %s"
+                                                    (Instr.Label.to_string indirect_label) (Var.to_string global_var));
+                              acc)
+                            else
+                              functions_potentially_called
+                                ~module_
+                                ~indirect_label
+                                ~type_index
+                                ~cfg_pointers
+                                ~cfg_spec
+                              |> List.fold ~init:acc
+                                ~f:(fun acc fct_index ->
+                                  if Set.is_empty acc && function_may_affect_global_variable pointer_analysis ~global_var ~fct_index then
+                                    (Log.info (fun () -> Printf.sprintf "call_indirect %s may affect global variable %s" 
+                                                            (Instr.Label.to_string indirect_label) (Var.to_string global_var));
+                                    Instr.Label.Set.add acc indirect_label)
+                                  else
+                                    acc)
+                                  end
                         | _ -> acc)
             in
             Instr.Label.Map.update dependencies global_var_label
@@ -154,7 +163,8 @@ let calls_depend_on_globals
         let block = Cfg.find_enclosing_block_exn cfg call_label in
         let predecessors = Cfg.all_predecessors cfg block in
         let instr_set =
-          List.fold predecessors ~init:Instr.Label.Set.empty 
+          List.fold predecessors 
+            ~init:Instr.Label.Set.empty 
             ~f:(fun acc block ->
                     match block.content with
                     | Data instrs' -> 
@@ -194,7 +204,8 @@ let indirect_calls_depend_on_globals
             ~cfg_spec
         | None -> 
           Call_graph.indirect_call_targets module_ type_index)
-        |> List.fold ~init:dependencies
+        |> List.fold
+          ~init:dependencies
           ~f:(fun dependencies idx ->
             let globals_used_by_function = 
               match Int32Map.find global_deps idx with

@@ -437,6 +437,25 @@ let are_equal_or_not ?(not_equal : bool = false) (var1, vs1 : Var.t * RIC.t) (va
     else
       compare_values var1 var2 vs1_true vs1_false vs2_true vs2_false
 
+(** Removes any symbolic relative offset from a value set.
+
+    For [ValueSet] and [Boolean] values, the underlying numeric abstraction is
+    converted to an absolute one by discarding its relative-offset component.
+    Boolean-specific information is lost in the process, and the result is
+    returned as a [ValueSet].
+
+    Bitfield values are returned unchanged.
+*)
+let remove_relative_offset (vs : t) : t =
+  match vs with
+  | ValueSet vs
+  | Boolean {numeric_value = vs; _} -> ValueSet (RIC.remove_relative_offset vs)
+  | _ -> vs
+
+
+let constant (i : int32) : t = ValueSet (RIC.constant i)
+let constant_int (i : int) : t = i |> Int32.of_int_exn |> constant
+
 
 (*
 TTTTTTTTTTTTTTTTTTTTTTTEEEEEEEEEEEEEEEEEEEEEE   SSSSSSSSSSSSSSS TTTTTTTTTTTTTTTTTTTTTTT   SSSSSSSSSSSSSSS 

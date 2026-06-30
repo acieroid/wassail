@@ -2,8 +2,6 @@ open Core
 open Helpers
 
 
-(* module Time = Time_float (* Time is deprecated in Core, we should use Time_float instead *) *)
-
 module InSlice = struct
   module T = struct
     (** Intermediary data structure used as part of the slicing to track which
@@ -58,7 +56,6 @@ let preanalysis
   let t2 = Time_float.now () in
   let global_deps = Global_read.function_global_deps module_ in
   let mem_dependencies = Memory_deps.make module_ global_deps pointer_analysis cfg in
-  (
   let t3 = Time_float.now () in
   let global_dependencies = Global_deps.global_dependencies ~module_ ~global_deps ~cfg ~cfg_instructions ~pointer_analysis in
   let t4 = Time_float.now () in
@@ -69,10 +66,7 @@ let preanalysis
   { control_dependencies; control_time;
     data_dependencies; data_time;
     mem_dependencies; mem_time;
-    (* global_set_instructions;  *)
-    global_time;
-    global_dependencies}
-  )
+    global_dependencies; global_time}
 
 
 (** Identify instructions to keep in a backwards slice on `cfg`, using the
@@ -9051,4 +9045,242 @@ let%test "global.get depends on indirect call to table target that modifies same
       ~test_name:"call_indirect uses real arguments rather than table index for memory dependency"
       ~with_pointer_analysis:true
       original slice 4l 9
+
+
+  let%test "slicing: checking that function arguments are managed properly" =
+    let original =
+      "(module
+
+        (func (;0;) (param $x i32) (param $y i32) (result i32)
+          local.get 0    ;; $x
+        )
+
+        (func (;1;) (result i32)
+          i32.const 0
+          i32.const 14
+          call 0        ;; should return 0
+          i32.eqz       ;; true
+          if 
+            i32.const 42
+            i32.const 55
+            i32.store
+          else
+            i32.const 14   ;; unreachable
+            i32.const 66   ;; unreachable
+            i32.store      ;; unreachable
+          end
+          i32.const 14
+          i32.load
+        )
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+
+        (func (;0;) (param $x i32) (param $y i32) (result i32)
+          local.get 0    ;; $x
+        )
+
+        (func (;1;) (result i32)
+          i32.const 14
+          i32.load
+        )
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"slicing: checking that function arguments are managed properly"
+      ~with_pointer_analysis:true
+      original slice 1l 12
+
+
+  let%test "slicing: checking that function arguments are managed properly 2" =
+    let original =
+      "(module
+
+        (func (;0;) (param $x i32) (param $y i32) (result i32)
+          local.get 0    ;; $x
+        )
+
+        (func (;1;) (result i32)
+          i32.const 0
+          i32.const 14
+          call 0        ;; should return 0
+          i32.eqz       ;; true
+          if 
+            i32.const 14
+            i32.const 55
+            i32.store
+          else
+            i32.const 42   ;; unreachable
+            i32.const 66   ;; unreachable
+            i32.store      ;; unreachable
+          end
+          i32.const 14
+          i32.load
+        )
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+
+        (func (;0;) (param $x i32) (param $y i32) (result i32)
+          local.get 0    ;; $x
+        )
+
+        (func (;1;) (result i32)
+          i32.const 0
+          i32.const 14
+          call 0        ;; should return 0
+          i32.eqz       ;; true
+          if 
+            i32.const 14
+            i32.const 55
+            i32.store
+          end
+          i32.const 14
+          i32.load
+        )
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"slicing: checking that function arguments are managed properly 2"
+      ~with_pointer_analysis:true
+      original slice 1l 12
+
+
+  let%test "slicing: checking that function arguments are managed properly, with a lot of arguments" =
+    let original =
+      "(module
+
+        (func (;0;) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32)(param i32) (param i32) (result i32)
+          local.get 11    ;; $x
+        )
+
+        (func (;1;) (result i32)
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 0
+          i32.const 14
+          i32.const 14
+          call 0        ;; should return 0
+          i32.eqz       ;; true
+          if 
+            i32.const 14
+            i32.const 55
+            i32.store
+          else
+            i32.const 42   ;; unreachable
+            i32.const 66   ;; unreachable
+            i32.store      ;; unreachable
+          end
+          i32.const 14
+          i32.load
+        )
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+
+        (func (;0;) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32)(param i32) (param i32) (result i32)
+          local.get 11    ;; $x
+        )
+
+        (func (;1;) (result i32)
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 0
+          i32.const 14
+          i32.const 14
+          call 0        ;; should return 0
+          i32.eqz       ;; true
+          if 
+            i32.const 14
+            i32.const 55
+            i32.store
+          end
+          i32.const 14
+          i32.load
+        )
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"slicing: checking that function arguments are managed properly, with a lot of arguments"
+      ~with_pointer_analysis:true
+      original slice 1l 24
+
+
+  let%test "slicing: checking that function arguments are managed properly, with a lot of arguments 2" =
+    let original =
+      "(module
+
+        (func (;0;) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32)(param i32) (param i32) (result i32)
+          local.get 11    ;; $x
+        )
+
+        (func (;1;) (result i32)
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 14
+          i32.const 0
+          i32.const 14
+          i32.const 14
+          call 0        ;; should return 0
+          i32.eqz       ;; true
+          if 
+            i32.const 42
+            i32.const 55
+            i32.store
+          else
+            i32.const 14   ;; unreachable
+            i32.const 66   ;; unreachable
+            i32.store      ;; unreachable
+          end
+          i32.const 14
+          i32.load
+        )
+        (memory (;0;) 1))"
+    in
+    let slice =
+      "(module
+
+        (func (;0;) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32) (param i32)(param i32) (param i32) (result i32)
+          local.get 11    ;; $x
+        )
+
+        (func (;1;) (result i32)
+          i32.const 14
+          i32.load
+        )
+        (memory (;0;) 1))"
+    in
+    check_slice
+      ~test_name:"slicing: checking that function arguments are managed properly, with a lot of arguments 2"
+      ~with_pointer_analysis:true
+      original slice 1l 24
 end
