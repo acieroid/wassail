@@ -111,7 +111,7 @@ let of_import (fct_idx : int32) (name : string) (nglobals : Int32.t) (_args : Ty
     {Domain.abstract_store = Variable.Map.empty; store_operations = RICSet.empty; unreachable = false}
     |> Domain.set ~var:Variable.MemorySize ~vs:(Value.ValueSet RIC.positive_integers) in
   match name with
-  | "fd_write" | "fd_seek" | "fd_fdstat_get" ->
+  | "fd_write" | "fd_seek" | "fd_fdstat_get" | "fd_read" ->
     let summary =
       (* Globals are unchanged *)
       globals |> List.fold 

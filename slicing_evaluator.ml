@@ -324,9 +324,4 @@ let evaluate =
           |> List.iter ~f:(fun file ->
               Printf.printf "Processing %s\n%!" file;
               evaluate_file file criterion_selection)
-        (* if String.is_suffix filename ~suffix:".wat" || String.is_suffix filename ~suffix:".wasm" then
-          evaluate_file filename criterion_selection
-        else
-          wat_files_in_directory filename
-          |> List.iter ~f:(fun file -> evaluate_file file criterion_selection) *)
     )

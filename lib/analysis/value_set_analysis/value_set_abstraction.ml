@@ -1088,5 +1088,34 @@ let%test_module "value-set abstraction tests" = (module struct
       (to_string actual)
       (if passed then "" else Printf.sprintf " (expected %s)" (to_string expected)));
     passed
+
+
+  let%test "and_relative_offset_and_constant" =
+    let x = ValueSet (RIC.relative_ric "negl0") in
+    let y = ValueSet (RIC.constant 3l) in
+    let actual = and_ x y in
+    let expected = ValueSet RIC.(ric (1l, Int 0l, Int 3l, ("", 0l))) in
+    let passed = equal actual expected in
+    print_endline (Printf.sprintf "%s %s & %s -> %s%s"
+      (test_label "[ValueSetAbstractions.and_ relative offset and constant]")
+      (to_string x)
+      (to_string y)
+      (to_string actual)
+      (if passed then "" else Printf.sprintf " (expected %s)" (to_string expected)));
+    passed
+
+  let%test "shift_left: [0,3] << 31 = " =
+    let x = ValueSet (RIC.constant 3l) in
+    let shift = ValueSet (RIC.constant 31l) in
+    let actual = shift_left x shift in
+    let expected = ValueSet (RIC.constant 0x80000000l) in
+    let passed = actual = expected in
+    print_endline (Printf.sprintf "%s %s << %s -> %s%s"
+      (test_label "[ValueSetAbstractions.shift_left]")
+      (to_string x)
+      (to_string shift)
+      (to_string actual)
+      (if passed then "" else Printf.sprintf " (expected %s)" (to_string expected)));
+    passed
 end)
     

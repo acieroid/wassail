@@ -73,13 +73,15 @@ module RIC = struct
     match r with 
     | Top -> Top 
     | Bottom -> Bottom 
+    | RIC {stride = s; _} when Int32.(s < 0l) -> Top
     | RIC {stride = s; lower_bound = Int l; upper_bound = u; offset = ("", o)} when Int32.(s*l+o<min_value+s) ->
       reduce (RIC {stride = s; lower_bound = NegInfinity; upper_bound = u; offset = ("", o)})
     | RIC {stride = s; lower_bound = l; upper_bound = Int u; offset = ("", o)} when Int32.(s*u+o>max_value-s) ->
       reduce (RIC {stride = s; lower_bound = l; upper_bound = Infinity; offset = ("", o)})
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = o} ->
-      if ExtendedInt.(u < l) then Bottom else 
-      if (Int32.(s = 1l) && ExtendedInt.(NegInfinity = l) && ExtendedInt.(Infinity = u)) then 
+      if ExtendedInt.(u < l) then 
+        Bottom 
+      else if (Int32.(s = 1l) && ExtendedInt.(NegInfinity = l) && ExtendedInt.(Infinity = u)) then 
         Top 
       else if Int32.(s = 0l) then 
         RIC {stride = 0l; lower_bound = Int 0l; upper_bound = Int 0l; offset = o} 
@@ -666,6 +668,8 @@ module RIC = struct
       Helper: split each operand by sign, convert to bitfields, apply [op], then join
       the four quadrants back in RIC space. *)
   let binop_logical (binop : bitfield -> bitfield -> bitfield) (ric1 : t) (ric2 : t) : t =
+    let ric1 = if String.is_empty (extract_relative_offset ric1) then ric1 else Top in
+    let ric2 = if String.is_empty (extract_relative_offset ric2) then ric2 else Top in
     let pos1 = meet ric1 positive_integers
     and neg1 = meet ric1 negative_integers
     and pos2 = meet ric2 positive_integers
@@ -2790,6 +2794,36 @@ let%test_module "RIC tests" = (module struct
     let compl = complement r in
     print_endline ("[RIC.complement]     " ^ to_string r ^ " → [  " ^ String.concat ~sep:"; " (List.map compl ~f:to_string) ^ "  ]");
     compl |> List.fold ~init:Bottom ~f:(fun acc x -> join acc x) |> equal (ric (1l, NegInfinity, Int Int32.(max_value - 1l), ("", 0l)))
+
+  let%test "of_bitfield :0000000000000000000000000000001" =
+    let bf = Bitfield.of_string ":0000000000000000000000000000001" in
+    let r = of_bitfield bf in
+    print_endline
+      (Printf.sprintf 
+        "[RIC.of_bitfield] %s   ---to-RIC--->   %s"
+        (Bitfield.to_string bf)
+        (to_string r));
+    equal r (ric (0x80000000l, Int 0l, Int 1l, ("", 0l)))
+
+  let%test "of_bitfield :000000000000000000000000000000:" =
+    let bf = Bitfield.of_string ":000000000000000000000000000000:" in
+    let r = of_bitfield bf in
+    print_endline
+      (Printf.sprintf 
+        "[RIC.of_bitfield] %s   ---to-RIC--->   %s"
+        (Bitfield.to_string bf)
+        (to_string r));
+    equal r (ric (1l, NegInfinity, Int 1l, ("", 0l)))
+
+  let%test "of_bitfield :0000000000000000000000000000000" =
+    let bf = Bitfield.of_string ":0000000000000000000000000000000" in
+    let r = of_bitfield bf in
+    print_endline
+      (Printf.sprintf 
+        "[RIC.of_bitfield] %s   ---to-RIC--->   %s"
+        (Bitfield.to_string bf)
+        (to_string r));
+    equal r (ric (0x80000000l, Int 0l, Int 1l, ("", 0l)))
 end)
 
     

@@ -161,8 +161,7 @@ module Make (*: Transfer.TRANSFER *) = struct
           else if Value.may_be_true cond_vs then
             y_vs
           else
-            (Log.warn (fun () -> "Select: condition can't be true nor false -- result is Bottom"); 
-            Value.bottom)
+            Value.bottom
         in
         Print_trace.select cond_vs x_vs y_vs result;
         State.set state ~var:(ret i) ~vs:result
@@ -541,7 +540,13 @@ module Make (*: Transfer.TRANSFER *) = struct
     | _ ->
       begin match block.content with
       | Control { instr = Merge; _ }
-      | Entry | Return _ ->
+      | Entry -> 
+        Print_trace.control_block (Some cfg) block.idx;
+        predecessors
+        |> List.map ~f:snd
+        |> List.reduce_exn ~f:join_state
+        |> merge_variables module_ cfg block predecessors
+      | Return _ ->
         Print_trace.control_block (Some cfg) block.idx;
         predecessors
         |> List.map ~f:snd
