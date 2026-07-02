@@ -170,7 +170,11 @@ let calls_depend_on_globals
                     | Data instrs' -> 
                       List.fold instrs' ~init:acc ~f:(fun acc instr ->
                         match globals_used_by_function with
-                        | Top -> Instr.Label.Set.add acc instr.label
+                        | Top ->
+                          begin match instr.instr with
+                          | GlobalSet _ -> Instr.Label.Set.add acc instr.label
+                          | _ -> acc
+                          end
                         | NotTop globals_used ->
                           if Global_read_domain.GlobalInstruction.Set.mem_label globals_used instr.label then
                             Instr.Label.Set.add acc instr.label
@@ -221,7 +225,11 @@ let indirect_calls_depend_on_globals
                         | Data instrs' -> 
                           List.fold instrs' ~init:acc ~f:(fun acc instr ->
                             match globals_used_by_function with
-                            | Top -> Instr.Label.Set.add acc instr.label
+                            | Top ->
+                              begin match instr.instr with
+                              | GlobalSet _ -> Instr.Label.Set.add acc instr.label
+                              | _ -> acc
+                              end
                             | NotTop globals_used ->
                               if Global_read_domain.GlobalInstruction.Set.mem_label globals_used instr.label then
                                 Instr.Label.Set.add acc instr.label

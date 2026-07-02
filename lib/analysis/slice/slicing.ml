@@ -151,8 +151,12 @@ let instructions_to_keep
         | None -> InSlice.Set.empty
         | Some deps -> InSlice.Set.of_list (List.map (Instr.Label.Set.to_list deps)
                                               ~f:(fun label ->
-                                                  Log.info (fun () -> Printf.sprintf "Instruction %s (%s) is part of the slice due to global dependences"
-                                                    (Instr.Label.to_string label) (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label)));
+                                                  Log.info (fun () -> Printf.sprintf
+                                                                        "Instruction %s (%s) is part of the slice due to global dependences of %s (%s)"
+                                                                        (Instr.Label.to_string label)
+                                                                        (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions label))
+                                                                        (Instr.Label.to_string slicepart.label)
+                                                                        (Instr.to_string (Instr.Label.Map.find_exn cfg_instructions slicepart.label)));
                                                   InSlice.make label None cfg_instructions)) in
       let worklist'''' = InSlice.Set.union worklist''' global_deps in
       loop (InSlice.Set.remove worklist'''' slicepart) slice' visited' in
@@ -356,11 +360,20 @@ let replace_with_equivalent_instructions (instrs : unit Instr.t list) (cfg : 'a 
   if List.is_empty instrs then instrs else
     let t = instrs_type instrs cfg instructions_map in
     let replaced = List.map (dummy_instrs t next_label) ~f:(fun i -> Instr.Data i) in
-   Log.info (fun () -> Printf.sprintf "Replacing instructions %s of type %s -> %s with %s"
+    Log.info (fun () -> Printf.sprintf "Replacing instructions %s of type %s -> %s with %s"
+             (String.concat ~sep:","
+                (List.map instrs ~f:(fun instr ->
+                     Printf.sprintf "%s:%s"
+                       (Instr.Label.to_string (Instr.label instr))
+                       (Instr.to_string instr))))
+             (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (fst t)))
+             (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (snd t)))
+             (String.concat ~sep:"," (List.map ~f:Instr.to_string replaced)));
+   (* Log.info (fun () -> Printf.sprintf "Replacing instructions %s of type %s -> %s with %s"
                 (String.concat ~sep:"," (List.map ~f:Instr.to_string instrs))
                 (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (fst t)))
                 (String.concat ~sep:"," (List.map ~f:instr_type_element_to_string (snd t)))
-                (String.concat ~sep:"," (List.map ~f:Instr.to_string replaced)));
+                (String.concat ~sep:"," (List.map ~f:Instr.to_string replaced))); *)
     replaced
 
 (* Check if the body is empty or only consist only of dummy instructions *)
@@ -9375,4 +9388,214 @@ let%test "global.get depends on indirect call to table target that modifies same
       ~test_name:"slicing: when a call is removed, so are its arguments"
       ~with_pointer_analysis:true
       original slice 1l 18
+
+
+  let%test "pointer slicing replaces removed call arguments before a live local.tee with dummy zeros" =
+    let original = "(module
+                      (type (;0;) (func (param i32 i32 i32 i32 i32)))
+                      (type (;1;) (func (result i32)))
+
+                      ;; Potentially relevant without pointer analysis, but irrelevant with pointer analysis.
+                      (func (;0;) (type 0) (param i32 i32 i32 i32 i32)
+                        i32.const 1000
+                        i32.const 1234
+                        i32.store)
+
+                      (func (;1;) (type 1) (result i32)
+                        (local i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32)
+
+                        ;; Locals used by the call arguments.
+                        i32.const 0
+                        local.set 0
+
+                        i32.const 7
+                        local.set 1
+
+                        ;; Memory value loaded after the call.
+                        i32.const 0
+                        i32.const 42
+                        i32.store
+
+                        ;; Dead call arguments. The third argument is also saved through local.tee.
+                        local.get 0
+                        i32.const 48
+                        local.get 1
+                        i32.const 18
+                        i32.add
+                        local.tee 2
+                        i32.const 18
+                        i32.const 0
+                        call 0
+
+                        ;; This load makes call 0 conservatively relevant without pointer analysis.
+                        i32.const 0
+                        i32.load
+
+                        ;; The value saved by local.tee is genuinely live for the criterion.
+                        local.get 2
+                        i32.add
+                        local.set 16
+
+                        ;; Slicing criterion.
+                        local.get 16)
+
+                      (memory (;0;) 1)
+                      (export \"main\" (func 1)))" in
+    let sliced = "(module
+                      (type (;0;) (func (param i32 i32 i32 i32 i32)))
+                      (type (;1;) (func (result i32)))
+
+                      (func (;0;) (type 0) (param i32 i32 i32 i32 i32)
+                        i32.const 1000
+                        i32.const 1234
+                        i32.store)
+
+                      (func (;1;) (type 1) (result i32)
+                        (local i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32)
+                        i32.const 7
+                        local.set 1
+                        i32.const 0
+                        i32.const 42
+                        i32.store
+                        i32.const 0
+                        i32.const 0
+                        local.get 1
+                        i32.const 18
+                        i32.add
+                        local.tee 2
+                        drop
+                        drop
+                        drop
+                        i32.const 0
+                        i32.load
+                        local.get 2
+                        i32.add
+                        local.set 16
+                        local.get 16)
+
+                      (memory (;0;) 1)
+                      (export \"main\" (func 1)))" in
+    check_slice
+      ~test_name:"pointer slicing replaces removed call arguments before a live local.tee with dummy zeros"
+      ~with_pointer_analysis:true
+      original
+      sliced
+      1l
+      21
+
+
+  let%test "pointer slicing removes a dead call and all of its arguments without local.tee" =
+    let original = "(module
+    (type (func (param i32 i32 i32 i32 i32)))
+    (type (func (result i32)))
+
+    (func $dead (param i32 i32 i32 i32 i32)
+      i32.const 1000
+      i32.const 1234
+      i32.store)
+
+    (func (export \"main\") (result i32)
+      (local i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32)
+
+      i32.const 10
+      local.set 0
+
+      i32.const 20
+      local.set 1
+
+      i32.const 0
+      i32.const 42
+      i32.store
+
+      local.get 0
+      i32.const 48
+      local.get 1
+      i32.const 18
+      i32.add
+      i32.const 18
+      i32.const 0
+      call 0
+
+      i32.const 0
+      i32.load
+      local.set 16
+
+      local.get 0
+      drop
+      local.get 1
+      drop
+
+      local.get 16)
+
+    (memory 1))" in
+
+    let sliced = "(module
+    (type (;0;) (func (param i32 i32 i32 i32 i32)))
+    (type (;1;) (func (result i32)))
+    (func (;0;) (type 0) (param i32 i32 i32 i32 i32)
+      i32.const 1000
+      i32.const 1234
+      i32.store)
+    (func (;1;) (type 1) (result i32)
+      (local i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32)
+      i32.const 0
+      i32.const 42
+      i32.store
+      i32.const 0
+      i32.load
+      local.set 16
+      local.get 16)
+    (memory (;0;) 1)
+    (export \"main\" (func 1)))" in
+
+    check_slice
+      ~test_name:"pointer slicing removes a dead call and all of its arguments without local.tee"
+      ~with_pointer_analysis:true
+      original
+      sliced
+      1l
+      22
+
+
+
+   let%test "top global-read call should not keep unrelated local argument of previous dead call" =
+     let original = "(module
+                        (type (;0;) (func (param i32)))
+                        (type (;1;) (func))
+
+                        ;; Imported functions get Top in the global-read analysis.
+                        (import \"env\" \"other_fct\" (func $other_fct (type 1)))
+
+                        ;; This function is irrelevant to the slicing criterion.
+                        (func $dead (type 0) (param i32))
+
+                        (func (export \"main\")
+                          (local i32)
+
+                          i32.const 42
+                          local.set 0
+
+                          ;; This argument is only for $dead. It should not be kept just because
+                          ;; $other_fct has Top as its global-read summary.
+                          local.get 0
+                          call $dead
+
+                          ;; Slicing criterion.
+                          call $other_fct))" in
+     let sliced = "(module
+                      (type (;0;) (func (param i32)))
+                      (type (;1;) (func))
+                      (import \"env\" \"other_fct\" (func (;0;) (type 1)))
+                      (func (;1;) (type 0) (param i32))
+                      (func (;2;)
+                        call 0)
+                      (export \"main\" (func 2)))" in
+     check_slice
+       ~test_name:"top global-read call should not keep unrelated local argument of previous dead call"
+       ~with_pointer_analysis:true
+       original
+       sliced
+       2l
+       4
+
 end
