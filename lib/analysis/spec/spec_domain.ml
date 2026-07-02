@@ -23,13 +23,9 @@ module SpecWithoutBottom = struct
     ]
 
   let to_dot_string (s : t) : string =
-    let stack = String.concat ~sep:"," (List.map s.vstack ~f:Var.to_string) in
-    let locals =
-    (if List.length s.locals > 0 then
-       String.concat ~sep:"," (List.map s.locals ~f:Var.to_string)
-     else
-       "") in
-    Printf.sprintf "<tr><td>%s</td><td>%s</td></tr>" stack locals
+    let stack = String.concat ~sep:",  " (List.map s.vstack ~f:Var.to_string) in
+    let locals = String.concat ~sep:",  " (List.map s.locals ~f:Var.to_string) in
+    Printf.sprintf "stack: %s<br/>locals: %s" stack locals
   (* (String.concat ~sep:", " (List.map s.locals ~f:Var.to_string))*)
   (* (String.concat ~sep:", " (List.map (Var.OffsetMap.to_alist s.memory) ~f:(fun ((k, offset), v) -> Printf.sprintf "%s+%d: %s" (Var.to_string k) offset (Var.to_string v)))) *)
 

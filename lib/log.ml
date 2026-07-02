@@ -15,7 +15,7 @@ let imprecision (message : message) : unit =
 let info_enabled = ref false
 let info (message : message) : unit =
   if !info_enabled then
-    Printf.printf "[INFO] %s\n%!" (message ())
+    Printf.printf "[INFO] %s%!\n" (message ())
 let enable_info () = info_enabled := true
 
 let debug_enabled = ref false

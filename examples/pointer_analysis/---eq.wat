@@ -1,0 +1,17 @@
+(module
+  (memory (export "mem") 1)
+  (global $g0 (mut i32) (i32.const 1024))
+
+  (func $main (export "main") (param $l0 i32) (result i32) (local $l1 i32)
+    i32.const 42
+    i32.const 42
+    i32.eq
+    drop
+
+    i32.const 42
+    i32.const 42
+    i32.ne
+
+    return
+  )
+)

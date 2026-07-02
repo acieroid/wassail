@@ -1,0 +1,9 @@
+benchmarks/wasm-bench/wasm/corpus/vm/expr_parser.wasm,6
+benchmarks/wasm-bench/wasm/corpus/vm/expr_parser.wasm,16
+benchmarks/wasm-bench/wasm/corpus/vm/expr_parser.wasm,19
+benchmarks/wasm-bench/wasm/corpus/vm/mini_lua_like_vm.wasm,6
+benchmarks/wasm-bench/wasm/corpus/vm/mini_lua_like_vm.wasm,16
+benchmarks/wasm-bench/wasm/corpus/vm/mini_lua_like_vm.wasm,19
+benchmarks/wasm-bench/wasm/corpus/vm/minilua_table_vm.wasm,6
+benchmarks/wasm-bench/wasm/corpus/vm/minilua_table_vm.wasm,16
+benchmarks/wasm-bench/wasm/corpus/vm/minilua_table_vm.wasm,19
