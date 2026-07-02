@@ -9281,4 +9281,98 @@ let%test "global.get depends on indirect call to table target that modifies same
       ~test_name:"slicing: checking that function arguments are managed properly, with a lot of arguments 2"
       ~with_pointer_analysis:true
       original slice 1l 24
+
+
+  let%test "slicing: checking that function arguments are managed properly, with a lot of arguments 2" =
+    let original =
+      "(module
+        ;; Minimal example with a LOCAL criterion, but where the local value comes
+        ;; from memory after a call.
+        ;;
+        ;; Criterion:
+        ;;   local.get 16
+        ;;
+        ;; Without pointer analysis:
+        ;;   call 0 is conservatively kept, because it may affect the i32.load
+        ;;   that defines local 16.
+        ;;
+        ;; With pointer analysis:
+        ;;   call 0 should be removed, because it writes at address 1000 while
+        ;;   local 16 is loaded from address 0. Its argument producers should also
+        ;;   disappear, not be replaced by drops.
+
+        (type (;0;) (func (param i32 i32 i32 i32 i32)))
+        (type (;1;) (func (result i32)))
+
+        ;; Potentially relevant without pointer analysis, but irrelevant with pointer analysis.
+        (func (;0;) (type 0) (param i32 i32 i32 i32 i32)
+          i32.const 1000
+          i32.const 1234
+          i32.store)
+
+        (func (;1;) (type 1) (result i32)
+          (local i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32)
+
+          ;; Locals used only to build call 0's arguments.
+          i32.const 0
+          local.set 0
+
+          i32.const 7
+          local.set 1
+
+          ;; Real value that should reach local 16.
+          i32.const 0
+          i32.const 42
+          i32.store
+
+          ;; Dead call arguments, shaped like the suspicious call 47 site.
+          ;; Without pointer analysis, these should remain because call 0 remains.
+          ;; With pointer analysis, these should disappear with call 0.
+          local.get 0        ;; should disappear only with pointer analysis
+          i32.const 48       ;; should disappear only with pointer analysis
+          local.get 1        ;; should disappear only with pointer analysis
+          i32.const 18       ;; should disappear only with pointer analysis
+          i32.add            ;; should disappear only with pointer analysis
+          i32.const 18       ;; should disappear only with pointer analysis
+          i32.const 0        ;; should disappear only with pointer analysis
+          call 0             ;; kept without pointer analysis, removed with pointer analysis
+
+          ;; local 16 is defined from memory after the call.
+          ;; This is why the no-pointer slice should keep call 0 conservatively.
+          i32.const 0
+          i32.load
+          local.set 16
+
+          ;; Slicing criterion.
+          local.get 16)
+
+        (memory (;0;) 1)
+        (export \"main\" (func 1))
+      )"
+    in
+    let slice =
+      "(module
+        (type (;0;) (func (param i32 i32 i32 i32 i32)))
+        (type (;1;) (func (result i32)))
+        (func (;0;) (type 0) (param i32 i32 i32 i32 i32)
+          i32.const 1000
+          i32.const 1234
+          i32.store)
+        (func (;1;) (type 1) (result i32)
+          (local i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32)
+          i32.const 0
+          i32.const 42
+          i32.store
+          i32.const 0
+          i32.load
+          local.set 16
+          local.get 16)
+        (memory (;0;) 1)
+        (export \"main\" (func 1))
+      )"
+    in
+    check_slice
+      ~test_name:"slicing: when a call is removed, so are its arguments"
+      ~with_pointer_analysis:true
+      original slice 1l 18
 end
