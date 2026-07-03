@@ -16,6 +16,18 @@ let info_enabled = ref false
 let info (message : message) : unit =
   if !info_enabled then
     Printf.printf "[INFO] %s%!\n" (message ())
+(* let info (message : message) : unit =
+  if !info_enabled then begin
+    let msg = Printf.sprintf "[INFO] %s\n" (message ()) in
+    let oc =
+      open_out_gen
+        [Open_creat; Open_text; Open_append]
+        0o644
+        "log.txt"
+    in
+    output_string oc msg;
+    close_out oc
+  end *)
 let enable_info () = info_enabled := true
 
 let debug_enabled = ref false
