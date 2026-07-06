@@ -5,11 +5,15 @@ type slicing_result = {
   function_sliced : int32;
   slicing_criterion : Instr.Label.t;
   slicing_instruction : string;
+  criterion_opcode : string;
   initial_number_of_instrs : int;
   slice_size_without_pointers : int;
   slice_size : int;
   slice_size_difference : int;
-  reduction_factor : float;
+  improved : bool;
+  baseline_slice_ratio : float;
+  vsa_slice_ratio : float;
+  extra_reduction_ratio : float;
   cfg_time : Time_float.Span.t;
   spec_time : Time_float.Span.t;
   vsa_time : Time_float.Span.t;
@@ -25,7 +29,10 @@ type slicing_result = {
   instr_to_keep_time : Time_float.Span.t;
   slicing_time_without_pointers : Time_float.Span.t;
   slicing_time : Time_float.Span.t;
-  total_time_difference : Time_float.Span.t
+  baseline_total_time : Time_float.Span.t;
+  vsa_total_time : Time_float.Span.t;
+  total_time_difference : Time_float.Span.t;
+  total_time_ratio : float
 }
 
 type ignored_reason =
@@ -77,6 +84,11 @@ let time (f : unit -> 'a) : 'a * Time_float.Span.t =
   let t1 = Time_float.now () in
   (res, Time_float.diff t1 t0)
 
+let opcode_of_instruction_string (instruction : string) : string =
+  match String.split instruction ~on:' ' with
+  | [] -> "<unknown>"
+  | opcode :: _ -> opcode
+
 let prefix : string ref = ref "."
 
 let output ?(append : bool = true) (file : string) (fields : string list) =
@@ -89,27 +101,34 @@ let output_slicing_result filename = function
                        Int32.to_string r.function_sliced; (* 1 *)
                        Instr.Label.to_string r.slicing_criterion; (* 2 *)
                        r.slicing_instruction; (* 3 *)
-                       string_of_int r.initial_number_of_instrs; (* 4 *)
-                       string_of_int r.slice_size_without_pointers; (* 5 *)
-                       string_of_int r.slice_size; (* 6 *)
-                       string_of_int r.slice_size_difference; (* 7 *)
-                       string_of_float r.reduction_factor; (* 8 *)
-                       string_of_float (Time_float.Span.to_ms r.cfg_time); (* 9 *)
-                       string_of_float (Time_float.Span.to_ms r.spec_time); (* 10 *)
-                       string_of_float (Time_float.Span.to_ms r.vsa_time); (* 11 *)
-                       string_of_float (Time_float.Span.to_ms r.control_time_without_pointers); (* 12 *)
-                       string_of_float (Time_float.Span.to_ms r.control_time); (* 13 *)
-                       string_of_float (Time_float.Span.to_ms r.data_time_without_pointers); (* 14 *)
-                       string_of_float (Time_float.Span.to_ms r.data_time); (* 15 *)
-                       string_of_float (Time_float.Span.to_ms r.mem_time_without_pointers); (* 16 *)
-                       string_of_float (Time_float.Span.to_ms r.mem_time); (* 17 *)
-                       string_of_float (Time_float.Span.to_ms r.global_time_without_pointers); (* 18 *)
-                       string_of_float (Time_float.Span.to_ms r.global_time); (* 19 *)
-                       string_of_float (Time_float.Span.to_ms r.instr_to_keep_time_without_pointers); (* 20 *)
-                       string_of_float (Time_float.Span.to_ms r.instr_to_keep_time); (* 21 *)
-                       string_of_float (Time_float.Span.to_ms r.slicing_time_without_pointers); (* 22 *)
-                       string_of_float (Time_float.Span.to_ms r.slicing_time); (* 23 *)
-                       string_of_float (Time_float.Span.to_ms r.total_time_difference)] (* 24 *)
+                       r.criterion_opcode; (* 4 *)
+                       string_of_int r.initial_number_of_instrs; (* 5 *)
+                       string_of_int r.slice_size_without_pointers; (* 6 *)
+                       string_of_int r.slice_size; (* 7 *)
+                       string_of_int r.slice_size_difference; (* 8 *)
+                       string_of_bool r.improved; (* 9 *)
+                       string_of_float r.baseline_slice_ratio; (* 10 *)
+                       string_of_float r.vsa_slice_ratio; (* 11 *)
+                       string_of_float r.extra_reduction_ratio; (* 12 *)
+                       string_of_float (Time_float.Span.to_ms r.cfg_time); (* 13 *)
+                       string_of_float (Time_float.Span.to_ms r.spec_time); (* 14 *)
+                       string_of_float (Time_float.Span.to_ms r.vsa_time); (* 15 *)
+                       string_of_float (Time_float.Span.to_ms r.control_time_without_pointers); (* 16 *)
+                       string_of_float (Time_float.Span.to_ms r.control_time); (* 17 *)
+                       string_of_float (Time_float.Span.to_ms r.data_time_without_pointers); (* 18 *)
+                       string_of_float (Time_float.Span.to_ms r.data_time); (* 19 *)
+                       string_of_float (Time_float.Span.to_ms r.mem_time_without_pointers); (* 20 *)
+                       string_of_float (Time_float.Span.to_ms r.mem_time); (* 21 *)
+                       string_of_float (Time_float.Span.to_ms r.global_time_without_pointers); (* 22 *)
+                       string_of_float (Time_float.Span.to_ms r.global_time); (* 23 *)
+                       string_of_float (Time_float.Span.to_ms r.instr_to_keep_time_without_pointers); (* 24 *)
+                       string_of_float (Time_float.Span.to_ms r.instr_to_keep_time); (* 25 *)
+                       string_of_float (Time_float.Span.to_ms r.slicing_time_without_pointers); (* 26 *)
+                       string_of_float (Time_float.Span.to_ms r.slicing_time); (* 27 *)
+                       string_of_float (Time_float.Span.to_ms r.baseline_total_time); (* 28 *)
+                       string_of_float (Time_float.Span.to_ms r.vsa_total_time); (* 29 *)
+                       string_of_float (Time_float.Span.to_ms r.total_time_difference); (* 30 *)
+                       string_of_float r.total_time_ratio] (* 31 *)
   | Ignored NoFunction ->
     output "nofunction.txt" [filename]
   | Ignored (NoInstruction f) ->
@@ -212,35 +231,56 @@ let slices (filename : string) (criterion_selection : [`Random of int | `All | `
                         let slice_size_without_pointers = Instr.Label.Set.length sliced_labels_without_pointers in
                         let slice_size = Instr.Label.Set.length sliced_labels in
                         let slice_size_difference = slice_size_without_pointers - slice_size in
-                        let reduction_factor = float_of_int slice_size_difference /. (float_of_int slice_size_without_pointers) in
-                        let total_time_difference =
-                          control_time 
+                        let improved = slice_size_difference > 0 in
+                        let baseline_slice_ratio = float_of_int slice_size_without_pointers /. float_of_int (Array.length labels) in
+                        let vsa_slice_ratio = float_of_int slice_size /. float_of_int (Array.length labels) in
+                        let extra_reduction_ratio = float_of_int slice_size_difference /. (float_of_int slice_size_without_pointers) in
+                        let baseline_total_time =
+                          cfg_time
+                            |> Time_float.Span.(+) spec_time
+                            |> Time_float.Span.(+) control_time_without_pointers
+                            |> Time_float.Span.(+) data_time_without_pointers
+                            |> Time_float.Span.(+) mem_time_without_pointers
+                            |> Time_float.Span.(+) global_time_without_pointers
+                            |> Time_float.Span.(+) instr_to_keep_time_without_pointers
+                            |> Time_float.Span.(+) slicing_time_without_pointers
+                        in
+                        let vsa_total_time =
+                          cfg_time
+                            |> Time_float.Span.(+) spec_time
+                            |> Time_float.Span.(+) vsa_time
+                            |> Time_float.Span.(+) control_time
                             |> Time_float.Span.(+) data_time 
                             |> Time_float.Span.(+) mem_time
                             |> Time_float.Span.(+) global_time
                             |> Time_float.Span.(+) instr_to_keep_time
                             |> Time_float.Span.(+) slicing_time
-                            |> Time_float.Span.(-) control_time_without_pointers
-                            |> Time_float.Span.(-) data_time_without_pointers
-                            |> Time_float.Span.(-) mem_time_without_pointers
-                            |> Time_float.Span.(-) global_time_without_pointers
-                            |> Time_float.Span.(-) instr_to_keep_time_without_pointers
-                            |> Time_float.Span.(-) slicing_time_without_pointers
+                        in
+                        let total_time_difference =
+                          Time_float.Span.(vsa_total_time - baseline_total_time)
+                        in
+                        let total_time_ratio =
+                          Time_float.Span.to_ms vsa_total_time /. Time_float.Span.to_ms baseline_total_time
                         in
                         let slicing_instruction =
                           match Cfg.find_instr cfg_instructions slicing_criterion with
                           | None -> "<instruction not found>"
                           | Some instr -> Instr.to_string instr
                         in
+                        let criterion_opcode = opcode_of_instruction_string slicing_instruction in
                         output_slicing_result filename (Success {
                             function_sliced = func.idx;
                             slicing_criterion;
                             slicing_instruction;
+                            criterion_opcode;
                             initial_number_of_instrs = Array.length labels;
                             slice_size_without_pointers;
                             slice_size;
                             slice_size_difference;
-                            reduction_factor;
+                            improved;
+                            baseline_slice_ratio;
+                            vsa_slice_ratio;
+                            extra_reduction_ratio;
                             cfg_time; 
                             spec_time;
                             vsa_time;
@@ -256,7 +296,10 @@ let slices (filename : string) (criterion_selection : [`Random of int | `All | `
                             instr_to_keep_time;
                             slicing_time_without_pointers;
                             slicing_time;
+                            baseline_total_time;
+                            vsa_total_time;
                             total_time_difference;
+                            total_time_ratio;
                           })
                       with e ->
                         output_slicing_result filename (SliceExtensionError (func.idx, slicing_criterion, Array.length labels_without_constants, Exn.to_string_mach e))
@@ -274,12 +317,20 @@ let evaluate_file (filename : string) (criterion_selection : [`All | `Random of 
 
 
 
-let wat_files_in_directory (dirname : string) : string list =
+let rec wat_files_in_directory (dirname : string) : string list =
   match Sys_unix.is_directory dirname with
-  | `Yes -> 
+  | `Yes ->
     Sys_unix.ls_dir dirname
-    |> List.filter ~f:(fun file -> Filename.check_suffix file ".wat" || Filename.check_suffix file ".wasm")
-    |> List.map ~f:(Filename.concat dirname)
+    |> List.concat_map ~f:(fun file ->
+        let path = Filename.concat dirname file in
+        match Sys_unix.is_directory path with
+        | `Yes -> wat_files_in_directory path
+        | `No ->
+          if Filename.check_suffix file ".wat" || Filename.check_suffix file ".wasm" then
+            [path]
+          else
+            []
+        | `Unknown -> [])
     |> List.sort ~compare:String.compare
   | `No -> failwith (Printf.sprintf "%s is not a directory" dirname)
   | `Unknown -> failwith (Printf.sprintf "cannot access directory %s" dirname)
@@ -308,8 +359,13 @@ let evaluate =
       and all = flag "-a" no_arg ~doc:"slice on all functions, for all slicing criteria"
       and last = flag "-l" no_arg ~doc:"slice on all functions, for the last slicing criterion" 
       and random = flag "-r" (optional int) ~doc:"N slice on all functions, for N random slicing criteria (default: 1 criterion)"
+      and seed = flag "-seed" (optional int) ~doc:"N initialize the random number generator with seed N"
       in
       fun () ->
+        begin match seed with
+        | Some s -> Random.init s
+        | None -> Random.init 14
+        end;
         begin match prefix_opt with
         | None -> set_output_directory filename ""
         | Some p -> set_output_directory filename p;
@@ -317,28 +373,35 @@ let evaluate =
         output ~append:false "data.csv" ["file name"; (* 0 *)
                        "function"; (* 1 *)
                        "slicing criterion"; (* 2 *)
-                       "slicing instruction"; (* 3 *)
-                       "initial number of instrs"; (* 4 *)
-                       "slice size without pointers"; (* 5 *)
-                       "slice size"; (* 6 *)
-                       "slice size difference"; (* 7 *)
-                       "reduction factor"; (* 8 *)
-                       "cfg_time (ms)"; (* 9 *)
-                       "spec_time (ms)"; (* 10 *)
-                       "vsa_time (ms)"; (* 11 *)
-                       "control_time_without_pointers (ms)"; (* 12 *)
-                       "control_time (ms)"; (* 13 *)
-                       "data_time_without_pointers (ms)"; (* 14 *)
-                       "data_time (ms)"; (* 15 *)
-                       "mem_time_without_pointers (ms)"; (* 16 *)
-                       "mem_time (ms)"; (* 17 *)
-                       "global_time_without_pointers (ms)"; (* 18 *)
-                       "global_time (ms)"; (* 19 *)
-                       "instr_to_keep_time_without_pointers (ms)"; (* 20 *)
-                       "instr_to_keep_time (ms)"; (* 21 *)
-                       "slicing_time_without_pointers (ms)"; (* 22 *)
-                       "slicing_time (ms)"; (* 23 *)
-                       "total_time_difference (ms)"] (* 24 *);
+                       "criterion instruction"; (* 3 *)
+                       "criterion opcode"; (* 4 *)
+                       "initial number of instrs"; (* 5 *)
+                       "slice size without pointers"; (* 6 *)
+                       "slice size"; (* 7 *)
+                       "slice size difference"; (* 8 *)
+                       "improved"; (* 9 *)
+                       "baseline slice ratio"; (* 10 *)
+                       "vsa slice ratio"; (* 11 *)
+                       "extra_reduction_ratio"; (* 12 *)
+                       "cfg_time (ms)"; (* 13 *)
+                       "spec_time (ms)"; (* 14 *)
+                       "vsa_time (ms)"; (* 15 *)
+                       "control_time_without_pointers (ms)"; (* 16 *)
+                       "control_time (ms)"; (* 17 *)
+                       "data_time_without_pointers (ms)"; (* 18 *)
+                       "data_time (ms)"; (* 19 *)
+                       "mem_time_without_pointers (ms)"; (* 20 *)
+                       "mem_time (ms)"; (* 21 *)
+                       "global_time_without_pointers (ms)"; (* 22 *)
+                       "global_time (ms)"; (* 23 *)
+                       "instr_to_keep_time_without_pointers (ms)"; (* 24 *)
+                       "instr_to_keep_time (ms)"; (* 25 *)
+                       "slicing_time_without_pointers (ms)"; (* 26 *)
+                       "slicing_time (ms)"; (* 27 *)
+                       "baseline_total_time (ms)"; (* 28 *)
+                       "vsa_total_time (ms)"; (* 29 *)
+                       "total_time_difference (ms)"; (* 30 *)
+                       "total_time_ratio"] (* 31 *);
         let criterion_selection = 
           match random with
             | Some n -> `Random n
