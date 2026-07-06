@@ -141,7 +141,6 @@ let of_import (fct_idx : int32) (name : string) (nglobals : Int32.t) (_args : Ty
     |> Domain.set ~var:(Variable.Accessed) ~vs:(Value.top)
   | _ ->
     (* There is no way to know if global variables have been changed *)
-    Log.warn (fun () -> Printf.sprintf "Imported function is not modelled: %s" name);
     let summary =
       (* Globals can point anywhere *)
       List.fold globals 
@@ -152,7 +151,7 @@ let of_import (fct_idx : int32) (name : string) (nglobals : Int32.t) (_args : Ty
       (* If present, return value is unknown: *)
       ret |> List.foldi ~init:summary
             ~f:(fun idx state _ -> state |> Domain.set ~var:(Variable.Var (Var.Return (fct_idx, Int32.of_int_exn idx))) ~vs:Value.top)
-      (* Linear memory may have been modified, but we don't know how: *)
+      (* Linear memory may have been modified/accessed, but we don't know how: *)
       |> Domain.set ~var:(Variable.Accessed) ~vs:(Value.top) in
     { summary with store_operations = RICSet.singleton RIC.Top }
 
