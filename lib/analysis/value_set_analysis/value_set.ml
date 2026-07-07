@@ -62,19 +62,25 @@ struct
         state |> Domain.get ~var:(Variable.Var (pop (Spec_domain.get_or_fail instr.annotation_before).vstack))
       in
       let indirect_call_targets = Call_graph.indirect_call_targets module_ typ in
+      Printf.printf "indirect call targets: %s\n" (List.to_string ~f:Int32.to_string indirect_call_targets);
       let targets =
         if module_.tables |> List.length |> (=) 1 then
           match call_index with
           | Bitfield _ -> indirect_call_targets
           | Boolean {numeric_value = r; _}
-          | ValueSet r when not (String.is_empty (RIC.extract_relative_offset r)) -> indirect_call_targets
+          | ValueSet r when String.(RIC.extract_relative_offset r <> "") -> indirect_call_targets
+          | Boolean {numeric_value = Top; _}
+          | ValueSet Top -> indirect_call_targets
           | Boolean {numeric_value = r; _}
           | ValueSet r -> 
             let table = module_.table_insts |> List.hd_exn in
             table
             |> Table_inst.indices
+            (* only keep table indices that intersect with the selected index: *)
             |> List.filter ~f:(fun idx -> RIC.(meet (constant idx) r <> Bottom))
+            (* extract functions from table: *)
             |> List.filter_map ~f:(fun idx -> Table_inst.get table idx)
+            (* only keep actual targets: *)
             |> List.filter ~f:(fun idx -> List.mem indirect_call_targets idx ~equal:Int32.(=))
         else
           indirect_call_targets
