@@ -26,7 +26,7 @@ log_file="$dir/results.log"
 exec > >(tee "$log_file") 2>&1
 
 random_seed=14
-time_limit_seconds=30
+time_limit_seconds=120
 parallel_jobs=${PARALLEL_JOBS:-$(nproc)}
 start_time=$(date +%s)
 
@@ -47,6 +47,8 @@ fi
 
 process_file() {
   file=$1
+  trap 'status=$?; echo "Error while processing $file; returning from process_file with status $status" >&2; trap - ERR; return $status' ERR
+  set -E
   file_basename=$(basename "$file")
 
   file_seed=$(printf '%s' "$file" | cksum | awk '{print $1}')
@@ -58,26 +60,35 @@ process_file() {
 
   sample_threshold=20
 
+  if [ "$number_of_functions" -eq 0 ]; then
+    echo "Skipping $file (no functions found)"
+    return 0
+  fi
+
   if [ "$sample_size" -lt "$sample_threshold" ]; then
-    :
-  else
-    function_indices_array=()
-    while IFS= read -r function_index; do
-      function_indices_array+=("$function_index")
-    done <<EOF
+    sample_size=$sample_threshold
+  fi
+
+  if [ "$sample_size" -gt "$number_of_functions" ]; then
+    sample_size=$number_of_functions
+  fi
+    
+  function_indices_array=()
+  while IFS= read -r function_index; do
+    function_indices_array+=("$function_index")
+  done <<EOF
 $function_indices
 EOF
 
-    for ((i = 0; i < sample_size; i++)); do
-      j=$((i + RANDOM % (number_of_functions - i)))
+  for ((i = 0; i < sample_size; i++)); do
+    j=$((i + RANDOM % (number_of_functions - i)))
 
-      tmp=${function_indices_array[$i]}
-      function_indices_array[$i]=${function_indices_array[$j]}
-      function_indices_array[$j]=$tmp
-    done
+    tmp=${function_indices_array[$i]}
+    function_indices_array[$i]=${function_indices_array[$j]}
+    function_indices_array[$j]=$tmp
+  done
 
-    function_indices=$(printf '%s\n' "${function_indices_array[@]:0:sample_size}")
-  fi
+  function_indices=$(printf '%s\n' "${function_indices_array[@]:0:sample_size}")
 
   length_of_function_indices=$(printf '%s\n' "$function_indices" | sed '/^$/d' | wc -l | tr -d ' ')
   echo "Processing $file ($length_of_function_indices functions to slice)"
@@ -95,9 +106,12 @@ EOF
     if [ "$status" -eq 124 ]; then
       printf '   [%s]\n      function %s timed out after %ss ------------------------------------------timeout\n' "$file_basename" "$function_index" "$time_limit_seconds"
     elif [ "$status" -ne 0 ]; then
-      echo "!-!-!-[$file_basename] slice evaluator failed with status $status ---------------------------------!!" >&2
+      echo "!-!-!-[$file_basename] slice evaluator failed with status $status; stopping this file ---------------------------------!!" >&2
+      return "$status"
     fi
   done
+
+  trap - ERR
 }
 
 export -f process_file

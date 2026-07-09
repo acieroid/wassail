@@ -144,7 +144,7 @@ module T = struct
         |> List.fold ~init:false 
                      ~f:(fun acc v -> acc || (String.(v <> "") && (Map.find_exn actual_values v |> RIC.is_singleton |> not)))
       in
-      if used_non_singleton_relative then Log.warn (fun () -> "used relative offset that is not a singleton");
+      (* if used_non_singleton_relative then Log.warn (fun () -> "used relative offset that is not a singleton"); *)
       Mem (RIC.update_relative_offset ~ric_:address ~actual_values), used_non_singleton_relative
 end
 include T
