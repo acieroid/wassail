@@ -1,6 +1,8 @@
 open Core
 open Wassail
 
+let single_file : bool ref = ref false
+
 type slicing_result = {
   function_sliced : int32;
   slicing_criterion : Instr.Label.t;
@@ -98,7 +100,9 @@ let prefix : string ref = ref "."
 
 let output ?(append : bool = true) (file : string) (fields : string list) =
   Out_channel.with_file (Printf.sprintf "%s/%s" !prefix file) ~append ~f:(fun ch ->
-      Out_channel.output_string ch (Printf.sprintf "%s\n" (String.concat ~sep:"," fields)))
+      Out_channel.output_string ch (Printf.sprintf "%s\n" (String.concat ~sep:"," fields)));
+  if !single_file && String.is_suffix file ~suffix:"error.csv" then
+    failwith (Printf.sprintf "Analysis of file %s resulted in an error." file)
 
 let output_if_missing_or_empty (file : string) (fields : string list) =
   let path = Printf.sprintf "%s/%s" !prefix file in
@@ -448,9 +452,13 @@ let evaluate =
             | Some n -> `Random n
             | None -> if all then `All else if last then `Last else `Random 1 in
         if String.is_suffix filename ~suffix:".wat" || String.is_suffix filename ~suffix:".wasm" then
-          (initialize_output_file (Filename.basename filename ^ ".data.csv");
+          (* analyzing a single file *)
+          (single_file := true;
+          initialize_output_file (Filename.basename filename ^ ".data.csv");
           evaluate_file ~fid:func filename criterion_selection)
         else
+          (* analyzing a folder *)
+          single_file := false;
           wat_files_in_directory filename
           |> List.iter ~f:(fun file ->
               initialize_output_file (Filename.basename file ^ ".data.csv");
