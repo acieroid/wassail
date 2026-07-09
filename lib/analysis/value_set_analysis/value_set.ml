@@ -62,7 +62,6 @@ struct
         state |> Domain.get ~var:(Variable.Var (pop (Spec_domain.get_or_fail instr.annotation_before).vstack))
       in
       let indirect_call_targets = Call_graph.indirect_call_targets module_ typ in
-      Printf.printf "indirect call targets: %s\n" (List.to_string ~f:Int32.to_string indirect_call_targets);
       let targets =
         if module_.tables |> List.length |> (=) 1 then
           match call_index with
