@@ -47,8 +47,6 @@ fi
 
 process_file() {
   file=$1
-  trap 'status=$?; echo "Error while processing $file; returning from process_file with status $status" >&2; trap - ERR; return $status' ERR
-  set -E
   file_basename=$(basename "$file")
 
   file_seed=$(printf '%s' "$file" | cksum | awk '{print $1}')
@@ -104,15 +102,15 @@ EOF
     set -e
 
     if [ "$status" -eq 124 ]; then
-      printf '   [%s]\n      function %s timed out after %ss ------------------------------------------timeout\n' "$file_basename" "$function_index" "$time_limit_seconds"
+      printf '   [%s]\n      function %s timed out after %ss; stopping this file ------------------------------------------timeout\n' "$file_basename" "$function_index" "$time_limit_seconds"
+      return 0
     elif [ "$status" -ne 0 ]; then
       echo "!-!-!-[$file_basename] slice evaluator failed with status $status; stopping this file ---------------------------------!!" >&2
       return "$status"
     fi
   done
-
-  trap - ERR
 }
+
 
 export -f process_file
 export random_seed

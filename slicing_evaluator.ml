@@ -3,6 +3,8 @@ open Wassail
 
 let single_file : bool ref = ref false
 
+exception StopExecution
+
 type slicing_result = {
   function_sliced : int32;
   slicing_criterion : Instr.Label.t;
@@ -47,6 +49,7 @@ type result =
   | SliceExtensionError of int32 * Instr.Label.t * int * string
   | SliceError of int32 * Instr.Label.t * int * string
   | CfgError of int32 * int * string
+  | VSAError of int32 * string
   | LoadError of string
 
 let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
@@ -99,10 +102,8 @@ let opcode_of_instruction_string (instruction : string) : string =
 let prefix : string ref = ref "."
 
 let output ?(append : bool = true) (file : string) (fields : string list) =
-  (Out_channel.with_file (Printf.sprintf "%s/%s" !prefix file) ~append ~f:(fun ch ->
-      Out_channel.output_string ch (Printf.sprintf "%s\n" (String.concat ~sep:"," fields)));
-  if !single_file && String.is_suffix file ~suffix:"error.csv" then
-    failwith (Printf.sprintf "Analysis of file %s resulted in an error." file))
+  Out_channel.with_file (Printf.sprintf "%s/%s" !prefix file) ~append ~f:(fun ch ->
+      Out_channel.output_string ch (Printf.sprintf "%s\n" (String.concat ~sep:"," fields)))
 
 let output_if_missing_or_empty (file : string) (fields : string list) =
   let path = Printf.sprintf "%s/%s" !prefix file in
@@ -173,6 +174,13 @@ let output_slicing_result filename = function
                         string_of_int size; (* 3 *)
                         "cfg"; (* 4 *)
                         reason] (* 5 *)
+  | VSAError (f, reason) ->
+    output "error.csv" [filename; (* 0 *)
+                        Int32.to_string f; (* 1 *)
+                        "-1"; (* 2 *)
+                        "-1"; (* 3 *)
+                        "VSA"; (* 4 *)
+                        reason] (* 5 *)
   | LoadError _ ->
     output "loaderror.txt" [filename]
 
@@ -221,7 +229,13 @@ let slices ~(fid : int option) (filename : string) (criterion_selection : [`Rand
             output_slicing_result filename (Ignored (NoInstruction func.idx))
           else
             let t0 = Time_float.now () in
-            let pointer_analysis = Some (Value_set.run_pointer_analysis module_ cfg_raw func.idx) in
+            let pointer_analysis =
+            try
+               Some (Value_set.run_pointer_analysis module_ cfg_raw func.idx)
+            with e ->
+              (output_slicing_result filename (VSAError (func.idx, Exn.to_string_mach e));
+              if !single_file then raise StopExecution else None)
+            in
             let vsa_time = Time_float.diff (Time_float.now ()) t0 in
             let preanalysis_without_pointers = Slicing.preanalysis module_ cfg cfg_instructions None in
             let preanalysis = Slicing.preanalysis module_ cfg cfg_instructions pointer_analysis in
@@ -267,7 +281,6 @@ let slices ~(fid : int option) (filename : string) (criterion_selection : [`Rand
                         let slicing_time = Time_float.diff t2 t1 in
                         let sliced_labels_without_pointers = all_labels sliced_func_without_pointers.code.body in
                         let sliced_labels = all_labels sliced_func.code.body in
-                        (* Printf.printf "fun %ld:%s -- initial: %s, before: %s, after: %d\n" func.idx (Instr.Label.to_string slicing_criterion) (Instr.Label.Set.to_string (all_labels func.code.body)) (Instr.Label.Set.to_string instrs_to_keep) (Instr.Label.Set.length sliced_labels); *)
                         let slice_size_without_pointers = Instr.Label.Set.length sliced_labels_without_pointers in
                         let slice_size = Instr.Label.Set.length sliced_labels in
                         let slice_size_difference = slice_size_without_pointers - slice_size in
@@ -342,15 +355,35 @@ let slices ~(fid : int option) (filename : string) (criterion_selection : [`Rand
                             total_time_ratio;
                           })
                       with e ->
-                        output_slicing_result filename (SliceExtensionError (func.idx, slicing_criterion, Array.length labels_without_constants_no_unreachable, Exn.to_string_mach e))
+                        match e with
+                        | StopExecution -> raise StopExecution
+                        | e ->
+                          (output_slicing_result filename (SliceExtensionError (func.idx, slicing_criterion, Array.length labels_without_constants_no_unreachable, Exn.to_string_mach e));
+                          if !single_file then raise StopExecution)
                     with e ->
-                      output_slicing_result filename 
-                        (SliceError (func.idx, slicing_criterion, Array.length labels_without_constants_no_unreachable, "Exception raised when calculating instructions to keep WITH pointer analysis: " ^ Exn.to_string_mach e))
+                      match e with
+                      | StopExecution -> raise StopExecution
+                      | e ->
+                        (output_slicing_result filename 
+                          (SliceError (func.idx, slicing_criterion, Array.length labels_without_constants_no_unreachable, "Exception raised when calculating instructions to keep WITH pointer analysis: " ^ Exn.to_string_mach e));
+                        if !single_file then raise StopExecution)
                   with e ->
-                    output_slicing_result filename 
-                      (SliceError (func.idx, slicing_criterion, Array.length labels_without_constants_no_unreachable, "Exception raised when calculating instructions to keep WITHOUT pointer analysis: " ^ Exn.to_string_mach e)))
-        with e -> output_slicing_result filename (CfgError (func.idx, Array.length labels, Exn.to_string_mach e)))
-  with e -> output_slicing_result filename (LoadError (Exn.to_string e))
+                    match e with
+                    | StopExecution -> raise StopExecution
+                    | e ->
+                      (output_slicing_result filename 
+                        (SliceError (func.idx, slicing_criterion, Array.length labels_without_constants_no_unreachable, "Exception raised when calculating instructions to keep WITHOUT pointer analysis: " ^ Exn.to_string_mach e)));
+                      if !single_file then raise StopExecution)
+        with e -> 
+          match e with
+          | StopExecution -> raise StopExecution
+          | e -> (output_slicing_result filename (CfgError (func.idx, Array.length labels, Exn.to_string_mach e)));
+            if !single_file then raise StopExecution)
+  with e ->
+    match e with
+    | StopExecution -> raise StopExecution
+    | e -> (output_slicing_result filename (LoadError (Exn.to_string e));
+      if !single_file then raise StopExecution)
 
 let evaluate_file ~(fid : int option) (filename : string) (criterion_selection : [`All | `Random of int | `Last]) : unit =
   slices ~fid filename criterion_selection
