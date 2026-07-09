@@ -99,10 +99,10 @@ let opcode_of_instruction_string (instruction : string) : string =
 let prefix : string ref = ref "."
 
 let output ?(append : bool = true) (file : string) (fields : string list) =
-  Out_channel.with_file (Printf.sprintf "%s/%s" !prefix file) ~append ~f:(fun ch ->
+  (Out_channel.with_file (Printf.sprintf "%s/%s" !prefix file) ~append ~f:(fun ch ->
       Out_channel.output_string ch (Printf.sprintf "%s\n" (String.concat ~sep:"," fields)));
   if !single_file && String.is_suffix file ~suffix:"error.csv" then
-    failwith (Printf.sprintf "Analysis of file %s resulted in an error." file)
+    failwith (Printf.sprintf "Analysis of file %s resulted in an error." file))
 
 let output_if_missing_or_empty (file : string) (fields : string list) =
   let path = Printf.sprintf "%s/%s" !prefix file in
