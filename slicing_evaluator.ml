@@ -458,10 +458,10 @@ let evaluate =
           evaluate_file ~fid:func filename criterion_selection)
         else
           (* analyzing a folder *)
-          single_file := false;
+          (single_file := false;
           wat_files_in_directory filename
           |> List.iter ~f:(fun file ->
               initialize_output_file (Filename.basename file ^ ".data.csv");
               Printf.printf "Processing %s\n%!" file;
-              evaluate_file ~fid:None file criterion_selection)
+              evaluate_file ~fid:None file criterion_selection))
     )
