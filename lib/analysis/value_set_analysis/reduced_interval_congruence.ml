@@ -205,6 +205,7 @@ module RIC = struct
   let set_relative_offset (r : t) ~(relative_offset : string) : t =
     match r with
     | Top -> Top
+    | Bottom -> Bottom
     | RIC {stride = s; lower_bound = l; upper_bound = u; offset = ("", o)} ->
       ric (s, l, u, (relative_offset, o))
     | _ -> Log.error (fun () -> "set_relative_offset : " ^ to_string r ^ " ... " ^ relative_offset);

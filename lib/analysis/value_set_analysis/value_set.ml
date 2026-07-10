@@ -62,6 +62,9 @@ struct
         state |> Domain.get ~var:(Variable.Var (pop (Spec_domain.get_or_fail instr.annotation_before).vstack))
       in
       let indirect_call_targets = Call_graph.indirect_call_targets module_ typ in
+      if List.is_empty indirect_call_targets then 
+        (Log.error (fun () -> "indirect call doesn't target any function in the table"); 
+        failwith "invalid program: indirect call doesn't target any function in the table");
       let targets =
         if module_.tables |> List.length |> (=) 1 then
           match call_index with
@@ -84,9 +87,9 @@ struct
         else
           indirect_call_targets
       in
-      if List.is_empty targets then 
-        (Log.error (fun () -> "indirect call index doesn't match any function"); 
-        failwith "invalid program: indirect call index doesn't match any function");
+      if Value_set_abstraction.(call_index <> bottom) && List.is_empty targets then 
+        (Log.error (fun () -> "indirect call index doesn't match any function in the table"); 
+        failwith "invalid program: indirect call index doesn't match any function in the table");
       List.fold_left targets
         ~init:Transfer.bottom
         ~f:(fun acc idx -> Domain.join (apply_summary ~indirect:true idx arity state) acc)

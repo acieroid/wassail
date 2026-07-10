@@ -62,7 +62,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       (state : Spec_domain.SpecWithoutBottom.t) 
       ~(value : Variable.t) 
       ~(of_this_variable : Variable.t)
-    : bool =
+    : bool = 
     match of_this_variable with
     | Var Var.Local l ->
       if l < List.length state.locals then
@@ -400,7 +400,7 @@ module Make (*: Transfer.TRANSFER *) = struct
       one control instruction. Branching instructions return refined true and
       false states; other instructions return a single successor state. *)
   let control
-      (_module_ : Wasm_module.t) (* The wasm module (read-only) *)
+      (module_ : Wasm_module.t) (* The wasm module (read-only) *)
       (cfg : annot_expected Cfg.t) (* The CFG analized *)
       (i : annot_expected Instr.labelled_control) (* The instruction *)
       (state : State.t) (* the pre-state *)
@@ -442,8 +442,11 @@ module Make (*: Transfer.TRANSFER *) = struct
         `Branch (true_, false_)
       end
     | Return -> 
+      let funcinst = Wasm_module.get_funcinst module_ cfg.idx in
+      let _, return_types = funcinst.typ in
+      let return_arity = List.length return_types in
       `Simple 
-        ((Spec_domain.get_or_fail i.annotation_before).vstack
+        (List.take (Spec_domain.get_or_fail i.annotation_before).vstack return_arity
         |> List.mapi 
             ~f:(fun i r -> 
               Variable.Var (Var.Return (cfg.idx, Int32.of_int_exn i)), 
