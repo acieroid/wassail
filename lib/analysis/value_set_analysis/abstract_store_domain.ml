@@ -217,7 +217,7 @@ let set (store : t) ~(var : Variable.t) ~(vs : Value.t) : t =
             { abstract_store = 
                 (Variable.Map.empty |> Variable.Map.set ~key:var ~data:vs);
               store_operations = RICSet.empty;
-              unreachable = true }
+              unreachable = false }
       in
         { store with abstract_store = 
             Variable.Map.filter_keys 

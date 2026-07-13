@@ -24,8 +24,9 @@ benchmarks/b*
 benchmarks/p*
 
 _coverage/
-/*.csv
+*.csv
 /*.dot
 rq2-sizes-interesting.pdf
 rq2-sizes.pdf
 rq2-time.pdf
+*.pdf

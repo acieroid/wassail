@@ -52,12 +52,14 @@ let to_string (s : t) : string =
   (match accessed with
   | None | Some (Value.ValueSet RIC.Bottom) -> 
     []
-  | Some addresses -> ["ACCESSED MEMORY:" ^ Value_set_abstraction.to_string addresses])
+  | Some addresses -> ["ACCESSED MEMORY: " ^ Value_set_abstraction.to_string addresses])
   @
   (match memory_size with
   | None | Some (Value.ValueSet RIC.Bottom) -> 
     []
-  | Some size -> ["MEMORY SIZE (nb of pages):" ^ Value_set_abstraction.to_string size])
+  | Some size -> ["MEMORY SIZE (nb of pages): " ^ Value_set_abstraction.to_string size])
+  @
+  (if s.unreachable then ["UNREACHABLE!"] else [])
   |> String.concat ~sep:"\n\t\t"
   
 (** [bottom cfg vars] returns the bottom summary for [cfg]. *)
@@ -236,88 +238,91 @@ let apply
     ~(state : Domain.t) 
     ~(args : Var.t list)
     ~(return_variables : Var.t list)
-  : Domain.t =
-  let globals = Domain.extract_global_values state in
-  let arguments = Domain.extract_argument_values state ~args in
-  let actual_values =
-    Map.merge globals arguments
-      ~f:(fun ~key:_ vs ->
-        match vs with
-        | `Left vs | `Right vs -> Some vs
-        | `Both _ -> assert false) in
-  let summary = update_relative_offsets summary ~actual_values in
-  let accessed_memory = Domain.get summary ~var:(Variable.Accessed) in
-  let state = Domain.access_memory state ~addresses:accessed_memory in
-  let affected_mem_vars =
-    summary.store_operations
-    |> RICSet.to_list
-    |> List.map ~f:(fun addr -> Variable.Mem addr)
-  in
-  let affected_state =
-    { Domain.abstract_store = 
-        affected_mem_vars
-        |> List.fold 
-          ~init:Variable.Map.empty 
-          ~f:(fun acc var -> acc |> Variable.Map.set ~key:var ~data:(Value.bottom));
-      store_operations = RICSet.empty;
-      unreachable = false } in
-  let state = Domain.make_compatible ~this_store:state ~relative_to:affected_state in
-  let store = 
-    Variable.Map.fold
-      state.abstract_store
-      ~init:Variable.Map.empty
-      ~f:(fun ~key:var ~data:vs acc ->
-        match var with
-        | Variable.Var _
-        | Variable.Accessed
-        | Variable.MemorySize -> Variable.Map.set acc ~key:var ~data:vs
-        | Variable.Mem _ ->
-          let is_safe =
-            List.fold 
-              affected_mem_vars 
-              ~init:true 
-              ~f:(fun acc v -> 
-                acc 
-                && Variable.comparable_offsets var v
-                && not (Variable.share_addresses var v))
-          in
-          if is_safe then
-            Variable.Map.set acc ~key:var ~data:vs
-          else
-            acc)
-  in
-  let state = 
-    if RICSet.mem summary.store_operations RIC.Top || RICSet.mem state.store_operations RIC.Top then
-      { Domain.abstract_store = store; 
-        store_operations = RICSet.singleton RIC.Top;
-        unreachable = state.unreachable || summary.unreachable }
-    else
-      { Domain.abstract_store = store; 
-        store_operations = RICSet.union summary.store_operations state.store_operations;
-        unreachable = state.unreachable || summary.unreachable } in
-  (* Affected memory areas have been erased, and affected/accessed addresses have been updated. *)
-  (* Update globals: *)
-  let state = 
-    summary.abstract_store 
-    |> Variable.Map.filter_keys ~f:Variable.is_global
-    |> Variable.Map.fold  
+  : Domain.t = 
+  if state.unreachable || summary.unreachable then
+    { Domain.bottom with unreachable = true }
+  else
+    let globals = Domain.extract_global_values state in
+    let arguments = Domain.extract_argument_values state ~args in
+    let actual_values =
+        Map.merge globals arguments
+        ~f:(fun ~key:_ vs ->
+            match vs with
+            | `Left vs | `Right vs -> Some vs
+            | `Both _ -> assert false) in
+    let summary = update_relative_offsets summary ~actual_values in
+    let accessed_memory = Domain.get summary ~var:(Variable.Accessed) in
+    let state = Domain.access_memory state ~addresses:accessed_memory in
+    let affected_mem_vars =
+        summary.store_operations
+        |> RICSet.to_list
+        |> List.map ~f:(fun addr -> Variable.Mem addr)
+    in
+    let affected_state =
+        { Domain.abstract_store = 
+            affected_mem_vars
+            |> List.fold 
+            ~init:Variable.Map.empty 
+            ~f:(fun acc var -> acc |> Variable.Map.set ~key:var ~data:(Value.bottom));
+        store_operations = RICSet.empty;
+        unreachable = false } in
+    let state = Domain.make_compatible ~this_store:state ~relative_to:affected_state in
+    let store = 
+        Variable.Map.fold
+        state.abstract_store
+        ~init:Variable.Map.empty
+        ~f:(fun ~key:var ~data:vs acc ->
+            match var with
+            | Variable.Var _
+            | Variable.Accessed
+            | Variable.MemorySize -> Variable.Map.set acc ~key:var ~data:vs
+            | Variable.Mem _ ->
+            let is_safe =
+                List.fold 
+                affected_mem_vars 
+                ~init:true 
+                ~f:(fun acc v -> 
+                    acc 
+                    && Variable.comparable_offsets var v
+                    && not (Variable.share_addresses var v))
+            in
+            if is_safe then
+                Variable.Map.set acc ~key:var ~data:vs
+            else
+                acc)
+    in
+    let state = 
+        if RICSet.mem summary.store_operations RIC.Top || RICSet.mem state.store_operations RIC.Top then
+        { Domain.abstract_store = store; 
+            store_operations = RICSet.singleton RIC.Top;
+            unreachable = state.unreachable || summary.unreachable }
+        else
+        { Domain.abstract_store = store; 
+            store_operations = RICSet.union summary.store_operations state.store_operations;
+            unreachable = state.unreachable || summary.unreachable } in
+    (* Affected memory areas have been erased, and affected/accessed addresses have been updated. *)
+    (* Update globals: *)
+    let state = 
+        summary.abstract_store 
+        |> Variable.Map.filter_keys ~f:Variable.is_global
+        |> Variable.Map.fold  
+            ~init:state 
+            ~f:(fun ~key ~data acc -> Domain.set acc ~var:key ~vs:data) in
+    (* Update memory variables: *)
+    let state =
+        summary.abstract_store
+        |> Variable.Map.filter_keys ~f:(fun key -> Variable.is_linear_memory key && not (Variable.equal key Variable.entire_memory))
+        |> Variable.Map.fold 
+        ~init:state
+        ~f:(fun ~key ~data acc -> 
+            Domain.set acc ~var:key ~vs:data)
+        |> Domain.remove_pointers_to_top in
+    (return_variables,
+    summary.abstract_store |> extract_return_values)
+    |>> List.fold2_exn
         ~init:state 
-        ~f:(fun ~key ~data acc -> Domain.set acc ~var:key ~vs:data) in
-  (* Update memory variables: *)
-  let state =
-    summary.abstract_store
-    |> Variable.Map.filter_keys ~f:(fun key -> Variable.is_linear_memory key && not (Variable.equal key Variable.entire_memory))
-    |> Variable.Map.fold 
-      ~init:state
-      ~f:(fun ~key ~data acc -> 
-        Domain.set acc ~var:key ~vs:data)
-    |> Domain.remove_pointers_to_top in
-  (return_variables,
-  summary.abstract_store |> extract_return_values)
-  |>> List.fold2_exn
-    ~init:state 
-    ~f:(fun state ret value -> state |> Domain.set ~var:(Variable.Var ret) ~vs:value)
-  |> Domain.update_memory_size ~summary
+        ~f:(fun state ret value -> state |> Domain.set ~var:(Variable.Var ret) ~vs:value)
+    |> Domain.update_memory_size ~summary
 
 
 

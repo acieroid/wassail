@@ -105,7 +105,7 @@ EOF
       printf '   [%s]\n      function %s timed out after %ss; stopping this file ------------------------------------------timeout\n' "$file_basename" "$function_index" "$time_limit_seconds"
       return 0
     elif [ "$status" -ne 0 ]; then
-      echo "!-!-!-[$file_basename] slice evaluator failed with status $status; stopping this file ---------------------------------!!" >&2
+      echo "[$file_basename] slice evaluator failed with status $status; stopping this file --------------------------------- error" >&2
       return "$status"
     fi
   done

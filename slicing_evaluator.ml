@@ -234,6 +234,7 @@ let slices ~(fid : int option) (filename : string) (criterion_selection : [`Rand
                Some (Value_set.run_pointer_analysis module_ cfg_raw func.idx)
             with e ->
               (output_slicing_result filename (VSAError (func.idx, Exn.to_string_mach e));
+              Log.error (fun () -> Printf.sprintf "Error while computing value-set analysis:\n %s%!"  (Exn.to_string_mach e));
               if !single_file then raise StopExecution else None)
             in
             let vsa_time = Time_float.diff (Time_float.now ()) t0 in

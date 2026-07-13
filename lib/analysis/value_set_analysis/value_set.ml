@@ -126,7 +126,7 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
     (fun _cfgs _wasm_mod -> Int32Map.empty)
     (fun wasm_mod ~cfgs:scc ~summaries:cfgs_and_summaries ->
       Log.info
-        (fun () -> Printf.sprintf "---------- Value-set analysis of SCC {%s} ----------"
+        (fun () -> Printf.sprintf "-------------------- Value-set analysis of SCC {%s} --------------------"
           (String.concat ~sep:", " (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
       (* Run the value-set analysis *)
       let annotated_scc = scc in
@@ -175,18 +175,27 @@ let run_pointer_analysis
   let cfg_spec_with_propagation = Spec_inference.Intra.analyze module_ cfg () in
   let instructions_from_pointer_cfg = Cfg.all_instructions cfg_spec_with_propagation in
   let cg = Call_graph.make module_ in
-  let schedule = Call_graph.analysis_schedule cg module_.nfuncimports |> List.concat in
-  let cfg_pointers_map = analyze_intra module_ schedule in
+  (* let schedule = Call_graph.analysis_schedule cg module_.nfuncimports |> List.concat in *)
+  let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
+  (* let cfg_pointers_map = analyze_intra module_ schedule in *)
+  let cfg_pointers_map = analyze_inter module_ schedule in
   let cfg_pointers =
     match Int32Map.find cfg_pointers_map funidx with
     | None -> 
       Log.error (fun () -> Printf.sprintf "No entry for function %ld" funidx); 
       failwith (Printf.sprintf "No entry for function %ld" funidx)
-    | Some (_summary, None) -> 
+    (* | Some (_summary, None) -> 
       Log.error (fun () -> Printf.sprintf "Function %ld has no CFG" funidx);
       failwith (Printf.sprintf "Function %ld has no CFG" funidx)
     | Some (_summary, Some cfg) -> cfg in
-  let summaries = Int32Map.map cfg_pointers_map ~f:(fun (summary, _) -> summary) in
+  let summaries = Int32Map.map cfg_pointers_map ~f:(fun (summary, _) -> summary) in *)
+      | Some (_spec_cfg, value_set_cfg, _summary) ->
+      value_set_cfg
+  in
+  let summaries =
+    Int32Map.map cfg_pointers_map
+      ~f:(fun (_spec_cfg, _value_set_cfg, summary) -> summary)
+  in
   Spec_inference.use_const := original_use_const;
   Spec_inference.propagate_globals := original_prop_globals;
   Spec_inference.propagate_locals := original_prop_locals;
