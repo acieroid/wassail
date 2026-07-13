@@ -49,7 +49,7 @@ type result =
   | SliceExtensionError of int32 * Instr.Label.t * int * string
   | SliceError of int32 * Instr.Label.t * int * string
   | CfgError of int32 * int * string
-  | VSAError of int32 * string
+  | VSAError of string
   | LoadError of string
 
 let all_labels (instrs : 'a Instr.t list) : Instr.Label.Set.t =
@@ -174,19 +174,18 @@ let output_slicing_result filename = function
                         string_of_int size; (* 3 *)
                         "cfg"; (* 4 *)
                         reason] (* 5 *)
-  | VSAError (f, reason) ->
+  | VSAError (reason) ->
     output "error.csv" [filename; (* 0 *)
-                        Int32.to_string f; (* 1 *)
+                        "-1"; (* 1 *)
                         "-1"; (* 2 *)
-                        "-1"; (* 3 *)
-                        "VSA"; (* 4 *)
-                        reason] (* 5 *)
+                        "VSA"; (* 3 *)
+                        reason] (* 4 *)
   | LoadError _ ->
     output "loaderror.txt" [filename]
 
 
-let slices ~(fid : int option) (filename : string) (criterion_selection : [`Random of int | `All | `Last ]) : unit =
-  try
+let slices ~(fid : int list option) (filename : string) (criterion_selection : [`Random of int | `All | `Last ]) : unit =
+  (* try *)
     Spec_inference.propagate_globals := false;
     Spec_inference.propagate_locals := false;
     Spec_inference.use_const := false;
@@ -195,28 +194,35 @@ let slices ~(fid : int option) (filename : string) (criterion_selection : [`Rand
     if List.is_empty funcs then
       output_slicing_result filename (Ignored NoFunction)
     else
+      let t0 = Time_float.now () in
+      let pointer_analysis =
+        try
+          Some (Value_set.run_pointer_analysis module_)
+        with e ->
+          (output_slicing_result filename (VSAError (Exn.to_string_mach e));
+          Log.error (fun () -> Printf.sprintf "Error while computing value-set analysis:\n %s%!"  (Exn.to_string_mach e));
+          if !single_file then raise StopExecution else None)
+      in
+      let vsa_time = Time_float.diff (Time_float.now ()) t0 in
       let funcs =
         match fid with
         | None ->
           (let sample_size = (float_of_int (List.length funcs) *. 0.96) 
                               /. ((0.01 *. (float_of_int (List.length funcs - 1))) +. 1.92)
                               |> int_of_float in
-            if sample_size < 30 then
-              funcs
-            else
-              let funcs_array = funcs |> Array.of_list in
-              (for i = 0 to sample_size - 1 do
-                let tmp = funcs_array.(i) in
-                let j = i + Random.int (Array.length funcs_array - i) in
-                funcs_array.(i) <- funcs_array.(j);
-                funcs_array.(j) <- tmp;
-              done;
-              Array.sub funcs_array ~pos:0 ~len:sample_size |> Array.to_list))
-        | Some fid -> funcs |> List.filter ~f:(fun f -> Int32.to_int_exn f.idx = fid)
+          let funcs_array = funcs |> Array.of_list in
+          (for i = 0 to sample_size - 1 do
+            let tmp = funcs_array.(i) in
+            let j = i + Random.int (Array.length funcs_array - i) in
+            funcs_array.(i) <- funcs_array.(j);
+            funcs_array.(j) <- tmp;
+          done;
+          Array.sub funcs_array ~pos:0 ~len:sample_size |> Array.to_list))
+        | Some fid -> funcs |> List.filter ~f:(fun f -> List.mem fid (Int32.to_int_exn f.idx) ~equal:Int.equal)
       in
       List.iter funcs ~f:(fun func ->
         let labels = func.code.body |> all_labels_no_blocks |> Instr.Label.Set.to_array in
-        try
+        (* try *)
           let t0 = Time_float.now () in
           let cfg_raw = Cfg_builder.build module_ func.idx in
           let cfg_time = Time_float.diff (Time_float.now ()) t0 in
@@ -228,17 +234,10 @@ let slices ~(fid : int option) (filename : string) (criterion_selection : [`Rand
           if Array.length labels_without_constants_no_unreachable = 0 then
             output_slicing_result filename (Ignored (NoInstruction func.idx))
           else
-            let t0 = Time_float.now () in
-            let pointer_analysis =
-            try
-               Some (Value_set.run_pointer_analysis module_ cfg_raw func.idx)
-            with e ->
-              (output_slicing_result filename (VSAError (func.idx, Exn.to_string_mach e));
-              Log.error (fun () -> Printf.sprintf "Error while computing value-set analysis:\n %s%!"  (Exn.to_string_mach e));
-              if !single_file then raise StopExecution else None)
-            in
-            let vsa_time = Time_float.diff (Time_float.now ()) t0 in
             let preanalysis_without_pointers = Slicing.preanalysis module_ cfg cfg_instructions None in
+            let pointer_analysis =
+              Option.map pointer_analysis ~f:(fun analysis -> Value_set.intra_of_inter_exn analysis ~fidx:func.idx)
+            in
             let preanalysis = Slicing.preanalysis module_ cfg cfg_instructions pointer_analysis in
             List.iter 
               (match criterion_selection with
@@ -375,18 +374,19 @@ let slices ~(fid : int option) (filename : string) (criterion_selection : [`Rand
                       (output_slicing_result filename 
                         (SliceError (func.idx, slicing_criterion, Array.length labels_without_constants_no_unreachable, "Exception raised when calculating instructions to keep WITHOUT pointer analysis: " ^ Exn.to_string_mach e)));
                       if !single_file then raise StopExecution)
-        with e -> 
+        (* with e -> 
           match e with
           | StopExecution -> raise StopExecution
           | e -> (output_slicing_result filename (CfgError (func.idx, Array.length labels, Exn.to_string_mach e)));
-            if !single_file then raise StopExecution)
-  with e ->
+            if !single_file then raise StopExecution *)
+              )
+  (* with e ->
     match e with
     | StopExecution -> raise StopExecution
     | e -> (output_slicing_result filename (LoadError (Exn.to_string e));
-      if !single_file then raise StopExecution)
+      if !single_file then raise StopExecution) *)
 
-let evaluate_file ~(fid : int option) (filename : string) (criterion_selection : [`All | `Random of int | `Last]) : unit =
+let evaluate_file ~(fid : int list option) (filename : string) (criterion_selection : [`All | `Random of int | `Last]) : unit =
   slices ~fid filename criterion_selection
 
 
@@ -460,12 +460,21 @@ let initialize_output_file (filename : string) : unit =
                                         "total_time_ratio"] (* 31 *)
 
 
+let int_list_arg_type : int list Command.Arg_type.t =
+  Command.Arg_type.create (fun value ->
+    value
+    |> String.split ~on:','
+    |> List.map ~f:(fun item ->
+        item
+        |> String.strip
+        |> Int.of_string))
+
 let evaluate =
   Command.basic
     ~summary:"Evaluate slicer on a .wat/.wasm file, or all .wat/.wasm files in a directory"
     Command.Let_syntax.(
       let%map_open filename = anon ("path" %: string)
-      and func = flag "-f" (optional int) ~doc:"index of a specific function to analyze (default: all)"
+      and funcs = flag "-f" (optional int_list_arg_type) ~doc:"FUNCTIONS comma-separated function indices to analyze (default: randomly selected sample)"
       and prefix_opt = flag "-p" (optional string) ~doc:"prefix for where to save the results file (default: current directory)"
       and all = flag "-a" no_arg ~doc:"slice on all functions, for all slicing criteria"
       and last = flag "-l" no_arg ~doc:"slice on all functions, for the last slicing criterion" 
@@ -489,7 +498,7 @@ let evaluate =
           (* analyzing a single file *)
           (single_file := true;
           initialize_output_file (Filename.basename filename ^ ".data.csv");
-          evaluate_file ~fid:func filename criterion_selection)
+          evaluate_file ~fid:funcs filename criterion_selection)
         else
           (* analyzing a folder *)
           (single_file := false;

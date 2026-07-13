@@ -154,6 +154,14 @@ let analyze_inter_classical (module_ : Wasm_module.t) (entry : Int32.t) : Domain
 type pointer_analysis = 
   Domain.t Cfg.t * Spec_domain.t Instr.t Instr.Label.Map.t * Domain.t Int32Map.t
 
+type pointer_analysis_inter =
+  (Domain.t Cfg.t option * Spec_domain.t Instr.t Instr.Label.Map.t option * Domain.t) Int32Map.t
+
+let intra_of_inter_exn (analysis : pointer_analysis_inter) ~(fidx : int32) : pointer_analysis =
+  let vsa, spec, _ = Int32Map.find_exn analysis fidx in
+  let summaries = analysis |> Int32Map.map ~f:(fun (_, _, summary) -> summary) in
+  Option.value_exn vsa, Option.value_exn spec, summaries
+
 (** [run_pointer_analysis module_ cfg funidx] runs the value-set analysis
     infrastructure required by downstream tools.
 
@@ -163,43 +171,28 @@ type pointer_analysis =
     analyses such as the slicer. *)
 let run_pointer_analysis 
     (module_ : Wasm_module.t) 
-    (cfg : unit Cfg.t) 
-    (funidx : int32)
-  : pointer_analysis =
+  : pointer_analysis_inter =
   let original_use_const = !Spec_inference.use_const
   and original_prop_globals = !Spec_inference.propagate_globals
   and original_prop_locals = !Spec_inference.propagate_locals in
   Spec_inference.use_const := true;
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := true;
-  let cfg_spec_with_propagation = Spec_inference.Intra.analyze module_ cfg () in
-  let instructions_from_pointer_cfg = Cfg.all_instructions cfg_spec_with_propagation in
   let cg = Call_graph.make module_ in
-  (* let schedule = Call_graph.analysis_schedule cg module_.nfuncimports |> List.concat in *)
   let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
-  (* let cfg_pointers_map = analyze_intra module_ schedule in *)
-  let cfg_pointers_map = analyze_inter module_ schedule in
-  let cfg_pointers =
-    match Int32Map.find cfg_pointers_map funidx with
-    | None -> 
-      Log.error (fun () -> Printf.sprintf "No entry for function %ld" funidx); 
-      failwith (Printf.sprintf "No entry for function %ld" funidx)
-    (* | Some (_summary, None) -> 
-      Log.error (fun () -> Printf.sprintf "Function %ld has no CFG" funidx);
-      failwith (Printf.sprintf "Function %ld has no CFG" funidx)
-    | Some (_summary, Some cfg) -> cfg in
-  let summaries = Int32Map.map cfg_pointers_map ~f:(fun (summary, _) -> summary) in *)
-      | Some (_spec_cfg, value_set_cfg, _summary) ->
-      value_set_cfg
-  in
-  let summaries =
-    Int32Map.map cfg_pointers_map
-      ~f:(fun (_spec_cfg, _value_set_cfg, summary) -> summary)
-  in
+  let analysis = analyze_inter module_ schedule in
   Spec_inference.use_const := original_use_const;
   Spec_inference.propagate_globals := original_prop_globals;
   Spec_inference.propagate_locals := original_prop_locals;
-  (cfg_pointers, instructions_from_pointer_cfg, summaries)
+  let analysis = 
+    analysis
+    |> Int32Map.map
+      ~f:(fun (cfg_spec, cfg_pointers, summary) ->
+        Some cfg_pointers, Some (cfg_spec |> Cfg.all_instructions), summary) in
+  List.fold_left module_.imported_funcs
+    ~init:analysis
+    ~f:(fun acc desc ->
+        Int32Map.set acc ~key:desc.idx ~data:(None, None, Summary.of_import desc.idx desc.name module_.nglobals desc.arguments desc.returns))
 
 
 

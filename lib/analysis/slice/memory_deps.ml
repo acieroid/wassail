@@ -394,12 +394,14 @@ let functions_potentially_called
       | ValueSet r when String.(RIC.extract_relative_offset r <> "") -> indirect_call_targets
       | Boolean {numeric_value = r; _}
       | ValueSet r -> 
-        let table = module_.table_insts |> List.hd_exn in
-        table
-        |> Table_inst.indices
-        |> List.filter ~f:(fun idx -> RIC.(meet (constant idx) r <> Bottom))
-        |> List.filter_map ~f:(fun idx -> Table_inst.get table idx)
-        |> List.filter ~f:(fun idx -> List.mem indirect_call_targets idx ~equal:Int32.(=))
+        match module_.table_insts |> List.hd with
+        | None -> indirect_call_targets (* this can happen if the table is imported *)
+        | Some table ->
+          table
+          |> Table_inst.indices
+          |> List.filter ~f:(fun idx -> RIC.(meet (constant idx) r <> Bottom))
+          |> List.filter_map ~f:(fun idx -> Table_inst.get table idx)
+          |> List.filter ~f:(fun idx -> List.mem indirect_call_targets idx ~equal:Int32.(=))
     else
       indirect_call_targets
 

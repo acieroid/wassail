@@ -91,24 +91,24 @@ EOF
   length_of_function_indices=$(printf '%s\n' "$function_indices" | sed '/^$/d' | wc -l | tr -d ' ')
   echo "Processing $file ($length_of_function_indices functions to slice)"
 
-  for function_index in $function_indices; do
-    seed=$((function_index * number_of_functions))
+  function_indices_csv=$(printf '%s' "$function_indices" | paste -sd, -)
+  seed=$number_of_functions
 
+  printf '   [%s]\n      slicing of functions %s with seed %s\n' "$file_basename" "$function_indices_csv" "$seed"
 
-    printf '   [%s]\n      slicing of function %s with seed %s\n' "$file_basename" "$function_index" "$seed"
-    set +e
-    timeout "${time_limit_seconds}s" wassail slice-evaluator "$file" -f "$function_index" -r 20 -seed "$seed"
-    status=$?
-    set -e
+  set +e
+  timeout "${time_limit_seconds}s" \
+    wassail slice-evaluator "$file" -f "$function_indices_csv" -r 20 -seed "$seed"
+  status=$?
+  set -e
 
-    if [ "$status" -eq 124 ]; then
-      printf '   [%s]\n      function %s timed out after %ss; stopping this file ------------------------------------------timeout\n' "$file_basename" "$function_index" "$time_limit_seconds"
-      return 0
-    elif [ "$status" -ne 0 ]; then
-      echo "[$file_basename] slice evaluator failed with status $status; stopping this file --------------------------------- error" >&2
-      return "$status"
-    fi
-  done
+  if [ "$status" -eq 124 ]; then
+    printf '   [%s]\n      evaluation timed out after %ss; stopping this file ------------------------------------------timeout\n' "$file_basename" "$time_limit_seconds"
+    return 0
+  elif [ "$status" -ne 0 ]; then
+    echo "[$file_basename] slice evaluator failed with status $status; stopping this file --------------------------------- error" >&2
+    return "$status"
+  fi
 }
 
 

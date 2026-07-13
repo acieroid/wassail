@@ -451,7 +451,7 @@ let find_call_indirect_instructions (cfg : Spec_domain.t Cfg.t) : Instr.Label.t 
 module Test = struct
   open Instr.Label.Test
   let build_cfg ?fidx:(fidx : int32 = 0l) (program : string) 
-    : Wasm_module.t * unit Cfg.t * Spec_domain.t Cfg.t =
+    : Wasm_module.t * Spec_domain.t Cfg.t =
     let module_ = Wasm_module.of_string program in 
     let cfg_raw = 
       Cfg_builder.build module_ fidx
@@ -459,14 +459,13 @@ module Test = struct
     let cfg = 
       Spec_inference.Intra.analyze module_ cfg_raw ()
     in
-      (* Spec_analysis.analyze_intra1 module_ fidx in *)
-    (module_, cfg_raw, cfg)
+    (module_, cfg)
 
   let%test "simple slicing - first slicing criterion, only const" =
     Spec_inference.propagate_globals := false;
     Spec_inference.propagate_locals := false;
     Spec_inference.use_const := false;
-    let module_, _, cfg = build_cfg "(module
+    let module_, cfg = build_cfg "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     memory.size ;; Instr 0
@@ -486,7 +485,7 @@ module Test = struct
     Spec_inference.propagate_globals := false;
     Spec_inference.propagate_locals := false;
     Spec_inference.use_const := false;
-    let module_, _, cfg = build_cfg "(module
+    let module_, cfg = build_cfg "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     memory.size ;; Instr 0
@@ -506,7 +505,7 @@ module Test = struct
     Spec_inference.propagate_globals := false;
     Spec_inference.propagate_locals := false;
     Spec_inference.use_const := false;
-    let module_, _, cfg = build_cfg "(module
+    let module_, cfg = build_cfg "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     block         ;; Instr 0
@@ -526,7 +525,7 @@ module Test = struct
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-     let module_, _, cfg = build_cfg "(module
+     let module_, cfg = build_cfg "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     block         ;; Instr 0
@@ -546,7 +545,7 @@ module Test = struct
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-    let module_, _, cfg = build_cfg "(module
+    let module_, cfg = build_cfg "(module
   (type (;0;) (func (param i32) (result i32)))
   (func (;test;) (type 0) (param i32) (result i32)
     memory.size     ;; Instr 0
@@ -575,7 +574,7 @@ module Test = struct
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-     let module_, _, cfg = build_cfg "(module
+     let module_, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
     block (result i32)            ;; Instr 0
@@ -598,7 +597,7 @@ module Test = struct
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-     let module_, _, cfg = build_cfg "(module
+     let module_, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
     block (result i32)            ;; Instr 0
@@ -621,7 +620,7 @@ module Test = struct
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-     let module_, _, cfg = build_cfg "(module
+     let module_, cfg = build_cfg "(module
    (type (;0;) (func (param i32) (result i32)))
    (func (;test;) (type 0) (param i32) (result i32)
     block (result i32)            ;; Instr 0
@@ -645,10 +644,10 @@ module Test = struct
      Spec_inference.propagate_globals := false;
      Spec_inference.propagate_locals := false;
      Spec_inference.use_const := false;
-     let module_, cfg_raw, cfg = build_cfg ~fidx original in
+     let module_, cfg = build_cfg ~fidx original in
      let pointer_analysis : Value_set.pointer_analysis option =
        if with_pointer_analysis then
-         Some (Value_set.run_pointer_analysis module_ cfg_raw fidx)
+         Some (Value_set.run_pointer_analysis module_ |> Value_set.intra_of_inter_exn ~fidx)
        else
          None
      in
@@ -658,7 +657,7 @@ module Test = struct
        (lab ~fidx criterion) in
      Printf.printf "[%s]\n\tslicing criterion: %s\n" test_name (Instr.to_string instruction);
      let actual = (slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.singleton (lab ~fidx criterion)) pointer_analysis).code.body in
-     let _, _, expected_cfg = build_cfg ~fidx sliced in
+     let _, expected_cfg = build_cfg ~fidx sliced in
      let expected = Cfg.body expected_cfg in
      if List.length expected <> List.length actual then begin
        Log.error (fun () -> Printf.sprintf "slices are different:\n---expected:---\n%s\n---\nand\n---actual:---\n%s\n---\n"
