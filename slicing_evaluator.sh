@@ -3,17 +3,28 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 DIRECTORY"
+  echo "Usage: $0 DIRECTORY [all]"
   echo
   echo "Runs the slice evaluator on every .wat and .wasm file under DIRECTORY, recursively."
+  echo "Pass 'all' to run wassail slice-evaluator with the -all option."
 }
 
-if [ "$#" -ne 1 ]; then
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
   usage >&2
   exit 1
 fi
 
 dir=$1
+run_all=false
+
+if [ "$#" -eq 2 ]; then
+  if [ "$2" != "all" ]; then
+    echo "Error: optional second argument must be 'all'" >&2
+    usage >&2
+    exit 1
+  fi
+  run_all=true
+fi
 
 
 if [ ! -d "$dir" ]; then
@@ -97,8 +108,13 @@ EOF
   printf '   [%s]\n      slicing of functions %s with seed %s\n' "$file_basename" "$function_indices_csv" "$seed"
 
   set +e
-  timeout "${time_limit_seconds}s" \
-    wassail slice-evaluator "$file" -f "$function_indices_csv" -r 20 -seed "$seed"
+  if [ "$run_all" = true ]; then
+    timeout "${time_limit_seconds}s" \
+      wassail slice-evaluator "$file" -f "$function_indices_csv" -r 20 -seed "$seed" -all
+  else
+    timeout "${time_limit_seconds}s" \
+      wassail slice-evaluator "$file" -f "$function_indices_csv" -r 20 -seed "$seed"
+  fi
   status=$?
   set -e
 
@@ -115,11 +131,15 @@ EOF
 export -f process_file
 export random_seed
 export time_limit_seconds
+export run_all
 
 echo "Running with $parallel_jobs parallel job(s)"
 
+set +e
 find "$dir" -type f \( -name '*.wat' -o -name '*.wasm' \) -print0 \
   | parallel -0 --line-buffer -j "$parallel_jobs" process_file {}
+parallel_status=$?
+set -e
 
 data_file="$dir/data.csv"
 : > "$data_file"
@@ -141,3 +161,4 @@ else
 fi
 
 print_elapsed_time
+exit "$parallel_status"

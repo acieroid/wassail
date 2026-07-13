@@ -184,8 +184,13 @@ let output_slicing_result filename = function
     output "loaderror.txt" [filename]
 
 
-let slices ~(fid : int list option) (filename : string) (criterion_selection : [`Random of int | `All | `Last ]) : unit =
-  (* try *)
+let slices 
+    ~(fid : int list option) 
+    (filename : string) 
+    (criterion_selection : [`Random of int | `All | `Last ]) 
+    ~(all_functions : bool)
+  : unit =
+  try
     Spec_inference.propagate_globals := false;
     Spec_inference.propagate_locals := false;
     Spec_inference.use_const := false;
@@ -205,24 +210,28 @@ let slices ~(fid : int list option) (filename : string) (criterion_selection : [
       in
       let vsa_time = Time_float.diff (Time_float.now ()) t0 in
       let funcs =
-        match fid with
-        | None ->
-          (let sample_size = (float_of_int (List.length funcs) *. 0.96) 
-                              /. ((0.01 *. (float_of_int (List.length funcs - 1))) +. 1.92)
-                              |> int_of_float in
-          let funcs_array = funcs |> Array.of_list in
-          (for i = 0 to sample_size - 1 do
-            let tmp = funcs_array.(i) in
-            let j = i + Random.int (Array.length funcs_array - i) in
-            funcs_array.(i) <- funcs_array.(j);
-            funcs_array.(j) <- tmp;
-          done;
-          Array.sub funcs_array ~pos:0 ~len:sample_size |> Array.to_list))
-        | Some fid -> funcs |> List.filter ~f:(fun f -> List.mem fid (Int32.to_int_exn f.idx) ~equal:Int.equal)
+        if all_functions then
+          funcs
+        else
+          match fid with
+          | None ->
+            (let sample_size = (float_of_int (List.length funcs) *. 0.96) 
+                                /. ((0.01 *. (float_of_int (List.length funcs - 1))) +. 1.92)
+                                |> int_of_float in
+            let funcs_array = funcs |> Array.of_list in
+            (for i = 0 to sample_size - 1 do
+              let tmp = funcs_array.(i) in
+              let j = i + Random.int (Array.length funcs_array - i) in
+              funcs_array.(i) <- funcs_array.(j);
+              funcs_array.(j) <- tmp;
+            done;
+            Array.sub funcs_array ~pos:0 ~len:sample_size |> Array.to_list))
+          | Some fid -> 
+            funcs |> List.filter ~f:(fun f -> List.mem fid (Int32.to_int_exn f.idx) ~equal:Int.equal)
       in
       List.iter funcs ~f:(fun func ->
         let labels = func.code.body |> all_labels_no_blocks |> Instr.Label.Set.to_array in
-        (* try *)
+        try
           let t0 = Time_float.now () in
           let cfg_raw = Cfg_builder.build module_ func.idx in
           let cfg_time = Time_float.diff (Time_float.now ()) t0 in
@@ -374,20 +383,24 @@ let slices ~(fid : int list option) (filename : string) (criterion_selection : [
                       (output_slicing_result filename 
                         (SliceError (func.idx, slicing_criterion, Array.length labels_without_constants_no_unreachable, "Exception raised when calculating instructions to keep WITHOUT pointer analysis: " ^ Exn.to_string_mach e)));
                       if !single_file then raise StopExecution)
-        (* with e -> 
+        with e -> 
           match e with
           | StopExecution -> raise StopExecution
           | e -> (output_slicing_result filename (CfgError (func.idx, Array.length labels, Exn.to_string_mach e)));
-            if !single_file then raise StopExecution *)
-              )
-  (* with e ->
+            if !single_file then raise StopExecution)
+  with e ->
     match e with
     | StopExecution -> raise StopExecution
     | e -> (output_slicing_result filename (LoadError (Exn.to_string e));
-      if !single_file then raise StopExecution) *)
+      if !single_file then raise StopExecution)
 
-let evaluate_file ~(fid : int list option) (filename : string) (criterion_selection : [`All | `Random of int | `Last]) : unit =
-  slices ~fid filename criterion_selection
+let evaluate_file 
+    ~(fid : int list option) 
+    (filename : string) 
+    (criterion_selection : [`All | `Random of int | `Last])
+    ~(all_functions : bool)
+  : unit =
+  slices ~fid filename criterion_selection ~all_functions
 
 
 
@@ -475,8 +488,9 @@ let evaluate =
     Command.Let_syntax.(
       let%map_open filename = anon ("path" %: string)
       and funcs = flag "-f" (optional int_list_arg_type) ~doc:"FUNCTIONS comma-separated function indices to analyze (default: randomly selected sample)"
-      and prefix_opt = flag "-p" (optional string) ~doc:"prefix for where to save the results file (default: current directory)"
-      and all = flag "-a" no_arg ~doc:"slice on all functions, for all slicing criteria"
+      and prefix_opt = flag "-p" (optional string) ~doc:"PREFIX for where to save the results file (default: current directory)"
+      and all = flag "-a" no_arg ~doc:"slice for all slicing criteria"
+      and all_functions = flag "-all" no_arg ~doc:"slice all functions (default: randomly generated sample)"
       and last = flag "-l" no_arg ~doc:"slice on all functions, for the last slicing criterion" 
       and random = flag "-r" (optional int) ~doc:"N slice on a statistically significant subset of functions, for N random slicing criteria (default: 1 criterion)"
       and seed = flag "-seed" (optional int) ~doc:"N initialize the random number generator with seed N"
@@ -498,7 +512,7 @@ let evaluate =
           (* analyzing a single file *)
           (single_file := true;
           initialize_output_file (Filename.basename filename ^ ".data.csv");
-          evaluate_file ~fid:funcs filename criterion_selection)
+          evaluate_file ~fid:funcs filename criterion_selection ~all_functions)
         else
           (* analyzing a folder *)
           (single_file := false;
@@ -506,5 +520,5 @@ let evaluate =
           |> List.iter ~f:(fun file ->
               initialize_output_file (Filename.basename file ^ ".data.csv");
               Printf.printf "Processing %s\n%!" file;
-              evaluate_file ~fid:None file criterion_selection))
+              evaluate_file ~fid:None file criterion_selection ~all_functions))
     )
