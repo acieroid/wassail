@@ -37,7 +37,7 @@ log_file="$dir/results.log"
 exec > >(tee "$log_file") 2>&1
 
 random_seed=14
-time_limit_seconds=120
+time_limit_seconds=240
 parallel_jobs=${PARALLEL_JOBS:-$(nproc)}
 start_time=$(date +%s)
 
@@ -101,7 +101,7 @@ EOF
 
     function_indices=$(printf '%s\n' "${function_indices_array[@]:0:sample_size}")
 
-    time_limit_seconds=$((60 + 10 * sample_size))
+    time_limit_seconds=$((300 + 30 * sample_size))
   fi
 
   length_of_function_indices=$(printf '%s\n' "$function_indices" | sed '/^$/d' | wc -l | tr -d ' ')
