@@ -378,8 +378,10 @@ let rec of_wasm (m : Wasm.Ast.module_) (new_label : unit -> Label.t) (i : Wasm.A
     data_labelled (Select (Option.map ~f:(List.map ~f:Type.of_wasm) types))
   | Loop (st, instrs) ->
     let (arity_in, arity_out) = Wasm_helpers.arity_of_block m st in
-    assert (arity_in = 0); (* what does it mean to have arity_in > 0 for a loop? *)
-    assert (arity_out <= 1); (* XXX: support any arity out? *)
+    if arity_in <> 0 then
+      failwith "Unsupported: loop with non-zero input arity";
+    if arity_out > 1 then
+      failwith "Unsupported: loop with more than one return value";
     let label = new_label () in
     let body = seq_of_wasm m new_label instrs in
     control_labelled ~label:label (Loop (Wasm_helpers.type_of_block m st, (arity_in, arity_out), body))
