@@ -101,7 +101,7 @@ EOF
 
     function_indices=$(printf '%s\n' "${function_indices_array[@]:0:sample_size}")
 
-    time_limit_seconds=$((300 + 30 * sample_size))
+    time_limit_seconds=$(awk -v n="$sample_size" 'BEGIN { printf "%d", 240 + 10 * sqrt(n) }')
   fi
 
   length_of_function_indices=$(printf '%s\n' "$function_indices" | sed '/^$/d' | wc -l | tr -d ' ')
