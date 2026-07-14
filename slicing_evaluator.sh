@@ -154,7 +154,7 @@ first_data_csv=$(find "$dir" -maxdepth 1 -type f -name '*.data.csv' | sort | hea
 if [ -n "$first_data_csv" ]; then
   head -n 1 "$first_data_csv" > "$data_file"
 
-  find "$dir" -maxdepth 1 -type f -name '*.data.csv' -print0 \
+  find "$dir" -type f -name '*.data.csv' -print0 \
     | sort -z \
     | while IFS= read -r -d '' file; do
         tail -n +2 "$file" >> "$data_file"
