@@ -65,39 +65,42 @@ process_file() {
 
   function_indices=$(wassail functions "$file" | awk '{print $1}')
   number_of_functions=$(printf '%s\n' "$function_indices" | sed '/^$/d' | wc -l | tr -d ' ')
-  sample_size=$(awk -v n="$number_of_functions" 'BEGIN { printf "%d", (n * 0.96) / ((0.01 * (n - 1)) + 1.92) }')
-
-  sample_threshold=20
 
   if [ "$number_of_functions" -eq 0 ]; then
     echo "Skipping $file (no functions found)"
     return 0
   fi
 
-  if [ "$sample_size" -lt "$sample_threshold" ]; then
-    sample_size=$sample_threshold
-  fi
+  if [ "$run_all" = false ]; then
+    sample_size=$(awk -v n="$number_of_functions" 'BEGIN { printf "%d", (n * 0.96) / ((0.01 * (n - 1)) + 1.92) }')
 
-  if [ "$sample_size" -gt "$number_of_functions" ]; then
-    sample_size=$number_of_functions
-  fi
-    
-  function_indices_array=()
-  while IFS= read -r function_index; do
-    function_indices_array+=("$function_index")
-  done <<EOF
+    sample_threshold=20
+
+    if [ "$sample_size" -lt "$sample_threshold" ]; then
+      sample_size=$sample_threshold
+    fi
+
+    if [ "$sample_size" -gt "$number_of_functions" ]; then
+      sample_size=$number_of_functions
+    fi
+
+    function_indices_array=()
+    while IFS= read -r function_index; do
+      function_indices_array+=("$function_index")
+    done <<EOF
 $function_indices
 EOF
 
-  for ((i = 0; i < sample_size; i++)); do
-    j=$((i + RANDOM % (number_of_functions - i)))
+    for ((i = 0; i < sample_size; i++)); do
+      j=$((i + RANDOM % (number_of_functions - i)))
 
-    tmp=${function_indices_array[$i]}
-    function_indices_array[$i]=${function_indices_array[$j]}
-    function_indices_array[$j]=$tmp
-  done
+      tmp=${function_indices_array[$i]}
+      function_indices_array[$i]=${function_indices_array[$j]}
+      function_indices_array[$j]=$tmp
+    done
 
-  function_indices=$(printf '%s\n' "${function_indices_array[@]:0:sample_size}")
+    function_indices=$(printf '%s\n' "${function_indices_array[@]:0:sample_size}")
+  fi
 
   length_of_function_indices=$(printf '%s\n' "$function_indices" | sed '/^$/d' | wc -l | tr -d ' ')
   echo "Processing $file ($length_of_function_indices functions to slice)"
@@ -110,7 +113,7 @@ EOF
   set +e
   if [ "$run_all" = true ]; then
     timeout "${time_limit_seconds}s" \
-      wassail slice-evaluator "$file" -f "$function_indices_csv" -r 20 -seed "$seed" -all
+      wassail slice-evaluator "$file" -f "$function_indices_csv" -a -seed "$seed" -all
   else
     timeout "${time_limit_seconds}s" \
       wassail slice-evaluator "$file" -f "$function_indices_csv" -r 20 -seed "$seed"

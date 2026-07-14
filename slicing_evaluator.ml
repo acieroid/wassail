@@ -489,7 +489,7 @@ let evaluate =
       let%map_open filename = anon ("path" %: string)
       and funcs = flag "-f" (optional int_list_arg_type) ~doc:"FUNCTIONS comma-separated function indices to analyze (default: randomly selected sample)"
       and prefix_opt = flag "-p" (optional string) ~doc:"PREFIX for where to save the results file (default: current directory)"
-      and all = flag "-a" no_arg ~doc:"slice for all slicing criteria"
+      and all_criteria = flag "-a" no_arg ~doc:"slice for all slicing criteria"
       and all_functions = flag "-all" no_arg ~doc:"slice all functions (default: randomly generated sample)"
       and last = flag "-l" no_arg ~doc:"slice on all functions, for the last slicing criterion" 
       and random = flag "-r" (optional int) ~doc:"N slice on a statistically significant subset of functions, for N random slicing criteria (default: 1 criterion)"
@@ -507,7 +507,7 @@ let evaluate =
         let criterion_selection = 
           match random with
             | Some n -> `Random n
-            | None -> if all then `All else if last then `Last else `Random 1 in
+            | None -> if all_criteria then `All else if last then `Last else `Random 1 in
         if String.is_suffix filename ~suffix:".wat" || String.is_suffix filename ~suffix:".wasm" then
           (* analyzing a single file *)
           (single_file := true;
