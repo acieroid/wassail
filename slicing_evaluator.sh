@@ -100,6 +100,8 @@ EOF
     done
 
     function_indices=$(printf '%s\n' "${function_indices_array[@]:0:sample_size}")
+
+    time_limit_seconds=$((60 + 10 * sample_size))
   fi
 
   length_of_function_indices=$(printf '%s\n' "$function_indices" | sed '/^$/d' | wc -l | tr -d ' ')
