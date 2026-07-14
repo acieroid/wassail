@@ -558,9 +558,10 @@ let call_depends_on_call
         if Set.is_empty globals_modified_by_fct2 then
           None
         else
-          match Int32Map.find_exn global_deps fct_1_index with
-          | Top -> Some depends_on_this_call
-          | NotTop globals_read_by_fct1 ->
+          match Int32Map.find global_deps fct_1_index with
+          | None -> Some depends_on_this_call (* fct1 is probably an imported function *)
+          | Some Top -> Some depends_on_this_call
+          | Some NotTop globals_read_by_fct1 ->
             if Global_read_domain.to_variable_names globals_read_by_fct1
                 |> Set.inter globals_modified_by_fct2 
                 |> Set.is_empty 
