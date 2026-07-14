@@ -33,7 +33,7 @@ let check (expected : Summary.t) (actual : Summary.t) : bool =
     if Summary.equal actual expected then
       true
     else begin
-      Log.imprecision (fun () -> Printf.sprintf "summaries not equal: expected: %s; actual: %s" (Summary.to_string expected) (Summary.to_string actual));
+      (* Log.imprecision (fun () -> Printf.sprintf "summaries not equal: expected: %s; actual: %s" (Summary.to_string expected) (Summary.to_string actual)); *)
       true (* not equal, but it does subsume so the test does not fail *)
     end
   else begin

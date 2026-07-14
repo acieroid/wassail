@@ -1,6 +1,8 @@
 open Core
 open Helpers
 
+let narrow_option = ref false
+
 (** A simple intra-procedural analysis *)
 module type INTRA_ONLY = sig
 
@@ -51,6 +53,7 @@ module Result (Transfer : Transfer.TRANSFER_BASE) = struct
     | Branch of Transfer.State.t * Transfer.State.t (** Upon a `br_if`, there are two successor states: one where the condition holds, and where where it does not hold. This is used to model that. *)
   [@@deriving compare]
 
+
   (** The results of an intra analysis are a mapping from instruction labels to their in and out values *)
   type intra_results = {
     instrs: (Transfer.State.t * t) Instr.Label.Map.t;
@@ -70,10 +73,10 @@ module Result (Transfer : Transfer.TRANSFER_BASE) = struct
 
   let join  (r1 : t) (r2 : t) : t =
     match (r1, r2) with
-    | Simple s1, _ when Transfer.State.equal s1 Transfer.bottom -> r2
-    | _, Simple s2 when Transfer.State.equal s2 Transfer.bottom -> r1
     | Uninitialized, _ -> r2
     | _, Uninitialized -> r1
+    | Simple s1, _ when Transfer.State.equal s1 Transfer.bottom -> r2
+    | _, Simple s2 when Transfer.State.equal s2 Transfer.bottom -> r1
     | Simple st1, Simple st2 ->
       let joined = Transfer.State.join st1 st2 in
       Simple joined
@@ -327,7 +330,7 @@ module MakeSumm
     let rec fixpoint (worklist : Cfg.BlockIdx.Set.t) (iteration : int) : unit =
       if IntSet.is_empty worklist then
         () (* No more elements to consider. We can stop here *)
-      else
+      else begin
         let block_idx = Set.min_elt_exn worklist in
         Log.debug (fun () -> Printf.sprintf "-----------------------\n Analyzing block %s\n" (Cfg.BlockIdx.to_string block_idx));
         let (in_state, out_state) = analyze_block block_idx in
@@ -352,6 +355,7 @@ module MakeSumm
           (* And recurse by adding all successors *)
           let successors = Cfg.successors cfg block_idx in
           fixpoint (IntSet.union (IntSet.remove worklist block_idx) (Cfg.BlockIdx.Set.of_list successors)) (iteration+1)
+      end
     in
     (* Performs narrowing by re-analyzing once each block *)
     let rec narrow (blocks : Cfg.BlockIdx.t list) : unit = match blocks with
