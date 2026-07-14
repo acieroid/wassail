@@ -63,36 +63,38 @@ struct
       in
       let indirect_call_targets = Call_graph.indirect_call_targets module_ typ in
       if List.is_empty indirect_call_targets then 
-        (Log.error (fun () -> "indirect call doesn't target any function in the table"); 
-        failwith "invalid program: indirect call doesn't target any function in the table");
-      let targets =
-        if module_.tables |> List.length |> (=) 1 then
-          match call_index with
-          | Bitfield _ -> indirect_call_targets
-          | Boolean {numeric_value = r; _}
-          | ValueSet r when String.(RIC.extract_relative_offset r <> "") -> indirect_call_targets
-          | Boolean {numeric_value = Top; _}
-          | ValueSet Top -> indirect_call_targets
-          | Boolean {numeric_value = r; _}
-          | ValueSet r -> 
-            let table = module_.table_insts |> List.hd_exn in
-            table
-            |> Table_inst.indices
-            (* only keep table indices that intersect with the selected index: *)
-            |> List.filter ~f:(fun idx -> RIC.(meet (constant idx) r <> Bottom))
-            (* extract functions from table: *)
-            |> List.filter_map ~f:(fun idx -> Table_inst.get table idx)
-            (* only keep actual targets: *)
-            |> List.filter ~f:(fun idx -> List.mem indirect_call_targets idx ~equal:Int32.(=))
+        (Log.warn (fun () -> "indirect call doesn't target any function in the table: this would fail at runtime"); 
+        { Domain.bottom with unreachable = true })
+      else
+        (let targets =
+          if module_.tables |> List.length |> (=) 1 then
+            match call_index with
+            | Bitfield _ -> indirect_call_targets
+            | Boolean {numeric_value = r; _}
+            | ValueSet r when String.(RIC.extract_relative_offset r <> "") -> indirect_call_targets
+            | Boolean {numeric_value = Top; _}
+            | ValueSet Top -> indirect_call_targets
+            | Boolean {numeric_value = r; _}
+            | ValueSet r -> 
+              let table = module_.table_insts |> List.hd_exn in
+              table
+              |> Table_inst.indices
+              (* only keep table indices that intersect with the selected index: *)
+              |> List.filter ~f:(fun idx -> RIC.(meet (constant idx) r <> Bottom))
+              (* extract functions from table: *)
+              |> List.filter_map ~f:(fun idx -> Table_inst.get table idx)
+              (* only keep actual targets: *)
+              |> List.filter ~f:(fun idx -> List.mem indirect_call_targets idx ~equal:Int32.(=))
+          else
+            indirect_call_targets
+        in
+        if Value_set_abstraction.(call_index <> bottom) && List.is_empty targets then 
+          (Log.warn (fun () -> "indirect call index doesn't match any function in the table: this would likely fail at runtime"); 
+          { Domain.bottom with unreachable = true })
         else
-          indirect_call_targets
-      in
-      if Value_set_abstraction.(call_index <> bottom) && List.is_empty targets then 
-        (Log.error (fun () -> "indirect call index doesn't match any function in the table"); 
-        failwith "invalid program: indirect call index doesn't match any function in the table");
-      List.fold_left targets
-        ~init:Transfer.bottom
-        ~f:(fun acc idx -> Domain.join (apply_summary ~indirect:true idx arity state) acc)
+          List.fold_left targets
+            ~init:Transfer.bottom
+            ~f:(fun acc idx -> Domain.join (apply_summary ~indirect:true idx arity state) acc))
 end
 module Intra = Intra.MakeSumm(TransferFunction)(ValueSetCallAdapter)
 module Inter = Inter.MakeSummaryBased(TransferFunction)(Intra)
