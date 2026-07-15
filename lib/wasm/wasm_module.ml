@@ -117,18 +117,21 @@ let replace_func (m : t) (fidx : Int32.t) (finst : Func_inst.t) : t =
 
 (** Constructs a Wasm_module *)
 let of_wasm (m : Wasm.Ast.module_) : t =
-  let imported_funcs = List.filter_mapi m.it.imports ~f:(fun idx import -> match import.it.idesc.it with
-      | FuncImport v ->
-        let idx = Int32.of_int_exn idx in
-        let name = Wasm.Ast.string_of_name import.it.item_name in
-        let type_idx = v.it in
-        let arguments, returns =
-          match (List32.nth m.it.types type_idx) with
-          | Some {it = Wasm.Types.FuncType (a, b); _} ->
-            (List.map a ~f:Type.of_wasm, List.map b ~f:Type.of_wasm)
-          | None -> failwith "of_wasm: nth error when looking for imports" in
-        Some { idx; type_idx; name; arguments; returns }
-      | _ -> None) in
+  let imported_funcs =
+    fst (List.fold m.it.imports ~init:([], 0) ~f:(fun (acc, func_idx) import ->
+        match import.it.idesc.it with
+        | FuncImport v ->
+          let idx = Int32.of_int_exn func_idx in
+          let name = Wasm.Ast.string_of_name import.it.item_name in
+          let type_idx = v.it in
+          let arguments, returns =
+            match (List32.nth m.it.types type_idx) with
+            | Some {it = Wasm.Types.FuncType (a, b); _} ->
+              (List.map a ~f:Type.of_wasm, List.map b ~f:Type.of_wasm)
+            | None -> failwith "of_wasm: nth error when looking for imports" in
+          ({ idx; type_idx; name; arguments; returns } :: acc, func_idx + 1)
+        | _ -> (acc, func_idx)))
+    |> List.rev in
   let nfuncimports = List32.length imported_funcs in
   let imported_globals = List.filter_map m.it.imports ~f:(fun import -> match import.it.idesc.it with
       | GlobalImport t -> Some (Global.of_wasm_import t)
@@ -389,6 +392,16 @@ module Test = struct
     let m: t = of_file "../../../test/call_indirect-with_imported_element.wat" in
     let (t1, t2) = get_func_type m 0l in
     List.is_empty t1 && (List.length t2) = 1 && Type.equal (List.hd_exn t2) Type.I32
+
+  let%test_unit "imported function indices ignore non-function imports" =
+    let m = of_string "(module
+      (type (func))
+      (import \"env\" \"g\" (global i32))
+      (import \"env\" \"mem\" (memory 1))
+      (import \"env\" \"f0\" (func (type 0)))
+      (import \"env\" \"f1\" (func (type 0)))
+      (func (type 0)))" in
+    [%test_result: Int32.t list] (List.map m.imported_funcs ~f:(fun f -> f.idx)) ~expect:[0l; 1l]
 
   let%test_unit "exported imported function keeps its type" =
     let m = of_string "(module

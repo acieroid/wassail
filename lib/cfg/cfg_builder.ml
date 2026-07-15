@@ -491,4 +491,15 @@ module Test = struct
   let%test_unit "CFG for memcpy.wat can be built" = test_cfgs "../../../test/memcpy.wat"
   let%test_unit "CFG for loop.wat can be built" = test_cfgs "../../../test/loop.wat"
   let%test_unit "CFG for loop-brif.wat can be built" = test_cfgs "../../../test/loop-brif.wat"
+
+  let%test_unit "CFGs for mixed imports do not collide with defined functions" =
+    let wasm_mod = Wasm_module.of_string "(module
+      (type (func))
+      (import \"env\" \"g\" (global i32))
+      (import \"env\" \"mem\" (memory 1))
+      (import \"env\" \"f0\" (func (type 0)))
+      (import \"env\" \"f1\" (func (type 0)))
+      (func (type 0)))" in
+    let cfgs = build_all wasm_mod in
+    [%test_result: Int32.t list] (Int32Map.keys cfgs) ~expect:[0l; 1l; 2l]
 end
