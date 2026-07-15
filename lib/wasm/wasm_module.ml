@@ -150,6 +150,15 @@ let of_wasm (m : Wasm.Ast.module_) : t =
         assert Int32.(f.idx = fidx);
         f.typ
       | None -> failwith (Printf.sprintf "of_wasm: nth error when looking for function type (function %ld unfound in type list of length %ld)" Int32.(fidx-nfuncimports) (List32.length funcs)) in
+  let func_type_idx (fidx : Int32.t) : Int32.t =
+    if Int32.(fidx < nfuncimports) then
+      match List32.nth imported_funcs fidx with
+      | Some desc -> desc.type_idx
+      | None -> failwith "of_wasm: nth error when looking for imported function type idx"
+    else
+      match List32.nth funcs Int32.(fidx-nfuncimports) with
+      | Some f -> f.type_idx
+      | None -> failwith (Printf.sprintf "of_wasm: nth error when looking for function type (function %ld unfound in type list of length %ld)" Int32.(fidx-nfuncimports) (List32.length funcs)) in
   let exports = List.map m.it.exports ~f:Export.of_wasm in
   let exported_funcs = List.filter_map m.it.exports ~f:(fun export -> match export.it.edesc.it with
       | FuncExport v ->
@@ -157,10 +166,7 @@ let of_wasm (m : Wasm.Ast.module_) : t =
         let arguments, returns = ftype idx in
         Some {
           idx;
-          type_idx = begin match List32.nth funcs Int32.(idx-nfuncimports) with
-            | Some f -> f.type_idx
-            | None -> failwith (Printf.sprintf "of_wasm: nth error when looking for function type (function %ld unfound in type list of length %ld)" Int32.(idx-nfuncimports) (List32.length funcs))
-          end;
+          type_idx = func_type_idx idx;
           name = Wasm.Ast.string_of_name export.it.name;
           arguments;
           returns;
@@ -383,4 +389,12 @@ module Test = struct
     let m: t = of_file "../../../test/call_indirect-with_imported_element.wat" in
     let (t1, t2) = get_func_type m 0l in
     List.is_empty t1 && (List.length t2) = 1 && Type.equal (List.hd_exn t2) Type.I32
+
+  let%test_unit "exported imported function keeps its type" =
+    let m = of_string "(module
+      (type (func (param i32) (result i32)))
+      (import \"env\" \"f\" (func (type 0)))
+      (export \"f\" (func 0)))" in
+    [%test_result: Int32.t list] (List.map m.exported_funcs ~f:(fun f -> f.idx)) ~expect:[0l];
+    [%test_result: Int32.t list] (List.map m.exported_funcs ~f:(fun f -> f.type_idx)) ~expect:[0l]
 end
