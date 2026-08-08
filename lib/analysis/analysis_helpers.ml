@@ -23,13 +23,34 @@ let mk_inter
     (init_data : unit Cfg.t Int32Map.t -> Wasm_module.t -> 'a Int32Map.t)
     (analysis : Wasm_module.t -> cfgs:Spec_domain.t Cfg.t Int32Map.t -> summaries:'a Int32Map.t -> 'a Int32Map.t)
   : Wasm_module.t -> Int32.t list list -> 'a Int32Map.t = fun wasm_mod sccs ->
-  let cfgs = Cfg_builder.build_all wasm_mod in
+  let cfgs = Cfg_builder.build_all wasm_mod |> Int32Map.filter_keys ~f:(fun key -> Int32.(key >= wasm_mod.nfuncimports)) in
   let annotated_cfgs = Int32Map.map cfgs ~f:(fun cfg -> Spec_inference.Intra.analyze wasm_mod cfg ()) in
   List.fold_left sccs
     ~init:(init_data cfgs wasm_mod)
     ~f:(fun summaries funs ->
         let scc_cfgs = Int32Map.filter_keys annotated_cfgs ~f:(fun idx -> List.mem funs idx ~equal:Stdlib.(=)) in
         let updated_summaries = analysis wasm_mod ~cfgs:scc_cfgs ~summaries in
+        Int32Map.fold updated_summaries
+          ~init:summaries
+          ~f:(fun ~key:idx ~data:sum acc ->
+              Int32Map.set acc ~key:idx ~data:sum))
+
+let mk_inter_with_preanalysis
+    (preanalysis : Wasm_module.t -> cfgs:Spec_domain.t Cfg.t Int32Map.t -> 'ctx)
+    (init_data : unit Cfg.t Int32Map.t -> Wasm_module.t -> 'a Int32Map.t)
+    (analysis : 'ctx -> Wasm_module.t -> cfgs:Spec_domain.t Cfg.t Int32Map.t -> summaries:'a Int32Map.t -> 'a Int32Map.t)
+  : Wasm_module.t -> Int32.t list list -> 'a Int32Map.t = fun wasm_mod sccs ->
+  let cfgs = Cfg_builder.build_all wasm_mod in
+  let annotated_cfgs = 
+    cfgs |> Int32Map.filter_keys ~f:(fun fid -> Int32.(fid >= wasm_mod.nfuncimports))
+    |>
+    Int32Map.map ~f:(fun cfg -> Spec_inference.Intra.analyze wasm_mod cfg ()) in
+  let preanalysis_result = preanalysis wasm_mod ~cfgs:annotated_cfgs in
+  List.fold_left sccs
+    ~init:(init_data cfgs wasm_mod)
+    ~f:(fun summaries funs ->
+        let scc_cfgs = Int32Map.filter_keys annotated_cfgs ~f:(fun idx -> List.mem funs idx ~equal:Stdlib.(=)) in
+        let updated_summaries = analysis preanalysis_result wasm_mod ~cfgs:scc_cfgs ~summaries in
         Int32Map.fold updated_summaries
           ~init:summaries
           ~f:(fun ~key:idx ~data:sum acc ->

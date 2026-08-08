@@ -265,7 +265,9 @@
       br_if 0 (;@1;)
     end
     call 3
-    i32.const 0)
+    i32.const 0
+    ;; return
+    )
   (func (;5;) (type 3) (param i32) (result i32)
     (local i32 i32 i32)
     local.get 0

@@ -1307,17 +1307,17 @@
             i32.shl
             call 14
             i32.store offset=20
-            local.get 0
-            local.get 0
-            i32.load offset=24
+            local.get 0          ;; address for the useless i32.store -> to be replaced by dummy const 0
+            local.get 0          ;; address to be loaded from
+            i32.load offset=24   ;; arg 1 for call 14
             local.get 2
-            i32.const 2
-            i32.shl
-            call 14
-            i32.store offset=24
+            i32.const 2          
+            i32.shl              ;; arg 2 for call 14
+            call 14              ;; value to be stored (turns out this is probably required by the slicing criterion)
+            i32.store offset=24  ;; this store seems to be removed, but not the instructions leading to it!
           end
           local.get 0
-          i32.load offset=16
+          i32.load offset=16     ;; slicing criterion
           call 12
           local.get 0
           local.get 2

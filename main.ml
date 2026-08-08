@@ -4,7 +4,7 @@ let report_time (msg : string) (t0 : Time_float.t) (t1 : Time_float.t) : unit =
   Printf.printf "Time_float for '%s': %s\n%!" msg (Time_float.Span.to_string (Time_float.diff t1 t0))
 
 let () =
-  Wassail.Log.enable_info ();
+  (* Wassail.Log.enable_info (); *)
   Command_unix.run ~version:"0.0"
     (Command.group ~summary:"Static analysis of WebAssembly"
        [
@@ -61,4 +61,15 @@ let () =
        ; "gen-slice-specific", Slicing_evaluation.gen_slice_specific
        ; "find-criterion", Slicing_evaluation.find_criterion
        ; "count-in-slice", Slicing_evaluation.count_in_slice
+       ; "slice-evaluator", Slicing_evaluator.evaluate
+
+       (* Pointer analysis *)
+       ; "value-set-intra", Analysis.value_set_intra
+       ; "value-set-cfg", Analysis.value_set_cfg
+       ; "value-set-inter", Analysis.value_set_inter
+       ; "value-set-inter-classical", Analysis.value_set_inter_classical
+
+       (* Global variables usage *)
+       ; "globals-usage", Analysis.globals_usage
+       
        ])

@@ -114,7 +114,7 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
               let cfg = Spec_inference.Intra.analyze module_ cfg_raw () in
               let spec_time = Time_float.diff (Time_float.now ()) t0 in
               let cfg_instructions = Cfg.all_instructions cfg in
-              let preanalysis = Slicing.preanalysis module_ cfg cfg_instructions in
+              let preanalysis = Slicing.preanalysis module_ cfg cfg_instructions None in
               List.iter (match criterion_selection with
                   | `Random -> [Array.get labels (Random.int (Array.length labels))]
                   | `All -> Array.to_list labels
@@ -124,7 +124,7 @@ let slices (filename : string) (criterion_selection : [`Random | `All | `Last ])
                       let instrs_to_keep, (control_time, data_time, mem_time, global_time, slicing_time1) = Slicing.instructions_to_keep module_ cfg cfg_instructions preanalysis (Instr.Label.Set.singleton slicing_criterion) in
                       try
                         let t0 = Time_float.now () in
-                        let sliced_func = Slicing.slice_to_funcinst module_ cfg ~instrs:(Some instrs_to_keep) cfg_instructions (Instr.Label.Set.singleton slicing_criterion) in
+                        let sliced_func = Slicing.slice_to_funcinst module_ cfg ~instrs:(Some instrs_to_keep) cfg_instructions (Instr.Label.Set.singleton slicing_criterion) None in
                         let t1 = Time_float.now () in
                         let slicing_time2 = Time_float.diff t1 t0 in
                         let sliced_labels = all_labels sliced_func.code.body in
@@ -250,7 +250,7 @@ let generate_slice (filename : string) (output_file : string) =
   Spec_inference.propagate_globals := false;
   Spec_inference.propagate_locals := false;
   let cfg = Cfg.without_empty_nodes_with_no_predecessors (Spec_analysis.analyze_intra1 module_ function_idx) in
-  let funcinst = Slicing.slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.of_list (if refined then actual_slicing_criteria else slicing_criteria)) in
+  let funcinst = Slicing.slice_to_funcinst module_ cfg (Cfg.all_instructions cfg) (Instr.Label.Set.of_list (if refined then actual_slicing_criteria else slicing_criteria)) None in
   let module_ = Wasm_module.replace_func module_ function_idx funcinst in
   Out_channel.with_file output_file
     ~f:(fun ch -> 

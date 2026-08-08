@@ -421,6 +421,29 @@ module Cfg = struct
       end
     | Some _  -> failwith "Cfg.is_loop_exn: this is not a control instruction"
 
+    let dummy_cfg : 'a t =
+      {
+        exported = false;
+        name = "";
+        idx = 0l;
+        type_idx = 0l;
+        global_types = [];
+        local_types = [];
+        arg_types = [];
+        return_types = [];
+        basic_blocks = IntMap.empty;
+        edges = IntMap.empty;
+        back_edges = IntMap.empty;
+        entry_block = 0;
+        exit_block = 0;
+        loop_heads = IntSet.empty;
+        instructions = [];
+        label_to_instr = Instr.Label.Map.empty;
+        block_arities = Instr.Label.Map.empty;
+        label_to_enclosing_block = Instr.Label.Map.empty;
+        label_to_enclosing_block_id = Instr.Label.Map.empty;
+      }
+
 end
 
 include Cfg
