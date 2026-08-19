@@ -27,6 +27,7 @@ let () =
        ; "cfg-adjlist", Cfg.cfg_adjlist
        ; "cfgs", Cfg.cfgs
        ; "icfg", Cfg.icfg
+       ; "cpg-json", Cpg.cpg_json
 
        ; "dependencies", Slicing.dependencies
        ; "postdom", Slicing.postdom

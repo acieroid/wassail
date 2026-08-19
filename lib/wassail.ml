@@ -40,3 +40,4 @@ module Control_deps = Control_deps
 
 module Instruction_counter = Instruction_counter
 module Sizes = Sizes
+module Cpg_json = Cpg_json
