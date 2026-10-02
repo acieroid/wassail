@@ -149,6 +149,14 @@ module TestInter = struct
     i32.const 0))"
       1l (* analyzing 1, which is called by 0, which depends on its result *)
 
+  let%test_unit "summary-based interprocedural taint ignores imported CFGs" =
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func))
+  (import \"env\" \"imported\" (func (;0;) (type 0)))
+  (func (;1;) (type 0)))" in
+    let results = analyze_inter module_ [[1l]] in
+    assert (Int32Map.mem results 1l)
+
   let%test_unit "interprocedural taint works on benchmarks" =
     List.iter [
       (* disabled because it takes ~15 seconds *) (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *)

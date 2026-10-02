@@ -24,7 +24,9 @@ let mk_inter
     (analysis : Wasm_module.t -> cfgs:Spec_domain.t Cfg.t Int32Map.t -> summaries:'a Int32Map.t -> 'a Int32Map.t)
   : Wasm_module.t -> Int32.t list list -> 'a Int32Map.t = fun wasm_mod sccs ->
   let cfgs = Cfg_builder.build_all wasm_mod in
-  let annotated_cfgs = Int32Map.map cfgs ~f:(fun cfg -> Spec_inference.Intra.analyze wasm_mod cfg ()) in
+  let annotated_cfgs =
+    Int32Map.filter_keys cfgs ~f:(fun idx -> Int32.(idx >= wasm_mod.nfuncimports))
+    |> Int32Map.map ~f:(fun cfg -> Spec_inference.Intra.analyze wasm_mod cfg ()) in
   List.fold_left sccs
     ~init:(init_data cfgs wasm_mod)
     ~f:(fun summaries funs ->
