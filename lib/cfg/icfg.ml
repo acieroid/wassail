@@ -76,11 +76,11 @@ module ICFG = struct
         let edge : Edge.t = { target = callee; direct = true } in
         calls := Int32Map.update !calls (Instr.label instr) ~f:(add_edge edge)
       | Call { instr = CallIndirect (_, _, _, typ); _ } ->
-        calls := List.fold_left (find_targets wasm_mod typ)
-            ~init:!calls
-            ~f:(fun calls f' ->
-                let edge : Edge.t = { target = f'; direct = false } in
-                Int32Map.update calls (Instr.label instr) ~f:(add_edge edge))
+        let edges =
+          List.map (find_targets wasm_mod typ) ~f:(fun target ->
+              Edge.{ target; direct = false })
+          |> Edge.Set.of_list in
+        calls := Instr.Label.Map.set !calls ~key:(Instr.label instr) ~data:edges
       | Control { instr = Block (_, _, instrs); _ }
       | Control { instr = Loop (_, _, instrs); _ } ->
         collect_calls_instrs instrs
@@ -387,6 +387,20 @@ module Test = struct
       (Instr.Label.Map.of_alist_exn [
           (Instr.Label.{ section = Function 0l; id = 1; },
            (Edge.Set.of_list [{ target = 1l; direct = true }]))])
+
+  let%test_unit "ICFG can be rendered with an indirect call without a target" =
+    let module_ = Wasm_module.of_string "(module
+  (type (;0;) (func))
+  (func (;0;) (type 0)
+    i32.const 0
+    call_indirect (type 0))
+  (table (;0;) 1 1 funcref))" in
+    let icfg = make module_ 0l in
+    let call_label = Instr.Label.{ section = Function 0l; id = 1 } in
+    let targets = Instr.Label.Map.find_exn icfg.calls call_label in
+    if not (Edge.Set.is_empty targets) then
+      failwith "Expected the indirect call to have no target";
+    ignore (to_dot icfg)
 
   let%test "ICFG for word count" =
     expect "(module
