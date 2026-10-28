@@ -17,6 +17,7 @@ depends: [
   "ppx_inline_test" # MIT
   "ppx_jane" # MIT
   "sexplib" # MIT
+  "yojson" # BSD-3-Clause
   "wasm" {= "2.0.1"} # Apache 2.0 # There are issues in github CI with 2.0.2
   "bisect_ppx" {dev & >= "2.5.0"} # MIT
 ]

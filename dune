@@ -2,8 +2,8 @@
  (package wassail)
  (name main)
  (public_name wassail)
- (modules Main Slicing Slicing_evaluation Utils Cfg Callgraph Generation Analysis)
- (libraries wassail core core_unix core_unix.command_unix wasm)
+ (modules Main Slicing Slicing_evaluation Utils Cfg Callgraph Generation Analysis Cpg)
+ (libraries wassail core core_unix core_unix.command_unix wasm yojson)
  ;; (link_flags :standard -cclib -static) ;; uncomment to enable static executable
  (preprocess (pps ppx_jane ppx_compare)))
 
