@@ -325,14 +325,18 @@ module RIC = struct
   (** [negative_part r]
       Intersection of [r] with negative integers. *)
   let negative_part (r : t) : t =
-    assert (extract_relative_offset r |> String.is_empty);
-    meet r negative_integers
+    if r |> extract_relative_offset |> String.is_empty |> not then
+      negative_integers
+    else
+      meet r negative_integers
 
   (** [positive_part r]
       Intersection of [r] with non‑negative integers. *)
   let positive_part (r : t) : t =
-    assert (extract_relative_offset r |> String.is_empty);
-    meet r positive_integers
+    if r |> extract_relative_offset |> String.is_empty |> not then
+      positive_integers
+    else
+      meet r positive_integers
   
   (** [are_disjoint r1 r2]
       [true] iff [r1 ⊓ r2 = ⊥]. *)

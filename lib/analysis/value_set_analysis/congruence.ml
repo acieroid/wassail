@@ -95,8 +95,8 @@ let (|>>) (c, i : 'a * 'b) (f : 'a -> 'b -> 'c) : 'c = f c i
     | Bottom, c | c, Bottom -> c 
     | Congruence { stride = s1; offset = (v1, o1) }, Congruence { stride = s2; offset = (v2, o2) } ->
       if String.equal v1 v2 then
-        let difference = Int64.abs Int64.(Int64.of_int32_exn o1 - Int64.of_int32_exn o2) in
-        if Int64.(difference > Int64.of_int32_exn Int32.max_value) then
+        let difference = Int64.(of_int32_exn o1 - of_int32_exn o2 |> abs) in
+        if Int64.(difference > of_int32_exn Int32.max_value) then
           Top
         else
           let new_stride = difference |> Int32.of_int64_exn |> gcd (gcd s1 s2) in
@@ -460,6 +460,11 @@ let%test_module "Congruence tests" = (module struct
   let%test "Congruence: meet_equal_congruences" =
     let c = Congruence {stride = 4l; offset = ("", 1l)} in
     equal (meet c c) c
+
+  let%test "Congruence: meet (2ℤ + 0) and (2ℤ + 1) => Bottom" =
+    let evens = Congruence {stride = 2l; offset = ("", 0l)} in
+    let odds = Congruence {stride = 2l; offset = ("", 1l)} in
+    equal (meet evens odds) Bottom
 
   (* Meeting congruences with same offset but different stride. *)
   let%test "Congruence: meet_same_offset_diff_stride" =
