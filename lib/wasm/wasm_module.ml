@@ -78,10 +78,9 @@ let is_function (m : t) (fidx : Int32.t) : bool =
 let is_imported (m : t) (fidx : Int32.t) : bool =
   Int32.(fidx < (Int32.of_int_exn (List.length m.imported_funcs)))
 
-(** Checks if a function is exported or not. An exported function has a name. *)
+(** Checks if a function is exported or not. *)
 let is_exported (m : t) (fidx : Int32.t) : bool =
-  let funcinst = get_funcinst m fidx in
-  Option.is_some funcinst.name
+  List.exists m.exported_funcs ~f:(fun desc -> Int32.equal desc.idx fidx)
 
 (** Get the memory instance for the memory with index idx *)
 let get_meminst (m : t) (idx : int) : Memory_inst.t =
@@ -444,4 +443,13 @@ module Test = struct
     [%test_result: int32 option list]
       (List.map ["f"; "g"; "h"] ~f:(StringMap.find (get_funcnames m)))
       ~expect:[Some 0l; Some 0l; Some 0l]
+
+  let%test_unit "re-exported import is recognized as exported" =
+    let m = of_string {|(module
+        (import "env" "f" (func))
+        (export "g" (func 0)))
+    |} in
+    [%test_result: bool]
+      (is_exported m 0l)
+      ~expect:true
 end
