@@ -249,4 +249,24 @@ module Test = struct
     [%test_result: TaintFlow.t list]
       (TaintFlowSet.to_list (detect_flows_from_exported_to_imported m))
       ~expect:[(2l, 0l, Taint_domain.Taint.taint (Var.Local 0))]
+
+  let%test_unit "call summaries preserve parameter order" =
+    let m = Wasm_module.of_string {|(module
+        (import "env" "sink" (func $sink (param i32))) ;; 0
+        (func $helper (param i32 i32) ;; 1, only propagates taint l0 to the sink
+          local.get 0
+          call $sink)
+        (func (export "f") (param i32) ;; 2, propagates the taint l0 all the way to the sink through the helper
+          local.get 0
+          i32.const 0
+          call $helper)
+        (func (export "g") (param i32) ;; 3, propagates l0 only to the helper, not all the way to the sink
+          i32.const 0
+          local.get 0
+          call $helper))
+    |} in
+    [%test_result: TaintFlow.t list]
+      (TaintFlowSet.to_list (detect_flows_from_exported_to_imported m))
+      ~expect:[(2l, 0l, Taint_domain.Taint.taint (Var.Local 0))]
+
 end

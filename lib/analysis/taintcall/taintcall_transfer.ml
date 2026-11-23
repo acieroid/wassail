@@ -56,22 +56,21 @@ let apply_summary
     (state : State.t)
     (summary : summary)
     : State.t =
-  let apply_summary (argsv : Taint_domain.Taint.t list) : Taintcall_domain.Call.t =
-    let substituted_summary : Taintcall_domain.Call.t =
-      Int32Map.map (fst summary) ~f:(fun args ->
-          (List.map args ~f:(fun arg -> Taint_domain.Taint.substitute arg (List.mapi argsv ~f:(fun i argv -> (Var.Local i, argv)))))) in
-    Taintcall_domain.Call.join substituted_summary (fst state)
-  in
-  let add_call (to_state : Taintcall_domain.Call.t) (f : Int32.t) (arity : int * int) : Taintcall_domain.Call.t =
-    let args = List.take (Spec_domain.get_or_fail i.annotation_before).vstack (fst arity) in
-    let argsv = List.map args ~f:(Taint_domain.get_taint (snd state)) in
-    Int32Map.update to_state f ~f:(function
-         | None -> argsv
-         | Some old -> List.map2_exn old argsv ~f:Taint_domain.Taint.join)
-  in
-  let sndstate' = TaintTransfer.apply_summary module_ f arity i (snd state) (snd summary) in
-  let args = List.take (Spec_domain.get_or_fail i.annotation_before).vstack (fst arity) in
-  add_call (apply_summary (List.map args ~f:(Taint_domain.get_taint (snd state)))) f arity, sndstate'
+  let spec_before = Spec_domain.get_or_fail i.annotation_before in
+  let stack = match i.instr with
+    | CallDirect _ -> spec_before.vstack
+    | CallIndirect _ -> List.drop spec_before.vstack 1 in
+  let args = List.rev (List.take stack (fst arity)) in
+  let argsv = List.map args ~f:(Taint_domain.get_taint (snd state)) in
+  let substitutions = List.mapi argsv ~f:(fun index taint -> (Var.Local index, taint)) in
+  let calls_from_callee = Int32Map.map (fst summary) ~f:(fun taints ->
+      List.map taints ~f:(fun taint -> Taint_domain.Taint.substitute taint substitutions)) in
+  let calls = Taintcall_domain.Call.join calls_from_callee (fst state) in
+  let calls = Int32Map.update calls f ~f:(function
+      | None -> argsv
+      | Some old -> List.map2_exn old argsv ~f:Taint_domain.Taint.join) in
+  let taint_state = TaintTransfer.apply_summary module_ f arity i (snd state) (snd summary) in
+  calls, taint_state
 
 let extract_summary (_module_ : Wasm_module.t) (cfg : annot_expected Cfg.t) (analyzed_cfg : State.t Cfg.t) : summary =
   let exit_block = Cfg.find_block_exn analyzed_cfg analyzed_cfg.exit_block in
