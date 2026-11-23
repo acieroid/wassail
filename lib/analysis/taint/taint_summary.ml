@@ -162,7 +162,4 @@ let summary_of (cfg : Spec_domain.t Cfg.t) (out_state : Taint_domain.t) : t =
       make cfg out_state
         (if List.length cfg.return_types = 1 then List.hd exit_spec.vstack else None)
         exit_spec.globals
-        (List.concat_map (Var.OffsetMap.to_alist exit_spec.memory)
-           ~f:(fun ((a, _), b) ->
-               (* Log.warn (Printf.sprintf "ignoring offset"); *)
-               [a; b]))
+        (Var.OffsetMap.data exit_spec.memory)

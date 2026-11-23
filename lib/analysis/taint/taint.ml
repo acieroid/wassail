@@ -225,6 +225,51 @@ module TestInter = struct
       (summary 1l).ret
       ~expect
 
+  let%test_unit "storing a tainted value leaves the address variable unchanged" =
+    let m = Wasm_module.of_string {|(module
+        (memory 1)
+        (func (param i32 i32) (result i32)
+          local.get 0
+          local.get 1
+          i32.store
+          local.get 0))
+    |} in
+    let result = analyze_intra m [0l] in
+    let summary idx = Int32Map.find_exn result idx |> fst in
+    [%test_result: Summary.t]
+      (summary 0l)
+      ~expect:Summary.{ ret = Some (Domain.Taint.taint (Var.Local 0));
+                        globals = [];
+                        mem = Domain.Taint.taint (Var.Local 1) }
+
+  let conditional_store () =
+    Wasm_module.of_string "(module
+      (memory 1)
+      (func (param i32 i32) (result i32)
+        local.get 1
+        if
+          i32.const 0
+          local.get 0
+          i32.store
+        end
+        i32.const 0
+        i32.load))"
+
+  let%test_unit "intra preserves memory taint from a conditional store" =
+    let summary, _ = Int32Map.find_exn (analyze_intra (conditional_store ()) [0l]) 0l in
+    let taint = Domain.Taint.taint (Var.Local 0) in
+    [%test_result: Summary.t]
+      summary
+      ~expect:Summary.{ ret = Some taint; globals = []; mem = taint }
+
+  let%test_unit "classical inter preserves memory taint from a conditional store" =
+    let icfg = analyze_inter_classical (conditional_store ()) 0l in
+    let cfg = Int32Map.find_exn icfg.cfgs 0l in
+    let exit = Cfg.find_block_exn cfg cfg.exit_block in
+    [%test_result: Domain.Taint.t]
+      (Domain.get_taint exit.annotation_after (Var.Return 0l))
+      ~expect:(Domain.Taint.taint (Var.Local 0))
+
   let%test_unit "interprocedural taint works on benchmarks" =
     List.iter [
       (* disabled because it takes ~15 seconds *) (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *)

@@ -96,72 +96,18 @@ module Make = struct
                 (ret ()) v2
             | Unary _ | Test _ | Convert _ ->
               Taint_domain.add_taint_v state (ret ()) (pop annotation_before.vstack)
-            | Load { offset = _offset; _ } ->
-              (* Simplest case: get the taint of the entire memory. Refined
-                 case: get the taint of the memory cells that can pointed to,
-                 according to the previous analysis stages (i.e., relational
-                 analysis) *)
-              let _addr = pop annotation_before.vstack in
-              let mem = annotation_before.memory in
-              let all_locs = Var.OffsetMap.keys mem in
-              (* Filter the memory location using results from the relational analysis if possible *)
-              let locs = (* if !Taint_options.use_relational then
-                            (* We need to filter locs to only have the locs that can be loaded.
-                            This means for each loc, we can ask the relational domain if are_equal loc v (where v is the top of the stack.
-                            If some are truly equal, we know we can only keep these. Otherwise, if some maybe equal, then these have to be kept. *)
-                            let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (addr, offset) with
-                            | (true, false) -> true
-                            | _ -> false) in
-                            if not (List.is_empty equal) then
-                            (* There are addresses that are definitely equal to addr, so we get their taint *)
-                            equal
-                            else
-                            (* No address is definitely equal to addr, so we take the ones that may be equal *)
-                            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (addr, offset) with
-                            | (true, _) -> true
-                            | _ -> false)
-                            else *)
-                all_locs in
-              (* Get the taint of possible memory location and their value.
-                 In practice, both the memory location and the value have the same taint
-              *)
-              let taints = List.map locs ~f:(fun (k, offset) ->
-                  (* Log.warn
-                     (Printf.sprintf "XXX: currently ignoring offsets in taints!!!\n--------------------\n--------------\n"); (* maybe only the values should be tainted, not the keys *) *)
-                  Taint_domain.Taint.join (Taint_domain.get_taint state k) (Taint_domain.get_taint state (Var.OffsetMap.find_exn mem (k, offset)))) in
-              Taint_domain.add_taint
-                state
-                (ret ())
-                (* ret is the join of all these taints *)
-                (List.fold_left taints
-                   ~init:(Taint_domain.get_taint state Taint_domain.untracked_memory)
-                   ~f:Taint_domain.Taint.join)
-            | Store { offset = _offset; _ } ->
-              (* Simplest case: set the taint for the entire memory
-                 Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
-              let vval, _vaddr = pop2 annotation_before.vstack in
-              let mem = annotation_after.memory in
-              let all_locs = Var.OffsetMap.keys mem in
-              (* Refine memory locations using relational innformation, if available *)
-              let locs = (* if !Taint_options.use_relational then
-                            let equal = List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (vaddr, offset) with
-                            | (true, false) -> true
-                            | _ -> false) in
-                            if not (List.is_empty equal) then
-                            (* There are addresses that are definitely equal to addr, so we get their taint *)
-                            equal
-                            else
-                            (* No address is definitely equal to addr, so we take the ones that may be equal *)
-                            List.filter all_locs ~f:(fun loc -> match Relational_domain.are_equal_with_offset (snd i.annotation_before) loc (vaddr, offset) with
-                            | (true, _) -> true
-                            | _ -> false)
-                            else *)
-                all_locs in
-              (* Set the taint of memory locations and the value to the taint of vval *)
-              List.fold_left locs ~init:state ~f:(fun s (k, offset) ->
-                  (* Log.warn (Printf.sprintf "XXX: ignoring offsets!"); *)
-                  Taint_domain.add_taint_v (Taint_domain.add_taint_v s k vval)
-                    (Var.OffsetMap.find_exn mem (k, offset)) vval)))
+            | Load _ ->
+              let memory_taint =
+                Var.OffsetMap.fold annotation_before.memory
+                  ~init:(Taint_domain.get_taint state Taint_domain.untracked_memory)
+                  ~f:(fun ~key:_ ~data:value taint ->
+                      Taint_domain.Taint.join taint (Taint_domain.get_taint state value)) in
+              Taint_domain.add_taint state (ret ()) memory_taint
+            | Store { offset; _ } ->
+              let _, address = pop2 annotation_before.vstack in
+              Option.fold (Var.OffsetMap.find annotation_before.memory (address, offset))
+                ~init:state ~f:(fun state previous ->
+                    Taint_domain.add_taint_v state Taint_domain.untracked_memory previous)))
 
   let control
       (_module_ : Wasm_module.t) (* The wasm module (read-only) *)
@@ -220,9 +166,19 @@ module Make = struct
             let states' = List.map predecessors ~f:(fun (pred_block, s) ->
                 (* get the spec after that state *)
                 let spec' = pred_block.annotation_after in
+                (* Spec inference keeps only memory bindings common to all paths.
+                   A write on any path can still taint a later load. *)
+                let s' = match spec, spec' with
+                  | Spec_domain.NotBottom joined, Spec_domain.NotBottom prior ->
+                    Var.OffsetMap.fold prior.memory ~init:s ~f:(fun ~key ~data:value acc ->
+                        if Var.OffsetMap.mem joined.memory key then
+                          acc
+                        else
+                          Taint_domain.add_taint_v acc Taint_domain.untracked_memory value)
+                  | _ -> s in
                 (* equate all different variables in the post-state with the ones in the pre-state *)
                 List.fold_left (Spec_domain.extract_different_vars spec spec')
-                  ~init:s
+                  ~init:s'
                   ~f:(fun s (x, y) ->
                       (* XXX: should it be x y or y x? *)
                       Taint_domain.add_taint_v s x y)) in
