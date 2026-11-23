@@ -30,7 +30,9 @@ let annotate (wasm_mod : Wasm_module.t) (summaries : Summary.t Int32Map.t) (spec
   let rel_cfg = (* Relational.Transfer.dummy_annotate *) spec_cfg in
   Intra.analyze wasm_mod rel_cfg summaries
 
-let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t * Domain.t Cfg.t * Summary.t) Int32Map.t =
+let analyze_inter (module_ : Wasm_module.t) (schedule : Int32.t list list)
+  : (Spec_domain.t Cfg.t * Domain.t Cfg.t * Summary.t) Int32Map.t =
+  let imported_summaries = initial_summaries Int32Map.empty module_ in
   Analysis_helpers.mk_inter
     (fun _cfgs _wasm_mod -> Int32Map.empty)
     (fun module_ ~cfgs:scc ~summaries:cfgs_and_summaries ->
@@ -39,11 +41,16 @@ let analyze_inter : Wasm_module.t -> Int32.t list list -> (Spec_domain.t Cfg.t *
             (String.concat ~sep:"," (List.map (Int32Map.keys scc) ~f:Int32.to_string)));
        (* Run the taint analysis *)
        let annotated_scc = scc (* Int32Map.map scc ~f:Relational.Transfer.dummy_annotate *) in
-       let summaries = Int32Map.mapi cfgs_and_summaries ~f:(fun ~key:_idx ~data:(_spec_cfg, _taint_cfg, summary) -> summary) in
+       let summaries =
+         Int32Map.fold cfgs_and_summaries
+           ~init:imported_summaries
+           ~f:(fun ~key ~data:(_spec_cfg, _taint_cfg, summary) acc ->
+               Int32Map.set acc ~key ~data:summary) in
        let results = Inter.analyze module_ ~cfgs:annotated_scc ~summaries:summaries in
        Int32Map.mapi results ~f:(fun ~key:idx ~data:(taint_cfg, summary) ->
            let spec_cfg = Int32Map.find_exn scc idx in
            (spec_cfg, taint_cfg, summary)))
+    module_ schedule
 
 (** Detects calls to sinks with data coming from the exported functions' arguments.
     Sinks are declared as a set of function indices. *)
@@ -65,7 +72,10 @@ let detect_unsafe_calls_from_exported_to_sinks (module_ : Wasm_module.t) (sinks 
                         | Local _ -> true
                         | _ -> false)) in
                   if unsafe then begin
-                    Log.info (fun () -> Printf.sprintf "Function %ld is eventually calling sink %ld with the following taint: %s" fidx target (Taint_domain.Taint.to_string t));
+                    let name idx = match Wasm_module.get_funcname module_ idx with
+                      | Some name -> Printf.sprintf "%ld (%s)" idx name
+                      | None -> Int32.to_string idx in
+                    Log.info (fun () -> Printf.sprintf "Function %s is eventually calling sink %s with the following taint: %s" (name fidx) (name target) (Taint_domain.Taint.to_string t));
                       found := (fidx, target, t) :: !found
                   end)
             end));
@@ -126,13 +136,8 @@ let detect_flows_from_sources_to_sinks (module_ : Wasm_module.t) (sources : Stri
   !found
 
 let detect_flows_from_exported_to_imported (module_ : Wasm_module.t) : TaintFlowSet.t =
-  let imports = StringSet.of_list (List.filter_map module_.imports ~f:(function
-      | { item_name; idesc = FuncImport _; _ } -> Some item_name
-      | _ -> None)) in
-  let exports = StringSet.of_list (List.filter_map module_.exports ~f:(function
-      | { name; edesc = Export.FuncExport _ } -> Some name
-      | _ -> None)) in
-  detect_flows_from_sources_to_sinks module_ exports imports
+  let sinks = Int32Set.of_list (List.map module_.imported_funcs ~f:(fun f -> f.idx)) in
+  TaintFlowSet.of_list (detect_unsafe_calls_from_exported_to_sinks module_ sinks)
 
 module Test = struct
 
@@ -227,5 +232,61 @@ module Test = struct
     |} in
     let aliases = StringSet.of_list ["f"; "g"] in
     assert (TaintFlowSet.is_empty (detect_flows_from_sources_to_sinks m aliases aliases))
+
+  let%test_unit "flow from exported arguments to sink through a helper function" =
+    let m = Wasm_module.of_string {|(module
+        (import "env" "sink" (func $sink (param i32))) ;; 0
+        (func $helper (param i32) ;; 1, calls sink with l0's taint
+          local.get 0
+          call $sink)
+        (func (export "main") (param i32) ;; 2
+          local.get 0 ;; taint l0
+          call $helper)
+        (func (export "constant") ;; 3
+          i32.const 0
+          call $helper))
+    |} in
+    [%test_result: TaintFlow.t list]
+      (TaintFlowSet.to_list (detect_flows_from_exported_to_imported m))
+      ~expect:[(2l, 0l, Taint_domain.Taint.taint (Var.Local 0))]
+
+  let%test_unit "call summaries preserve parameter order" =
+    let m = Wasm_module.of_string {|(module
+        (import "env" "sink" (func $sink (param i32))) ;; 0
+        (func $helper (param i32 i32) ;; 1, only propagates taint l0 to the sink
+          local.get 0
+          call $sink)
+        (func (export "f") (param i32) ;; 2, propagates the taint l0 all the way to the sink through the helper
+          local.get 0
+          i32.const 0
+          call $helper)
+        (func (export "g") (param i32) ;; 3, propagates l0 only to the helper, not all the way to the sink
+          i32.const 0
+          local.get 0
+          call $helper))
+    |} in
+    [%test_result: TaintFlow.t list]
+      (TaintFlowSet.to_list (detect_flows_from_exported_to_imported m))
+      ~expect:[(2l, 0l, Taint_domain.Taint.taint (Var.Local 0))]
+
+  let%test_unit "call summaries propagate global taint" =
+    let m = Wasm_module.of_string {|(module
+        (import "env" "sink" (func $sink (param i32)))
+        (global $g (mut i32) (i32.const 0))
+        (func $helper ;; func 0, call sink with global
+          global.get $g
+          call $sink)
+        (func (export "f") (param i32) ;; func 1, taints global and then goes all the way to the sink
+          local.get 0
+          global.set $g
+          call $helper)
+        (func (export "g") (param i32) ;; func 2, untaints global and then goes all the way to the sink
+          i32.const 0
+          global.set $g
+          call $helper))
+    |} in
+    [%test_result: TaintFlow.t list]
+      (TaintFlowSet.to_list (detect_flows_from_exported_to_imported m))
+      ~expect:[(2l, 0l, Taint_domain.Taint.taint (Var.Local 0))]
 
 end

@@ -274,7 +274,7 @@ module Make = struct
             | Some ret_var ->
               Taint_domain.add_taint state ret_var spec.return in
           (* Taint the arguments *)
-          let args = List.take annotation_before.vstack (List.length desc.arguments) in
+          let args = List.take annotation_before.vstack (List.length desc.arguments) |> List.rev in
           if List.length args <> List.length spec.arguments then
             failwith (Printf.sprintf "Improperly modeled function %s: got %d arguments, but modeled with %d"
                         desc.name (List.length args) (List.length spec.arguments))

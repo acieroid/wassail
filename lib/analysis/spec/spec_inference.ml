@@ -332,7 +332,7 @@ module Spec_inference
     let nargs = List.length (fst funcinst.typ) in
     let locals = funcinst.code.locals in
     State.wrap ~default:bottom ~f:(fun state ->
-        let args = List.take state.vstack nargs in
+        let args = List.take state.vstack nargs |> List.rev in
         let zeroes = List.map locals ~f:(fun t -> Var.Const (Prim_value.zero_of_t t)) in
         let vstack = [] in
         let locals = args @ zeroes in

@@ -157,6 +157,28 @@ module TestInter = struct
     let results = analyze_inter module_ [[1l]] in
     assert (Int32Map.mem results 1l)
 
+  let%test_unit "classical import taint models use declared parameter order" =
+    let m = Wasm_module.of_string {|(module
+      (import "wasi_snapshot_preview1" "fd_write"
+        (func $write (param i32 i32 i32 i32) (result i32)))
+      (func (param i32 i32 i32 i32)
+        local.get 0
+        local.get 1
+        local.get 2
+        local.get 3
+        call $write
+        drop))
+    |} in
+    let icfg = analyze_inter_classical m 1l in
+    let import = Int32Map.find_exn icfg.cfgs 0l in
+    let exit = Cfg.find_block_exn import import.exit_block in
+    let fd = Domain.Taint.taint (Var.Other "fd_write.fd") in
+    let has_fd_taint parameter =
+      Domain.Taint.subsumes (Domain.get_taint exit.annotation_after (Var.Local parameter)) fd in
+    [%test_result: bool list]
+      (List.map [0; 1; 2; 3] ~f:has_fd_taint)
+      ~expect:[true; false; false; false]
+
   let%test_unit "interprocedural taint works on benchmarks" =
     List.iter [
       (* disabled because it takes ~15 seconds *) (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *)
