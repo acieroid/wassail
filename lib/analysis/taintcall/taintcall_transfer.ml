@@ -62,7 +62,10 @@ let apply_summary
     | CallIndirect _ -> List.drop spec_before.vstack 1 in
   let args = List.rev (List.take stack (fst arity)) in
   let argsv = List.map args ~f:(Taint_domain.get_taint (snd state)) in
-  let substitutions = List.mapi argsv ~f:(fun index taint -> (Var.Local index, taint)) in
+  let argument_taints = List.mapi argsv ~f:(fun index taint -> (Var.Local index, taint)) in
+  let global_taints = List.mapi spec_before.globals ~f:(fun index global ->
+      (Var.Global index, Taint_domain.get_taint (snd state) global)) in
+  let substitutions = argument_taints @ global_taints in
   let calls_from_callee = Int32Map.map (fst summary) ~f:(fun taints ->
       List.map taints ~f:(fun taint -> Taint_domain.Taint.substitute taint substitutions)) in
   let calls = Taintcall_domain.Call.join calls_from_callee (fst state) in
