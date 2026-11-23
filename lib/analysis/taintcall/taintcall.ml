@@ -85,20 +85,26 @@ let detect_flows_from_sources_to_sinks (module_ : Wasm_module.t) (sources : Stri
   let cg = Call_graph.make module_ in
   let schedule = Call_graph.analysis_schedule cg module_.nfuncimports in
   let funcnames = Wasm_module.get_funcnames module_ in
-  let _sources_specifications = Int32Map.of_alist_exn (List.filter_map (StringSet.to_list sources) ~f:(fun source_name ->
-      match StringMap.find funcnames source_name with
-      | Some source_idx -> Some (source_idx, Var.Other source_name)
-      | None ->
-        Log.warn (fun () -> Printf.sprintf "source does not exist in binary (this could be perfectly fine): %s" source_name);
-        None (* This source does not exist in the binary, so we ignore it *)
-    )) in
-  let sink_indices_to_names = Int32Map.of_alist_exn (List.filter_map (StringSet.to_list sinks) ~f:(fun sink_name ->
-      match StringMap.find funcnames sink_name with
-      | Some sink_idx -> Some (sink_idx, sink_name)
-      | None ->
-        Log.warn (fun () -> Printf.sprintf "sink does not exist in binary (this could be perfectly fine): %s" sink_name);
-        None (* This sink does not exist in the binary, so we ignore it *)
-    )) in
+  let _sources_specifications =
+    StringSet.to_list sources
+    |> List.filter_map ~f:(fun source_name ->
+        match StringMap.find funcnames source_name with
+        | Some source_idx -> Some (source_idx, Var.Other source_name)
+        | None ->
+          Log.warn (fun () -> Printf.sprintf "source does not exist in binary (this could be perfectly fine): %s" source_name);
+          None (* This source does not exist in the binary, so we ignore it *)
+      )
+    |> Int32Map.of_alist_reduce ~f:(fun first _ -> first) in
+  let sink_indices_to_names =
+    (StringSet.to_list sinks)
+    |> List.filter_map  ~f:(fun sink_name ->
+        match StringMap.find funcnames sink_name with
+        | Some sink_idx -> Some (sink_idx, sink_name)
+        | None ->
+          Log.warn (fun () -> Printf.sprintf "sink does not exist in binary (this could be perfectly fine): %s" sink_name);
+          None (* This sink does not exist in the binary, so we ignore it *)
+      )
+    |> Int32Map.of_alist_reduce ~f:(fun first _ -> first) in
   Log.warn (fun () -> "source specification has been disabled");
   (* Taintcall_transfer.TaintTransfer.return_taint_specifications := sources_specifications; *)
   let results = analyze_inter module_ schedule in
@@ -214,5 +220,12 @@ module Test = struct
     let actual = detect_unsafe_calls_from_exported_to_sinks module_ (Int32Set.singleton 2l) in
     let expected = [(0l, 2l, Taint_domain.Taint.Taints (Var.Set.singleton (Var.Local 1)))] in
     check_equal actual expected
+
+  let%test_unit "source/sink lookups accepts multiple aliases for the same function" =
+    let m = Wasm_module.of_string {|(module
+      (func (export "f") (export "g")))
+    |} in
+    let aliases = StringSet.of_list ["f"; "g"] in
+    assert (TaintFlowSet.is_empty (detect_flows_from_sources_to_sinks m aliases aliases))
 
 end

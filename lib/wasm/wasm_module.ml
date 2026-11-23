@@ -52,19 +52,22 @@ let get_global_types (m : t) : Type.t list =
 
 (** Get the name of a function, if it has one *)
 let get_funcname (m : t) (fidx : Int32.t) : string option =
-  let funcinst = get_funcinst m fidx in
-  funcinst.name
+  if Int32.(fidx < m.nfuncimports) then
+    Option.map (List32.nth m.imported_funcs fidx) ~f:(fun desc -> desc.name)
+  else
+    Option.bind (List32.nth m.funcs Int32.(fidx - m.nfuncimports)) ~f:(fun funcinst -> funcinst.name)
 
 (** Get the index and name of all functions that have names, as a map from function name to its index *)
 let get_funcnames (m : t) : int32 StringMap.t =
-  let alist = List.filter_map m.funcs ~f:(fun funcinst ->
-      Option.map funcinst.name ~f:(fun name -> (name, funcinst.idx))) in
+  let exported = List.map m.exported_funcs ~f:(fun desc -> (desc.name, desc.idx)) in
   let imported = List.mapi
       (List.filter m.imports ~f:(function
            | { idesc = Import.FuncImport _; _ } -> true
            | _ -> false))
       ~f:(fun idx f -> (f.item_name, (Int32.of_int_exn idx))) in
-  StringMap.of_alist_exn (alist @ imported)
+  (exported @ imported)
+  |> List.dedup_and_sort ~compare:[%compare: string * int32]
+  |> StringMap.of_alist_exn
 
 (** Checks if a function is present *)
 let is_function (m : t) (fidx : Int32.t) : bool =
@@ -75,10 +78,9 @@ let is_function (m : t) (fidx : Int32.t) : bool =
 let is_imported (m : t) (fidx : Int32.t) : bool =
   Int32.(fidx < (Int32.of_int_exn (List.length m.imported_funcs)))
 
-(** Checks if a function is exported or not. An exported function has a name. *)
+(** Checks if a function is exported or not. *)
 let is_exported (m : t) (fidx : Int32.t) : bool =
-  let funcinst = get_funcinst m fidx in
-  Option.is_some funcinst.name
+  List.exists m.exported_funcs ~f:(fun desc -> Int32.equal desc.idx fidx)
 
 (** Get the memory instance for the memory with index idx *)
 let get_meminst (m : t) (idx : int) : Memory_inst.t =
@@ -410,4 +412,44 @@ module Test = struct
       (export \"f\" (func 0)))" in
     [%test_result: Int32.t list] (List.map m.exported_funcs ~f:(fun f -> f.idx)) ~expect:[0l];
     [%test_result: Int32.t list] (List.map m.exported_funcs ~f:(fun f -> f.type_idx)) ~expect:[0l]
+
+  let%test_unit "function name lookup with imported function" =
+    let m = of_string {|(module
+        (import "env" "f" (func))
+        (func) ;; exported function h
+        (func) ;; unnamed function
+        (func (export "g"))
+        (export "h" (func 1)))
+    |} in
+    [%test_result: string option list]
+      (List.map [0l; 1l; 2l; 3l] ~f:(get_funcname m))
+      ~expect:[Some "f"; Some "h"; None; Some "g"]
+
+  let%test_unit "function name lookup export with multiple names" =
+    let m = of_string {|(module
+        (func (export "f") (export "g"))
+        (export "h" (func 0)))
+    |} in
+    [%test_result: int32 option list]
+      (List.map ["f"; "g"; "h"] ~f:(StringMap.find (get_funcnames m)))
+      ~expect:[Some 0l; Some 0l; Some 0l]
+
+  let%test_unit "function name lookup export of imported function" =
+    let m = of_string {|(module
+        (import "env" "f" (func))
+        (export "g" (func 0))
+        (export "h" (func 0)))
+    |} in
+    [%test_result: int32 option list]
+      (List.map ["f"; "g"; "h"] ~f:(StringMap.find (get_funcnames m)))
+      ~expect:[Some 0l; Some 0l; Some 0l]
+
+  let%test_unit "re-exported import is recognized as exported" =
+    let m = of_string {|(module
+        (import "env" "f" (func))
+        (export "g" (func 0)))
+    |} in
+    [%test_result: bool]
+      (is_exported m 0l)
+      ~expect:true
 end
