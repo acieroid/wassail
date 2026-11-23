@@ -187,7 +187,10 @@ module Make = struct
     Log.info (fun () -> Printf.sprintf "applying summary of function %ld" f);
     let spec_before = Spec_domain.get_or_fail i.annotation_before in
     let spec_after = Spec_domain.get_or_fail i.annotation_after in
-    let args = List.take spec_before.vstack (fst arity) in
+    let stack = match i.instr with
+      | CallDirect _ -> spec_before.vstack
+      | CallIndirect _ -> List.drop spec_before.vstack 1 in
+    let args = List.rev (List.take stack (fst arity)) in
     let ret = if snd arity = 1 then List.hd spec_after.vstack else None in
     let taint_after_call = Taint_summary.apply
         ~include_memory:(not (Wasm_module.is_imported module_ f))

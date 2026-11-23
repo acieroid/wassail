@@ -199,6 +199,32 @@ module TestInter = struct
       (summary 1l)
       ~expect:Summary.{ ret = Some taint; globals = []; mem = taint }
 
+  let%test_unit "taint summaries argument order" =
+    let m = Wasm_module.of_string {|(module
+        (type $binary (func (param i32 i32) (result i32)))
+        (table 1 funcref)
+        (elem (i32.const 0) func $first)
+        (func $first (param i32 i32) (result i32) local.get 0)
+        (func (param i32) (result i32)
+          local.get 0
+          i32.const 42
+          call $first)
+        (func (param i32) (result i32)
+          local.get 0
+          i32.const 42
+          i32.const 0
+          call_indirect (type $binary)))
+    |} in
+    let result = analyze_intra m [0l; 1l] in
+    let summary idx = Int32Map.find_exn result idx |> fst in
+    let expect = Some (Domain.Taint.taint (Var.Local 0)) in
+    [%test_result: Domain.Taint.t option]
+      (summary 0l).ret
+      ~expect;
+    [%test_result: Domain.Taint.t option]
+      (summary 1l).ret
+      ~expect
+
   let%test_unit "interprocedural taint works on benchmarks" =
     List.iter [
       (* disabled because it takes ~15 seconds *) (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *)
