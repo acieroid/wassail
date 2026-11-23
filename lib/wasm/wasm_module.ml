@@ -59,14 +59,17 @@ let get_funcname (m : t) (fidx : Int32.t) : string option =
 
 (** Get the index and name of all functions that have names, as a map from function name to its index *)
 let get_funcnames (m : t) : int32 StringMap.t =
-  let alist = List.filter_map m.funcs ~f:(fun funcinst ->
-      Option.map funcinst.name ~f:(fun name -> (name, funcinst.idx))) in
+  let exported = List.filter_map m.exported_funcs ~f:(fun desc ->
+      if Int32.(desc.idx >= m.nfuncimports) then
+        Some (desc.name, desc.idx)
+      else
+        None) in
   let imported = List.mapi
       (List.filter m.imports ~f:(function
            | { idesc = Import.FuncImport _; _ } -> true
            | _ -> false))
       ~f:(fun idx f -> (f.item_name, (Int32.of_int_exn idx))) in
-  StringMap.of_alist_exn (alist @ imported)
+  StringMap.of_alist_exn (exported @ imported)
 
 (** Checks if a function is present *)
 let is_function (m : t) (fidx : Int32.t) : bool =
@@ -424,4 +427,14 @@ module Test = struct
     [%test_result: string option list]
       (List.map [0l; 1l; 2l; 3l] ~f:(get_funcname m))
       ~expect:[Some "f"; Some "h"; None; Some "g"]
+
+  let%test_unit "function name lookup export with multiple names" =
+    let m = of_string {|(module
+        (func (export "f") (export "g"))
+        (export "h" (func 0)))
+    |} in
+    [%test_result: int32 option list]
+      (List.map ["f"; "g"; "h"] ~f:(StringMap.find (get_funcnames m)))
+      ~expect:[Some 0l; Some 0l; Some 0l]
+
 end
