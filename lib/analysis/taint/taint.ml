@@ -179,6 +179,26 @@ module TestInter = struct
       (List.map [0; 1; 2; 3] ~f:has_fd_taint)
       ~expect:[true; false; false; false]
 
+  let%test_unit "memory taint" =
+    let m = Wasm_module.of_string {|(module
+      (memory 1)
+      (func $store (param i32) ;; func 0, write its parameter in the memory -> propagates taint to the memory
+        i32.const 0
+        local.get 0
+        i32.store)
+      (func (param i32) (result i32) ;; func 1, propagates its parameter to store, then read the same memory location -> propagate taint to memory and return it
+        local.get 0
+        call $store
+        i32.const 0
+        i32.load))
+    |} in
+    let result = analyze_inter m [[0l]; [1l]] in
+    let summary idx = let _, _, summary = Int32Map.find_exn result idx in summary in
+    let taint = Domain.Taint.taint (Var.Local 0) in
+    [%test_result: Summary.t]
+      (summary 1l)
+      ~expect:Summary.{ ret = Some taint; globals = []; mem = taint }
+
   let%test_unit "interprocedural taint works on benchmarks" =
     List.iter [
       (* disabled because it takes ~15 seconds *) (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *)

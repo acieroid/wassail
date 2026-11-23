@@ -133,7 +133,9 @@ module Make = struct
                 state
                 (ret ())
                 (* ret is the join of all these taints *)
-                (List.fold_left taints ~init:Taint_domain.Taint.bottom ~f:Taint_domain.Taint.join)
+                (List.fold_left taints
+                   ~init:(Taint_domain.get_taint state Taint_domain.untracked_memory)
+                   ~f:Taint_domain.Taint.join)
             | Store { offset = _offset; _ } ->
               (* Simplest case: set the taint for the entire memory
                  Refined case: set the taint to the memory cells that can be pointed to, according to the previous analysis stages (i.e., relational analysis) *)
@@ -175,7 +177,7 @@ module Make = struct
     | _ -> `Simple state
 
   let apply_summary
-      (_module_ : Wasm_module.t)
+      (module_ : Wasm_module.t)
       (f : Int32.t)
       (arity : int * int)
       (i : annot_expected Instr.labelled_call)
@@ -188,15 +190,13 @@ module Make = struct
     let args = List.take spec_before.vstack (fst arity) in
     let ret = if snd arity = 1 then List.hd spec_after.vstack else None in
     let taint_after_call = Taint_summary.apply
+        ~include_memory:(not (Wasm_module.is_imported module_ f))
         summary
         state
         args
         spec_before.globals
         spec_after.globals
-        (List.concat_map (Var.OffsetMap.to_alist spec_after.memory)
-           ~f:(fun ((a, _offset), b) ->
-               (* Log.warn (Printf.sprintf "XXX: ignoring offset\n"); *)
-               [a; b])) ret in
+        ret in
     taint_after_call
 
   let merge_flows

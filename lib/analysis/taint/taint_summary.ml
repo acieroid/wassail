@@ -102,7 +102,8 @@ let make (_cfg : 'a Cfg.t) (state : Taint_domain.t)
   { globals; ret;
     (* The taint of the memory is the join of all taints of memory variables *)
     mem = List.fold_left (List.map mem_post ~f:(Taint_domain.get_taint state))
-        ~init:Taint_domain.Taint.bottom ~f:Taint_domain.Taint.join }
+        ~init:(Taint_domain.get_taint state Taint_domain.untracked_memory)
+        ~f:Taint_domain.Taint.join }
 
 
 (** Apply a summary to a given state, where args are the arguments to apply the summary, globals are the globals after the summary, and ret is the optional return value.
@@ -112,7 +113,7 @@ let make (_cfg : 'a Cfg.t) (state : Taint_domain.t)
     [r: {l0, l1}].
     The process is similar for globals.
  *)
-let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pre : Var.t list) (globals_post : Var.t list) (mem_post : Var.t list) (ret : Var.t option) : Taint_domain.t =
+let apply ?(include_memory = true)(summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pre : Var.t list) (globals_post : Var.t list) (ret : Var.t option) : Taint_domain.t =
   (* The arguments of the summary are l0, l1, etc. *)
   let summary_args = List.init (List.length args) ~f:(fun i -> Var.Local i) in
   (* The globals of the summary are g0, g1, etc. *)
@@ -141,12 +142,11 @@ let apply (summary : t) (state : Taint_domain.t) (args : Var.t list) (globals_pr
           (* g' (the global after the call) is tainted with the taint of g (the global of the summary, representing the global at the end of the execution of the summary *)
           Taint_domain.add_taint acc g' (subst g))
   in
-  (* Memory: propagate the join memory taint from the summary to all memory locs in the state *)
-  let with_mem = if !Taint_options.keep_memory then
-      List.fold_left mem_post ~init:with_globals ~f:(fun acc v ->
-          Taint_domain.add_taint acc v (subst summary.mem))
-    else
-      with_globals in
+  (* Propagate memory taint *)
+  let with_mem = if include_memory && !Taint_options.keep_memory then
+    Taint_domain.add_taint with_globals Taint_domain.untracked_memory (subst summary.mem)
+  else
+    with_globals in
   with_mem
 
 
