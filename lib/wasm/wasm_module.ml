@@ -52,8 +52,10 @@ let get_global_types (m : t) : Type.t list =
 
 (** Get the name of a function, if it has one *)
 let get_funcname (m : t) (fidx : Int32.t) : string option =
-  let funcinst = get_funcinst m fidx in
-  funcinst.name
+  if Int32.(fidx < m.nfuncimports) then
+    Option.map (List32.nth m.imported_funcs fidx) ~f:(fun desc -> desc.name)
+  else
+    Option.bind (List32.nth m.funcs Int32.(fidx - m.nfuncimports)) ~f:(fun funcinst -> funcinst.name)
 
 (** Get the index and name of all functions that have names, as a map from function name to its index *)
 let get_funcnames (m : t) : int32 StringMap.t =
@@ -410,4 +412,16 @@ module Test = struct
       (export \"f\" (func 0)))" in
     [%test_result: Int32.t list] (List.map m.exported_funcs ~f:(fun f -> f.idx)) ~expect:[0l];
     [%test_result: Int32.t list] (List.map m.exported_funcs ~f:(fun f -> f.type_idx)) ~expect:[0l]
+
+  let%test_unit "function name lookup with imported function" =
+    let m = of_string {|(module
+        (import "env" "f" (func))
+        (func) ;; exported function h
+        (func) ;; unnamed function
+        (func (export "g"))
+        (export "h" (func 1)))
+    |} in
+    [%test_result: string option list]
+      (List.map [0l; 1l; 2l; 3l] ~f:(get_funcname m))
+      ~expect:[Some "f"; Some "h"; None; Some "g"]
 end
