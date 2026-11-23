@@ -104,9 +104,9 @@ let return (_module : Wasm_module.t) (_cfg : annot_expected Cfg.t) (_instr : ann
 
 let imported
     (_module_ : Wasm_module.t)
-    (_desc : Wasm_module.func_desc)
+    (desc : Wasm_module.func_desc)
     (_annot_before : annot_expected)
     (_annot_after : annot_expected)
     (_state : State.t)
   : State.t =
-  failwith "taintcall does not model imported functions"
+  failwith (Printf.sprintf "taintcall: imported function '%s' is not modeled" desc.name)
