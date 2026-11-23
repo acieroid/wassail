@@ -302,6 +302,33 @@ module TestIntra = struct
     let cfg = Cfg_builder.build module_ 0l in
     let _ = Spec_inference.Intra.analyze module_ cfg () in
     ()
+
+  let%test_unit "classical spec inference parameter order" =
+    let m = Wasm_module.of_string {|(module
+      (type $binary (func (param i32 i32) (result i32)))
+      (table 1 funcref)
+      (elem (i32.const 0) func $first)
+      (func $first (type $binary) local.get 0) ;; func 0
+      (func (param i32) (result i32) ;; func 1, calls 0 with [l0, 42]
+        local.get 0
+        i32.const 42
+        call $first)
+      (func (param i32) (result i32) ;; func 2, also calls 0 with [l0, ]
+        local.get 0
+        i32.const 42
+        i32.const 0
+        call_indirect (type $binary)))
+    |} in
+    let callee_locals entry =
+      let icfg = analyze_inter_classical m entry in
+      let callee = Int32Map.find_exn icfg.cfgs 0l in
+      let block = Cfg.find_block_exn callee callee.entry_block in
+      (Spec_domain.get_or_fail block.annotation_before).locals in
+    let expected = [Var.Local 0; Var.Const (Prim_value.I32 42l)] in
+    [%test_result: Var.t list list]
+      (List.map [1l; 2l] ~f:callee_locals)
+      ~expect:[expected; expected]
+      
 end
 
 module TestInter = struct
