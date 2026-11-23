@@ -188,6 +188,8 @@ let add_taint (s : t) (v : Var.t) (taint : Taint.t) : t =
 let add_taint_v (s : t) (v : Var.t) (taint : Var.t) : t =
   add_taint s v (get_taint s taint)
 
+(** Taint of writes outside of any known memory address *)
+let untracked_memory = Var.Other "untracked_mem"
 
 module Test = struct
   let%test "subsumption works as expected" =

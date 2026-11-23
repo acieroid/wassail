@@ -179,6 +179,97 @@ module TestInter = struct
       (List.map [0; 1; 2; 3] ~f:has_fd_taint)
       ~expect:[true; false; false; false]
 
+  let%test_unit "memory taint" =
+    let m = Wasm_module.of_string {|(module
+      (memory 1)
+      (func $store (param i32) ;; func 0, write its parameter in the memory -> propagates taint to the memory
+        i32.const 0
+        local.get 0
+        i32.store)
+      (func (param i32) (result i32) ;; func 1, propagates its parameter to store, then read the same memory location -> propagate taint to memory and return it
+        local.get 0
+        call $store
+        i32.const 0
+        i32.load))
+    |} in
+    let result = analyze_inter m [[0l]; [1l]] in
+    let summary idx = let _, _, summary = Int32Map.find_exn result idx in summary in
+    let taint = Domain.Taint.taint (Var.Local 0) in
+    [%test_result: Summary.t]
+      (summary 1l)
+      ~expect:Summary.{ ret = Some taint; globals = []; mem = taint }
+
+  let%test_unit "taint summaries argument order" =
+    let m = Wasm_module.of_string {|(module
+        (type $binary (func (param i32 i32) (result i32)))
+        (table 1 funcref)
+        (elem (i32.const 0) func $first)
+        (func $first (param i32 i32) (result i32) local.get 0)
+        (func (param i32) (result i32)
+          local.get 0
+          i32.const 42
+          call $first)
+        (func (param i32) (result i32)
+          local.get 0
+          i32.const 42
+          i32.const 0
+          call_indirect (type $binary)))
+    |} in
+    let result = analyze_intra m [0l; 1l] in
+    let summary idx = Int32Map.find_exn result idx |> fst in
+    let expect = Some (Domain.Taint.taint (Var.Local 0)) in
+    [%test_result: Domain.Taint.t option]
+      (summary 0l).ret
+      ~expect;
+    [%test_result: Domain.Taint.t option]
+      (summary 1l).ret
+      ~expect
+
+  let%test_unit "storing a tainted value leaves the address variable unchanged" =
+    let m = Wasm_module.of_string {|(module
+        (memory 1)
+        (func (param i32 i32) (result i32)
+          local.get 0
+          local.get 1
+          i32.store
+          local.get 0))
+    |} in
+    let result = analyze_intra m [0l] in
+    let summary idx = Int32Map.find_exn result idx |> fst in
+    [%test_result: Summary.t]
+      (summary 0l)
+      ~expect:Summary.{ ret = Some (Domain.Taint.taint (Var.Local 0));
+                        globals = [];
+                        mem = Domain.Taint.taint (Var.Local 1) }
+
+  let conditional_store () =
+    Wasm_module.of_string "(module
+      (memory 1)
+      (func (param i32 i32) (result i32)
+        local.get 1
+        if
+          i32.const 0
+          local.get 0
+          i32.store
+        end
+        i32.const 0
+        i32.load))"
+
+  let%test_unit "intra preserves memory taint from a conditional store" =
+    let summary, _ = Int32Map.find_exn (analyze_intra (conditional_store ()) [0l]) 0l in
+    let taint = Domain.Taint.taint (Var.Local 0) in
+    [%test_result: Summary.t]
+      summary
+      ~expect:Summary.{ ret = Some taint; globals = []; mem = taint }
+
+  let%test_unit "classical inter preserves memory taint from a conditional store" =
+    let icfg = analyze_inter_classical (conditional_store ()) 0l in
+    let cfg = Int32Map.find_exn icfg.cfgs 0l in
+    let exit = Cfg.find_block_exn cfg cfg.exit_block in
+    [%test_result: Domain.Taint.t]
+      (Domain.get_taint exit.annotation_after (Var.Return 0l))
+      ~expect:(Domain.Taint.taint (Var.Local 0))
+
   let%test_unit "interprocedural taint works on benchmarks" =
     List.iter [
       (* disabled because it takes ~15 seconds *) (* ("../../../benchmarks/benchmarksgame/binarytrees.wat", 1l); *)
